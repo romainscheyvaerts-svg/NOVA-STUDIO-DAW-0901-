@@ -38,13 +38,15 @@ interface ChatAssistantProps {
    * s'ouvre pas toute seule par-dessus, elle montre un bandeau discret.
    */
   suppressAutoOpen?: boolean;
+  /** Aucune bulle par-dessus l'écran (artiste invité : son écran affiche lui-même les messages). */
+  quiet?: boolean;
   /** Téléphone : ouvrir Nova = aller sur son onglet. */
   onRequestOpen?: () => void;
   /** Nova ouverte / fermée (une seule carte de coaching à la fois). */
   onOpenChange?: (open: boolean) => void;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen, onOpenChange }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen, onOpenChange, quiet }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   // Bandeau quand le chat est fermé : sinon les messages du studio passaient inaperçus.
   const [toast, setToast] = useState<{ id: number; text: string; hasChoices: boolean } | null>(null);
@@ -315,7 +317,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
 
   return (
     <div className={containerClass}>
-      {toast && !isOpen && createPortal(
+      {toast && !isOpen && !quiet && createPortal(
         <button type="button" role="status" aria-live="polite"
           onClick={() => { setToast(null); setIsOpen(true); onRequestOpen?.(); }}
           // Au-dessus du bouton Nova (bas droite) : avant, centré en bas, il cachait « Piste voix / Paroles /

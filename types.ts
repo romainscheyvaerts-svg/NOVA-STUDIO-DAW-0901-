@@ -1154,6 +1154,16 @@ export interface DAWState {
   /** Collaboration : dernière opération du journal incluse dans cet instantané. */
   collabSeq?: number;
   /**
+   * Collaboration : qui a ouvert la séance (« Max, ingé son ») — affiché à
+   * l'invité dès son arrivée, avant même de rejoindre.
+   */
+  collabHost?: { role: CollabRole; name: string };
+  /**
+   * Collaboration : ce que l'artiste invité peut modifier dans la séance de
+   * l'ingé (utils/guestRights). Absent : pas de restriction (séance d'un artiste).
+   */
+  collabGuestRights?: { limited: boolean; ownMix?: boolean; markers?: boolean; by?: string; at?: number };
+  /**
    * Collaboration : opérations sur le temps (R12) déjà appliquées à ce projet (leurs identifiants, les
    * 200 dernières). L'instantané en ligne peut contenir une opération reçue en direct que le journal
    * rejoue ensuite à celui qui arrive : sans cette liste, le temps était inséré deux fois.

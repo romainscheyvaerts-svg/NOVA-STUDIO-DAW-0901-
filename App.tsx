@@ -193,6 +193,8 @@ import {
   knownOf, mergeClips, metaSigOf, mixAllowed, noteMerged, noteSent, orderOf, pendingClipIds, sameOrder, SONG_FIELDS, SongField, songFieldsOf, sanitizeSongField, clipSig,
 } from './utils/collabContent';
 import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
+import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, guestCanEditContent, guestCanMix, guestOpVerdict, guestRefusalText, isLimitedGuest, sanitizeGuestRights } from './utils/guestRights';
+import GuestStudio from './components/GuestStudio';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 import { useRemoteInge } from './hooks/useRemoteInge';
@@ -1196,6 +1198,8 @@ function Studio() {
   const collabMixScopeRef = useRef<(t: Track) => boolean>(() => true);
   /** Supprimer la piste d'un autre : refusé (elle reviendrait à sa prochaine prise). */
   const collabDeleteGuardRef = useRef<(trackId: string) => string | null>(() => null);
+  /** Artiste invité en mode simple : une modification de piste hors de ses droits (mix de l'ingé, prises d'un autre) est refusée. */
+  const collabTrackGuardRef = useRef<(prev: Track, next: Track) => string | null>(() => null);
   // Modes d'automation Pro Tools (Touch / Latch / Write / Trim) : écriture pendant la lecture.
   useAutomationWrite({ stateRef, setSilently, checkpoint, notify: setAiNotification });
   // Nova Pro (5 €/mois) : importer ses propres instrus + collaborer. Défini plus bas.
@@ -1729,6 +1733,11 @@ function Studio() {
   
   const handleUpdateTrack = useCallback((updatedTrack: Track) => {
     const previousTrack = stateRef.current.tracks.find(t => t.id === updatedTrack.id);
+    // Artiste invité (séance de l'ingé) : le volume du beat, les effets de l'ingé… restent à l'ingé.
+    if (previousTrack) {
+      const guestWhy = collabTrackGuardRef.current(previousTrack, updatedTrack);
+      if (guestWhy) { setAiNotification(guestWhy); return; }
+    }
 
     if (previousTrack && previousTrack.isTrackArmed !== updatedTrack.isTrackArmed) {
         // Collaboration : on n'arme pas la piste d'un autre (ni celle où il enregistre).
@@ -5029,6 +5038,8 @@ function Studio() {
     : undefined), [arrangeLaneShown, state.markers, state.tracks]);
 
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
+  /** Artiste invité qui a quitté la séance de l'ingé : en rouvrant le lien, il revient directement. */
+  const GUEST_LEFT_KEY = 'nova_collab_guest_left';
   const [collabOpen, setCollabOpen] = useState(false);
   // Bandeau du bas : libellés repliés en icônes selon la place réelle (utils/dockFit).
   const [dockEl, setDockEl] = useState<HTMLDivElement | null>(null);
@@ -5190,9 +5201,11 @@ function Studio() {
   /** Code d'invitation (6 caractères) ; 'unavailable' : le serveur ne le propose pas encore. */
   const [inviteCode, setInviteCode] = useState<{ code: string; expiresAt?: string } | 'unavailable' | 'loading' | null>(null);
   /** Arrivée par une invitation : choisir son rôle avant de rejoindre. */
-  const [collabArrival, setCollabArrival] = useState<{ sessionName: string; suggestedRole: CollabRole | null } | null>(null);
+  const [collabArrival, setCollabArrival] = useState<{ sessionName: string; suggestedRole: CollabRole | null; host?: { role: CollabRole; name: string } | null } | null>(null);
   const pendingArrivalRef = useRef<CollabRole | 'any' | null>(null);
   const [arrivalName, setArrivalName] = useState('');
+  /** Compte connecté au moment de l'arrivée (sinon : connexion sur la carte d'arrivée elle-même). */
+  const [arrivalSignedIn, setArrivalSignedIn] = useState<boolean | undefined>(undefined);
   /** Met à jour ce que montrent les en-têtes de piste (qui enregistre où). */
   const refreshCollabLiveRef = useRef<() => void>(() => {});
   /** Suit la lecture de l'hôte (« Écouter ensemble »). */
@@ -5368,10 +5381,11 @@ function Studio() {
   // Opération reçue : appliquée telle quelle, verrous de clip compris (utils/clipLock).
   const remoteSet = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setState(trustedUpdate(fn)); };
   const remoteSetSilently = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setSilently(fn); };
-  const applyCollabOp = useCallback(async (o: CollabOp) => {
+  const applyCollabOp = useCallback(async (o0: CollabOp) => {
     const c = collabRef.current;
     if (!c) return;
-    const p = o.op || {};
+    let o = o0;
+    let p = o.op || {};
     const touch = (id: string) => remoteTouchedRef.current.add(id);
     // Chacun son domaine : une opération hors de ses droits est ignorée (avant,
     // n'importe quel membre pouvait écraser les prises ou le mix d'un autre).
@@ -5384,6 +5398,28 @@ function Studio() {
       const prev = seenPeersRef.current.get(pk);
       seenPeersRef.current.set(pk, { ...prev, name: o.author_name || prev?.name || '?', role: o.role, ...(o.replay ? {} : { seenAt: Date.now() }) });
       if (!o.replay && (!prev?.seenAt || Date.now() - prev.seenAt > 5000)) setPeersTick(x => x + 1);
+    }
+    // Droits de l'artiste invité (utils/guestRights) : décidés par l'ingé, et lui seul.
+    if (o.kind === GUEST_RIGHTS_KIND) {
+      if (o.role !== 'engineer') return refuse('droits de l’invité : réservés à l’ingé son');
+      const r = sanitizeGuestRights(p.rights);
+      if (!r || !lwwRef.current.accept('guest_rights', o.seq)) return;
+      const before = stateRef.current.collabGuestRights;
+      remoteSetSilently(s => ({ ...s, collabGuestRights: r }));
+      if (!o.replay && c.role === 'artist' && (!!before?.limited !== r.limited || !!before?.ownMix !== !!r.ownMix)) {
+        setAiNotification(r.limited
+          ? `🎙️ ${o.author_name} garde la main sur sa séance : tu enregistres sur ta piste${r.ownMix ? ' et tu peux régler le son de ta voix' : ''}.`
+          : `🔓 ${o.author_name} t'a ouvert toute la séance : tu peux aussi modifier les autres pistes de voix.`);
+      }
+      return;
+    }
+    // Artiste invité en mode simple : une opération hors de ses droits est ignorée, chez TOUT
+    // le monde (même envoyée par une ancienne version de NOVA ou un appareil trafiqué).
+    // Avant : il pouvait baisser le beat, supprimer la voix lead de l'ingé, changer le tempo…
+    if (o.role === 'artist' && isLimitedGuest('artist', stateRef.current.collabGuestRights)) {
+      const v = guestOpVerdict(o.kind, p, { rights: stateRef.current.collabGuestRights, authorKey: o.member_key, existing });
+      if (!v.ok) return refuse(v.reason || 'invité : hors de ses droits');
+      if (v.op) { o = { ...o, op: v.op }; p = v.op; }
     }
     if (o.kind === 'freeze' && o.role !== 'engineer') return refuse('réservé à l’ingé son');
     // Mix : l'ingé partout ; un artiste / beatmaker sur SES pistes et sur les pistes partagées (utils/collabContent).
@@ -5968,6 +6004,8 @@ function Studio() {
     // Un autre projet est ouvert (la collaboration va se fermer) : rien ne part, surtout pas des suppressions.
     if (cloudRef.current && state.id !== cloudProjectId(cloudRef.current.id)) return;
     const me = { role: c.role, key: c.key };
+    // Artiste invité en mode simple : seules SES pistes partent (le reste est à l'ingé, utils/guestRights).
+    const guestRights = isLimitedGuest(c.role, state.collabGuestRights) ? state.collabGuestRights : null;
     let contentChanged = false;
     for (const t of state.tracks) {
       // Reçu de l'autre : contenu / gel connus (le mix, lui, est suivi champ par champ à la réception).
@@ -5997,7 +6035,7 @@ function Studio() {
       // Mix : l'ingé partout ; un artiste / beatmaker sur SES pistes et les pistes partagées.
       // Avant : seul l'ingé envoyait ; le volume ou l'effet qu'un artiste mettait sur SA voix
       // restait chez lui (mesuré : « Voix lead : mix, effets » différents après une prise).
-      if (canSendMix(t, me)) {
+      if (canSendMix(t, me) && (!guestRights || guestCanMix(t, c.key, guestRights))) {
         // Seuls les réglages modifiés partent (les autres ne sont jamais écrasés chez l'autre).
         const changed = changedFields(knownFieldsRef.current.get(t.id), mixFieldsOf(t));
         const names = Object.keys(changed);
@@ -6032,7 +6070,7 @@ function Studio() {
         void sendFreeze(t.id).catch(e => { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(t.id); });
       }
       // Contenu : le propriétaire, et l'ingé sur les pistes des artistes (comp, respirations, gain, justesse).
-      if (canSendContent(t, me) && !isEmptyDelta(contentDelta(knownContentRef.current.get(t.id), metaSigOf(contentOf(t)), t.clips || []))) {
+      if (canSendContent(t, me) && (!guestRights || guestCanEditContent(t, c.key, guestRights)) && !isEmptyDelta(contentDelta(knownContentRef.current.get(t.id), metaSigOf(contentOf(t)), t.clips || []))) {
         if (!contentDirtyRef.current.has(t.id)) noteEditingRef.current?.(t.id);
         contentDirtyRef.current.add(t.id);
         contentChanged = true;
@@ -6048,7 +6086,7 @@ function Studio() {
       knownSigRef.current.delete('content:' + id);
       contentDirtyRef.current.delete(id);
       // Seulement ce qu'on a le droit de supprimer pour tous (sa piste ; une piste partagée : l'ingé).
-      if (gone && deleteAllowed(gone, { role: c.role, memberKey: c.client.memberKey || c.key })) c.client.queue(`del:${id}`, 'track_del', { trackId: id });
+      if (gone && deleteAllowed(gone, { role: c.role, memberKey: c.client.memberKey || c.key }) && (!guestRights || guestCanDelete(gone, c.key, guestRights))) c.client.queue(`del:${id}`, 'track_del', { trackId: id });
     }
     lastTracksRef.current = state.tracks;
     // Ordre des pistes (glisser une piste, nouvelle piste) : le même chez tous.
@@ -6156,6 +6194,17 @@ function Studio() {
         stateRef.current = produce(stateRef.current, claim);
         if (claimed.length) setState(produce(claim));
       }
+      // Qui ouvre la séance : l'invité le voit dès son arrivée (« Max, ingé son, t'invite »).
+      // Séance de l'ingé : l'artiste invité est en mode simple par défaut (utils/guestRights),
+      // l'ingé peut lui ouvrir plus de choses dans le panneau Collaboration.
+      if (host) {
+        const mark = (d: DAWState) => {
+          d.collabHost = { role, name };
+          if (role === 'engineer' && !d.collabGuestRights) d.collabGuestRights = { ...DEFAULT_GUEST_RIGHTS, by: name, at: Date.now() };
+        };
+        stateRef.current = produce(stateRef.current, mark);
+        setSilently(produce(mark));
+      }
       if (!(cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id))) {
         const ok = await syncCloudRef.current({ interactive: true });
         if (!ok) throw new Error("la session n'a pas pu être mise en ligne");
@@ -6233,6 +6282,7 @@ function Studio() {
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
         else if (kind === 'notes') r21Ref.current?.onNotesSent(op, seq);
         else if (kind === 'tempo') lwwRef.current.note('tempo', seq);
+        else if (kind === GUEST_RIGHTS_KIND) lwwRef.current.note('guest_rights', seq);
         // Opérations reçues pendant que la nôtre (même réglage) partait : rejouées maintenant, la plus
         // récente du journal l'emporte (les plus anciennes que la nôtre seront écartées par l'horloge).
         if (['order', 'song', 'markers', 'chords', 'tempo', 'groups'].includes(kind)) {
@@ -6240,6 +6290,16 @@ function Studio() {
           deferredOpsRef.current.delete(kind);
           if (waiting.length) setTimeout(() => { [...waiting].sort((a, b) => a.seq - b.seq).forEach(w => { void applyCollabOp(w); }); }, 0);
         }
+      };
+      // Artiste invité en mode simple : ce qui sort de ses droits ne part pas (et l'interface ne le propose pas).
+      client.sendFilter = (kind, op) => {
+        const cc = collabRef.current;
+        const rights = stateRef.current.collabGuestRights;
+        if (!cc || !isLimitedGuest(cc.role, rights)) return op;
+        const ex = typeof op.trackId === 'string' ? stateRef.current.tracks.find(x => x.id === op.trackId) as Track | undefined : undefined;
+        const v = guestOpVerdict(kind, op as Record<string, any>, { rights, authorKey: cc.key, existing: ex });
+        if (!v.ok) { console.info('[Collab] invité : pas envoyé', kind, v.reason); return null; }
+        return (v.op as Record<string, unknown>) || op;
       };
       client.onStatus(s => setCollabStatus(s));
       // Messages éphémères : lecture de l'hôte, latence, empreintes, audio en direct (voir onEphemeralRef).
@@ -6287,6 +6347,8 @@ function Studio() {
         }
       }
       if (claimed.length) client.queue('own', 'own', { trackIds: claimed, color: myColor });
+      // Ingé qui ouvre sa séance : les droits de l'invité partent dans le journal (l'artiste qui arrive les lit).
+      if (host && role === 'engineer' && stateRef.current.collabGuestRights) client.queue(GUEST_RIGHTS_KIND, GUEST_RIGHTS_KIND, { rights: stateRef.current.collabGuestRights });
       try { localStorage.setItem(COLLAB_ACTIVE_KEY, JSON.stringify({ sessionId: cs.id, role, name, host, color: myColor })); } catch { /* */ }
       setCollabArrival(null);
       track('collab_started', { role });
@@ -6820,27 +6882,60 @@ function Studio() {
     return () => window.clearInterval(id);
   }, [collab]);
 
+  /** Artiste invité en mode simple (séance de l'ingé, utils/guestRights). */
+  const guestLimited = (): boolean => isLimitedGuest(collabRef.current?.role, stateRef.current.collabGuestRights);
+  /** Nom de l'ingé de la séance (pour les messages à l'invité). */
+  const engineerName = (): string | null => {
+    const h = stateRef.current.collabHost;
+    if (h?.role === 'engineer') return h.name;
+    const m = collabOnlineRef.current.find(x => x.role === 'engineer');
+    return m?.display_name || stateRef.current.collabGuestRights?.by || null;
+  };
   collabRecGuardRef.current = (trackId) => {
     const c = collabRef.current;
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t) return null;
+    if (guestLimited() && !guestCanEditContent(t as Track, c.key, stateRef.current.collabGuestRights)) {
+      return `« ${t.name} » est une piste de ${engineerName() || "l'ingé"} : tu enregistres sur TA piste. Appuie sur REC dans ton écran, elle se choisit toute seule.`;
+    }
     return recordBlock(t as Track, collabMe(), currentRecs(), Date.now(), otherArtists());
   };
   collabMixScopeRef.current = (t) => {
     const c = collabRef.current;
     if (!c || c.role === 'engineer') return true;
+    if (guestLimited()) return guestCanMix(t, c.key, stateRef.current.collabGuestRights);
     return !t.collabOwnerKey || t.collabOwnerKey === c.key;
+  };
+  collabTrackGuardRef.current = (prev, next) => {
+    const c = collabRef.current;
+    if (!c || !guestLimited()) return null;
+    const rights = stateRef.current.collabGuestRights;
+    if (!guestCanMix(prev, c.key, rights) && fieldSig(mixFieldsOf(prev)) !== fieldSig(mixFieldsOf(next))) return guestRefusalText(engineerName());
+    if (!guestCanEditContent(prev, c.key, rights) && sigOf(contentOf(prev)) !== sigOf(contentOf(next))) return guestRefusalText(engineerName());
+    return null;
   };
   collabDeleteGuardRef.current = (trackId) => {
     const c = collabRef.current;
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t) return null;
+    if (guestLimited() && !guestCanDelete(t as Track, c.key, stateRef.current.collabGuestRights)) {
+      return `« ${t.name} » fait partie de la séance de ${engineerName() || "l'ingé"} : tu ne peux pas la supprimer.`;
+    }
     const rec = currentRecs().find(r => r.trackId === trackId);
     if (rec) return `${rec.name} enregistre sur « ${t.name} » en ce moment : la piste est verrouillée.`;
     if (t.collabOwnerKey && t.collabOwnerKey !== c.key) return `« ${t.name} » est la piste de ${t.collabOwnerName || 'quelqu’un d’autre'} : tu ne peux pas la supprimer. Coupe-la (bouton M) si tu ne veux pas l'entendre.`;
     return null;
   };
 
+  /** Ingé : change ce que l'artiste invité peut modifier ; la décision part chez tout le monde (journal). */
+  const setGuestRights = useCallback((patch: Partial<GuestRights>) => {
+    const c = collabRef.current;
+    if (!c || c.role !== 'engineer') return;
+    const next: GuestRights = { ...(stateRef.current.collabGuestRights || DEFAULT_GUEST_RIGHTS), ...patch, by: c.name, at: Date.now() };
+    stateRef.current = { ...stateRef.current, collabGuestRights: next };
+    setSilently(s => ({ ...s, collabGuestRights: next }));
+    c.client.queue(GUEST_RIGHTS_KIND, GUEST_RIGHTS_KIND, { rights: next });
+  }, [setSilently]);
   /** « Créer ma piste » : une piste de voix à moi (mon nom, ma couleur), sélectionnée. */
   const createMyTrack = useCallback((arm = false): string | null => {
     const c = collabRef.current;
@@ -6866,6 +6961,14 @@ function Studio() {
     const c = collabRef.current;
     const me = collabMe();
     if (!c || !me) return null; // pas de collaboration : choix habituel
+    // Invité en mode simple : toujours SA piste (créée à son nom la première fois).
+    if (guestLimited()) {
+      const mine = stateRef.current.tracks.find(x => x.id === preferId && x.type === TrackType.AUDIO && x.collabOwnerKey === c.key)
+        || stateRef.current.tracks.find(x => x.type === TrackType.AUDIO && x.collabOwnerKey === c.key);
+      if (mine) return { id: mine.id };
+      const nid = createMyTrack();
+      return nid ? { id: nid } : null;
+    }
     const t = myRecordTarget(stateRef.current.tracks, me, currentRecs(), preferId, otherArtists());
     if (t) return { id: t.id };
     if (c.role !== 'artist') return { error: "Pas de piste à toi pour enregistrer : crée une piste (elle sera à ton nom), puis appuie sur REC." };
@@ -7104,8 +7207,12 @@ function Studio() {
     if (!cs?.secret) return null;
     let base = 'https://www.studiomakemusic.com/daw';
     try { base = `${window.location.origin}${window.location.pathname}`; } catch { /* */ }
-    return `${base}?session=${encodeURIComponent(`${cs.id}.${cs.secret}`)}&invite=1`;
+    // Séance de l'ingé : la personne invitée est presque toujours l'artiste (rôle déjà choisi en arrivant, modifiable).
+    const forArtist = collabRef.current?.role === 'engineer' && collabRef.current.host;
+    return `${base}?session=${encodeURIComponent(`${cs.id}.${cs.secret}`)}&invite=1${forArtist ? '&role=artist' : ''}`;
   }, []);
+  const inviteLinkRef = useRef<(() => string | null) | null>(null);
+  inviteLinkRef.current = inviteLink;
   const createInviteCode = useCallback(async () => {
     const cs = cloudRef.current;
     if (!cs) return;
@@ -7151,10 +7258,20 @@ function Studio() {
     const wanted = pendingArrivalRef.current;
     if (!wanted || collab || !cloudSession || state.id !== cloudProjectId(cloudSession.id)) return;
     pendingArrivalRef.current = null;
-    setCollabArrival({ sessionName: cloudSession.name || state.name || 'Session', suggestedRole: wanted === 'any' ? null : wanted });
+    // Artiste invité qui revient (il avait quitté cette séance) : il rouvre le lien, il est de retour, sans rien re-choisir.
+    let back: { sessionId?: string; role?: CollabRole; name?: string } | null = null;
+    try { back = JSON.parse(localStorage.getItem(GUEST_LEFT_KEY) || 'null'); } catch { /* */ }
+    if (back && back.sessionId === cloudSession.id && back.role === 'artist' && back.name) {
+      try { localStorage.removeItem(GUEST_LEFT_KEY); } catch { /* */ }
+      void startCollab('artist', back.name, { host: false });
+      return;
+    }
+    // Qui invite (enregistré par l'hôte dans la séance) : « Max, ingé son, t'invite ». Séance d'un ingé : on arrive en artiste.
+    const host = stateRef.current.collabHost || null;
+    setCollabArrival({ sessionName: cloudSession.name || state.name || 'Session', suggestedRole: wanted === 'any' ? (host?.role === 'engineer' ? 'artist' : null) : wanted, host });
     setCollabOpen(true);
     // Nom proposé : celui du compte (modifiable).
-    void catalogSupabase.auth.getUser().then(({ data }) => { const e = data?.user?.email; if (e) setArrivalName(n => n || e.split('@')[0]); }).catch(() => {});
+    void catalogSupabase.auth.getUser().then(({ data }) => { setArrivalSignedIn(!!data?.user); const e = data?.user?.email; if (e) setArrivalName(n => n || e.split('@')[0]); }).catch(() => setArrivalSignedIn(false));
   }, [state.id, state.name, cloudSession, collab]);
 
   // Diagnostic en lecture seule (console, tests de bout en bout) : état de la collaboration.
@@ -7163,6 +7280,10 @@ function Studio() {
       status: () => collabRef.current?.client.getStatus() ?? null,
       role: () => collabRef.current?.role ?? null,
       me: () => { const c = collabRef.current; return c ? { key: c.key, name: c.name, role: c.role, color: c.color, host: c.host, memberKey: c.client.memberKey } : null; },
+      /** Lien d'invitation tel que « Copier le lien » le donne. */
+      invite: () => inviteLinkRef.current?.() ?? null,
+      /** Droits de l'artiste invité (utils/guestRights). */
+      guestRights: () => stateRef.current.collabGuestRights ?? null,
       listen: () => ({ on: listenTogetherRef.current, follow: followHostRef.current, log: followLogRef.current.slice(-20) }),
       engineTime: () => ({ t: Date.now(), pos: stateRef.current.isPlaying ? audioEngine.getCurrentTime() : playheadStore.get(), playing: !!stateRef.current.isPlaying }),
       recs: () => collabLiveStore.get().recs,
@@ -8772,6 +8893,81 @@ function Studio() {
     else setShareOpen(true);
   };
 
+  // ===== Artiste invité dans la séance de l'ingé (utils/guestRights, components/GuestStudio) =====
+  // Avant : l'artiste arrivait dans le DAW complet (mixer, effets, « Mix auto » qui réglait le beat de
+  // l'ingé, suppression de pistes…) et tout ce qui le concernait était au fond du panneau Collaboration.
+  const guestMode = !!collab && isLimitedGuest(collab.role, state.collabGuestRights);
+  const [guestShowSession, setGuestShowSession] = useState(false);
+  const [guestPhones, setGuestPhones] = useState<'casque' | 'haut-parleurs' | null>(() => {
+    try { const v = localStorage.getItem('nova_headphones'); return v === '1' ? 'casque' : v === '0' ? 'haut-parleurs' : null; } catch { return null; }
+  });
+  /** Après « Quitter la séance » : on propose d'y revenir (même rôle, même nom). */
+  const [guestLeft, setGuestLeft] = useState<{ sessionName: string; engineer: string; name: string } | null>(null);
+  const guestTrack = guestMode && collab ? state.tracks.find(t => t.type === TrackType.AUDIO && t.collabOwnerKey === collab.key) || null : null;
+  useEffect(() => {
+    if (!guestMode) { setGuestShowSession(false); return; }
+    setCollabOpen(false);
+    setGuestLeft(null);
+    // Casque : détecté tout seul quand le navigateur le dit (nom de la sortie audio), sans question.
+    if (guestPhones === null) {
+      void detectHeadphones().then(found => {
+        if (!found) return;
+        const casque = found.guess === 'casque';
+        try { localStorage.setItem('nova_headphones', casque ? '1' : '0'); } catch { /* */ }
+        setInputMonitoringState(casque);
+        setGuestPhones(found.guess);
+      }).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestMode]);
+  // Sa piste à son nom dès son arrivée (une fois relié) : l'ingé la voit arriver et prépare ses effets.
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!guestMode || !collabMemberKey || !c) return;
+    if (!stateRef.current.tracks.some(t => t.type === TrackType.AUDIO && t.collabOwnerKey === c.key)) createMyTrack();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestMode, collabMemberKey]);
+  const sendChat = (text: string) => {
+    const c = collabRef.current;
+    if (!c) return;
+    const localId = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setCollabMessages(m => [...m.slice(-199), { id: localId, from: c.name, role: c.role, text, at: Date.now(), mine: true, pending: true }]);
+    // File d'envoi : hors ligne, le message part au retour du réseau (« envoi… » en attendant).
+    c.client.queue(`chat:${localId}`, 'chat', { text, localId });
+  };
+  const collabStatusShown = collab && collabStatus ? collabStatusView(collabStatus, { othersOnline: collabOnline.filter(m => m.member_key !== collab.client.memberKey).length, peerSeenAt }) : null;
+  const collabTalking = collab ? collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name) : [];
+  const remoteMixFromName = (() => {
+    const k = Object.entries(remoteAudio).find(([, v]) => v.mix)?.[0];
+    return k ? collabOnline.find(m => participantOf(m.member_key) === k)?.display_name || '?' : null;
+  })();
+  /** Écoute du mix de l'ingé coupée avant de jouer chez soi (sinon sa propre sortie reste muette). */
+  const guestStopListening = () => { if (listenRemoteMix) toggleListenRemoteMix(); };
+  /** Prochaine prise : au même endroit que la dernière (on recommence), ou à la suite. */
+  const [guestTakeFrom, setGuestTakeFrom] = useState<'same' | 'next'>('same');
+  const guestRecord = () => {
+    const c = collabRef.current;
+    if (!c) return;
+    if (!stateRef.current.isRecording && !stateRef.current.isPlaying && guestTakeFrom === 'same') {
+      // « Recommencer » : la prise repart d'où partait la précédente (avant : de là où la lecture s'était
+      // arrêtée, la 2e prise tombait après la 1re au lieu de la remplacer).
+      const mine = stateRef.current.tracks.find(t => t.type === TrackType.AUDIO && t.collabOwnerKey === c.key);
+      const lanes = mine ? listLanes(mine) : [];
+      const last = lanes.length ? lanes.reduce((a, b2) => (b2.n > a.n ? b2 : a)) : null;
+      if (last) handleSeek(Math.max(0, last.start));
+    }
+    if (!stateRef.current.isRecording) {
+      // Une piste de l'ingé armée dans son projet ne bloque pas la prise : elle part sur SA piste.
+      if (stateRef.current.tracks.some(t => t.isTrackArmed && t.collabOwnerKey !== c.key)) {
+        const fix = (d: DAWState) => { d.tracks.forEach(t => { if (t.isTrackArmed && t.collabOwnerKey !== c.key) t.isTrackArmed = false; }); };
+        stateRef.current = produce(stateRef.current, fix);
+        setSilently(produce(fix));
+      }
+    }
+    void handleToggleRecord();
+  };
+  const guestEngineerView = collabPeerViews.find(v => v.role === 'engineer' && !v.me) || null;
+
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
@@ -8898,6 +9094,7 @@ function Studio() {
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
     ];
   };
+
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
@@ -9370,7 +9567,7 @@ function Studio() {
       />
 
       <WelcomeSteps
-        open={welcomeOpen && !proGate && !collabArrival && !collabOpen}
+        open={welcomeOpen && !proGate && !collabArrival && !collabOpen && !guestMode}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
         beatLoading={externalImportNotice?.startsWith('Chargement') ? externalImportNotice.replace(/^Chargement\s*:\s*/, '').replace(/\.{3}$/, '') : null}
         isMobile={isMobile}
@@ -9426,6 +9623,10 @@ function Studio() {
         >
           <span className="text-[9rem] leading-none font-black text-white drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">{countInBeat}</span>
           <span className="mt-4 text-sm font-bold text-red-300 uppercase tracking-widest">Prépare-toi… (touche pour annuler)</span>
+          {/* Artiste invité : sa première ligne de paroles, déjà sous les yeux pendant le décompte. */}
+          {guestMode && (state.lyrics || '').trim() && (
+            <span data-testid="countin-lyrics" className="mt-6 max-w-[90vw] px-4 text-center text-[22px] font-black leading-tight text-white">{(state.lyrics || '').split(/\r?\n/).map(l => l.trim()).find(Boolean)}</span>
+          )}
         </button>
       )}
 
@@ -9611,6 +9812,7 @@ function Studio() {
         onSignIn={async (email, password) => {
           await signInAccount(email, password);
           setCollabGate(null);
+          if (collabArrival && arrivalSignedIn === false) { setArrivalSignedIn(true); return; }
           const r = pendingRemoteRef.current;
           if (r) { void startRemote(r.role, r.name, r.link); return; }
           const p = pendingStartRef.current;
@@ -9625,6 +9827,19 @@ function Studio() {
         onJoin={(r, n) => { void startCollab(r, n, { host: false }); }}
         onCancelArrival={() => setCollabArrival(null)}
         onJoinCode={joinWithCode}
+        signedIn={collabArrival ? arrivalSignedIn : undefined}
+        onSignUp={async (email, password) => {
+          // Compte créé sans quitter NOVA (avant : lien vers le site, puis revenir et se connecter).
+          const { data, error } = await catalogSupabase.auth.signUp({ email: email.trim(), password });
+          if (error) {
+            const m = String(error.message || '');
+            throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte » et entre ton mot de passe.'
+              : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${m}`);
+          }
+          if (!data?.session) throw new Error('Compte créé ! Ouvre le mail de confirmation que tu viens de recevoir, puis reviens ici et touche « J’ai déjà un compte ».');
+          setArrivalSignedIn(true);
+        }}
+        guestRights={collab?.role === 'engineer' && state.collabGuestRights ? { value: state.collabGuestRights, onChange: setGuestRights } : null}
         onCreateMyTrack={collab && collab.role !== 'engineer' ? () => { const id = createMyTrack(); if (id) setAiNotification(`🎙️ « ${stateRef.current.tracks.find(t => t.id === id)?.name || 'Ta piste'} » est à toi : sélectionnée, appuie sur REC pour enregistrer.`); } : undefined}
         listen={collab ? {
           canHost: collab.host, on: !!listenTogether, hostName: listenTogether?.hostName || null,
@@ -9694,6 +9909,89 @@ function Studio() {
         }}
       />
       </PanelBoundary>
+      {guestMode && collab && !guestShowSession && (
+        <PanelBoundary name="l'écran de l'artiste invité" overlay onClose={() => setGuestShowSession(true)}>
+        <GuestStudio
+          sessionName={cloudSession?.name || state.name || 'Séance'}
+          engineer={guestEngineerView ? { name: guestEngineerView.name, online: guestEngineerView.online, label: guestEngineerView.label }
+            : state.collabHost?.role === 'engineer' ? { name: state.collabHost.name, online: false, label: 'pas encore connecté' } : null}
+          others={collabPeerViews.filter(v => !v.me && v.role !== 'engineer')}
+          me={{ name: collab.name, color: collab.color }}
+          status={collabStatusShown}
+          onRetry={() => { void collabRef.current?.client.retryNow(); }}
+          canMixOwn={!!state.collabGuestRights?.ownMix}
+          headphones={guestPhones}
+          onHeadphones={(has) => { setInputMonitoring(has); setGuestPhones(has ? 'casque' : 'haut-parleurs'); }}
+          monitoring={inputMonitoring}
+          onMonitoring={(on) => setInputMonitoring(on)}
+          micTrackId={guestTrack?.isTrackArmed ? guestTrack.id : null}
+          onTestMic={() => {
+            const id = guestTrack?.id || createMyTrack();
+            if (id) void (async () => { await ensureAudioEngine(); await armForRecording(id); })();
+          }}
+          mixFrom={remoteMixFromName}
+          listening={listenRemoteMix}
+          mixStatus={mixStatus}
+          onToggleListen={toggleListenRemoteMix}
+          onRetryMix={retryRemoteMix}
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          onPlay={() => { guestStopListening(); void handleTogglePlay(); }}
+          onRecord={guestRecord}
+          position={() => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get())}
+          lyrics={state.lyrics || ''}
+          lyricsStart={state.lyricsStart ?? 0}
+          lyricsSpeed={state.lyricsSpeed ?? 16}
+          onLyrics={(text) => setState(prev => ({ ...prev, lyrics: text }))}
+          takes={guestTrack ? listLanes(guestTrack).map(l => ({ n: l.n, name: l.name, start: l.start, end: l.end, used: l.used })) : []}
+          auditionN={takeAudition && guestTrack && takeAudition.trackId === guestTrack.id ? takeAudition.n : null}
+          onAudition={(n) => {
+            if (!guestTrack) return;
+            guestStopListening();
+            handleAuditionTake(guestTrack.id, n);
+            if (n === null && stateRef.current.isPlaying) void handleTogglePlay();
+          }}
+          onKeep={(n) => { if (guestTrack) handleKeepTake(guestTrack.id, n); }}
+          nextTakeFrom={guestTakeFrom}
+          onNextTakeFrom={setGuestTakeFrom}
+          onDelete={(n) => { if (guestTrack) handleDeleteTake(guestTrack.id, n); }}
+          talkOn={talkOn}
+          onTalk={(on) => { void setTalk(on); }}
+          talking={collabTalking}
+          messages={collabMessages}
+          onSend={sendChat}
+          notice={aiNotice}
+          onLeave={() => {
+            const eng = guestEngineerView?.name || state.collabHost?.name || "l'ingé";
+            setGuestLeft({ sessionName: cloudSession?.name || state.name || 'Séance', engineer: eng, name: collab.name });
+            try { if (cloudRef.current) localStorage.setItem(GUEST_LEFT_KEY, JSON.stringify({ sessionId: cloudRef.current.id, role: 'artist', name: collab.name })); } catch { /* */ }
+            void leaveCollab();
+          }}
+          onShowSession={() => setGuestShowSession(true)}
+        />
+        </PanelBoundary>
+      )}
+      {guestMode && guestShowSession && (
+        // Toute la séance, en lecture seule : on regarde, on ne touche à rien (c'est la séance de l'ingé).
+        <div data-testid="guest-readonly" className="fixed inset-0 z-[555] flex items-start justify-center bg-transparent p-3" onPointerDownCapture={e => e.stopPropagation()}>
+          <div className="pointer-events-auto mt-2 flex w-full max-w-xl items-center gap-3 rounded-2xl border border-amber-400/40 bg-nv-surface/95 px-4 py-3 shadow-2xl">
+            <p className="min-w-0 flex-1 text-[13px] font-bold text-amber-100">👀 La séance de {guestEngineerView?.name || state.collabHost?.name || "l'ingé"}, en lecture seule : tu regardes, tu ne peux rien y changer.</p>
+            <button type="button" data-testid="guest-readonly-back" onClick={() => setGuestShowSession(false)} className="h-12 shrink-0 rounded-xl bg-cyan-500 px-4 text-[14px] font-black text-black">Revenir</button>
+          </div>
+        </div>
+      )}
+      {guestLeft && !collab && (
+        <div data-testid="guest-left" className="fixed inset-0 z-[560] flex items-center justify-center bg-nv-bg/95 p-6 text-white">
+          <div className="w-full max-w-sm space-y-3 text-center">
+            <p className="text-5xl" aria-hidden>👋</p>
+            <h1 className="text-[20px] font-black">Tu as quitté la séance de {guestLeft.engineer}</h1>
+            <p className="text-[14px] text-slate-300">Tes prises envoyées sont chez {guestLeft.engineer}. Pour revenir plus tard, rouvre le lien qu'il t'a envoyé, ou touche le bouton ci-dessous.</p>
+            <button type="button" data-testid="guest-rejoin" disabled={!!collabBusy} onClick={() => { const g = guestLeft; void startCollab('artist', g.name, { host: false }); }}
+              className="h-14 w-full rounded-2xl bg-cyan-500 text-[16px] font-black text-black disabled:opacity-50">{collabBusy || `Revenir dans la séance de ${guestLeft.engineer}`}</button>
+            <button type="button" onClick={() => setGuestLeft(null)} className="min-h-12 w-full text-[13px] text-slate-400 underline">Fermer</button>
+          </div>
+        </div>
+      )}
       {/* « Collaborer » (ordinateur / tablette) : dans le bandeau du bas ; flottant,
           il recouvrait le bas du catalogue Beat Store. */}
       {!showLanding && <FrozenEditsNotice tracks={state.tracks} bridgeConnected={preFx.bridgeConnected} projectId={state.id} compact={isMobile} />}
@@ -9825,7 +10123,9 @@ function Studio() {
       <AutotuneVstManager />
       </Suspense>
       
-      <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
+      {/* Artiste invité : l'assistant Nova et ses bulles restent cachés (son écran affiche lui-même les messages ;
+          sur PC, la bulle recouvrait le bouton « Envoyer » de la discussion avec l'ingé). */}
+      <div className={(isMobile && activeMobileTab !== 'NOVA') || (guestMode && !guestShowSession) ? 'hidden' : ''}>
         <PanelBoundary name="le chat Nova" overlay>
         <ChatAssistant
             onSendMessage={envoyerAuChatbot}
@@ -9833,7 +10133,8 @@ function Studio() {
             projectState={state}
             externalNotification={aiNotice?.text ?? null}
             externalNotificationId={aiNotice?.id}
-            suppressAutoOpen={drumsOpen || !!midiEditorOpen || isExportMenuOpen || collabOpen || takeHomeOpen}
+            suppressAutoOpen={drumsOpen || !!midiEditorOpen || isExportMenuOpen || collabOpen || takeHomeOpen || guestMode}
+            quiet={guestMode}
             isMobile={isMobile}
             forceOpen={isMobile && activeMobileTab === 'NOVA'}
             onRequestOpen={isMobile ? () => setActiveMobileTab('NOVA') : undefined}

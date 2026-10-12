@@ -4,6 +4,7 @@ import { CollabMember, ROLE_LABEL } from '../services/Collab';
 import type { CollabStatusView } from '../utils/collabStatus';
 import { ARRIVAL_ROLE_HELP, formatInviteCode, formatPosition, MAX_PARTICIPANTS, parseTimeMentions, PeerView, PEER_STATE_TONE, withPosition } from '../utils/collabPeers';
 import { agoShort, type HistoryEntry } from '../utils/collabHistory';
+import { GUEST_RIGHTS_HELP, type GuestRights } from '../utils/guestRights';
 
 /**
  * Collaboration à distance : inviter (un lien, un code à 6 caractères ; la
@@ -92,8 +93,14 @@ interface Props {
   inviteLink?: string | null;
   inviteCode?: { code: string; expiresAt?: string } | 'unavailable' | 'loading' | null;
   onRefreshCode?: () => void;
-  /** Arrivée par une invitation : choisir son rôle. */
-  arrival?: { sessionName: string; suggestedRole: CollabRole | null } | null;
+  /** Arrivée par une invitation : choisir son rôle (host : qui a ouvert la séance, s'il est connu). */
+  arrival?: { sessionName: string; suggestedRole: CollabRole | null; host?: { role: CollabRole; name: string } | null } | null;
+  /** Compte connecté (sinon : e-mail et mot de passe directement sur la carte d'arrivée). */
+  signedIn?: boolean;
+  /** Créer un compte sans quitter NOVA. */
+  onSignUp?: (email: string, password: string) => Promise<void>;
+  /** Ingé : ce que l'artiste invité peut modifier dans sa séance (utils/guestRights). */
+  guestRights?: { value: GuestRights; onChange: (patch: Partial<GuestRights>) => void } | null;
   defaultName?: string;
   onJoin?: (role: CollabRole, name: string) => void;
   onCancelArrival?: () => void;
@@ -189,6 +196,9 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [codeBusy, setCodeBusy] = useState(false);
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [markerName, setMarkerName] = useState('');
+  const [showRoles, setShowRoles] = useState(false);
+  const [signUpMode, setSignUpMode] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // Panneau ouvert : les notifications d'export passent à gauche (elles recouvraient son bouton principal).
   useEffect(() => {
@@ -217,6 +227,24 @@ const CollabPanel: React.FC<Props> = (p) => {
     try { await p.onJoinCode(code); setCode(''); } catch (e: any) { setCodeErr(e?.message || 'Code impossible à vérifier : réessaie.'); } finally { setCodeBusy(false); }
   };
   const btn = 'h-10 rounded-xl px-3 text-[12px] font-black transition-colors disabled:opacity-40';
+  // Invité de l'ingé : rôle Artiste déjà choisi, une seule carte (les 3 rôles restent à un toucher).
+  const quickArtist = !!p.arrival && arrivalRole === 'artist' && (p.arrival.host?.role === 'engineer' || p.arrival.suggestedRole === 'artist');
+  // Pas de compte connecté : on se connecte (ou on crée son compte) sur la même carte.
+  const inlineLogin = !!p.arrival && p.signedIn === false && !!p.onSignIn;
+  const joinNow = async () => {
+    if (!arrivalRole || !p.arrival) return;
+    setSignErr(null);
+    if (inlineLogin) {
+      setJoining(true);
+      try {
+        if (signUpMode && p.onSignUp) await p.onSignUp(email, password); else await p.onSignIn!(email, password);
+        setPassword('');
+      } catch (e: any) { setSignErr(e?.message || 'Connexion impossible'); setJoining(false); return; }
+      setJoining(false);
+    }
+    const nm = arrivalName.trim() || (email.includes('@') ? email.split('@')[0] : '') || ROLE_LABEL[arrivalRole];
+    p.onJoin?.(arrivalRole, nm);
+  };
   const canShare = typeof navigator !== 'undefined' && typeof (navigator as any).share === 'function';
   const peers = p.peers || [];
   const onlineCount = peers.filter(x => x.online).length;
@@ -245,6 +273,10 @@ const CollabPanel: React.FC<Props> = (p) => {
   );
 
   return (
+    <>
+    {/* Arrivée par une invitation : la séance derrière est assombrie et inactive (avant : les boutons du DAW
+        restaient sous le doigt pendant qu'on lisait la carte). */}
+    {!p.active && p.arrival && <div aria-hidden data-testid="collab-arrival-backdrop" className="fixed inset-0 z-[639] bg-black/75 backdrop-blur-[2px]" />}
     <div className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(400px,calc(100vw-24px))] max-h-[min(700px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-nv-surface/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="collab-title">
       <div className="flex items-center gap-2 p-4 border-b border-white/5">
         <h2 id="collab-title" className="flex-1 text-[14px] font-black text-white">👥 Collaboration</h2>
@@ -254,13 +286,29 @@ const CollabPanel: React.FC<Props> = (p) => {
             className={`font-mono text-[10px] font-black ${latencyTone(p.latency.serverMs)}`}>{p.latency.serverMs} ms</span>
         )}
         {p.active && p.role && <span className={`text-[11px] font-black ${ROLE_COLOR[p.role]}`}>{ROLE_LABEL[p.role]}</span>}
-        <button type="button" onClick={p.onClose} aria-label="Fermer" className="w-10 h-10 rounded-xl bg-white/5 text-slate-300">✕</button>
+        <button type="button" onClick={p.onClose} aria-label="Fermer" className="w-11 h-11 rounded-xl bg-white/5 text-slate-300">✕</button>
       </div>
 
       {!p.active && p.arrival ? (
-        // Arrivée par une invitation : le rôle se choisit ici, une phrase claire par rôle.
+        // Arrivée par une invitation. Séance d'un ingé : « Max (ingé son) t'invite », rôle Artiste déjà choisi,
+        // un seul bouton ; sans compte, e-mail et mot de passe sur la même carte (avant : 3 rôles à lire,
+        // puis un 2e écran de connexion, et « créer un compte » ouvrait un autre site).
         <div className="p-4 space-y-3 overflow-y-auto" data-testid="collab-arrival">
-          <p className="text-[13px] font-black text-white">Tu rejoins « {p.arrival.sessionName} »</p>
+          {p.arrival.host ? (
+            <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3">
+              <p className="text-[15px] font-black text-white" data-testid="arrival-host"><span className={ROLE_COLOR[p.arrival.host.role]}>{p.arrival.host.name}</span> ({ROLE_LABEL[p.arrival.host.role].toLowerCase()}) t'invite dans sa séance</p>
+              <p className="text-[13px] text-slate-300">« {p.arrival.sessionName} »</p>
+            </div>
+          ) : (
+            <p className="text-[13px] font-black text-white">Tu rejoins « {p.arrival.sessionName} »</p>
+          )}
+          {quickArtist && !showRoles ? (
+            <div className="rounded-2xl border border-cyan-400/40 bg-cyan-500/10 p-3" data-testid="arrival-role-artist" data-quick="1">
+              <p className="text-[14px] font-black text-cyan-200">🎙️ Tu viens enregistrer ta voix</p>
+              <p className="mt-1 text-[12px] leading-snug text-slate-300">Tu enregistres sur ta piste à ton nom, tu écoutes le son de {p.arrival.host?.name || "l'ingé"} et tu lui parles. Le mix, c'est lui.</p>
+              <button type="button" onClick={() => setShowRoles(true)} className="mt-1 min-h-11 text-[12px] text-slate-400 underline">Je ne suis pas l'artiste</button>
+            </div>
+          ) : (
           <fieldset className="space-y-1.5" aria-label="Ton rôle">
             <legend className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-1">Tu arrives comme…</legend>
             {ROLES.map(r => (
@@ -273,13 +321,28 @@ const CollabPanel: React.FC<Props> = (p) => {
               </label>
             ))}
           </fieldset>
-          <input value={arrivalName} onChange={e => setArrivalName(e.target.value)} placeholder="Ton nom (affiché aux autres)" aria-label="Ton nom"
-            className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
-          {gateBlock}
-          <button type="button" data-testid="arrival-join" disabled={!!p.busy || !arrivalRole}
-            onClick={() => arrivalRole && p.onJoin?.(arrivalRole, arrivalName.trim() || ROLE_LABEL[arrivalRole])}
-            className={`${btn} h-11 w-full bg-cyan-500 text-black`}>{p.busy || (arrivalRole ? `Rejoindre comme ${ROLE_LABEL[arrivalRole].toLowerCase()}` : 'Choisis ton rôle pour rejoindre')}</button>
-          <button type="button" onClick={p.onCancelArrival} className="w-full min-h-10 text-center text-[12px] text-slate-400 underline">Pas maintenant (juste écouter la session)</button>
+          )}
+          <input value={arrivalName} onChange={e => setArrivalName(e.target.value)} placeholder="Ton prénom ou ton nom d'artiste" aria-label="Ton nom"
+            className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
+          {inlineLogin ? (
+            <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid="arrival-login">
+              <p className="text-[12px] font-bold text-white">{signUpMode ? 'Crée ton compte Make Music (gratuit, 1 minute)' : 'Ton compte Make Music'}</p>
+              <input type="email" autoComplete="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" aria-label="E-mail" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
+              <input type="password" autoComplete={signUpMode ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={signUpMode ? 'Choisis un mot de passe (6 caractères min.)' : 'Mot de passe'} aria-label="Mot de passe" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
+              {signErr && <p role="alert" className="text-[12px] text-red-300">{signErr}</p>}
+              {p.onSignUp && (
+                <button type="button" onClick={() => { setSignUpMode(m => !m); setSignErr(null); }} data-testid="arrival-signup-toggle" className="min-h-11 w-full text-center text-[12px] text-cyan-300 underline">
+                  {signUpMode ? "J'ai déjà un compte" : 'Pas encore de compte ? Crée-le ici'}
+                </button>
+              )}
+            </div>
+          ) : gateBlock}
+          <button type="button" data-testid="arrival-join" disabled={!!p.busy || joining || !arrivalRole || (inlineLogin && (!email || !password))}
+            onClick={() => void joinNow()}
+            className={`${btn} h-12 w-full bg-cyan-500 text-[14px] text-black`}>{p.busy || (joining ? 'Connexion…' : !arrivalRole ? 'Choisis ton rôle pour rejoindre'
+              : quickArtist && !showRoles ? (inlineLogin ? (signUpMode ? 'Créer mon compte et rejoindre' : 'Me connecter et rejoindre') : `Rejoindre la séance${p.arrival.host ? ` de ${p.arrival.host.name}` : ''}`)
+                : `Rejoindre comme ${ROLE_LABEL[arrivalRole].toLowerCase()}`)}</button>
+          <button type="button" onClick={p.onCancelArrival} className="w-full min-h-11 text-center text-[12px] text-slate-400 underline">Pas maintenant (juste regarder la séance)</button>
         </div>
       ) : !p.active ? (
         <div className="p-4 space-y-3 overflow-y-auto">
@@ -435,6 +498,28 @@ const CollabPanel: React.FC<Props> = (p) => {
               )}
             </div>
           )}
+          {p.guestRights && (
+            <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-guest-rights">
+              <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Ce que l'artiste peut faire</p>
+              <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2">
+                <input type="checkbox" data-testid="guest-rights-limited" checked={p.guestRights.value.limited} onChange={e => p.guestRights!.onChange({ limited: e.target.checked })} className="mt-0.5 h-5 w-5 accent-cyan-400" />
+                <span className="text-[12px] leading-snug text-slate-200"><b>Mode simple (conseillé)</b> — {GUEST_RIGHTS_HELP.limited}</span>
+              </label>
+              {p.guestRights.value.limited && (
+                <>
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2">
+                    <input type="checkbox" data-testid="guest-rights-ownmix" checked={!!p.guestRights.value.ownMix} onChange={e => p.guestRights!.onChange({ ownMix: e.target.checked })} className="h-5 w-5 accent-cyan-400" />
+                    <span className="text-[12px] text-slate-200">{GUEST_RIGHTS_HELP.ownMix}</span>
+                  </label>
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2">
+                    <input type="checkbox" data-testid="guest-rights-markers" checked={!!p.guestRights.value.markers} onChange={e => p.guestRights!.onChange({ markers: e.target.checked })} className="h-5 w-5 accent-cyan-400" />
+                    <span className="text-[12px] text-slate-200">{GUEST_RIGHTS_HELP.markers}</span>
+                  </label>
+                </>
+              )}
+              {!p.guestRights.value.limited && <p className="text-[11px] text-amber-200">{GUEST_RIGHTS_HELP.free}</p>}
+            </div>
+          )}
           {p.audio && (
             <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-audio">
               <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Audio en direct</p>
@@ -564,6 +649,7 @@ const CollabPanel: React.FC<Props> = (p) => {
         </>
       )}
     </div>
+    </>
   );
 };
 

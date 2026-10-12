@@ -22,6 +22,8 @@ VIEWPORTS = {
     "pc": {"width": 1600, "height": 900},
     "pc1366": {"width": 1366, "height": 768},
     "tel": {"width": 432, "height": 768},
+    # Téléphone courant (iPhone 12 à 15) : 390 × 844, au doigt.
+    "tel390": {"width": 390, "height": 844},
     "tab": {"width": 1024, "height": 768},
 }
 
@@ -86,12 +88,12 @@ def launch(p):
 
 def new_page(browser, vp="pc", log=None, touch=None, storage=None):
     size = VIEWPORTS[vp]
-    is_touch = (vp in ("tel", "tab")) if touch is None else touch
+    is_touch = (vp in ("tel", "tel390", "tab")) if touch is None else touch
     ctx = browser.new_context(
         viewport=size,
         permissions=["microphone"],
         has_touch=is_touch,
-        is_mobile=(vp == "tel"),
+        is_mobile=(vp in ("tel", "tel390")),
         device_scale_factor=1,
         accept_downloads=True,
         locale="fr-BE",
