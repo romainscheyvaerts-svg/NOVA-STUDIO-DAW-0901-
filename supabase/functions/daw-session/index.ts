@@ -19,6 +19,7 @@ const BUCKET = "daw-sessions";
 const MAX_SESSION_BYTES = 1500 * 1024 * 1024; // 1,5 Go par session
 const MAX_MANIFEST_CHARS = 4_000_000;
 const MAX_PARTS_PER_CALL = 200;
+const SIGN_WITHOUT_LIST_MAX = 4; // au-delà, on liste la session pour ne pas renvoyer ce qui y est déjà
 const STALE_DAYS = 180; // sessions oubliées : supprimées à la création d'une nouvelle
 // Collaboration (journal d'opérations) : l'activité repousse le ménage des 180 jours.
 // Au plus une écriture par heure et par session (pas une par opération).
@@ -222,7 +223,9 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   if (action === "sign_upload") {
     const wanted: string[] = Array.isArray(body?.parts) ? body.parts.filter((p: unknown) => typeof p === "string" && PART_RE.test(p as string)) : [];
     if (wanted.length > MAX_PARTS_PER_CALL) throw new HttpError(400, "Trop de fichiers dans un seul envoi");
-    const have = await listParts(row.id);
+    // Peu de fichiers (morceaux de prise envoyés pendant l'enregistrement, 1 par seconde) : on signe
+    // directement, sans lister toute la session à chaque appel (fichiers nommés par leur SHA-1, upsert sans risque).
+    const have = wanted.length > SIGN_WITHOUT_LIST_MAX ? await listParts(row.id) : new Map();
     const uploads: Record<string, { path: string; token: string }> = {};
     for (const p of new Set(wanted)) {
       if (have.has(p)) continue;
