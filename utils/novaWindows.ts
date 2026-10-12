@@ -8,13 +8,17 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // R4 / R6 : Track Presets, Commit / Consolider avec effets, AudioSuite, impression de bus.
   | 'track-preset' | 'bounce' | 'audiosuite' | 'print-bus'
   // R13 : transposer / étirer, marqueurs de warp, Trim TCE (bord tiré).
-  | 'transpose' | 'warp' | 'elastic-tce';
+  | 'transpose' | 'warp' | 'elastic-tce'
+  // Commit / gel de plusieurs pistes (hooks/useProToolsEcarts).
+  | 'batch-render';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
   /** Clips visés (Strip Silence, renommer / couleur, justesse note par note). */
   targets?: { trackId: string; clipId: string }[];
   trackId?: string;
+  /** Pistes cochées d'office (Commit / gel en lot). */
+  trackIds?: string[];
   /** Champ mis en avant à l'ouverture. */
   focus?: 'name' | 'color';
   /** Audio → MIDI (V20) : mélodie, batterie ou harmonie ; micro ; instrument ; version simple. */
