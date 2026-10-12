@@ -209,6 +209,9 @@ import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 import ProToolsPanel, { MixSourcePicker } from './components/ProToolsPanel';
 import { mixSource, proToolsSink, takesBatchOf, writtenMessage } from './services/ProToolsBridge';
 import { useRemoteInge } from './hooks/useRemoteInge';
+// Lien d'écoute client sans compte (chantier 12) : panneau de l'ingé + diffusion aux clients.
+import ListenLinksPanel from './components/ListenLinksPanel';
+import { listenHost } from './services/ListenBroadcast';
 import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
 import { liveVstNodes } from './engine/VSTPluginNode';
@@ -7381,6 +7384,8 @@ function Studio() {
       : '📡 Diffusion du mix arrêtée.');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Lien d'écoute client : la diffusion aux clients s'arrête quand l'ingé quitte la séance.
+  useEffect(() => { if (!collab || collab.role !== 'engineer') listenHost.stop(); }, [collab]);
   // Pont Pro Tools : source du mix changée pendant la diffusion → le nouveau flux part tout de suite.
   useEffect(() => mixSource().onChange(() => {
     const rtc = rtcRef.current;
@@ -10552,6 +10557,15 @@ function Studio() {
         remoteError={remote.error}
         remoteLinkFromUrl={remoteLinkFromUrl}
         savedRemote={state.remoteInge ? { role: state.remoteInge.role } : null}
+        listenLinks={collab?.role === 'engineer' ? (
+          <PanelBoundary name="les liens d'écoute" compact>
+            <ListenLinksPanel
+              session={cloudRef.current?.secret ? { id: cloudRef.current.id, secret: cloudRef.current.secret } : null}
+              name={collab.name}
+              getMixStream={async () => { await ensureAudioEngine(); return mixSource().stream(() => audioEngine.getCollabMixStream()); }}
+            />
+          </PanelBoundary>
+        ) : null}
         proTools={collab?.role === 'engineer' ? (
           <PanelBoundary name="le pont Pro Tools" compact>
             <ProToolsPanel existing={() => stateRef.current.tracks

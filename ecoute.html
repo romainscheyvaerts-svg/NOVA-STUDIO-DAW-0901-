@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0d10">
+  <!-- Page privée (lien d'écoute) : jamais indexée, et le lien (#t=…) ne fuit pas dans l'en-tête Referer. -->
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Écoute — NOVA Studio</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="%BASE_URL%icons/icon-192.png">
+  <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png">
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 300 800;
+      font-display: swap;
+      src: url('%BASE_URL%fonts/inter-latin.woff2') format('woff2');
+    }
+    html, body { margin: 0; background: #0c0d10; color: #fff; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-text-size-adjust: 100%; }
+    #ecoute-chargement { min-height: 100dvh; display: grid; place-items: center; color: #94a3b8; font: 600 14px/1.4 Inter, system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <!-- Lien d'écoute client (chantier 12) : page légère, sans le DAW (entrée séparée, ecoute.tsx). -->
+  <div id="ecoute"><div id="ecoute-chargement">Ouverture du lien d'écoute…</div></div>
+  <noscript>Active JavaScript pour écouter le mix.</noscript>
+  <script type="module" src="/ecoute.tsx"></script>
+</body>
+</html>

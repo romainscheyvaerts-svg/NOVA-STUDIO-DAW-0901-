@@ -89,6 +89,8 @@ interface Props {
   netTest?: React.ReactNode;
   /** Côté ingé : pont Pro Tools (dossier des prises BWF, source du mix diffusé). */
   proTools?: React.ReactNode;
+  /** Côté ingé : liens d'écoute client sans compte (components/ListenLinksPanel). */
+  listenLinks?: React.ReactNode;
   /** État de la connexion (en direct, rattrapage, hors ligne, envoi…). */
   status?: CollabStatusView | null;
   onRetry?: () => void;
@@ -590,6 +592,7 @@ const CollabPanel: React.FC<Props> = (p) => {
               </p>
             </div>
           )}
+          {p.listenLinks}
           {p.proTools}
           {p.history && (
             <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-history">
