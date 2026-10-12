@@ -63,7 +63,7 @@ export const arrivalAfterStop = (m: NetMeasure, f: TakeFormat, takeSec = 180): n
   const perSeg = (2 * rtt + 0.4) / (1 - loss);
   const segBits = need * 1000 * LT_SEGMENT_SEC;
   // Le dernier morceau (~1 s de son) part au STOP, puis l'ingé le télécharge et pose la prise.
-  const last = segBits / (up * 1000) + perSeg + 0.3;
+  const last = segBits / (up * 1000) + perSeg + 0.8;
   // Débit insuffisant : le retard pris pendant la prise s'ajoute.
   const totalBits = need * 1000 * takeSec;
   const backlog = Math.max(0, totalBits / (up * 1000) / (1 - loss) - takeSec);

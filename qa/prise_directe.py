@@ -34,6 +34,9 @@ DUREE = float(os.environ.get("DUREE", "180"))
 UP_KBPS = float(os.environ.get("UP_KBPS", "1000"))
 RTT_MS = float(os.environ.get("RTT_MS", "80"))
 STEREO = os.environ.get("STEREO", "1") == "1"
+# MIC=deux : deux micros différents (gauche ≠ droite) ; MIC=un : un seul micro sur une entrée stéréo (gauche = droite).
+MIC = os.environ.get("MIC", "deux")
+VARIANTE = os.environ.get("VARIANTE", "")
 ROOT = Path(os.environ.get("QA_ROOT", r"D:\1 WORK\CONTENU\nova-prise-directe"))
 os.environ.setdefault("QA_OUT", str(ROOT / PHASE))
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3499/")
@@ -45,7 +48,7 @@ from feat_lib import dismiss, collab, open_panel, close_panel, REC_INIT  # noqa
 from collab_artiste import seance_project  # noqa
 
 MAX_UID, NINA_UID = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
-FAKE_MIC = ROOT / "micro_voix_48k_stereo.wav"
+FAKE_MIC = ROOT / ("micro_voix_48k_stereo.wav" if MIC == "deux" else "micro_voix_48k_un_micro.wav")
 OUT = Path(os.environ["QA_OUT"])
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +72,7 @@ def make_mic(path: Path, seconds=60, sr=48000):
     breath = rng.normal(0, 0.004, len(t)) * (1 - env)
     room = rng.normal(0, 0.0007, len(t))
     left = 0.42 * v + breath + room
-    right = 0.38 * np.roll(v, 24) + breath * 0.8 + rng.normal(0, 0.0007, len(t))
+    right = 0.38 * np.roll(v, 24) + breath * 0.8 + rng.normal(0, 0.0007, len(t)) if MIC == "deux" else left
     data = np.stack([left, right], axis=1)
     data = (np.clip(data, -1, 1) * 32767).astype("<i2")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -348,7 +351,9 @@ def shot(page, name):
 def sc_longue(p, res):
     rig = Rig(p, lt_off=(PHASE == "avant")).start()
     try:
-        r = {"duree_prise_s": DUREE, "debit_montant_kbps": UP_KBPS, "rtt_ms": RTT_MS, "stereo": STEREO}
+        r = {"duree_prise_s": DUREE, "debit_montant_kbps": UP_KBPS, "rtt_ms": RTT_MS, "stereo": STEREO, "micro": MIC if STEREO else "mono"}
+        key = "longue" + (f"_{VARIANTE}" if VARIANTE else "")
+        res[key] = r
         seen = {"recv_pendant": 0.0, "peaks": 0}
 
         def during(t):
@@ -359,12 +364,12 @@ def sc_longue(p, res):
                     seen["peaks"] = max(seen["peaks"], v["peaks"])
                 if 60 < t < 61 and not seen.get("shot"):
                     seen["shot"] = True
-                    shot(rig.E, "longue_inge_pendant_la_prise"); shot(rig.T, "longue_artiste_pendant_la_prise")
+                    shot(rig.E, f"{key}_inge_pendant_la_prise"); shot(rig.T, f"{key}_artiste_pendant_la_prise")
 
         rig.shaper.bytes_up = 0
         t_stop, before = rig.record(DUREE, during)
         clip = rig.new_take(before)
-        shot(rig.T, "longue_artiste_apres_stop")
+        shot(rig.T, f"{key}_artiste_apres_stop")
         try:
             dt = rig.until(lambda: rig.placed_at_max(clip), 900, "prise posée chez Max", 0.1)
         except AssertionError as e:
@@ -386,12 +391,11 @@ def sc_longue(p, res):
                 r["debit_flux_kbps"] = round(last["sent"] * 8 / (last["framesSent"] / last["sr"]) / 1000, 1)
             rig.wait(2.5)
             r["texte_artiste"] = rig.T.get_by_test_id("take-send-status").inner_text() if rig.T.get_by_test_id("take-send-status").count() else None
-            shot(rig.T, "longue_artiste_recue")
-            shot(rig.E, "longue_inge_posee")
-        res["longue"] = r
+            shot(rig.T, f"{key}_artiste_recue")
+            shot(rig.E, f"{key}_inge_posee")
         return r
     finally:
-        rig.close("longue")
+        rig.close("longue" + (f"_{VARIANTE}" if VARIANTE else ""))
 
 
 def sc_coupure(p, res):
@@ -570,7 +574,7 @@ def run():
             except Exception as e:  # noqa
                 import traceback
                 res[name] = {**(res.get(name) or {}), "exception": f"{e}", "trace": traceback.format_exc()[-1500:]}
-            res.setdefault("durees_s", {})[name] = round(time.time() - t0, 1)
+            res.setdefault("durees_s", {})[name + (f"_{VARIANTE}" if name == "longue" and VARIANTE else "")] = round(time.time() - t0, 1)
             res_path.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
             print(json.dumps({name: res.get(name)}, ensure_ascii=False, indent=1)[:4000])
 
