@@ -334,6 +334,12 @@ export class CollabClient {
    * répond pas : préférer `queue` (file d'envoi) pour ce qui ne doit pas se perdre.
    */
   async send(kind: string, op: unknown): Promise<number> {
+    // Hors de mes droits (artiste invité en mode simple, utils/guestRights) : rien ne part.
+    if (this.sendFilter) {
+      const f = this.sendFilter(kind, (op || {}) as Record<string, unknown>);
+      if (!f) return -1;
+      op = f;
+    }
     const body = { ...(op as Record<string, unknown>), _id: (op as any)?._id || newOpId(), _d: this.deviceId, _p: this.pageId };
     remember(this.seenIds, body._id as string); // notre écho n'est jamais rejoué
     let r: { seq: number; role: CollabRole; author_name: string; member_key: string; created_at: string };
@@ -377,8 +383,19 @@ export class CollabClient {
   /** Notre opération est enregistrée (numéro du journal) : pour la règle « dernière écriture gagne ». */
   onSent?: (kind: string, op: Record<string, unknown>, seq: number) => void;
 
+  /**
+   * Filtre d'envoi : renvoie l'opération à envoyer (éventuellement réduite), ou null si elle
+   * ne doit pas partir (artiste invité en mode simple : le mix, le tempo… restent à l'ingé).
+   */
+  sendFilter?: (kind: string, op: Record<string, unknown>) => Record<string, unknown> | null;
+
   /** Met une modification dans la file d'envoi (une par clé) et l'envoie dès que possible. */
   queue(key: string, kind: string, op: Record<string, unknown>) {
+    if (this.sendFilter) {
+      const f = this.sendFilter(kind, op);
+      if (!f) return;
+      op = f;
+    }
     this.outbox.put(key, kind, op);
     void this.flush();
   }
