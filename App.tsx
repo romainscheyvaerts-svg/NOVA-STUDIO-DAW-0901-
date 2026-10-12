@@ -248,6 +248,7 @@ const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'n
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
+import { useControlSurface } from './hooks/useControlSurface';
 import ProToolsWindows, { PRO_TOOLS_WINDOWS_PRELOAD } from './components/ProToolsWindows';
 import { useChordLaneProp } from './components/ChordLane';
 const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then(m => ({ default: m.HumQuickButtons })));
@@ -1011,6 +1012,7 @@ function Studio() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
+  const [audioSettingsFocus, setAudioSettingsFocus] = useState<'surfaces' | undefined>(undefined);
   // R15 : fenêtre « Mixes casque » (ouverte depuis les Réglages audio ou le menu).
   const [cueMixesOpen, setCueMixesOpen] = useState(false);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false); 
@@ -4252,6 +4254,23 @@ function Studio() {
     },
     openKeymapEditor: () => setKeymapEditorOpen(true),
     openLayouts: () => setLayoutsOpen(true),
+  });
+
+  // Surfaces de contrôle Mackie Control / HUI (Préférences › Surfaces de contrôle) :
+  // mêmes chemins que la souris (volume, mute, solo, armement, transport).
+  useControlSurface({
+    stateRef,
+    updateTrack: (t) => handleUpdateTrack(t),
+    selectTrack: (id) => setVisualState({ selectedTrackId: id }),
+    togglePlay: () => { void handleTogglePlay(); },
+    stop: () => { void handleStop(); },
+    toggleRecord: () => { void handleToggleRecord(); },
+    seek: (t) => handleSeek(t),
+    toggleLoop: () => setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })),
+    undo,
+    toggleMetronome: () => { void handleToggleMetronome(); },
+    addMarker: (t) => handleAddMarkerHere(t),
+    notify: (m) => setAiNotification(m),
   });
 
   // Scrub / shuttle (R17) : le moteur, et la position validée au relâchement.
@@ -9799,6 +9818,7 @@ function Studio() {
       a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
       a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
+      a('Réglages', 'pal.surfaces', 'Préférences › Surfaces de contrôle (Mackie Control, HUI)', () => { setAudioSettingsFocus('surfaces'); setIsAudioSettingsOpen(true); }, { pt: 'Setup › Peripherals › MIDI Controllers', keywords: 'surface controle mackie mcu hui x-touch faderport icon uf8 fader motorise contrôleur' }),
       a('Réglages', 'pal.theme', `Thème ${theme === 'light' ? 'sombre' : 'clair'}`, () => toggleTheme(), { keywords: 'thème clair sombre dark light' }),
       a('Réglages', 'pal.simple', simpleNow ? 'Passer en mode avancé (console, routage, automation)' : 'Passer en mode simple', () => simpleModeStore.setPref(!simpleNow), { keywords: 'mode simple avancé' }),
       // Vues
@@ -10912,7 +10932,7 @@ function Studio() {
 
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
-      {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+      {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => { setIsAudioSettingsOpen(false); setAudioSettingsFocus(undefined); }} focusSection={audioSettingsFocus} />}
       {cueMixesOpen && <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />}
       <AutotuneVstManager />
       </Suspense>

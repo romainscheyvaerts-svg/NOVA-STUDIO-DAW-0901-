@@ -92,14 +92,31 @@ class MidiManager {
   private attach() {
     const handler = this.handleMidiMessage.bind(this);
     const want = this.selectedInputId !== ALL_INPUTS && this.inputs.has(this.selectedInputId) ? this.selectedInputId : ALL_INPUTS;
-    this.inputs.forEach((input, id) => { input.onmidimessage = want === ALL_INPUTS || id === want ? handler : null; });
+    this.inputs.forEach((input, id) => {
+      // Port réservé à une surface de contrôle (services/ControlSurface) : ses faders et
+      // boutons ne jouent pas de notes et ne passent pas par le MIDI Learn.
+      if (this.isReserved(id, input.name)) { input.onmidimessage = null; return; }
+      input.onmidimessage = want === ALL_INPUTS || id === want ? handler : null;
+    });
+  }
+
+  /** Ports d'entrée réservés aux surfaces de contrôle (identifiant ou nom). */
+  private reserved = { ids: new Set<string>(), names: new Set<string>() };
+  private isReserved(id: string, name?: string) {
+    return this.reserved.ids.has(id) || (!!name && this.reserved.names.has(name));
+  }
+  public reserveInputs(ports: { id: string; name?: string }[]) {
+    this.reserved = { ids: new Set(ports.map(p => p.id)), names: new Set(ports.map(p => p.name || '').filter(Boolean)) };
+    if (this.access) this.attach();
+    this.deviceListeners.forEach(f => { try { f(); } catch { /* */ } });
   }
 
   public onDevicesChange(f: () => void) { this.deviceListeners.add(f); return () => { this.deviceListeners.delete(f); }; }
 
   public getInputs(): MidiDevice[] {
       const list: MidiDevice[] = [];
-      this.inputs.forEach((input) => {
+      this.inputs.forEach((input, id) => {
+          if (this.isReserved(id, input.name)) return;
           list.push({
               id: input.id,
               name: input.name,
@@ -128,7 +145,7 @@ class MidiManager {
 
   public getActiveDeviceName(): string | null {
       if (this.selectedInputId !== ALL_INPUTS && this.inputs.has(this.selectedInputId)) return this.inputs.get(this.selectedInputId).name;
-      const names = Array.from(this.inputs.values()).map(i => i.name).filter(Boolean);
+      const names = Array.from(this.inputs.entries()).filter(([id, i]) => !this.isReserved(id, i.name)).map(([, i]) => i.name).filter(Boolean);
       return names.length ? names.join(' + ') : null;
   }
 
