@@ -116,7 +116,7 @@ def seed_review(cloud, sid):
                 "pos": reg({"t": t, "end": None}, ts), "text": reg(text, ts), "status": reg({"s": "open"}, ts), "archived": reg(False, ts), "replies": []}
         base.update(kw)
         return base
-    c1 = cm(1, 72, "à 1:12 le « s » siffle", now - 500_000, replies=[{"id": "rp-1", "authorKey": "u:max", "authorName": "Max", "createdAt": now - 400_000, "text": reg("corrigé dans la V2", now - 400_000)}])
+    c1 = cm(1, 72, "à 1:12 le « s » siffle", now - 500_000, replies=[{"id": "rp-1", "authorKey": "u:max", "authorName": "Max", "createdAt": now - 400_000, "text": reg("corrigé dans la V2", now - 400_000, by="u:max")}])
     c2 = cm(2, 12, "intro : on peut couper 2 mesures ?", now - 450_000, status=reg({"s": "resolved"}, now - 300_000))
     c3 = cm(3, 30, "commentaire archivé (ne doit pas apparaître)", now - 440_000, archived=reg(True, now - 200_000))
     for kind, items in (("mixver", [v1, v2]), ("comments", [c1, c2, c3])):

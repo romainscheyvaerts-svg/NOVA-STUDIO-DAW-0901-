@@ -212,6 +212,8 @@ interface ScheduledSource {
   source: AudioBufferSourceNode;
   gain: GainNode;
   clipId: string;
+  /** Piste du clip (attente du transport, C6). */
+  trackId?: string;
 }
 
 export class AudioEngine {
@@ -2002,9 +2004,10 @@ export class AudioEngine {
    * Latence de compensation d'une piste : effets actifs de la chaine. Piste
    * gelee : le clip gele ne traverse que les effets restants (postFreezeLatency).
    */
-  private recomputeTrackLatency(trackId: string) {
+  private recomputeTrackLatency(trackId: string, holdTransport = false) {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
+    const before = holdTransport ? this.trackLatencies() : null;
     const lat = (id: string) => {
       const l = dsp.pluginChain.get(id)?.instance?.latency;
       return (typeof l === 'number' && l > 0 && l < 0.5) ? l : 0;
@@ -2025,6 +2028,65 @@ export class AudioEngine {
       bd.delayTime.setValueAtTime(v, tNow);
     });
     this.recomputePdc();
+    // (C6) Tampon d'un VST agrandi EN LECTURE : le transport attend d'autant (voir holdTransport).
+    if (before) {
+      const after = this.trackLatencies();
+      let k = 0;
+      after.forEach((v, id) => { k = Math.max(k, v - (before.get(id) ?? v)); });
+      if (k > 1e-9) {
+        const grown = new Set<string>();
+        after.forEach((v, id) => { if (v - (before.get(id) ?? v) >= k - 1e-9) grown.add(id); });
+        this.holdTransport(k, grown);
+      }
+    }
+  }
+
+  /** Latence compensée de chaque piste (avance de ses clips), en s. */
+  private trackLatencies(): Map<string, number> {
+    const m = new Map<string, number>();
+    this.tracksDSP.forEach((d, id) => m.set(id, this.pdcSuspended ? 0 : (d.pluginLatency || 0) + (d.downLatency || 0)));
+    return m;
+  }
+
+  /** Attentes du transport (s) depuis le chargement : tampons VST agrandis en lecture (mesures, QA). */
+  public transportHoldTotal = 0;
+
+  /**
+   * (C6) Tampon adaptatif d'un VST agrandi EN LECTURE de `k` secondes. La compensation de
+   * latence de NOVA avance les clips de chaque piste de sa propre latence ; ce VST, lui, a
+   * attendu `k` en silence (sans perdre un bloc) : tout ce qui passe par lui ressort désormais
+   * `k` plus tard. Pour que les pistes restent calées à l'échantillon près, toute la session
+   * « attend » `k`, une fois :
+   *  - pistes `grown` (celles dont la latence a pris `k` : la piste du VST, celles qui passent
+   *    par elle) : leurs sons en cours continuent, ils ont déjà pris `k` de retard ;
+   *  - autres pistes : leurs sons s'arrêtent à la fin de ce qui est déjà programmé
+   *    (nextScheduleTime) et reprennent `k` plus tard, AU MÊME point du morceau (pause de `k`) ;
+   *  - origine du morceau et fenêtre suivante décalées de `k` : la suite (clips, notes,
+   *    automation, effets calés sur le tempo) est programmée avec les nouvelles latences.
+   * La musique entière a pris `k` de retard une fois ; la position affichée recule de `k`.
+   * Jamais pendant une prise (compensation suspendue) ni en lecture ralentie.
+   */
+  private holdTransport(k: number, grown: Set<string>) {
+    if (!this.ctx || !this.isPlaying || this.practice || this.pdcSuspended || !(k > 0)) return;
+    const at = Math.max(this.nextScheduleTime, this.ctx.currentTime);
+    this.activeSources.forEach((src, key) => {
+      if (src.trackId && grown.has(src.trackId)) return;
+      try {
+        const fadeStart = Math.max(this.ctx!.currentTime, at - 0.005);
+        src.gain.gain.cancelScheduledValues(fadeStart);
+        src.gain.gain.setValueAtTime(src.gain.gain.value, fadeStart);
+        src.gain.gain.linearRampToValueAtTime(0, at);
+        src.source.stop(at);
+      } catch { /* déjà arrêtée */ }
+      this.activeSources.delete(key);
+    });
+    this.playbackStartTime += k;
+    this.nextScheduleTime += k;   // même point du morceau, k plus tard
+    const now = this.ctx.currentTime;
+    this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, now); });
+    this.resyncTimelineEffects();
+    this.transportHoldTotal += k;
+    try { window.dispatchEvent(new CustomEvent('nova:transport-hold', { detail: { seconds: k } })); } catch { /* hors navigateur */ }
   }
 
   /**
@@ -3926,7 +3988,7 @@ export class AudioEngine {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
             source.start(when, offsetIntoClip, actualDuration);
             
-            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id });
+            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId });
             
             source.onended = () => {
                 // Apres un bouclage la meme cle peut deja pointer vers une NOUVELLE
@@ -4345,11 +4407,11 @@ export class AudioEngine {
           dsp!.pluginChain.set(plugin.id, pEntry);
           if (instance.node instanceof VSTPluginNode) {
             const trackId = track.id;
-            instance.node.setLatencyListener(() => this.recomputeTrackLatency(trackId));
+            instance.node.setLatencyListener((why) => this.recomputeTrackLatency(trackId, why === 'adaptive'));
             if (lowLatency) instance.node.setMonitorBypass(true);
           } else if (instance.node instanceof HybridAutoTuneNode) {
             const trackId = track.id;
-            instance.node.setLatencyListener(() => this.recomputeTrackLatency(trackId));
+            instance.node.setLatencyListener((why) => this.recomputeTrackLatency(trackId, why === 'adaptive'));
             if (lowLatency) instance.node.updateParams({ ...plugin.params, lowLatency: true });
           } else if (lowLatency && instance.node?.updateParams) {
             instance.node.updateParams({ ...plugin.params, lowLatency: true });

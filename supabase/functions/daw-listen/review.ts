@@ -101,12 +101,34 @@ export interface ReviewSources {
   ops?: { kind: string; op: unknown }[];
 }
 
+/**
+ * Mêmes droits que NOVA à la réception (utils/timelineComments.enforceAuthorship,
+ * utils/mixVersions.mergeVersions) : les mots d'un commentaire ou d'une réponse ne
+ * comptent que s'ils sont horodatés par leur auteur ; une décision sur une version,
+ * seulement si elle est horodatée par celui qui l'a prise. Sinon le registre est
+ * neutralisé (valeur vide, horodatage zéro) : la version de l'auteur l'emporte.
+ */
+const ZERO_REG = { v: null, s: { t: 0, c: 0, by: "" } };
+function trustedComment(i: Record<string, any>): Record<string, any> {
+  const out = { ...i };
+  if (typeof i.authorKey === "string" && stampOf(i.text)?.by !== i.authorKey) out.text = ZERO_REG;
+  if (Array.isArray(i.replies)) {
+    out.replies = i.replies.map((r: unknown) => (isObj(r) && typeof r.authorKey === "string" && stampOf(r.text)?.by !== r.authorKey ? { ...r, text: ZERO_REG } : r));
+  }
+  return out;
+}
+function trustedVersion(i: Record<string, any>): Record<string, any> {
+  const d = (i.decision as Reg<any> | undefined)?.v;
+  if (isObj(d) && typeof d.byKey === "string" && stampOf(i.decision)?.by !== d.byKey) return { ...i, decision: ZERO_REG };
+  return i;
+}
+
 /** États fusionnés (projet puis journal). */
 export function collectReview(src: ReviewSources): { comments: Map<string, Record<string, any>>; versions: Map<string, Record<string, any>> } {
   const comments = new Map<string, Record<string, any>>();
   const versions = new Map<string, Record<string, any>>();
-  const addC = (i: Record<string, any>) => { try { comments.set(i.id, mergeComment(comments.get(i.id), i)); } catch { /* ignoré */ } };
-  const addV = (i: Record<string, any>) => { try { versions.set(i.id, mergeVersion(versions.get(i.id), i)); } catch { /* ignoré */ } };
+  const addC = (i: Record<string, any>) => { try { comments.set(i.id, mergeComment(comments.get(i.id), trustedComment(i))); } catch { /* ignoré */ } };
+  const addV = (i: Record<string, any>) => { try { versions.set(i.id, mergeVersion(versions.get(i.id), trustedVersion(i))); } catch { /* ignoré */ } };
   const project = isObj(src.project) ? src.project : {};
   itemsOf(project.timelineComments).forEach(addC);
   itemsOf(project.mixVersions).forEach(addV);

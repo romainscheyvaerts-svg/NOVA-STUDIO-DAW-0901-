@@ -6,6 +6,7 @@ import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
+import { VstLateBadge } from './VstLateAlert';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
@@ -363,6 +364,7 @@ const ChannelStrip: React.FC<{
             >
                <i className="fas fa-grip-vertical text-slate-700 mr-1.5 text-[8px]"></i>
                <PluginName plugin={p} className="font-semibold" />
+               {p.type === 'VST3' && <VstLateBadge pluginId={p.id} />}
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
                {/* Move Up/Down Buttons (toujours visibles au doigt : pas de survol) */}

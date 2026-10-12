@@ -133,6 +133,15 @@ export function guestOpVerdict(kind: string, op: Record<string, any> | null | un
       return guestCanDelete(ctx.existing, who, rights) ? { ok: true } : { ok: false, reason: 'invité : piste de l’ingé' };
     case 'markers':
       return rights.markers ? { ok: true } : { ok: false, reason: 'invité : repères réservés à l’ingé' };
+    case 'comments':
+      // Chantier 11 : l'invité commente la timeline (« 1:12 le "s" siffle »), répond, résout.
+      return { ok: true };
+    case 'mixver': {
+      // Versions du mix : l'invité ne fait que valider ou demander des retouches (la décision) ;
+      // créer une version reste à l'ingé (vérifié aussi à la réception, utils/mixVersions).
+      const list = Array.isArray(p.upsert) ? p.upsert : [];
+      return list.length ? { ok: true } : { ok: false, reason: 'invité : version vide' };
+    }
     case 'song': {
       const fields = p.fields && typeof p.fields === 'object' ? p.fields as Record<string, unknown> : {};
       const kept: Record<string, unknown> = {};
@@ -154,6 +163,7 @@ export const GUEST_RIGHTS_HELP = {
   free: "Mode libre : l'artiste peut aussi toucher aux autres pistes de voix, au tempo, à l'ordre des pistes…",
   ownMix: 'Il peut régler le son de sa voix (volume, effets)',
   markers: 'Il peut poser des repères (« couplet 2 ici »)',
+  comments: 'Il peut toujours commenter la timeline (« 1:12 le "s" siffle »), répondre, et valider tes versions',
 } as const;
 
 /** Phrase montrée à l'artiste quand il essaie quelque chose que l'ingé garde pour lui. */

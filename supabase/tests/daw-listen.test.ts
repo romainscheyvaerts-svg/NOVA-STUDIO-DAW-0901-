@@ -246,7 +246,8 @@ describe('daw-listen · LECTURE SEULE (vérifiée côté serveur)', () => {
 
 // ─── Commentaires et versions : vue publique ─────────────────────────────────────────────
 const st = (t: number, c = 0, by = 'u:x') => ({ t, c, by });
-const reg = <T,>(v: T, t: number, c = 0) => ({ v, s: st(t, c) });
+// Comme NOVA : un texte est horodaté par son auteur (u:secret-key pour Nina ici), sinon il est ignoré.
+const reg = <T,>(v: T, t: number, c = 0, by = 'u:secret-key') => ({ v, s: st(t, c, by) });
 const comment = (id: string, t: number, text: string, ts: number, extra: Record<string, unknown> = {}) => ({
   id, authorKey: 'u:secret-key', authorName: 'Nina', role: 'artist', createdAt: ts, trackId: 'voix',
   pos: reg({ t, end: null }, ts), text: reg(text, ts), status: reg({ s: 'open' }, ts), archived: reg(false, ts), replies: [], ...extra,
@@ -259,8 +260,8 @@ const version = (id: string, n: number, ts: number, extra: Record<string, unknow
 describe('daw-listen · commentaires et versions (lecture seule, fusionnés)', () => {
   it('fusion « le plus récent gagne », archivés et réponses effacées exclus, aucune clé interne exposée', () => {
     const c1 = comment('cm-1', 72, 'le « s » siffle', 1000);
-    const c1edit = { ...c1, text: reg('le « s » siffle trop', 2000), replies: [{ id: 'rp-1', authorKey: 'u:max', authorName: 'Max', createdAt: 2100, text: reg('corrigé', 2100) },
-      { id: 'rp-2', authorKey: 'u:max', authorName: 'Max', createdAt: 2200, text: reg('oups', 2200), deleted: reg(true, 2300) }] };
+    const c1edit = { ...c1, text: reg('le « s » siffle trop', 2000), replies: [{ id: 'rp-1', authorKey: 'u:max', authorName: 'Max', createdAt: 2100, text: reg('corrigé', 2100, 0, 'u:max') },
+      { id: 'rp-2', authorKey: 'u:max', authorName: 'Max', createdAt: 2200, text: reg('oups', 2200, 0, 'u:max'), deleted: reg(true, 2300) }] };
     const c1old = { ...c1, text: reg('ancienne version', 1500) };
     const c2 = comment('cm-2', 10, 'intro trop longue', 1100, { archived: reg(true, 1200) });
     const c3 = comment('cm-3', 30, 'refrain : plus de basse', 1300, { status: reg({ s: 'resolved' }, 1400) });

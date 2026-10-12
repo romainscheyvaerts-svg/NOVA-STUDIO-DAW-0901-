@@ -3,6 +3,7 @@ import { PluginInstance } from '../types';
 import { PluginName, usePluginTitle } from './PluginName';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import { FloatingMenu, handlePluginModifierClick, pluginStateClass, pluginStateHelp, pluginStateMenuItems, useLongPress } from './TrackStructure';
+import { VstLateBadge } from './VstLateAlert';
 
 /**
  * Effets de la piste, lisibles d'un coup d'œil (comme les inserts de Pro Tools) :
@@ -57,6 +58,8 @@ const Chip: React.FC<{ p: PluginInstance; baked: boolean; trackId: string } & Om
           : `border-white/5 bg-black/20 text-slate-500 ${p.isInactive ? '' : 'line-through'}`}`}
       >
         <PluginName plugin={p} showDetail compact />
+        {/* (C6) Pont en retard : coupures récentes / tampon agrandi. */}
+        {p.type === 'VST3' && !baked && <VstLateBadge pluginId={p.id} />}
       </button>
       {!baked && <button type="button" onClick={(e) => onRemove(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${pluginDisplayName(p)}`}><i className="fas fa-times"></i></button>}
       {menu && <FloatingMenu x={menu.x} y={menu.y} title={p.name || p.type} onClose={() => setMenu(null)} items={pluginStateMenuItems(trackId, p, () => onOpen({ stopPropagation() {}, preventDefault() {} } as unknown as React.MouseEvent, p))} />}

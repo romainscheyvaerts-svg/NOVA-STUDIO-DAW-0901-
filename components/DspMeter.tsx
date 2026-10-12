@@ -6,6 +6,7 @@ import { pickAutoFreeze, rankHeavyTracks, SafetyContext } from '../utils/dspLoad
 import { novaBridge, BridgeState } from '../services/NovaBridge';
 import { audioEngine } from '../engine/AudioEngine';
 import { barItem } from '../utils/barFit';
+import VstLateAlert from './VstLateAlert';
 
 /**
  * Compteur « CPU » de la barre de transport (comme la fenêtre Performance de
@@ -202,6 +203,9 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
         </div>,
         document.body,
       )}
+
+      {/* (C6) Pont VST en retard : alerte par plugin, avec l'action « Geler la piste ». */}
+      <VstLateAlert tracks={tracks} onFreezeTrack={onFreezeTrack} />
 
       {alert && createPortal(
         <div role="alert" data-testid="dsp-alert" className="fixed z-[690] top-[72px] left-1/2 -translate-x-1/2 w-[min(440px,calc(100vw-24px))] rounded-2xl border border-red-500/40 bg-[#1a1114] p-4 shadow-2xl text-[12px] text-slate-200">
