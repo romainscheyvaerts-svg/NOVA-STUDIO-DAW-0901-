@@ -84,6 +84,10 @@ export interface GuestStudioProps {
   review?: React.ReactNode;
   /** Commentaires ouverts + versions en attente de son avis (pastille du bouton 💬). */
   reviewBadge?: number;
+  /** B3 : où en est l'envoi de ma prise (« Prise en cours d'envoi… 80 % », « Prise reçue par Max ✓ »). */
+  takeSend?: React.ReactNode;
+  /** B3 : test de connexion en un bouton (verdict, temps d'arrivée d'une prise). */
+  netTest?: React.ReactNode;
 }
 
 const fmt = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
@@ -208,6 +212,7 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
               {p.status!.action && <button type="button" data-testid="guest-retry" onClick={p.onRetry} className="h-11 shrink-0 rounded-xl bg-white px-3 text-[13px] font-black text-black">{p.status!.action === 'reload' ? 'Recharger' : 'Réessayer'}</button>}
             </div>
           )}
+          {p.takeSend}
           {shownNotice && (
             <p role="status" data-testid="guest-notice" className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-[13px] font-semibold text-cyan-50">{shownNotice.text}</p>
           )}
@@ -257,6 +262,14 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
             {p.monitoring && p.headphones === 'haut-parleurs' && <p className="text-[12px] text-amber-200">Sans casque, ta voix ressort dans les haut-parleurs et peut siffler (larsen) : coupe cette option.</p>}
             </>}
           </section>
+
+          {/* Connexion : un test avant la séance */}
+          {p.netTest && (
+            <section className={card} data-testid="guest-net" aria-labelledby="guest-net-t">
+              <h2 id="guest-net-t" className="text-[15px] font-black">📶 Ta connexion</h2>
+              {p.netTest}
+            </section>
+          )}
 
           {/* 3. Le mix de l'ingé */}
           <section className={card} data-testid="guest-listen" aria-labelledby="guest-listen-t">

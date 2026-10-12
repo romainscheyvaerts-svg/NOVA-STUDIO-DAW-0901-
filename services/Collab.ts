@@ -47,6 +47,8 @@ export interface CollabMember {
   edit?: string | null; sel?: string | null;
   /** Audio en direct proposé : talkback ouvert, mix diffusé (services/CollabRtc). */
   talk?: boolean; mixOut?: boolean;
+  /** Reçoit les prises envoyées pendant l'enregistrement (B3) ; absent : ancienne version de NOVA. */
+  lt?: number;
   last_seen?: string;
 }
 
@@ -54,6 +56,8 @@ export interface CollabMember {
 export interface PresenceMeta {
   color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean;
   edit?: string | null; sel?: string | null; talk?: boolean; mixOut?: boolean;
+  /** B3 : version de la prise en direct comprise (absent : ancienne version, elle reçoit la prise entière après le STOP). */
+  lt?: number;
 }
 
 /** Messages éphémères (direct seulement, jamais dans le journal). */
@@ -234,6 +238,7 @@ export class CollabClient {
         if (m.sel) extra.sel = m.sel;
         if (m.talk) extra.talk = true;
         if (m.mixOut) extra.mixOut = true;
+        if (typeof m.lt === 'number') extra.lt = m.lt;
         return { member_key: key, role: m.role, display_name: m.name, online: true, ...extra };
       });
       this.onPresence(online as CollabMember[]);
@@ -452,10 +457,12 @@ export class CollabClient {
         this.failed.delete(o.seq);
       } catch (e) {
         // Avant : marquée appliquée quand même, le clip restait muet sans retour.
-        const tries = (this.failed.get(o.seq)?.tries || 0) + 1;
+        // Prise encore en route (B3, utils/liveTake) : on attend, sans compter d'échec.
+        const waitingTake = !!(e as any)?.liveTakePending;
+        const tries = (this.failed.get(o.seq)?.tries || 0) + (waitingTake ? 0 : 1);
         if (tries < 6) this.failed.set(o.seq, { o, tries });
         else { this.failed.delete(o.seq); this.setStatus({ failedOps: this.status.failedOps + 1 }); this.onFailure?.(o); }
-        console.warn('[Collab] opération', o.kind, e);
+        if (!waitingTake) console.warn('[Collab] opération', o.kind, e);
       } finally {
         this.pending.delete(o.seq);
       }
@@ -574,6 +581,53 @@ export async function uploadBuffers(link: CloudLink, bufferIds: string[], onProg
     if (total > 0 && sent < total) onProgress?.(total, total); // fin (réussie ou non) : plus de barre
   }
   Object.entries(out).forEach(([id, ref]) => uploaded.set(id, ref));
+  return out;
+}
+
+/**
+ * Met en ligne des morceaux déjà nommés par leur SHA-1 (prise envoyée pendant
+ * l'enregistrement, utils/liveTake) : seuls ceux que le serveur n'a pas partent.
+ */
+export async function uploadParts(link: CloudLink, parts: { hash: string; bytes: Uint8Array }[]): Promise<void> {
+  if (!parts.length) return;
+  const byHash = new Map(parts.map(p => [p.hash, p.bytes]));
+  const r = await call<{ uploads: Record<string, { path: string; token: string }> }>('sign_upload', { id: link.id, secret: link.secret, parts: [...byHash.keys()] });
+  for (const [hash, u] of Object.entries(r.uploads || {})) {
+    const data = byHash.get(hash);
+    if (!data) continue;
+    const { error } = await catalogSupabase.storage.from('daw-sessions')
+      .uploadToSignedUrl(u.path.replace(/^daw-sessions\//, ''), u.token, new Blob([data as BlobPart], { type: 'application/octet-stream' }));
+    if (error) throw new Error(`Envoi de la prise impossible : ${error.message}`);
+  }
+}
+
+/** Adresse d'envoi d'un morceau (null : déjà en ligne). */
+export async function signPart(link: CloudLink, hash: string): Promise<{ path: string; token: string } | null> {
+  const r = await call<{ uploads: Record<string, { path: string; token: string }> }>('sign_upload', { id: link.id, secret: link.secret, parts: [hash] });
+  return r.uploads?.[hash] || null;
+}
+
+/** Envoi d'un morceau à l'adresse donnée par signPart. */
+export async function putPart(ticket: { path: string; token: string }, bytes: Uint8Array): Promise<void> {
+  const { error } = await catalogSupabase.storage.from('daw-sessions')
+    .uploadToSignedUrl(ticket.path.replace(/^daw-sessions\//, ''), ticket.token, new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+  if (error) throw new Error(`Envoi de la prise impossible : ${error.message}`);
+}
+
+/** Télécharge des morceaux en ligne (prise envoyée pendant l'enregistrement) ; SHA-1 vérifié. */
+export async function downloadParts(link: CloudLink, hashes: string[]): Promise<Map<string, Uint8Array>> {
+  const out = new Map<string, Uint8Array>();
+  if (!hashes.length) return out;
+  const r = await call<{ urls: Record<string, string> }>('urls', { id: link.id, secret: link.secret, parts: hashes });
+  for (const h of hashes) {
+    const u = r.urls?.[h];
+    if (!u) continue; // pas encore en ligne : réessayé plus tard
+    const res = await fetch(u);
+    if (!res.ok) continue;
+    const b = new Uint8Array(await res.arrayBuffer());
+    if ((await sha1(b)) !== h) throw new Error('Morceau de prise abîmé en route');
+    out.set(h, b);
+  }
   return out;
 }
 

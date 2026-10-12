@@ -84,6 +84,9 @@ interface Props {
   savedRemote?: { role: 'artist' | 'engineer' } | null;
   /** En direct, côté ingé : réglage à distance des VST du PC de l'artiste. */
   liveVst?: React.ReactNode;
+  /** B3 : envoi de ma dernière prise, et test de connexion avant la séance. */
+  takeSend?: React.ReactNode;
+  netTest?: React.ReactNode;
   /** Côté ingé : pont Pro Tools (dossier des prises BWF, source du mix diffusé). */
   proTools?: React.ReactNode;
   /** État de la connexion (en direct, rattrapage, hors ligne, envoi…). */
@@ -422,6 +425,12 @@ const CollabPanel: React.FC<Props> = (p) => {
           {/* Une seule zone qui défile (invitation, VST de l'artiste, messages) : la saisie
               du message reste toujours visible (avant : poussée hors de l'écran chez l'ingé). */}
           <div ref={listRef} data-testid="collab-scroll" className="flex-1 min-h-0 overflow-y-auto">
+          {(p.takeSend || p.netTest) && (
+            <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-net">
+              {p.takeSend}
+              {p.netTest}
+            </div>
+          )}
           <div className="p-4 space-y-2 border-b border-white/5">
             <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Dans la session · {onlineCount}/{MAX_PARTICIPANTS}</p>
             <ul className="space-y-1" aria-label="Participants" data-testid="collab-members">
