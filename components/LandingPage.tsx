@@ -352,7 +352,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
       </header>
 
       {/* Contenu principal */}
-      <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      {/* Téléphone : la page défile d'un bloc. Avant, la colonne « Démarrer » prenait 577 px
+          sur 692 et le catalogue (ou ses actions de secours) n'avait plus que 32 px visibles. */}
+      <main className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
         {/* Sidebar gauche - Actions principales */}
         <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-nv-bg flex flex-col">
           <div className="p-4 space-y-3">
@@ -497,7 +499,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
         </aside>
 
         {/* Zone centrale - Catalogue d'instrumentaux */}
-        <section className="flex-1 flex flex-col overflow-hidden">
+        <section className="flex-1 flex flex-col md:overflow-hidden min-h-[60vh] md:min-h-0">
           <div className="p-4 border-b border-white/5 bg-nv-bg/50">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1" role="tablist" aria-label="Bibliothèque">
               <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
@@ -516,7 +518,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 md:overflow-y-auto p-4">
             {!loading && instrumentals.length > 0 && (
               <CatalogUnavailable compact onRetry={() => setCatalogTry(n => n + 1)} />
             )}
