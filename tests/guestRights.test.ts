@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../types';
 import {
-  DEFAULT_GUEST_RIGHTS, GUEST_FORBIDDEN_KINDS, GUEST_RIGHTS_KIND, guestCanDelete, guestCanEditContent, guestCanMix,
+  DEFAULT_GUEST_RIGHTS, GUEST_FORBIDDEN_KINDS, GUEST_REFUSED_SONG_FIELDS, GUEST_RIGHTS_KIND, guestCanDelete, guestCanEditContent, guestCanMix,
   guestOpVerdict, isLimitedGuest, sanitizeGuestRights,
 } from '../utils/guestRights';
 import { canSendContent, canSendMix, deleteAllowed, mixAllowed } from '../utils/collabContent';
@@ -109,6 +109,16 @@ describe('réception chez l’ingé : ce qu’un artiste en mode simple ne peut 
     const mixed = v('song', { fields: { lyrics: 'couplet', projectScale: 'MINOR' }, _id: 'x' });
     expect(mixed.ok).toBe(true);
     expect(mixed.op).toEqual({ fields: { lyrics: 'couplet' }, _id: 'x' });
+  });
+  it('fréquence d’échantillonnage du projet : refusée (seule ou avec les paroles, qui passent seules)', () => {
+    expect(GUEST_REFUSED_SONG_FIELDS).toContain('sampleRate');
+    const seule = v('song', { fields: { sampleRate: 96000 } });
+    expect(seule.ok).toBe(false);
+    expect(seule.reason).toMatch(/fréquence d’échantillonnage/);
+    const avec = v('song', { fields: { lyrics: 'refrain', sampleRate: 44100 } });
+    expect(avec).toEqual({ ok: true, op: { fields: { lyrics: 'refrain' } } });
+    // Hors mode simple (ou ingé) : permise.
+    expect(v('song', { fields: { sampleRate: 96000 } }, undefined, { limited: false }).ok).toBe(true);
   });
   it('repères : seulement si l’ingé le permet', () => {
     expect(v('markers', { upsert: [{ id: 'm', time: 1 }] }).ok).toBe(false);

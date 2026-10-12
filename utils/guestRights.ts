@@ -77,6 +77,14 @@ export const guestCanDelete = guestCanEditContent;
 export const GUEST_SONG_FIELDS = ['lyrics', 'lyricsRegions'] as const;
 
 /**
+ * Champs de la session REFUSÉS à un invité (tout le reste de l'opération « song ») :
+ * tonalité, gamme, arrangements, et la fréquence d'échantillonnage du projet
+ * (utils/projectRate) : la changer recrée le moteur et reconvertit tous les sons
+ * de la séance chez tout le monde — c'est la séance de l'ingé.
+ */
+export const GUEST_REFUSED_SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'sampleRate'] as const;
+
+/**
  * Opérations jamais permises à un invité en mode simple : elles changent la
  * séance de l'ingé pour tout le monde (tempo, ordre, groupes, accords, beat,
  * opérations sur le temps, verrou de volume, « Écouter ensemble », notes de
@@ -129,7 +137,9 @@ export function guestOpVerdict(kind: string, op: Record<string, any> | null | un
       const fields = p.fields && typeof p.fields === 'object' ? p.fields as Record<string, unknown> : {};
       const kept: Record<string, unknown> = {};
       for (const f of GUEST_SONG_FIELDS) if (f in fields) kept[f] = fields[f];
-      if (!Object.keys(kept).length) return { ok: false, reason: 'invité : tonalité et arrangements réservés à l’ingé' };
+      if (!Object.keys(kept).length) {
+        return { ok: false, reason: 'sampleRate' in fields ? 'invité : fréquence d’échantillonnage du projet réservée à l’ingé' : 'invité : tonalité et arrangements réservés à l’ingé' };
+      }
       return Object.keys(kept).length === Object.keys(fields).length ? { ok: true } : { ok: true, op: { ...p, fields: kept } };
     }
     default:

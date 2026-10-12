@@ -1403,6 +1403,8 @@ function Studio() {
       const from = projectRateOf(stateRef.current);
       if (to === from) return;
       if (stateRef.current.isRecording) { setAiNotification('🎙️ Arrête la prise avant de changer la fréquence du projet.'); return; }
+      // Artiste invité (mode simple) : la fréquence est celle de la séance de l'ingé (utils/guestRights).
+      if (isLimitedGuest(collabRef.current?.role, stateRef.current.collabGuestRights)) { setAiNotification(guestRefusalText(engineerName())); return; }
       setRateConfirm({ from, to, ...registryConversionPlan(to) });
     };
     window.addEventListener('nova:request-samplerate', onReq);
