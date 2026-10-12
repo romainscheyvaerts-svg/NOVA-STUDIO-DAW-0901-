@@ -46,6 +46,7 @@ import { CrossfadeCurve } from '../types';
 import { STEMS_TOOLTIP } from '../services/StemSeparation';
 import { araAvailability } from '../utils/araEdit';
 import { useAraContext } from './AraDialog';
+import { clipGainWheel, isClipGainWheel } from '../utils/clipGainWheel';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
@@ -535,6 +536,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
+      // Ctrl+Maj+molette sur un clip : son gain (utils/clipGainWheel), pas le zoom.
+      if (isClipGainWheel(e)) {
+        const hit = clipAtPointRef.current?.(e.clientX, e.clientY);
+        if (hit) { clipGainWheel(hit.trackId, hit.clip, e); return; }
+      }
 
       const rect = el.getBoundingClientRect();
       const pointerX = e.clientX - rect.left;
@@ -944,6 +950,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, []);
 
   /** Clip sous un point de l'écran (même calcul que le clic), ou null. */
+  const clipAtPointRef = useRef<((x: number, y: number) => { trackId: string; clip: Clip } | null) | null>(null);
   const clipAtPoint = (clientX: number, clientY: number): { trackId: string; clip: Clip } | null => {
     const sc = scrollContainerRef.current;
     if (!sc) return null;
@@ -961,6 +968,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
     return null;
   };
+  clipAtPointRef.current = clipAtPoint;
   /** Haut (contenu, px) de la ligne de clips d'une piste, ou null si elle n'est pas affichée. */
   const laneTopOf = (trackId: string): number | null => {
     let yy = tracksTop;

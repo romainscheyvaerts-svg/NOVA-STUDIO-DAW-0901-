@@ -934,6 +934,20 @@ export interface Track {
    * ancienne version l'ignore et joue simplement le comp. Voir utils/playlists.
    */
   takeMeta?: TakeMeta[];
+  /**
+   * Playlists de la piste (Pro Tools : « Main Playlist » et ses versions .01,
+   * .02…) : des versions COMPLÈTES de l'édition de la piste (avant / après un
+   * nettoyage, une version « clean », un autre comp). La playlist active joue
+   * depuis `clips` / `takeMeta` comme toujours ; les autres gardent ici leurs
+   * clips. L'entrée de la playlist active n'a pas de clips (ils sont dans
+   * `clips`). Une ancienne version ignore ce champ et joue la playlist active.
+   * Voir utils/trackPlaylists.
+   */
+  playlists?: TrackPlaylist[];
+  /** Playlist active (son entrée dans `playlists`). */
+  activePlaylistId?: string;
+  /** Playlist active précédente (Pro Tools : Maj+← bascule entre les deux dernières). */
+  recentPlaylistId?: string;
 
   /**
    * Piste guide (R3) : la voix témoin (démo du topliner, yaourt, ancienne prise)
@@ -1016,6 +1030,18 @@ export interface CueMix {
 }
 
 /** Infos d'un couloir de prise (Track.takeMeta). */
+/** Une playlist de piste (utils/trackPlaylists). */
+export interface TrackPlaylist {
+  id: string;
+  /** « LEAD A », « LEAD A.01 »… (renommable). */
+  name: string;
+  /** Clips de la playlist quand elle n'est PAS active (vide pour l'active : ils sont dans Track.clips). */
+  clips: Clip[];
+  /** Couloirs de prises de la playlist quand elle n'est pas active. */
+  takeMeta?: TakeMeta[];
+  createdAt?: number;
+}
+
 export interface TakeMeta {
   /** Numéro de la prise (Clip.takeNumber). */
   n: number;

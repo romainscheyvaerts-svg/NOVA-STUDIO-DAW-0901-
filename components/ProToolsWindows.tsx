@@ -21,6 +21,8 @@ const BounceDialog = lazyWithPreload(() => import('./BounceDialog'));
 const AudioSuiteDialog = lazyWithPreload(() => import('./AudioSuiteDialog'));
 const TransposeDialog = lazyWithPreload(() => import('./TransposeDialog'));
 const WarpMarkers = lazyWithPreload(() => import('./WarpMarkers'));
+const BatchRenderDialog = lazyWithPreload(() => import('./BatchRenderDialog'));
+const IoNamesDialog = lazyWithPreload(() => import('./IoNamesDialog'));
 export const PRO_TOOLS_WINDOWS_PRELOAD = [PitchEditor, TrackPresetDialog, StripSilenceDialog, AudioSuiteDialog, TransposeDialog, PitchBatchDialog, AudioToMidiDialog, BounceDialog, WarpMarkers];
 import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
 import { applyClipPatches, doneMessage, renderElasticClip } from '../services/elasticRender';
@@ -54,6 +56,8 @@ interface Props {
  */
 const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar }) => {
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [batch, setBatch] = useState<NovaWindowDetail | null>(null);
+  const [ioNames, setIoNames] = useState(false);
   const [strip, setStrip] = useState<NovaWindowDetail | null>(null);
   const [props, setProps] = useState<NovaWindowDetail | null>(null);
   const [pitch, setPitch] = useState<NovaWindowDetail | null>(null);
@@ -151,6 +155,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if ((d.name === 'ara-melodyne' || d.name === 'ara-vocalign') && d.targets?.length) setAra(d);
       else if (d.name === 'track-preset') setTrackPreset(d);
       else if (d.name === 'bounce' || d.name === 'print-bus') setBounce(d);
+      else if (d.name === 'batch-render') setBatch(d);
+      else if (d.name === 'io-names') setIoNames(true);
       else if (d.name === 'audiosuite') { if (d.revert && d.targets?.length) revertSuite(d.targets); else if (d.targets?.length || d.range) setSuite(d); }
       // R13 : transposer / étirer, marqueurs de warp, Trim TCE.
       else if (d.name === 'transpose' && d.targets?.length) { if (d.revert) revertElastic(d.targets); else setTranspose(d); }
@@ -263,6 +269,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       <MountWhenOpened when={!!trackPreset}><TrackPresetDialog open={!!trackPreset} trackId={trackPreset?.trackId} tracks={tracks} setState={setState} onClose={() => setTrackPreset(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!bounce}><BounceDialog open={!!bounce} mode={bounce?.name === 'print-bus' ? 'bus' : bounce?.bounce?.mode === 'range' ? 'range' : 'commit'} trackId={bounce?.trackId}
         range={bounce?.range} tracks={tracks} setState={setState} onClose={() => setBounce(null)} /></MountWhenOpened>
+      <MountWhenOpened when={ioNames}><IoNamesDialog open={ioNames} onClose={() => setIoNames(false)} /></MountWhenOpened>
+      <MountWhenOpened when={!!batch}><BatchRenderDialog open={!!batch} tracks={tracks} preselected={batch?.trackIds || []} onClose={() => setBatch(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!transpose}><TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!warp}><WarpMarkers open={!!warp} trackId={warp?.targets?.[0]?.trackId} clipId={warp?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} setState={setState} onClose={() => setWarp(null)} /></MountWhenOpened>

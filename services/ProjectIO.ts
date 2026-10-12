@@ -11,6 +11,7 @@ import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
 import { samplerBufferKey } from '../utils/melodicSampler';
 import { salvageJson, repairProject } from '../utils/projectRepair';
 import { projectRateOf } from '../utils/projectRate';
+import { packPlaylists, unpackPlaylists } from '../utils/trackPlaylists';
 
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
 export const REPAIR_REPORT = '__repairReport';
@@ -23,6 +24,8 @@ export class ProjectIO {
    */
   public static async saveProject(state: DAWState, ownedInstrumentIds: (string | number)[] = []): Promise<Blob> {
     const zip = new JSZip();
+    // Playlists rangées : leurs clips passent par le même chemin que les autres (son écrit une fois), puis reviennent à leur place.
+    state = packPlaylists(state);
     
     // 1. Clonage de l'état pour modification (on retire les buffers lourds du JSON)
     const serializableState = JSON.parse(JSON.stringify(state));
@@ -255,6 +258,7 @@ export class ProjectIO {
         if (kept.length) serializableState.clipBin = kept; else delete serializableState.clipBin;
     }
 
+    unpackPlaylists(serializableState);
     // 3. Ajout du fichier JSON d'état
     zip.file("project.json", JSON.stringify(serializableState, null, 2));
     
@@ -310,7 +314,7 @@ export class ProjectIO {
         }
     }
 
-    const fixed = repairProject(loadedState, { audioRefs: new Set(files) });
+    const fixed = repairProject(packPlaylists(loadedState), { audioRefs: new Set(files) });
     if (fixed.fatal || !fixed.state) throw new Error(`Fichier projet corrompu : ${fixed.fatal || 'illisible'}`);
     loadedState = fixed.state;
     const report = [...preReport, ...fixed.report];
@@ -567,6 +571,7 @@ export class ProjectIO {
         }
         loadedState.clipBin = kept;
     }
+    unpackPlaylists(loadedState);
     if (unreadable) {
         const list = [...unreadableTracks];
         report.push(`${unreadable} clip${unreadable > 1 ? 's' : ''} dont le son est abîmé (illisible) : gardé${unreadable > 1 ? 's' : ''} hors ligne (${list.slice(0, 3).map(x => `« ${x} »`).join(', ')}${list.length > 3 ? '…' : ''}).`);
