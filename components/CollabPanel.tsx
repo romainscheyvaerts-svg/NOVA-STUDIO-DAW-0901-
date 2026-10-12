@@ -26,6 +26,8 @@ export interface LiveAudioView {
   canMixOut: boolean;
   mixOutOn: boolean;
   onToggleMixOut: () => void;
+  /** Ingé : choix de la source du mix diffusé (master NOVA ou entrée système : pont Pro Tools). */
+  mixSource?: React.ReactNode;
   /** Mix reçu en direct (nom de la personne qui le diffuse), et si je l'écoute. */
   remoteMixFrom: string | null;
   listening: boolean;
@@ -85,6 +87,8 @@ interface Props {
   /** B3 : envoi de ma dernière prise, et test de connexion avant la séance. */
   takeSend?: React.ReactNode;
   netTest?: React.ReactNode;
+  /** Côté ingé : pont Pro Tools (dossier des prises BWF, source du mix diffusé). */
+  proTools?: React.ReactNode;
   /** État de la connexion (en direct, rattrapage, hors ligne, envoi…). */
   status?: CollabStatusView | null;
   onRetry?: () => void;
@@ -543,6 +547,7 @@ const CollabPanel: React.FC<Props> = (p) => {
                 {p.audio.talkOn ? '🎙️ On t’entend… (relâche pour couper)' : '🎙️ Maintenir pour parler (talkback)'}
               </button>
               {p.audio.talking.length > 0 && <p role="status" data-testid="collab-talking" className="text-[12px] font-bold text-sky-200">🔊 {p.audio.talking.join(', ')} te parle{p.audio.talking.length > 1 ? 'nt' : ''}…</p>}
+              {p.audio.canMixOut && p.audio.mixSource}
               {p.audio.canMixOut && (
                 <button type="button" data-testid="collab-mix-out" onClick={p.audio.onToggleMixOut} aria-pressed={p.audio.mixOutOn}
                   className={`${btn} h-11 w-full ${p.audio.mixOutOn ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>
@@ -585,6 +590,7 @@ const CollabPanel: React.FC<Props> = (p) => {
               </p>
             </div>
           )}
+          {p.proTools}
           {p.history && (
             <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-history">
               <button type="button" onClick={() => setHistoryOpen(o => !o)} aria-expanded={historyOpen} data-testid="collab-history-toggle"

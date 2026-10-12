@@ -121,6 +121,8 @@ export interface BridgeState {
   sidechain?: boolean;
   /** (v13) Sauvegarde des projets sur le disque (Documents\Nova Studio\Projets). */
   projects?: boolean;
+  /** (v14) Pont Pro Tools : prises BWF écrites dans le dossier choisi par l'ingé (services/ProToolsBridge). */
+  protools?: boolean;
 }
 
 /** Première version du pont qui sait caler un compresseur sur une réduction cible. */
@@ -221,6 +223,9 @@ export const BRIDGE_AUTOMATION_VERSION = 11;
 
 /** Première version du pont qui écrit les projets sur le disque (Nova Studio). */
 export const BRIDGE_PROJECTS_VERSION = 13;
+
+/** Première version du pont qui écrit les prises BWF pour Pro Tools (pont Pro Tools, chantier 9). */
+export const BRIDGE_PROTOOLS_VERSION = 14;
 
 /** Version d'un projet telle que le pont la garde sur le disque (même forme que dans IndexedDB). */
 export interface DiskVersionRecord {
@@ -433,6 +438,7 @@ class NovaBridgeService {
             automation: !!hello.automation && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
             sidechain: !!hello.sidechain && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
             projects: !!hello.projects && (Number(hello.version) || 0) >= BRIDGE_PROJECTS_VERSION,
+            protools: !!hello.protools && (Number(hello.version) || 0) >= BRIDGE_PROTOOLS_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -1018,6 +1024,41 @@ class NovaBridgeService {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => { this.pending.delete(req_id); reject(new Error("Le pont ne répond pas à l'écriture du son")); }, 60000);
       this.pending.set(req_id, { resolve: () => resolve(), reject, timer });
+      ws.send(buf);
+    });
+  }
+
+  // --- Pont Pro Tools (pont v14) ------------------------------------------------------
+
+  /** Le pont connecté sait écrire les prises BWF dans un dossier du PC. */
+  proToolsFiles(): boolean { return this.isConnected() && !!this.state.protools; }
+
+  /** Dossier proposé par défaut (Documents\Nova Studio\Pro Tools), et si `folder` est accessible en écriture. */
+  async proToolsStatus(folder?: string): Promise<{ defaultFolder: string; folder: string | null; writable: boolean; error?: string }> {
+    const r = await this.request({ action: 'PT_STATUS', ...(folder ? { folder } : {}) }, 10000);
+    return { defaultFolder: String(r.default_folder || ''), folder: r.folder ? String(r.folder) : null, writable: !!r.writable, ...(r.error ? { error: String(r.error) } : {}) };
+  }
+
+  /**
+   * Écrit un fichier BWF tel quel (octets déjà encodés par la page : utils/bwf) dans `folder`.
+   * Le pont vérifie le nom et l'en-tête, écrit de façon atomique et renvoie le chemin final
+   * (« (2) » ajouté si le fichier est ouvert dans Pro Tools et ne peut pas être remplacé).
+   */
+  writeProToolsFile(folder: string, name: string, bytes: Uint8Array): Promise<{ path: string; renamed: boolean }> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Pont non connecté'));
+    const req_id = this.nextId++;
+    const j = new TextEncoder().encode(JSON.stringify({ action: 'PT_WRITE_FILE', req_id, folder, name, size: bytes.length }));
+    const off = align4(8 + j.length);
+    const buf = new ArrayBuffer(off + align4(bytes.length));
+    const u8 = new Uint8Array(buf);
+    u8[0] = 2;
+    new DataView(buf).setUint32(4, j.length, true);
+    u8.set(j, 8);
+    u8.set(bytes, off);
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => { this.pending.delete(req_id); reject(new Error("Le pont ne répond pas à l'écriture de la prise")); }, 30000);
+      this.pending.set(req_id, { resolve: (r: any) => resolve({ path: String(r?.path || ''), renamed: !!r?.renamed }), reject, timer });
       ws.send(buf);
     });
   }
