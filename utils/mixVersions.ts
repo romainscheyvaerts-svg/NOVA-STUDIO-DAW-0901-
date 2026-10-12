@@ -97,8 +97,9 @@ export function mergeVersions(local: MixVersion[] | undefined, incoming: MixVers
   const map = new Map((local || []).map(v => [v.id, v] as const));
   const added: MixVersion[] = [], decided: MixVersion[] = [], orphans: MixVersion[] = [];
   for (let inc of incoming) {
-    // La décision ne vient que d'un artiste ; un ingé ne fait que la transmettre (état déjà décidé).
-    if (!opts.fromArtist && inc.decision.v && inc.decision.s.by !== inc.decision.v.byKey) inc = { ...inc, decision: { v: null, s: ZERO } };
+    // Une décision compte seulement si elle est horodatée par celui qui l'a prise (règle identique
+    // chez tous, et dans la page d'écoute client) ; un ingé ne fait que la transmettre.
+    if (inc.decision.v && inc.decision.s.by !== inc.decision.v.byKey) inc = { ...inc, decision: { v: null, s: ZERO } };
     const cur = map.get(inc.id);
     if (!cur) {
       if (!opts.fromEngineer) { orphans.push(inc); continue; }
