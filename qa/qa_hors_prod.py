@@ -601,7 +601,7 @@ _INIT_SANS_PONT_APPLI = r"""(() => {
   function QAWebSocket(url, protocols) {
     try {
       const u = new URL(String(url), location.href);
-      if (['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) && (u.port === '8765' || u.port === '8766')) url = 'ws://127.0.0.1:9/';
+      if (['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) && (u.port === '8765' || u.port === '8766')) url = 'ws://127.0.0.1:59999/pont-appli-8765-coupe-par-la-qa';
     } catch (e) { /* adresse illisible : laissée telle quelle */ }
     return protocols === undefined ? new W(url) : new W(url, protocols);
   }
@@ -627,7 +627,7 @@ def install(context, log=None):
         return context
     context._qa_hors_prod = True
     if os.environ.get("QA_PONT_APPLI") != "1":
-        # Jamais le pont de l'appli installée (8765/8766) : la page le voit absent (port fermé).
+        # Jamais le pont de l'appli installée (8765/8766) : la page le voit absent (port 59999 fermé : ERR_CONNECTION_REFUSED, comme un pont absent).
         try:
             context.add_init_script(_INIT_SANS_PONT_APPLI)
         except Exception:
