@@ -1874,6 +1874,8 @@ export class AudioEngine {
     try {
       await this.ensureInputSource(trackId);
       const spec = this.armedSpecs.get(trackId) ?? null;
+      // Chaîne en veille : rebranchée avant que le micro n'arrive (retour casque avec effets).
+      this.effectSleep?.wake(trackId);
       const tap = this.inputRouter!.arm(trackId, spec, dsp.input, dsp.inputAnalyzer, this.monitorGainFor());
       this.monitoringTrackId = trackId;
       void this.attachFlashback(trackId);
@@ -2082,6 +2084,7 @@ export class AudioEngine {
    */
   private setTrackLowLatency(trackId: string, on: boolean) {
     if (on) this.lowLatencyTracks.add(trackId); else this.lowLatencyTracks.delete(trackId);
+    if (on) this.effectSleep?.wake(trackId);
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     let total = 0;

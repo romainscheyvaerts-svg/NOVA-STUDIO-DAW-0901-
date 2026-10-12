@@ -387,8 +387,9 @@ def run_palier(p, proj, n, seconds, trace_nodes=False, gestures=True, log_name="
 
 
 OFFLINE_COST_JS = r"""
-async ({ n, sec }) => {
+async ({ n, sec, types }) => {
   const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
+  let REG = null; try { REG = await window.__novaAppModule('/engine/pluginRegistry.ts'); } catch (err) { /* */ }
   await e.init();
   const SR = 44100;
   const eq = { isEnabled: true, masterGain: 1, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [100,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: i === 2 ? -2 : i === 6 ? 2 : 0, q: 1, isEnabled: true, isSolo: false })) };
@@ -409,7 +410,11 @@ async ({ n, sec }) => {
     return Math.round((performance.now() - t0) / N / sec * 100) / 100;
   };
   const res = {};
-  for (const t of Object.keys(cfg)) {
+  const all = ['PROEQ12', 'COMPRESSOR', 'DEESSER', 'VOCALSATURATOR', 'REVERB', 'DELAY', 'CHORUS', 'FLANGER', 'DOUBLER', 'STEREOSPREADER', 'DENOISER', 'MASTERSYNC', 'AUTOTUNE',
+    ...((REG && REG.PLUGIN_REGISTRY) ? REG.PLUGIN_REGISTRY.map(p => p.type) : [])];
+  const list = types === 'all' ? [...new Set(all)] : Object.keys(cfg);
+  for (const t of list) {
+    if (!cfg[t]) { const r = REG && REG.getRegisteredPlugin ? REG.getRegisteredPlugin(t) : null; cfg[t] = r && r.defaultParams ? r.defaultParams() : {}; }
     const v = []; const vs = [];
     for (let k = 0; k < 3; k++) { v.push(await bench(t, false)); vs.push(await bench(t, true)); }
     v.sort((a, b) => a - b); vs.sort((a, b) => a - b);
@@ -420,12 +425,12 @@ async ({ n, sec }) => {
 """
 
 
-def offline_costs(p):
+def offline_costs(p, types=None):
     """Coût de calcul de chaque effet (rendu hors ligne, médiane de 3) : ms de calcul par seconde de son et par instance."""
     b = p.chromium.launch(headless=True, executable_path=CHROME, args=["--autoplay-policy=no-user-gesture-required"])
     ctx, page = new_page(b, "pc", Log("couts"))
     try:
         page.goto(BASE, wait_until="domcontentloaded"); page.wait_for_timeout(4000)
-        return page.evaluate(OFFLINE_COST_JS, {"n": 24, "sec": 3})
+        return page.evaluate(OFFLINE_COST_JS, {"n": 24, "sec": 3, "types": types})
     finally:
         ctx.close(); b.close()
