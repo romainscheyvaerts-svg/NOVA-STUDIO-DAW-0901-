@@ -3807,6 +3807,12 @@ function Studio() {
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
   const freezeTrackRef = useRef(handleFreezeTrack);
   freezeTrackRef.current = handleFreezeTrack;
+  // Console : « geler cette piste » depuis la charge processeur d'une tranche (TrackCpuBadge).
+  useEffect(() => {
+    const onFreeze = (e: Event) => { const id = (e as CustomEvent).detail?.trackId; if (id) void freezeTrackRef.current(id); };
+    window.addEventListener('nova:freeze-track', onFreeze);
+    return () => window.removeEventListener('nova:freeze-track', onFreeze);
+  }, []);
 
   // --- Surcharge processeur (compteur CPU de la barre de transport, mode sécurité) ---------
   // engine/dspMonitor mesure les sous-régimes du contexte audio et les retards du
@@ -3824,7 +3830,8 @@ function Studio() {
       getContext: () => audioEngine.ctx,
       isActive: () => audioEngine.isTransportRunning(),
       getLateTicks: () => audioEngine.getSchedulerLateTicks(),
-      getEstimatedLoad: () => estimatedDspLoadPct(stateRef.current.tracks),
+      // Pistes en veille (effets au repos, engine/effectSleep) : seule leur base compte.
+      getEstimatedLoad: () => estimatedDspLoadPct(stateRef.current.tracks, undefined, new Set(audioEngine.getSleepStats()?.asleepIds || [])),
     });
     const off = dspMonitor.onEpisode(e => {
       if (e.type !== 'overload' || !safeModeStore.get()) return;

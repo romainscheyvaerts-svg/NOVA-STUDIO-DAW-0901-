@@ -7,6 +7,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
 import { VstLateBadge } from './VstLateAlert';
+import TrackCpuBadge from './TrackCpuBadge';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
@@ -302,10 +303,14 @@ const ChannelStrip: React.FC<{
       <div className="h-[200px] shrink-0 border-b border-white/[0.04] px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden">
         <div className="flex items-center justify-between px-1 mb-0.5">
           <span className="text-[8px] font-black text-slate-500 uppercase leading-3">{track.type === TrackType.BUS ? 'Effets du bus' : (isMaster ? 'Chaîne du master' : 'Effets')}</span>
+          <span className="flex items-center gap-1">
+          {/* Charge processeur de la piste (chantier 13) : détail par effet, veille, « geler ». */}
+          {!isMaster && track.type !== TrackType.BUS && track.type !== TrackType.SEND && <TrackCpuBadge track={track} />}
           {track.plugins.length >= insertRows && (
             <button type="button" onClick={handleEmptySlotClick} title="Ajouter un effet" aria-label={`Ajouter un effet sur ${track.name}`}
               className="nova-hit-tactile w-4 h-3 rounded text-[8px] leading-3 text-slate-500 hover:text-cyan-300"><i className="fas fa-plus"></i></button>
           )}
+          </span>
         </div>
         {shownInserts.map((p, idx) => (
           <div 

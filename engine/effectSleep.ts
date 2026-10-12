@@ -63,6 +63,8 @@ export interface SleepHost {
   inputBusyUntil(trackId: string): number;
   /** Délai (s) avant le prochain clip de la piste (Infinity si aucun / à l'arrêt). */
   nextActivityIn(trackId: string): number;
+  /** Tests : sentinelle simulée (sinon AudioWorkletNode « nova-veille-sentinel »). */
+  makeSentinel?: (ctx: BaseAudioContext) => { port: { onmessage: ((e: MessageEvent) => void) | null; postMessage(m: any): void } } & AudioNode;
 }
 
 interface TrackSleep {
@@ -152,6 +154,7 @@ export class EffectSleepManager {
     if (this.moduleReady && this.ctxRef === ctx) return this.moduleReady;
     this.ctxRef = ctx;
     this.banks = [];
+    if (this.host.makeSentinel) { this.moduleOk = true; this.moduleReady = Promise.resolve(true); return this.moduleReady; }
     this.moduleReady = (async () => {
       try {
         const url = URL.createObjectURL(new Blob([SENTINEL_CODE], { type: 'text/javascript' }));
@@ -181,10 +184,10 @@ export class EffectSleepManager {
     let bi = this.banks.findIndex(b => b.used.some(u => u === null));
     if (bi < 0) {
       try {
-        const node = new AudioWorkletNode(ctx, 'nova-veille-sentinel', {
+        const node = (this.host.makeSentinel ? this.host.makeSentinel(ctx) : new AudioWorkletNode(ctx, 'nova-veille-sentinel', {
           numberOfInputs: SLOTS, numberOfOutputs: 0,
           processorOptions: { level: QUIET_LEVEL, minQuiet: Math.round(0.1 * ctx.sampleRate) },
-        });
+        })) as AudioWorkletNode;
         const b = { node, used: new Array(SLOTS).fill(null) as (string | null)[] };
         const index = this.banks.length;
         node.port.onmessage = (e) => this.onSentinel(index, e.data);

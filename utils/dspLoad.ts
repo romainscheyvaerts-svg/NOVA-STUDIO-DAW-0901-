@@ -70,12 +70,13 @@ export function trackCostMs(t: Track): number {
   return Math.round(cost * 10) / 10;
 }
 
-export const totalCostMs = (tracks: Track[]): number =>
-  Math.round(tracks.reduce((s, t) => s + trackCostMs(t), 0) * 10) / 10;
+/** asleep : pistes dont les effets dorment (veille automatique) : seule leur base compte. */
+export const totalCostMs = (tracks: Track[], asleep?: Set<string>): number =>
+  Math.round(tracks.reduce((s, t) => s + (asleep?.has(t.id) ? Math.min(TRACK_BASE_MS, trackCostMs(t)) : trackCostMs(t)), 0) * 10) / 10;
 
 /** Charge estimée (0–100 %, peut dépasser 100 quand la session est trop lourde). */
-export const estimatedLoadPct = (tracks: Track[], budgetMs = DSP_BUDGET_MS): number =>
-  Math.round((totalCostMs(tracks) / budgetMs) * 100);
+export const estimatedLoadPct = (tracks: Track[], budgetMs = DSP_BUDGET_MS, asleep?: Set<string>): number =>
+  Math.round((totalCostMs(tracks, asleep) / budgetMs) * 100);
 
 export interface HeavyTrack { id: string; name: string; costMs: number; frozen: boolean }
 
