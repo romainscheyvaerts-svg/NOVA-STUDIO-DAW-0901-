@@ -458,6 +458,14 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
             return Resp(401, cors, {"error": "Connecte-toi pour continuer (QA hors production)."})
         if fn == "daw-session":
             return Resp(401, cors, {"error": "Connecte-toi pour collaborer (QA hors production)."})
+        if fn == "daw-listen":
+            # Lien d'écoute client : sans simulateur propre au scénario (qa/listen_sim.py), aucun lien
+            # n'existe ; l'ingé n'est pas connecté.
+            try: action = json.loads(body or b"{}").get("action")
+            except Exception: action = None
+            if action == "listen_open":
+                return Resp(404, cors, {"error": "Lien d'écoute introuvable (QA hors production).", "code": "unknown"})
+            return Resp(401, cors, {"error": "Connecte-toi pour gérer les liens d'écoute (QA hors production)."})
         if fn == "nova-chat":
             return Resp(503, cors, {"error": "Assistant indisponible (QA hors production)."})
         return None
