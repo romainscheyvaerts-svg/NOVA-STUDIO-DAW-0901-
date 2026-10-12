@@ -31,6 +31,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+# Prises écrites par le pont simulé : jamais dans les Documents de l'utilisateur.
+os.environ.setdefault("NOVA_TAKES_DIR", str(Path(__import__('tempfile').gettempdir()) / "nova-qa-prises"))
 sys.path.insert(0, str(ROOT / "bridge-python" / "tests"))
 sys.path.insert(0, str(ROOT / "bridge-python"))
 import fake_sounddevice as fsd  # noqa: E402

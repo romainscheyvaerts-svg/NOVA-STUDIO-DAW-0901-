@@ -41,14 +41,18 @@ export function parseWav(buf: ArrayBuffer): WavData {
   if (!fmt || dataOff < 0 || !fmt.channels || !fmt.align) throw new Error('WAV incomplet');
   const nc = fmt.channels;
   const frames = Math.floor(dataLen / fmt.align);
-  const channels = Array.from({ length: nc }, () => new Float32Array(frames));
   const bytes = fmt.bits / 8;
   if (fmt.format === 3 && fmt.bits === 32) {
     // Copie alignée (l'en-tête du pont fait 58 octets) ; plates-formes petit-boutistes (toutes).
+    // Mono : cette copie EST le canal (une seule copie d'une longue prise en mémoire).
     const f = new Float32Array(buf.slice(dataOff, dataOff + frames * nc * 4));
-    if (nc === 1) channels[0].set(f);
-    else for (let i = 0; i < frames; i++) for (let c = 0; c < nc; c++) channels[c][i] = f[i * nc + c];
-  } else if (fmt.format === 1 && (bytes === 2 || bytes === 3 || bytes === 4)) {
+    if (nc === 1) return { sampleRate: fmt.rate, channels: [f], frames };
+    const channels = Array.from({ length: nc }, () => new Float32Array(frames));
+    for (let i = 0; i < frames; i++) for (let c = 0; c < nc; c++) channels[c][i] = f[i * nc + c];
+    return { sampleRate: fmt.rate, channels, frames };
+  }
+  const channels = Array.from({ length: nc }, () => new Float32Array(frames));
+  if (fmt.format === 1 && (bytes === 2 || bytes === 3 || bytes === 4)) {
     const scale = 1 / Math.pow(2, fmt.bits - 1);
     for (let i = 0; i < frames; i++) for (let c = 0; c < nc; c++) {
       const p = dataOff + (i * nc + c) * bytes;

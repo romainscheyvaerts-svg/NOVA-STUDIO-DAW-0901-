@@ -2350,13 +2350,13 @@ export class AudioEngine {
    * Fin de la prise côté pont : fichiers fermés, relus, et posés EXACTEMENT où la prise de la
    * page l'aurait été. Rend, par piste, le son du pont (ou rien : la prise de la page reste).
    */
-  private async finishBridgeTake(bt: NonNullable<AudioEngine['bridgeTake']>, p: { firstFrame: number; pos0: number; lead: number; sr: number; lats: Map<string, number>; widths: Map<string, 1 | 2> }):
+  private async finishBridgeTake(bt: NonNullable<AudioEngine['bridgeTake']>, stopping: Promise<BridgeTakeInfo | null>, p: { firstFrame: number; pos0: number; lead: number; sr: number; lats: Map<string, number>; widths: Map<string, 1 | 2> }):
     Promise<{ byTrack: Map<string, { channels: Float32Array[]; start: number; path: string }>; note?: string }> {
     const byTrack = new Map<string, { channels: Float32Array[]; start: number; path: string }>();
     const bridge = this.asioBridge;
     const info = await bt.started;
     if (!info || !bridge) return { byTrack, note: info === null && bridge ? 'Le pont n\'a pas écrit cette prise : prise du navigateur gardée.' : undefined };
-    const stopped = await bridge.recStop(bt.id);
+    const stopped = await stopping;
     if (!stopped || !stopped.success || !stopped.files) {
       return { byTrack, note: `Prise de la carte non relue (${stopped?.error || 'pas de réponse du pont'}) : prise du navigateur gardée.` };
     }
@@ -2496,6 +2496,11 @@ export class AudioEngine {
     this.recordingTrackId = null;
     this.recordingTrackIds = [];
     this.recStartTime = 0;
+    // C1 : le pont arrête SA prise tout de suite (même instant que la page), avant d'attendre
+    // l'enregistreur de la page ; elle est relue plus bas.
+    const bt = this.bridgeTake;
+    this.bridgeTake = null;
+    const bridgeStop = bt ? bt.started.then(info => (info && this.asioBridge ? this.asioBridge.recStop(bt.id) : null)) : null;
 
     const { channels, firstFrame } = await session.stop(src);
     try { input?.dispose(); } catch { /* */ }
@@ -2524,12 +2529,10 @@ export class AudioEngine {
     const out: TakeResult[] = [];
     const lats = new Map(input.layout.map(l => [l.trackId, latency + channelOffsetSec(recChannels.get(l.trackId) || [], offs)] as [string, number]));
     // C1 : la prise écrite par le pont remplace celle de la page (même calage, sans trou).
-    const bt = this.bridgeTake;
-    this.bridgeTake = null;
     let bridged: Awaited<ReturnType<AudioEngine['finishBridgeTake']>> = { byTrack: new Map() };
     if (bt) {
       try {
-        bridged = await this.finishBridgeTake(bt, { firstFrame, pos0: playStart !== null && firstFrame >= 0 ? firstFrame / sr - playStart : recordedAt, lead, sr, lats, widths: new Map(input.layout.map(l => [l.trackId, l.width])) });
+        bridged = await this.finishBridgeTake(bt, bridgeStop!, { firstFrame, pos0: playStart !== null && firstFrame >= 0 ? firstFrame / sr - playStart : recordedAt, lead, sr, lats, widths: new Map(input.layout.map(l => [l.trackId, l.width])) });
       } catch (e) {
         console.warn('[AudioEngine] Prise du pont non relue', e);
         bridged = { byTrack: new Map(), note: 'Prise de la carte non relue : prise du navigateur gardée.' };

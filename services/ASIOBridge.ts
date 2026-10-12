@@ -323,8 +323,8 @@ export class ASIOBridgeClient {
     // Morceau d'un fichier de prise (REC_FETCH)
     const chunk = decodeFileChunk(data);
     if (chunk) {
-      // Copie : la vue pointe dans le message WebSocket.
-      this.fetches.get(chunk.req)?.chunks.push({ ...chunk, data: new Uint8Array(chunk.data) });
+      // La vue garde le message (à nous seuls) : pas de copie d'une longue prise.
+      this.fetches.get(chunk.req)?.chunks.push(chunk);
       return;
     }
     try {
