@@ -8,10 +8,17 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   resolve: {
-    alias: { '@': path.resolve(__dirname, '.') },
+    alias: {
+      '@': path.resolve(__dirname, '.'),
+      // Fonctions serveur (Deno) testées telles quelles : leurs imports distants
+      // sont remplacés par des faux en mémoire (supabase/tests/fakes).
+      'https://deno.land/std@0.190.0/http/server.ts': path.resolve(__dirname, 'supabase/tests/fakes/denoServe.ts'),
+      'https://esm.sh/@supabase/supabase-js@2.49.1': path.resolve(__dirname, 'supabase/tests/fakes/supabase.ts'),
+      'https://esm.sh/stripe@18.5.0': path.resolve(__dirname, 'supabase/tests/fakes/stripe.ts'),
+    },
   },
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'supabase/tests/**/*.test.ts'],
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
     restoreMocks: true,

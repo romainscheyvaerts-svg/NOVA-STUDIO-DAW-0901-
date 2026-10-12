@@ -1,5 +1,6 @@
 import { catalogSupabase } from './supabase';
 import { isNovaDesktop } from '../utils/desktopApp';
+import { leavePage } from '../utils/saveBeforeLeave';
 
 /**
  * Paiements Nova (Stripe Checkout, fonction nova-billing du site) :
@@ -46,7 +47,12 @@ export async function openCheckout(product: BillingProduct, extra: Record<string
   try {
     const r = await billing<{ url: string; session_id: string }>('checkout', { product, return_url: returnUrl(), ...extra });
     if (tab) tab.location.href = r.url;
-    else window.location.href = r.url;
+    else {
+      // Nouvel onglet bloqué : l'onglet du studio part vers Stripe, APRÈS sauvegarde du projet
+      // (sinon il reste ouvert et le message dit quoi faire).
+      const left = await leavePage(r.url);
+      if (left.error) throw new Error(left.error);
+    }
     return r.session_id;
   } catch (e) {
     tab?.close();
@@ -110,5 +116,7 @@ export async function openBillingPortal(): Promise<void> {
   }
   const tab = window.open('', '_blank');
   const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
-  if (tab) tab.location.href = r.url; else window.location.href = r.url;
+  if (tab) { tab.location.href = r.url; return; }
+  const left = await leavePage(r.url);
+  if (left.error) throw new Error(left.error);
 }

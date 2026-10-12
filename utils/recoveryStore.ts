@@ -334,6 +334,31 @@ export class RecoveryStore {
     return { record, audio, missing };
   }
 
+  /** Version complète (JSON compris), sans les sons. */
+  async getRecord(id: number): Promise<VersionRecord | null> {
+    return (await this.db.get<VersionRecord>(VERSIONS, id)) || null;
+  }
+
+  /** Un son gardé sur l'appareil. */
+  async getAudio(id: string): Promise<StoredAudio | null> {
+    return (await this.db.get<StoredAudio>(AUDIO, id)) || null;
+  }
+
+  /**
+   * Remet dans l'appareil une version relue ailleurs (disque de Nova Studio, après un
+   * vidage du stockage du navigateur) : sons manquants puis version, même identifiant.
+   */
+  async importVersion(record: VersionRecord, audio: { id: string; sampleRate: number; channels: Float32Array[] }[]): Promise<void> {
+    const known = await this.audioKeys();
+    for (const a of audio) {
+      if (known.has(a.id)) continue;
+      const rec: StoredAudio = { id: a.id, sampleRate: a.sampleRate, length: a.channels[0]?.length || 0, channels: a.channels, savedAt: this.now() };
+      await this.db.put(AUDIO, a.id, rec);
+      known.add(a.id);
+    }
+    await this.db.put(VERSIONS, record.id, { ...record, audioIds: record.audioIds.filter(id => known.has(id)) }, { durable: true });
+  }
+
   /** Versions en trop supprimées, puis sons que plus rien ne référence. */
   async prune(): Promise<number> {
     const keys = (await this.db.keys(VERSIONS)) as number[];

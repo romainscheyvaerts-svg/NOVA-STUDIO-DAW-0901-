@@ -250,18 +250,27 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     const bar = barRef.current;
     if (!bar) return;
     let raf = 0;
+    let ro: ResizeObserver | null = null;
+    // Éléments dont le TEXTE change de largeur (BPM « 125.4 », TAP 126.7, compteur, CAPTURER…) :
+    // observés eux aussi. Un groupe déjà contraint ne change pas de taille quand son contenu
+    // grandit (il déborde) : seule la barre et ses groupes observés laissaient passer 1 à 20 px.
+    const watch = () => {
+      if (!ro) return;
+      bar.querySelectorAll<HTMLElement>('button, [role=button], [role=status], [data-testid], [data-bar-item]').forEach(el => ro!.observe(el));
+    };
     const run = () => {
       raf = 0;
       const f = fitBar(bar);
       setFolded(prev => (prev.join('|') === f.join('|') ? prev : f));
+      watch(); // éléments apparus depuis (CAPTURER, puce VST…)
     };
-    run();
-    if (typeof ResizeObserver === 'undefined') return;
+    if (typeof ResizeObserver === 'undefined') { run(); return; }
     const schedule = () => { if (!raf) raf = requestAnimationFrame(run); };
-    const ro = new ResizeObserver(schedule);
+    ro = new ResizeObserver(schedule);
     ro.observe(bar);
-    Array.from(bar.children).forEach(c => ro.observe(c));
-    return () => { ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
+    Array.from(bar.children).forEach(c => ro!.observe(c));
+    run();
+    return () => { ro?.disconnect(); ro = null; if (raf) cancelAnimationFrame(raf); };
   }, []);
   // Infobulle du menu : ce qui y a été replié, en clair.
   const FOLD_LABELS: Record<string, string> = {
