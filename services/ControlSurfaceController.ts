@@ -121,6 +121,7 @@ export class SurfaceController {
   private scrubMode = false;
   private scrubbing: { pos: number; last: number } | null = null;
   private timeMode: 'beats' | 'smpte' = 'beats';
+  private wasPlaying = false;
   /** Dernier message reçu de la surface (ms) ; -1 : jamais. */
   lastHeard = -1;
   hello = false;
@@ -355,6 +356,13 @@ export class SurfaceController {
       this.held.next = now + REPEAT_EVERY_MS;
     }
     if (this.scrubbing && now - this.scrubbing.last > SCRUB_IDLE_MS) this.endScrub();
+    // Lecture lancée alors qu'un doigt est déjà sur un fader : l'écriture Touch / Latch démarre
+    // comme si on venait de le toucher (sinon elle se relâcherait seule faute d'appui).
+    const isPlayingNow = h.isPlaying();
+    if (isPlayingNow && !this.wasPlaying) {
+      for (const s of this.touched) { const t = this.stripTrack(s); if (t) h.automationTouch(t.id, 'volume', true); }
+    }
+    this.wasPlaying = isPlayingNow;
 
     const tracks = this.tracks();
     const selected = h.getSelectedTrackId();

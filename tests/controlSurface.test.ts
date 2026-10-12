@@ -355,6 +355,18 @@ describe('contrôleur de surface', () => {
     expect(FADER_DEADBAND).toBeGreaterThan(0);
   });
 
+  it('doigt déjà posé au lancement de la lecture : l’écriture démarre quand même', () => {
+    const r = rig();
+    r.ctl.handleMidi([0x90, 0x68, 0x7f]);
+    r.ctl.tick();
+    expect(r.env.calls.filter(c => c === 'touch:t0:volume')).toHaveLength(1);
+    r.env.playing = true;
+    r.env.now += 33; r.ctl.tick();
+    expect(r.env.calls.filter(c => c === 'touch:t0:volume')).toHaveLength(2);
+    r.env.now += 33; r.ctl.tick();
+    expect(r.env.calls.filter(c => c === 'touch:t0:volume')).toHaveLength(2);
+  });
+
   it('mute, solo, rec, select et leurs voyants', () => {
     const r = rig();
     r.ctl.handleMidi([0x90, 0x10, 0x7f]);

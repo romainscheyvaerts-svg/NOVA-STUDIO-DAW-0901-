@@ -246,6 +246,16 @@ def close_prefs(page):
     page.wait_for_timeout(300)
 
 
+def section_shot(page, name):
+    """Capture de la section Préférences › Surfaces de contrôle seule."""
+    sec = page.locator("[data-control-surface-settings]").first
+    try:
+        sec.scroll_into_view_if_needed(); page.wait_for_timeout(300)
+        sec.screenshot(path=str(OUT / f"{name}.png"))
+    except Exception:
+        shot(page, name)
+
+
 def status(page):
     return page.locator("[data-surface-status]").first.get_attribute("data-surface-status")
 
@@ -270,7 +280,7 @@ def run_main(b, src):
     # 0. Préférences › Surfaces de contrôle -------------------------------------------------
     pal = open_prefs(page)
     ok("0a palette : « Préférences › Surfaces de contrôle »", pal == "pal.surfaces", pal)
-    shot(page, f"r{RUN}_01_preferences_avant")
+    section_shot(page, f"r{RUN}_01_preferences_avant")
     page.locator("[data-control-surface-settings]").get_by_role("button", name=re.compile("Détecter")).first.click()
     try:
         page.wait_for_function("() => document.querySelector('[data-surface-status]')?.getAttribute('data-surface-status') === 'connected'", timeout=10000)
@@ -285,7 +295,7 @@ def run_main(b, src):
     proto = page.get_by_label("Protocole de la surface").input_value()
     ok("0c ports et protocole choisis", sel_in == "X-Touch" and sel_out == "X-Touch" and proto == "mcu", [sel_in, sel_out, proto])
     ok("0d SysEx demandé (afficheurs)", page.evaluate("() => window.__qaSurf.sysexAsked") is True)
-    shot(page, f"r{RUN}_02_preferences_connectee")
+    section_shot(page, f"r{RUN}_02_preferences_connectee")
     close_prefs(page)
     kb_inputs = page.evaluate("async () => (await window.__novaAppModule('/services/MidiManager.ts')).midiManager.getInputs().map(i => i.name)")
     ok("0e le port de la surface n'est plus un clavier MIDI", "X-Touch" not in kb_inputs, kb_inputs)
@@ -374,7 +384,10 @@ def run_main(b, src):
     playing = page.evaluate("() => window.DAW_CONTROL.getState().isPlaying")
     wait_song(page, 5.0, 40)
     page.wait_for_timeout(100)
-    cnt_play = counter(sent(page))
+    allm = sent(page)
+    cnt_play = counter(allm)
+    tc_last = [m for m in allm if m["d"][0] == 0xB0 and 0x40 <= m["d"][1] <= 0x49 and m["s"] is not None]
+    tc_song = tc_last[-1]["s"] if tc_last else None
     press(page, 0x5D)  # STOP
     page.wait_for_timeout(500)
     s = st(page)
@@ -398,8 +411,11 @@ def run_main(b, src):
     lv0 = [d[1] & 0x0F for d in meters if d[1] >> 4 == 0]
     ok("5c vumètres (channel pressure) pendant la lecture", len(lv0) >= 10 and max(lv0) >= 6, {"messages_tranche1": len(lv0), "niveau_max": max(lv0) if lv0 else None, "total": len(meters)})
     RES["mesures"]["vumetres"] = {"messages": len(meters), "tranche1_niveaux": sorted(set(lv0))}
-    ok("5d compteur 7 segments en mesures (≈ mesure 3 à 5 s, 140 BPM)", cnt_play.replace(".", "").strip().startswith("3"), cnt_play)
-    RES["mesures"]["compteur_a_5s"] = cnt_play
+    bar_want = None if tc_song is None else int(tc_song / (4 * 60 / 140)) + 1
+    bar_shown = cnt_play.split(".")[0].strip()
+    ok("5d compteur 7 segments en mesures (= mesure de l'instant du dernier envoi, 140 BPM)", bar_want is not None and bar_shown == str(bar_want) and tc_song > 4.5,
+       {"affiche": cnt_play, "instant_s": None if tc_song is None else round(tc_song, 3), "mesure_attendue": bar_want})
+    RES["mesures"]["compteur_fin_lecture"] = {"affiche": cnt_play, "instant_s": tc_song}
     # Boucle
     press(page, 0x56); page.wait_for_timeout(250)
     l1 = st(page)["loop"]
@@ -513,7 +529,7 @@ def run_main(b, src):
     except Exception:
         pass
     hst = status(page)
-    shot(page, f"r{RUN}_05_hui_connectee")
+    section_shot(page, f"r{RUN}_05_hui_connectee")
     close_prefs(page)
     page.wait_for_timeout(500)
     v = int(pos_of(0.4) * 16383)
@@ -558,7 +574,7 @@ def run_refus(b, src, mode):
     else:
         txt = page.locator("[data-control-surface-settings]").first.inner_text()
         ok("12b Web MIDI absent : message clair", "ne gère pas le MIDI" in txt, txt[-160:])
-    shot(page, f"r{RUN}_06_midi_{mode}")
+    section_shot(page, f"r{RUN}_06_midi_{mode}")
     ctx.close()
 
 
