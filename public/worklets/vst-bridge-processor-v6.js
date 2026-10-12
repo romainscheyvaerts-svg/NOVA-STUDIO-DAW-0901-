@@ -61,6 +61,15 @@ const LATE_TRIGGER = 8;
 // Mise en route du plugin (≈ 1 s après son chargement) : ses premiers passages peuvent tarder,
 // ce n'est pas un pont lent. Ni compté ni agrandi pendant ce temps.
 const WARMUP_BLOCKS = 375;
+// Marge gardée au-dessus de l'âge maximal des retours vu pendant un agrandissement (≈ 21 ms) :
+// la gigue du pont ne doit pas forcer un 2e agrandissement (un 2e trou) juste après.
+const ADAPT_MARGIN_BLOCKS = 8;
+
+/** Plus petit palier (en blocs) ≥ need, plafonné à max. */
+function stepCovering(base, need, max) {
+  for (const k of ADAPT_STEPS) { const b = Math.round(base * k); if (b >= need) return Math.min(b, max); }
+  return max;
+}
 
 /** Palier suivant (en blocs) au-dessus de cur, plafonné à max. */
 function nextStepBlocks(base, cur, max) {
@@ -93,6 +102,8 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.ageMax = 0;          // âge maximal (blocs) des retours depuis les dernières stats
     this.recvPeriod = 0;      // retours reçus depuis les dernières stats
     this.sentLoud = new Uint8Array(RING); // le bloc envoyé portait du son (une coupure s'entendrait)
+    this.episode = false;     // agrandissement en cours (de la 1re attente à la reprise du son)
+    this.episodeAge = 0;      // âge maximal des retours pendant cet agrandissement
     this.ring = new Array(RING);
     this.bridge = null;       // MessagePort vers le Worker
     this.active = false;      // plugin chargé et flux ouvert
@@ -173,6 +184,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     // Âge du retour : blocs écoulés depuis l'envoi (le bloc doit revenir au plus tard à delayBlocks).
     const age = this.seq - m.seq;
     if (age > this.ageMax) this.ageMax = age;
+    if (this.episode && age > this.episodeAge) this.episodeAge = age;
     // Trop tard : l'heure de ce bloc est passée (compté comme manquant).
     if (m.seq < this.seq - this.delayBlocks) { this.late++; this.lateSinceActive++; return; }
     this.ring[m.seq % RING] = { seq: m.seq, data: m.data };
@@ -294,6 +306,16 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
       this.delayBlocks++;
       this.underruns++;
       silentLate = true;
+      // Fin de l'attente : si les retours vus pendant ce temps sont plus vieux que la marge, le
+      // tampon monte encore, DANS le même trou (pas un 2e trou au prochain pic de gigue).
+      if (this.hold === 0 && this.episode && this.delayBlocks < this.maxBlocks && this.episodeAge + ADAPT_MARGIN_BLOCKS > this.delayBlocks) {
+        const target = stepCovering(this.baseBlocks, this.episodeAge + ADAPT_MARGIN_BLOCKS, this.maxBlocks);
+        if (target > this.delayBlocks) {
+          this.hold = target - this.delayBlocks;
+          this.grows++;
+          this.port.postMessage({ type: 'delay', frames: target * 128, grows: this.grows, at: this.seq });
+        }
+      }
     } else {
       const want = this.seq - this.delayBlocks;
       const e = want >= 0 ? this.ring[want % RING] : null;
@@ -313,6 +335,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
           if (this.adaptive && this.delayBlocks < this.maxBlocks) {
             // Palier suivant : ce bloc-ci est la 1re attente ; le bloc manquant reste attendu.
             const target = nextStepBlocks(this.baseBlocks, this.delayBlocks, this.maxBlocks);
+            if (!this.episode) { this.episode = true; this.episodeAge = 0; }
             this.hold = target - this.delayBlocks - 1;
             this.delayBlocks++;
             this.grows++;
@@ -321,6 +344,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         }
       }
       if (hit) this.ring[want % RING] = undefined;
+      if (hit && e.data) this.episode = false;   // le son a repris : fin de l'agrandissement
     }
     if (silentLate) { if (!this.inGap) { this.dropouts++; this.inGap = true; } }
     else this.inGap = false;

@@ -88,11 +88,13 @@ describe('C6 · worklet face à un pont en retard', () => {
     expect(r.last.delayFrames).toBe(2048);
   });
 
-  it('tampon ADAPTATIF : agrandi à 4096, plus aucun silence ensuite, aucun bloc sauté', () => {
+  it('tampon ADAPTATIF : agrandi (avec marge) à 6144, plus aucun silence ensuite, aucun bloc sauté', () => {
     const r = run({ adaptive: true, blocks: 1500, delay: () => 30 });
     const grows = r.msgs.filter(m => m.type === 'delay');
-    expect(grows.map(m => m.frames)).toEqual([3072, 4096]);
-    expect(r.last.delayFrames).toBe(4096);
+    // 3072 ; pendant l'attente, des retours d'âge 30 : marge de 8 blocs → 6144, dans le même trou.
+    expect(grows.map(m => m.frames)).toEqual([3072, 6144]);
+    expect(r.last.delayFrames).toBe(6144);
+    expect(r.last.dropouts).toBe(1);
     expect(silencesAfter(r.out, 500)).toBe(0);
     expect(consecutive(r.out)).toBe(true);
     // Seuls les blocs de la mise en route du plugin (≈ 1 s après son chargement : ses premiers
@@ -105,6 +107,10 @@ describe('C6 · worklet face à un pont en retard', () => {
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
     const r = run({ adaptive: true, blocks: 6000, delay: () => 5 + Math.floor(rnd() * 36) });
     expect(r.last.delayFrames).toBeLessThanOrEqual(6144);
+    // Un seul trou après la mise en route : la marge absorbe les pics de gigue suivants.
+    const after = r.out.slice(400);   // après la mise en route (want ≥ 375)
+    let gaps = 0; for (let i = 0; i < after.length; i++) if (after[i] < 0 && (i === 0 || after[i - 1] >= 0)) gaps++;
+    expect(gaps).toBeLessThanOrEqual(1);
     const firstOk = r.out.findIndex((x, i) => i > 0 && x >= 0 && r.out.slice(i).every(y => y >= 0));
     expect(firstOk).toBeGreaterThan(375);
     expect(firstOk).toBeLessThan(375 + 750);     // < 2 s après la mise en route (48 kHz)

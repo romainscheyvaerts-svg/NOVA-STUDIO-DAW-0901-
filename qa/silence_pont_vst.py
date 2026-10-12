@@ -110,6 +110,7 @@ async ({ SR, path, name, sets }) => {
       tap.connect(rec); rec.connect(mute); mute.connect(e.ctx.destination);
       const blocks = []; rec.port.onmessage = ev => blocks.push(ev.data); rec.port.postMessage(true);
       const hold0 = e.transportHoldTotal || 0;
+      const late0 = e.schedulerLateTicks || 0;
       const before = S.info();
       e.startPlayback(0, S.tracks(), { at: e.ctx.currentTime + 0.4 });
       const origin = e.playbackStartTime;
@@ -120,7 +121,7 @@ async ({ SR, path, name, sets }) => {
       try { tap.disconnect(rec); rec.disconnect(); mute.disconnect(); } catch (err) {}
       const n = Math.round(dur * SR), L = new Float32Array(n), R = new Float32Array(n), got = new Uint8Array(n), f0 = Math.round(origin * SR);
       for (const [fr, a, b] of blocks) for (let i = 0; i < a.length; i++) { const k = fr + i - f0; if (k >= 0 && k < n) { L[k] = a[i]; R[k] = b[i]; got[k] = 1; } }
-      S.last = { L, R, got, n, dur, holdK: Math.round(((e.transportHoldTotal || 0) - hold0) * SR) };
+      S.last = { L, R, got, n, dur, holdK: Math.round(((e.transportHoldTotal || 0) - hold0) * SR), lateTicks: (e.schedulerLateTicks || 0) - late0 };
       return { avant: before, pendant: during, apres_arret: S.info(), attente_transport_ech: S.last.holdK };
     })();
     return true;
@@ -161,7 +162,7 @@ async ({ SR, path, name, sets }) => {
     const out = {
       trous: holes.length, trous_ms_total: +holes.reduce((s, h) => s + h.duree_ms, 0).toFixed(1),
       silence_pct: +(100 * holes.reduce((s, h) => s + h.duree_ms, 0) / 1000 / ((n - clipStart) / SR)).toFixed(1),
-      blocs_non_captures: missed.length, blocs_non_captures_detail: missed.slice(0, 8),
+      ordonnanceur_en_retard: S.last.lateTicks, blocs_non_captures: missed.length, blocs_non_captures_detail: missed.slice(0, 8),
       trous_reference: holesR.length, trous_reference_ms_total: +holesR.reduce((s, h) => s + h.duree_ms, 0).toFixed(1),
       trous_apres_2s: after2.length, dernier_trou_fin_s: +lastEnd.toFixed(3), premiers_trous: holes.slice(0, 8), trous_reference_detail: holesR.slice(0, 8),
       salves_mesurees: measured.length, decalages_gauche_droite: [...new Set(measured)], attente_transport_ech: holdK,
@@ -250,7 +251,24 @@ def main():
                     later.first.click()
                     pg.wait_for_timeout(400)
 
-            def phase(key, dur, export=True, shots=()):
+            def phase(key, dur, export=True, shots=(), rebuild=None):
+                """Écoute mesurée. Machine partagée : une écoute dérangée (ordonnanceur du moteur en
+                retard, blocs non captés par l'enregistreur — rien à voir avec le pont) est refaite,
+                2 fois au plus ; toutes les tentatives sont gardées."""
+                essais = []
+                for k in range(3):
+                    if k and rebuild:
+                        rebuild()
+                    r = one(key, dur, export, shots)
+                    essais.append({x: r.get(x) for x in ("trous", "trous_reference", "trous_apres_2s", "ordonnanceur_en_retard", "blocs_non_captures", "decalages_gauche_droite")})
+                    if not r.get("ordonnanceur_en_retard") and not r.get("blocs_non_captures"):
+                        break
+                r["tentatives"] = essais
+                res["phases"][key] = r
+                (OUT / f"silence_{LABEL}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+                return r
+
+            def one(key, dur, export, shots):
                 close_dialogs()
                 pg.evaluate(f"() => window.__silence.capture({dur})")
                 pendant = None
@@ -264,11 +282,9 @@ def main():
                 alert = pg.locator("[data-testid=vst-late-alert]")
                 r = {**ana, "noeud": info, "alerte_pendant_l_ecoute": pendant, "alerte_visible_a_la_fin": alert.count() > 0 and alert.first.is_visible(),
                      "alerte_texte_a_la_fin": alert.first.inner_text() if alert.count() else None}
-                res["phases"][key] = r
                 print(key, json.dumps({k: r[k] for k in ("trous", "trous_ms_total", "silence_pct", "trous_reference", "trous_apres_2s", "dernier_trou_fin_s",
-                                                          "decalages_gauche_droite", "attente_transport_ech") if k in r},
+                                                          "decalages_gauche_droite", "attente_transport_ech", "ordonnanceur_en_retard", "blocs_non_captures") if k in r},
                                       ensure_ascii=False), (r.get("lecture_vs_export") or {}).get("ecart_max_lsb16"), flush=True)
-                (OUT / f"silence_{LABEL}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
                 return r
 
             # 0) Pont normal, tampon adaptatif (réglage par défaut).
@@ -279,10 +295,13 @@ def main():
             res["phases_installation"]["A"] = pg.evaluate("() => window.__silence.build(false)")
             pA = phase("A_ralenti_tampon_fixe", 6, export=False, shots=[(3.5, "A_alerte_tampon_fixe")])
             # B) Pont ralenti, tampon ADAPTATIF : 1re écoute (agrandissement en cours d'écoute).
-            pg.evaluate("() => window.__novaTest.update(d => { d.tracks = d.tracks.filter(t => !t.id.startsWith('silence-')); })")
-            pg.wait_for_timeout(1500)
-            res["phases_installation"]["B"] = pg.evaluate("() => window.__silence.build(true)")
-            pB = phase("B_ralenti_adaptatif_1re_ecoute", 8, shots=[(3.5, "B_alerte_tampon_agrandi")])
+            def build_b():
+                pg.evaluate("() => window.__novaTest.update(d => { d.tracks = d.tracks.filter(t => !t.id.startsWith('silence-')); })")
+                pg.wait_for_timeout(1500)
+                res["phases_installation"]["B"] = pg.evaluate("() => window.__silence.build(true)")
+                pg.wait_for_timeout(1500)   # mise en route du plugin passée
+            build_b()
+            pB = phase("B_ralenti_adaptatif_1re_ecoute", 8, shots=[(3.5, "B_alerte_tampon_agrandi")], rebuild=build_b)
             # B2) 2e écoute, pont toujours ralenti : tampon déjà agrandi.
             pB2 = phase("B2_ralenti_adaptatif_2e_ecoute", 6)
             # Fenêtre de l'effet, ouverte depuis sa pastille (compteur, tampon, actions).
