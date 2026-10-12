@@ -42,3 +42,19 @@ export function keepSessionFlagOnClose(st: DAWState, lastSavedSignature: unknown
   if (!hasWorthKeeping(st)) return false;
   return !sameSignature(projectSignature(st), lastSavedSignature);
 }
+
+/**
+ * Fermeture d'onglet : demander « Quitter la page ? » SEULEMENT s'il y a vraiment du
+ * travail non sauvegardé. Avant, n'importe quelle modification depuis l'ouverture
+ * suffisait, même déjà écrite par la sauvegarde automatique (fenêtre inutile à chaque
+ * fermeture, qu'on finit par valider sans lire le jour où elle compte).
+ *
+ * Non sauvegardé = une prise en cours, ou un projet qui a du contenu et dont l'état
+ * diffère de la dernière version écrite (sauvegarde automatique pas encore passée,
+ * échouée, ou suspendue parce qu'un autre onglet a la main sur ce projet).
+ */
+export function needsUnloadWarning(st: DAWState, lastSavedSignature: unknown[] | null | undefined, opts: { hasUserContent: boolean }): boolean {
+  if (st.isRecording) return true;
+  if (!opts.hasUserContent && !hasWorthKeeping(st)) return false;
+  return !sameSignature(projectSignature(st), lastSavedSignature);
+}

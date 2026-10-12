@@ -18,7 +18,7 @@ import { canSendContent, canSendMix, deleteAllowed, mixAllowed } from '../utils/
 const NINA = 'u:44444444-4444-4444-8444-444444444444';
 const NINA_DEVICE = `${NINA}:dev1`;
 const base = { isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, pan: 0, volume: 1, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0, clips: [] };
-const t = (x: Partial<Track> & { id: string; name: string; type: any }): Track => ({ ...base, color: '#fff', ...x } as unknown as Track);
+const t = (x: Omit<Partial<Track>, 'type'> & { id: string; name: string; type: any }): Track => ({ ...base, color: '#fff', ...x } as unknown as Track);
 
 const beat = t({ id: 'instrumental', name: 'Beat', type: 'AUDIO' });
 const voixLead = t({ id: 'voix', name: 'Voix lead', type: 'AUDIO' }); // préparée par l'ingé, sans propriétaire nommé
