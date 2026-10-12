@@ -261,6 +261,9 @@ export class EffectSleepManager {
   tick() {
     const ctx = this.host.ctx();
     if (!ctx) return;
+    // Nouveau contexte audio (changement de fréquence) : tout ce qui suivait l'ancien est oublié.
+    if (ctx !== this.ctxRef) { this.state.clear(); this.banks = []; this.moduleOk = false; this.ensureModule(ctx); return; }
+    if (!this.moduleOk) return;
     const now = ctx.currentTime;
     const ids = this.host.trackIds();
     const alive = new Set(ids);

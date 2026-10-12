@@ -87,16 +87,19 @@ const SETTLE_MS = 160;
  * Le son est identique : une bande neutre est strictement transparente.
  *
  * Séances de 64 à 128 pistes (chantier 13) : une fois les fondus finis, la chaîne est
- * « compacte » : entrée -> filtres actifs -> sortie, sans les gains d'aiguillage de chaque
- * bande (tous à 1 : copie exacte) ni les analyseurs en série. L'analyseur du spectre n'est
- * branché (en dérivation) que pendant que la fenêtre le lit. Mesuré : 5,4 -> ~3 ms de
- * calcul par seconde de son pour 4 bandes actives. Son identique au bit près.
+ * « compacte » : entrée -> analyse -> filtres actifs -> sortie, sans les gains d'aiguillage de
+ * chaque bande (tous à 1 : copie exacte). L'analyseur du spectre (sortie) n'est branché, en
+ * dérivation, que pendant que la fenêtre le lit. L'analyseur d'entrée RESTE en série : la
+ * source muette de la piste (ConstantSource à 0) sort un bloc marqué « silence », que Chrome
+ * propage ; l'analyseur réécrit ce bloc et les filtres le voient « actif ». Sans lui, Chrome
+ * arrête les filtres après leur queue et la lecture ne retombe plus sur l'export (mesuré :
+ * 0,8 LSB16 au début d'une phrase après un silence). Son identique au bit près.
  */
 export class ProEQ12Node {
   private ctx: BaseAudioContext;
   public input: GainNode;
   public output: GainNode;
-  /** Gardé pour l'interface (taille de FFT, fréquence) : plus câblé (copie inutile à chaque bloc). */
+  /** Analyse d'entrée, en série (garde la chaîne « active », voir l'en-tête de la classe). */
   public preAnalyzer: AnalyserNode;
   private postAn: AnalyserNode;
   /** Analyseur après l'égaliseur (spectre de la fenêtre) : branché à la lecture, débranché 3 s après. */
@@ -240,7 +243,9 @@ export class ProEQ12Node {
    */
   private relink() {
     const next: [AudioNode, AudioNode][] = [];
-    let last: AudioNode = this.input;
+    const next0: [AudioNode, AudioNode] = [this.input, this.preAnalyzer];
+    next.push(next0);
+    let last: AudioNode = this.preAnalyzer;
     for (const v of this.voices) {
       if (!v.inChain) continue;
       if (this.compactOn) { const f = v.filters[v.slot]; next.push([last, f]); last = f; }
