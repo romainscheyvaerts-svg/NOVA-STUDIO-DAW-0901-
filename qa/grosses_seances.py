@@ -103,7 +103,7 @@ def base_track(tid, name, ttype, out, color, **kw):
 
 def spans_for(role, i, profile):
     """Plages jouées (début, fin) dans le morceau de 64 s."""
-    if profile == "dense" or role == "beat":
+    if profile in ("dense", "nue") or role == "beat":
         return [(0.0, SONG)]
     S = SECTIONS
     out = []
@@ -158,9 +158,12 @@ def make_bench_project(path: Path, n: int, profile="realiste"):
                 t += d
         third = (plugin(f"{tid}-ds", "DEESSER", {"frequency": 7000, "threshold": -30, "reduction": 0.5, "detection": "RELATIVE", "relThreshold": -6, "mode": "BELL", "q": 1, "isEnabled": True})
                  if i % 2 == 0 else plugin(f"{tid}-sat", "VOCALSATURATOR", {"drive": 20, "mix": 0.3, "mode": "TAPE", "tone": 0, "eqLow": 0, "eqMid": 0, "eqHigh": 0, "outputGain": 1.0, "isEnabled": True}))
+        fx = [plugin(f"{tid}-eq", "PROEQ12", eq_params(80 if role in ("beat", "instrument") else 100)),
+              plugin(f"{tid}-comp", "COMPRESSOR", comp_params(i)), third]
+        if profile == "nue":   # témoin : pistes sans effet (coût d'une piste nue)
+            fx = []
         tracks.append(base_track(tid, f"{role.title()} {i + 1}", "AUDIO", f"bus-{i % 4}", "#3b82f6", clips=clips,
-                                 plugins=[plugin(f"{tid}-eq", "PROEQ12", eq_params(80 if role in ("beat", "instrument") else 100)),
-                                          plugin(f"{tid}-comp", "COMPRESSOR", comp_params(i)), third],
+                                 plugins=fx,
                                  pan=round(((i % 9) - 4) / 6, 2), volume=0.35,
                                  sends=[{"id": "send-verb", "level": 0.12, "isEnabled": True}]))
     state = {
@@ -193,13 +196,18 @@ def activity(state):
 # --------------------------------------------------------------------------- mesures dans la page
 PB = """() => { const c = window.__soakAudioCtx; if (!c || !c.playbackStats) return null; const p = c.playbackStats;
   return { ev: p.underrunEvents, s: p.underrunDuration, tot: p.totalDuration, t: performance.now(), ct: c.currentTime }; }"""
-SLEEP_STATS = """async () => { try { const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
-  return e.getSleepStats ? e.getSleepStats() : null; } catch (err) { return null; } }"""
-CTX_HOOK = r"""
+SLEEP_STATS = """() => { try { const d = window.DAW_CONTROL && window.DAW_CONTROL.diag ? window.DAW_CONTROL.diag() : null;
+  return d && d.engine && d.engine.sleep ? d.engine.sleep : null; } catch (err) { return null; } }"""
+CTX_HOOK_T = r"""
 (() => { const A = window.AudioContext; if (!A) return;
-  window.AudioContext = new Proxy(A, { construct(T, args, NT) { const c = Reflect.construct(T, args, NT); if (!window.__soakAudioCtx) window.__soakAudioCtx = c; return c; } });
+  const forced = %s;
+  window.AudioContext = new Proxy(A, { construct(T, args, NT) {
+    if (forced) args = [{ ...(args[0] || {}), latencyHint: forced }];
+    const c = Reflect.construct(T, args, NT); if (!window.__soakAudioCtx) window.__soakAudioCtx = c; return c; } });
 })();
 """
+# Essai : latencyHint imposé (QA_LATENCY_HINT=playback) ; vide = celui de l'appli.
+CTX_HOOK = CTX_HOOK_T % json.dumps(os.environ.get("QA_LATENCY_HINT") or None)
 PERF_INIT = r"""
 window.__perf = { long: [], frames: [], on: false };
 try { new PerformanceObserver(l => { for (const e of l.getEntries()) if (window.__perf.on) window.__perf.long.push(e.duration); }).observe({ type: 'longtask', buffered: false }); } catch (e) {}

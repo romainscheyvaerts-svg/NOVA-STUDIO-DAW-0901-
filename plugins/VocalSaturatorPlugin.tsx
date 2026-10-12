@@ -11,7 +11,7 @@ const SAT_MODES: Record<string, { label: string; help: string }> = {
   TRANSISTOR: { label: 'Transistor', help: 'Transistor : grain plus dur et brillant, la voix devient agressive.' },
   SOFT_CLIP: { label: 'Écrêtage doux', help: 'Écrêtage doux (soft clip) : arrondit les crêtes, la voix paraît plus forte sans claquer.' },
 };
-import { loadWorkletModule, setParamSmooth } from './vocalDspUtils';
+import { loadWorkletModule, setParamSmooth, isOfflineContext as isOfflineCtx } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
@@ -57,9 +57,29 @@ class AdaaShaperProcessor extends AudioWorkletProcessor {
     // (un message du port peut arriver apres le debut d'un rendu hors ligne).
     const init = options && options.processorOptions && options.processorOptions.curve;
     if (init && init.length > 1) this.load(Float32Array.from(init));
-    this.port.onmessage = (e) => { if (e.data && e.data.curve) this.pending = e.data.curve; };
+    this.rest = false;
+    // Filtre anti-continu (passe-haut 10 Hz) et compensation du drive, calculés ici à
+    // l'identique des nœuds natifs qu'ils remplacent (BiquadFilter de Chromium, Gain).
+    const o = (options && options.processorOptions) || {};
+    this.ag = Math.fround(Number.isFinite(o.autoGain) ? o.autoGain : 1);
+    this.dc = new Float64Array(8);
+    const cutoff = Math.min(1, Math.max(0, Math.fround(10) / (0.5 * sampleRate)));
+    const resonance = Math.fround(Math.exp(Math.fround((Math.fround(1) / 20) * Math.LN10)));
+    const theta = Math.PI * cutoff, alpha = Math.sin(theta) / (2 * resonance), cosw = Math.cos(theta), beta = (1 + cosw) / 2, inv = 1 / (1 + alpha);
+    this.db0 = beta * inv; this.db1 = -2 * beta * inv; this.db2 = beta * inv; this.da1 = -2 * cosw * inv; this.da2 = (1 - alpha) * inv;
+    this.port.onmessage = (e) => { if (e.data && e.data.curve) this.pending = e.data.curve; if (e.data && Number.isFinite(e.data.autoGain)) this.ag = Math.fround(e.data.autoGain); };
   }
   load(curve) {
+    // Valeur de la courbe en 0 (interpolation 32 bits de Chromium) : voir « kick » dans process.
+    // Chromium ne calcule ce WaveShaper sans entrée que si courbe(0) ≠ 0 (évaluée en double).
+    {
+      const N = curve.length, S = Math.fround(0.5 * (N - 1));
+      let v = Math.fround(Math.fround(0 + 1) * S); if (v > N - 1) v = N - 1;
+      const i1 = v | 0, i2 = Math.min(N - 1, i1 + 1), f = Math.fround(v - i1);
+      const vd = 0.5 * (N - 1), j1 = Math.floor(vd), j2 = Math.min(N - 1, j1 + 1);
+      const dbl = curve[j1] + (vd - j1) * (curve[j2] - curve[j1]);
+      this.c0 = dbl === 0 ? 0 : Math.fround(Math.fround(f * Math.fround(curve[i2] - curve[i1])) + curve[i1]);
+    }
     const n = curve.length;
     const h = 2 / (n - 1);
     const F = new Float64Array(n);
@@ -87,6 +107,9 @@ class AdaaShaperProcessor extends AudioWorkletProcessor {
     const input = inputs[0], output = outputs[0];
     if (!output || !output[0]) return true;
     const nIn = input ? input.length : 0;
+    // Veille (engine/effectSleep) : entrée et mémoire (dernier échantillon) sous −240 dBFS.
+    let quiet = true;
+    for (let c = 0; c < nIn && quiet; c++) { const x = input[c]; for (let i = 0; i < x.length; i++) { const v = x[i]; if (v > 1e-12 || v < -1e-12) { quiet = false; break; } } }
     for (let c = 0; c < output.length; c++) {
       const out = output[c];
       const src = nIn > 0 ? (input[c] || input[0]) : null;
@@ -109,6 +132,28 @@ class AdaaShaperProcessor extends AudioWorkletProcessor {
       }
       this.prev[c] = xp;
     }
+    // Anti-continu + compensation (sortie en 32 bits comme entre deux nœuds natifs).
+    const F = 1.1754943508222875e-38, t = this.ag, b0 = this.db0, b1 = this.db1, b2 = this.db2, a1 = this.da1, a2 = this.da2;
+    for (let c = 0; c < output.length && c < 2; c++) {
+      const out = output[c], d = this.dc, k = c * 4;
+      let x1 = d[k], x2 = d[k + 1], y1 = d[k + 2], y2 = d[k + 3];
+      // Le WaveShaper natif de repli, sans entrée mais relié à l'anti-continu, est calculé
+      // par Chromium quand courbe(0) ≠ 0 (queue « infinie ») : il ajoutait courbe(0), une
+      // composante continue de ~1e-7 (courbes asymétriques, TUBE). Gardée à l'identique.
+      const kick = this.c0 || 0;
+      for (let i = 0; i < out.length; i++) {
+        const x = kick === 0 ? out[i] : Math.fround(out[i] + kick);
+        const y = Math.fround(b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2);
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        out[i] = t === 1 ? y : y * t;
+      }
+      d[k] = (x1 < F && x1 > -F) ? 0 : x1; d[k + 1] = (x2 < F && x2 > -F) ? 0 : x2;
+      d[k + 2] = (y1 < F && y1 > -F) ? 0 : y1; d[k + 3] = (y2 < F && y2 > -F) ? 0 : y2;
+    }
+    let dcq = true;
+    for (let i = 0; i < 8; i++) if (this.dc[i] > 1e-12 || this.dc[i] < -1e-12) { dcq = false; break; }
+    const rest = dcq && quiet && !(this.prev[0] > 1e-12 || this.prev[0] < -1e-12 || this.prev[1] > 1e-12 || this.prev[1] < -1e-12);
+    if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
     return true;
   }
 }
@@ -213,12 +258,7 @@ export class VocalSaturatorNode {
     this.driveGain.connect(this.shaper);
     this.shaper.connect(this.dcBlock);
     this.dcBlock.connect(this.autoGain);
-    this.autoGain.connect(this.tiltLow);
-    this.tiltLow.connect(this.tiltHigh);
-    this.tiltHigh.connect(this.eqLowNode);
-    this.eqLowNode.connect(this.eqMidNode);
-    this.eqMidNode.connect(this.eqHighNode);
-    this.eqHighNode.connect(this.wetGain);
+    // autoGain -> [couleur : tilt, EQ grave / médium / aigu] -> wetGain : voir relinkColor().
     this.wetGain.connect(this.makeupGain);
 
     this.makeupGain.connect(this.output);
@@ -232,12 +272,17 @@ export class VocalSaturatorNode {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],
-        processorOptions: { curve: Array.from(this.curve) }
+        processorOptions: { curve: Array.from(this.curve), autoGain: this.driveCompensation(1 + (this.safeDrive() / 25)) }
       });
       this.adaa = node;
+      node.port.onmessage = (e) => { if (e.data && typeof e.data.rest === 'boolean') this.atRest = e.data.rest; };
       // Bascule de l'etage de courbe : meme courbe, meme niveau, meme retard (~0).
+      // Le worklet fait aussi l'anti-continu et la compensation : le gain natif passe à 1.
       this.driveGain.connect(node);
-      node.connect(this.dcBlock);
+      this.autoGain.gain.cancelScheduledValues(0);
+      this.autoGain.gain.setValueAtTime(1, 0);
+      node.connect(this.autoGain);
+      try { this.dcBlock.disconnect(this.autoGain); } catch (e) {}
       try { this.driveGain.disconnect(this.shaper); } catch (e) {}
     } catch (e) {
       console.warn('[VocalSaturator] ADAA indisponible, courbe simple :', e);
@@ -245,7 +290,62 @@ export class VocalSaturatorNode {
   }
 
   /** AudioParam d'un réglage automatisable (R8) : « mix », « tone », « outputGain » ; sinon null. */
-  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+  public automationParam(key: string): MappedParam | null {
+    // Couleur automatisée : le tilt reste dans la chaîne même à 0 (la courbe peut le quitter).
+    if (key === 'tone' && !this.toneAutomated) { this.toneAutomated = true; this.relinkColor(); }
+    return this.auto.get(key);
+  }
+
+  /** Veille des effets (engine/effectSleep) : ADAA au repos (ou courbe simple, sans mémoire). */
+  private atRest = false;
+  public isAtRest(): boolean { return this.adaa ? this.atRest : !this.disposed; }
+
+  /**
+   * Filtres de couleur câblés : seulement ceux qui ne sont pas neutres. Une étagère ou une
+   * cloche à 0 dB est l'identité (coefficients b = a, rendu identique au bit près sauf
+   * arrondi d'un échantillon sous −300 dBFS) : la retirer économise son calcul (5 filtres
+   * sur 6 avec les réglages par défaut). Un filtre qui redevient neutre ne quitte la chaîne
+   * qu'une fois son glissement terminé (0,3 s), un filtre qui part de 0 dB y entre tout de suite.
+   */
+  private toneAutomated = false;
+  private colorLinked: BiquadFilterNode[] | null = null;
+  private colorTimer: ReturnType<typeof setTimeout> | null = null;
+  private colorWanted(): BiquadFilterNode[] {
+    const nz = (v: any) => Number.isFinite(Number(v)) && Number(v) !== 0;
+    const on = this.params.isEnabled !== false;
+    const out: BiquadFilterNode[] = [];
+    if (this.toneAutomated || (on && nz(this.params.tone))) out.push(this.tiltLow, this.tiltHigh);
+    if (on && nz(this.params.eqLow)) out.push(this.eqLowNode);
+    if (on && nz(this.params.eqMid)) out.push(this.eqMidNode);
+    if (on && nz(this.params.eqHigh)) out.push(this.eqHighNode);
+    return out;
+  }
+  private relinkColor(deferRemoval = false) {
+    const want = this.colorWanted();
+    const cur = this.colorLinked;
+    if (cur && want.length === cur.length && want.every((n, i) => n === cur[i])) return;
+    // Retrait différé (glissement vers 0 dB en cours) : on garde l'union jusqu'à la fin.
+    let next = want;
+    if (deferRemoval && cur && cur.some(n => !want.includes(n))) {
+      const order = [this.tiltLow, this.tiltHigh, this.eqLowNode, this.eqMidNode, this.eqHighNode];
+      next = order.filter(n => want.includes(n) || cur.includes(n));
+      if (this.colorTimer) clearTimeout(this.colorTimer);
+      this.colorTimer = setTimeout(() => { this.colorTimer = null; if (!this.disposed) this.relinkColor(false); }, 300);
+    }
+    if (cur && next.length === cur.length && next.every((n, i) => n === cur[i])) return;
+    const chain = [this.autoGain, ...next, this.wetGain];
+    // Nouveaux liens d'abord, anciens ensuite : jamais de trou dans la voie saturée.
+    const links = new Set<string>();
+    for (let i = 0; i < chain.length - 1; i++) { chain[i].connect(chain[i + 1]); links.add(`${i}`); }
+    const oldChain = cur ? [this.autoGain, ...cur, this.wetGain] : [];
+    for (let i = 0; i < oldChain.length - 1; i++) {
+      const a = oldChain[i], b = oldChain[i + 1];
+      const ia = chain.indexOf(a);
+      if (ia >= 0 && chain[ia + 1] === b) continue;
+      try { a.disconnect(b); } catch { /* déjà débranché */ }
+    }
+    this.colorLinked = next;
+  }
   /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
   public restoreStatic() { this.auto.restoreStatic(); }
 
@@ -342,7 +442,9 @@ export class VocalSaturatorNode {
     if (isEnabled) {
       const pre = 1 + (this.safeDrive() / 25);
       set(this.driveGain.gain, pre);
-      set(this.autoGain.gain, this.driveCompensation(pre));
+      const comp = this.driveCompensation(pre);
+      if (this.adaa) this.adaa.port.postMessage({ autoGain: comp });
+      else set(this.autoGain.gain, comp);
 
       const sTone = Math.max(-1, Math.min(1, safe(tone)));
       this.auto.get('tone')!.setStatic(sTone, st);
@@ -350,6 +452,8 @@ export class VocalSaturatorNode {
       set(this.eqLowNode.gain, safe(this.params.eqLow));
       set(this.eqMidNode.gain, safe(this.params.eqMid));
       set(this.eqHighNode.gain, safe(this.params.eqHigh));
+      // Hors ligne (export) et à la création : chaîne posée telle quelle ; en direct, retrait après le glissement.
+      this.relinkColor(this.ctx.currentTime > this.createdAt && !isOfflineCtx(this.ctx));
 
       const sMix = Math.max(0, Math.min(1, safe(mix)));
       this.auto.get('mix')!.setStatic(sMix, st);
@@ -357,6 +461,7 @@ export class VocalSaturatorNode {
     } else {
       this.auto.get('mix')!.setStatic(0, st);
       this.auto.get('outputGain')!.setStatic(1, st);
+      this.relinkColor(this.ctx.currentTime > this.createdAt && !isOfflineCtx(this.ctx));
     }
   }
 
@@ -364,6 +469,7 @@ export class VocalSaturatorNode {
 
   public dispose() {
     this.disposed = true;
+    if (this.colorTimer) { clearTimeout(this.colorTimer); this.colorTimer = null; }
     try { this.input.disconnect(); } catch (e) {}
     if (this.adaa) {
       retireWorkletNode(this.adaa);

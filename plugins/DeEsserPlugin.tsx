@@ -97,6 +97,7 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     this.core = createDeesserCore(sampleRate);
     this.core.setParams(this.params);
     this.dirty = false;
+    this.lastFrame = -1;
     this.zero = new Float32Array(128);
     this.blocks = 0;
     this.port.onmessage = (e) => {
@@ -106,6 +107,10 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Bloc(s) sauté(s) : la chaîne dormait (veille), le cœur rattrape les blocs muets.
+    const fr = currentFrame;
+    if (this.lastFrame >= 0 && fr > this.lastFrame + 128) this.core.catchUp(fr - this.lastFrame - 128);
+    this.lastFrame = fr;
     // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
     if (parameters.__resetGen && parameters.__resetGen[0] !== (this.gen || 0)) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     // Réglages automatisables : l'AudioParam fait foi (automation programmée au bloc près).
@@ -134,6 +139,9 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
       if (out[1]) out[1].set(kR.subarray(0, n));
     }
     if (++this.blocks >= 6) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
+    // Veille (engine/effectSleep) : cœur au repos signalé à chaque changement.
+    const rest = !useKey && this.core.atRest();
+    if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
     return true;
   }
 }
@@ -199,6 +207,7 @@ export class DeEsserNode {
       });
       this.worklet.port.onmessage = (e) => {
         const d = e.data || {};
+        if (typeof d.rest === 'boolean') { this.atRest = d.rest; return; }
         if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, grNowDb: d.grNowDb, detDb: d.detDb, at: Date.now() };
       };
       this.input.connect(this.worklet);
@@ -211,6 +220,10 @@ export class DeEsserNode {
       this.input.connect(this.output);
     }
   }
+
+  /** Cœur au repos (veille des effets, engine/effectSleep). */
+  private atRest = false;
+  public isAtRest(): boolean { return !!this.worklet && !this.failed && !this.keyActive && this.atRest; }
 
   /** Retard ajouté (s) : aucun (pas d'anticipation), déclaré au PDC. */
   public get latency(): number { return 0; }
