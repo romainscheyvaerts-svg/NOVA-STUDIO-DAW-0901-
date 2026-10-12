@@ -33,6 +33,17 @@
  * la position du morceau de son ENTRÉE (échantillons ; -1 = transport arrêté) : la sortie à
  * l'instant t du contexte = morceau t − origine ; le bloc envoyé à f ressort à f + latence.
  * Le plugin (Melodyne) joue les clips de la piste à cette position, comme dans Pro Tools.
+ * v6 (C6) — tampon adaptatif (si processorOptions.maxPrebufferFrames > prebufferFrames) :
+ * un bloc absent à son heure alors que le pont répond (en retard) n'est plus perdu : la sortie
+ * l'ATTEND. Le tampon passe au palier suivant (× 1,5, 2, 3, 4 du pré-tampon, plafond
+ * maxPrebufferFrames) : la sortie rend du silence (« attente ») le temps de l'agrandissement,
+ * puis le flux reprend AU BLOC MANQUANT, sans rien sauter. Le plugin a donc reçu et traité
+ * tous les blocs, dans l'ordre, comme à l'export. Message { type: 'delay', frames } aussitôt :
+ * le moteur décale d'autant la compensation (PDC) et le transport (AudioEngine.holdTransport).
+ * Le tampon ne redescend que sur ordre du thread principal ({ type: 'delay', frames } plus
+ * petit, transport arrêté), d'après l'âge des retours mesuré ici (ageMaxFrames).
+ * Compteurs : underruns (blocs rendus en silence faute de son), dropouts (coupures = suites
+ * de tels blocs), late (blocs arrivés après leur heure), grows (agrandissements).
  */
 
 const RING = 512; // blocs gardés (≈ 1,4 s à 48 kHz)
@@ -41,6 +52,21 @@ const TOL = 1e-4;
 const JUMP = 0.02;
 const MAX_PER_BLOCK = 4;
 const RAMP_BLOCKS = 2;
+// Paliers du tampon adaptatif, en multiples du pré-tampon de base (même calcul que
+// utils/vstAdaptiveBuffer.ts, côté thread principal).
+const ADAPT_STEPS = [1, 1.5, 2, 3, 4];
+// Le pont répond mais trop tard : au bout de LATE_TRIGGER blocs en retard, un bloc absent est
+// une vraie perte (pas le tout premier passage dans le plugin, qui peut tarder).
+const LATE_TRIGGER = 8;
+// Mise en route du plugin (≈ 1 s après son chargement) : ses premiers passages peuvent tarder,
+// ce n'est pas un pont lent. Ni compté ni agrandi pendant ce temps.
+const WARMUP_BLOCKS = 375;
+
+/** Palier suivant (en blocs) au-dessus de cur, plafonné à max. */
+function nextStepBlocks(base, cur, max) {
+  for (const k of ADAPT_STEPS) { const b = Math.round(base * k); if (b > cur) return Math.min(b, max); }
+  return max;
+}
 
 class VSTBridgeProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -53,6 +79,20 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     super();
     const o = (options && options.processorOptions) || {};
     this.delayBlocks = Math.max(2, Math.min(RING - 8, Math.round((o.prebufferFrames || 2048) / 128)));
+    // Tampon adaptatif (C6) : actif seulement si un plafond plus grand est donné.
+    this.baseBlocks = this.delayBlocks;
+    this.maxBlocks = Math.max(this.baseBlocks, Math.min(RING - 8, Math.round((o.maxPrebufferFrames || 0) / 128)));
+    this.adaptive = this.maxBlocks > this.baseBlocks;
+    this.hold = 0;            // blocs d'attente restants (agrandissement en cours)
+    this.late = 0;            // blocs arrivés après leur heure (total)
+    this.lateSinceActive = 0;
+    this.dropouts = 0;        // coupures : suites de blocs rendus en silence faute de son
+    this.inGap = false;
+    this.grows = 0;
+    this.delayId = 0;         // dernier ordre { type: 'delay', id } appliqué (thread principal)
+    this.ageMax = 0;          // âge maximal (blocs) des retours depuis les dernières stats
+    this.recvPeriod = 0;      // retours reçus depuis les dernières stats
+    this.sentLoud = new Uint8Array(RING); // le bloc envoyé portait du son (une coupure s'entendrait)
     this.ring = new Array(RING);
     this.bridge = null;       // MessagePort vers le Worker
     this.active = false;      // plugin chargé et flux ouvert
@@ -88,10 +128,10 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         this.bridge = m.port;
         this.bridge.onmessage = (ev) => this.onProcessed(ev.data);
       } else if (m.type === 'active') {
-        if (m.on && !this.active) { this.ring = new Array(RING); this.activeSince = this.seq; this.received = 0; this.lastSent.fill(NaN); } // tampon propre
+        if (m.on && !this.active) { this.ring = new Array(RING); this.activeSince = this.seq; this.received = 0; this.lateSinceActive = 0; this.hold = 0; this.inGap = false; this.lastSent.fill(NaN); } // tampon propre
         this.active = !!m.on;
       } else if (m.type === 'bypass') {
-        if (!m.on && this.bypass) { this.ring = new Array(RING); this.activeSince = this.seq; this.lastSent.fill(NaN); }
+        if (!m.on && this.bypass) { this.ring = new Array(RING); this.activeSince = this.seq; this.lateSinceActive = 0; this.hold = 0; this.inGap = false; this.lastSent.fill(NaN); }
         this.bypass = !!m.on;
       } else if (m.type === 'arm') {
         // Réglage déclaré au pont (SET_AUTOMATION_MAP) : ses valeurs peuvent partir.
@@ -117,16 +157,27 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         this.resetPending = true;
       } else if (m.type === 'tllatency') {
         this.tlLatency = m.latency || 0;
+      } else if (m.type === 'delay') {
+        // Ordre du thread principal (transport arrêté) : tampon ramené à `frames` (ou agrandi).
+        const want = Math.max(2, Math.min(this.maxBlocks, Math.round((Number(m.frames) || 0) / 128)));
+        const target = this.delayBlocks + this.hold;
+        if (want < target) { this.delayBlocks = Math.min(this.delayBlocks, want); this.hold = want - this.delayBlocks; }
+        else if (want > target) this.hold += want - target;
+        if (typeof m.id === 'number') this.delayId = m.id;
       }
     };
   }
 
   onProcessed(m) {
     if (!m || typeof m.seq !== 'number' || !m.data) return;
+    // Âge du retour : blocs écoulés depuis l'envoi (le bloc doit revenir au plus tard à delayBlocks).
+    const age = this.seq - m.seq;
+    if (age > this.ageMax) this.ageMax = age;
     // Trop tard : l'heure de ce bloc est passée (compté comme manquant).
-    if (m.seq < this.seq - this.delayBlocks) return;
+    if (m.seq < this.seq - this.delayBlocks) { this.late++; this.lateSinceActive++; return; }
     this.ring[m.seq % RING] = { seq: m.seq, data: m.data };
     this.received++;
+    this.recvPeriod++;
     if (m.seq > this.lastRecvSeq) this.lastRecvSeq = m.seq;
     const d = m.data;
     for (let i = 0; i < d.length; i += 4) {
@@ -222,6 +273,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     if (reset) this.resetsSent++;
     const gate = !reset && (this.ara ? (tl < 0 && pc === 0 && !this.tlSentPlaying) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64));
     if (this.ara && !gate) this.tlSentPlaying = tl >= 0;
+    this.sentLoud[this.seq % RING] = loud ? 1 : 0;
     if (gate) {
       this.ring[this.seq % RING] = { seq: this.seq, data: null };
     } else if (pc > 0) {
@@ -234,23 +286,53 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     }
 
     // 2) Sortie : le bloc traité d'il y a delayBlocks
-    const want = this.seq - this.delayBlocks;
-    const e = want >= 0 ? this.ring[want % RING] : null;
-    const hit = !!(e && e.seq === want);
-    if (hit && e.data && !(this.ara && want < this.tlMuteBefore)) {
-      const d = e.data;
-      for (let i = 0; i < n; i++) { oL[i] = d[2 * i]; if (oR !== oL) oR[i] = d[2 * i + 1]; }
-    } else {
+    let silentLate = false;
+    if (this.hold > 0) {
+      // Agrandissement du tampon en cours : la sortie attend (silence), aucun bloc n'est sauté.
       oL.fill(0); if (oR !== oL) oR.fill(0);
-      // Le tout premier bloc traité peut tarder (premier passage dans le plugin) : on ne compte qu'ensuite.
-      if (want >= this.activeSince && this.received > 0 && !hit) this.underruns++;
+      this.hold--;
+      this.delayBlocks++;
+      this.underruns++;
+      silentLate = true;
+    } else {
+      const want = this.seq - this.delayBlocks;
+      const e = want >= 0 ? this.ring[want % RING] : null;
+      const hit = !!(e && e.seq === want);
+      if (hit && e.data && !(this.ara && want < this.tlMuteBefore)) {
+        const d = e.data;
+        for (let i = 0; i < n; i++) { oL[i] = d[2 * i]; if (oR !== oL) oR[i] = d[2 * i + 1]; }
+      } else {
+        oL.fill(0); if (oR !== oL) oR.fill(0);
+        // Le tout premier bloc traité peut tarder (premier passage dans le plugin) : on ne compte
+        // qu'ensuite — ou dès que le pont répond, mais systématiquement en retard. Seulement les
+        // blocs qui s'entendraient : du son en entrée, ou une queue (réverbe) encore audible.
+        const audible = this.sentLoud[want % RING] === 1 || (this.lastLoudSeq >= 0 && want - this.lastLoudSeq <= 64);
+        if (want >= this.activeSince + WARMUP_BLOCKS && !hit && audible && (this.received > 0 || this.lateSinceActive >= LATE_TRIGGER)) {
+          this.underruns++;
+          silentLate = true;
+          if (this.adaptive && this.delayBlocks < this.maxBlocks) {
+            // Palier suivant : ce bloc-ci est la 1re attente ; le bloc manquant reste attendu.
+            const target = nextStepBlocks(this.baseBlocks, this.delayBlocks, this.maxBlocks);
+            this.hold = target - this.delayBlocks - 1;
+            this.delayBlocks++;
+            this.grows++;
+            this.port.postMessage({ type: 'delay', frames: target * 128, grows: this.grows, at: this.seq });
+          }
+        }
+      }
+      if (hit) this.ring[want % RING] = undefined;
     }
-    if (hit) this.ring[want % RING] = undefined;
+    if (silentLate) { if (!this.inGap) { this.dropouts++; this.inGap = true; } }
+    else this.inGap = false;
 
     this.seq++;
     if (this.seq - this.statsAt >= 375) { // ≈ toutes les secondes
       this.statsAt = this.seq;
-      this.port.postMessage({ type: 'stats', underruns: this.underruns, received: this.received, seq: this.seq, paramsSent: this.paramsSent, paramBlocks: this.paramBlocks, resets: this.resetsSent });
+      this.port.postMessage({ type: 'stats', underruns: this.underruns, received: this.received, seq: this.seq, paramsSent: this.paramsSent, paramBlocks: this.paramBlocks, resets: this.resetsSent,
+        dropouts: this.dropouts, late: this.late, grows: this.grows, delayFrames: (this.delayBlocks + this.hold) * 128, delayId: this.delayId,
+        ageMaxFrames: this.ageMax * 128, recvPeriod: this.recvPeriod });
+      this.ageMax = 0;
+      this.recvPeriod = 0;
     }
     return true;
   }

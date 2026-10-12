@@ -120,6 +120,9 @@ export class AraInsertNode extends VSTPluginNode {
 
   protected loadExtras() { return { ara: this.kind }; }
 
+  /** (C6) Avance FIXE : la position du morceau envoyée au plugin dépend de la latence du flux. */
+  protected adaptiveMaxFrames(): number { return VST_PREBUFFER_FRAMES; }
+
   protected onActivated(slotId: string, node: AudioWorkletNode) {
     node.port.postMessage({ type: 'ara', on: true });
     node.port.postMessage({ type: 'tllatency', latency: VST_PREBUFFER_FRAMES + this.pluginLatencySamples });

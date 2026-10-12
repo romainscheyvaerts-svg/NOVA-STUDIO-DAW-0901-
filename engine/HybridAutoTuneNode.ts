@@ -54,7 +54,7 @@ export class HybridAutoTuneNode {
   private retries = 0;
   private fallback: string | null = null;
   private route: 'nova' | 'vst' = 'nova';
-  private latencyListener: (() => void) | null = null;
+  private latencyListener: ((reason?: 'adaptive') => void) | null = null;
   private unsubs: (() => void)[] = [];
   private disposed = false;
   private readonly realtime: boolean;
@@ -84,7 +84,7 @@ export class HybridAutoTuneNode {
     return this.nova.latency;
   }
 
-  setLatencyListener(cb: (() => void) | null) { this.latencyListener = cb; }
+  setLatencyListener(cb: ((reason?: 'adaptive') => void) | null) { this.latencyListener = cb; }
 
   /** Départ de la lecture à `at` : l'autotune (NOVA ou VST du PC) repart d'un état connu, comme à l'export. */
   resetAt(at: number) {
@@ -161,7 +161,7 @@ export class HybridAutoTuneNode {
         params: { localPath: want.path, pluginName: want.pluginName },
       }, { quiet: true });
       this.vst = vst;
-      vst.setLatencyListener(() => { if (this.route === 'vst') this.latencyListener?.(); this.publish(); });
+      vst.setLatencyListener((why) => { if (this.route === 'vst') this.latencyListener?.(why); this.publish(); });
       this.vstUnsub = vst.onStatus(s => this.onVstStatus(s));
       // Le pont est peut-être déjà connecté : le nœud s'y charge tout seul.
       if (novaBridge.isConnected()) this.onVstStatus(vst.getInfo().status);

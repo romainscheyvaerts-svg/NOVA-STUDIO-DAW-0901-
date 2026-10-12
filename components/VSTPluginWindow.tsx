@@ -5,6 +5,7 @@ import { liveVstNodes } from '../engine/VSTPluginNode';
 import { isFreezeStale, isPluginBaked } from '../utils/freeze';
 import { BridgeConnectPanel } from './VstBrowserTab';
 import { SidechainPanel } from './SidechainPanel';
+import { coupures } from '../utils/vstAdaptiveBuffer';
 
 interface VSTPluginWindowProps {
   plugin: PluginInstance;
@@ -104,8 +105,33 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
         {track?.isTrackArmed && (
           <p className="text-[11px] text-slate-400">Piste armée : l'effet est contourné pendant l'enregistrement pour que ton retour casque reste sans retard.</p>
         )}
-        {info.underruns > 0 && (
-          <p className="text-[11px] text-amber-300">Le pont a pris du retard ({info.underruns} coupures). Ferme les programmes inutiles si le son craque.</p>
+        {(info.dropoutsTotal > 0 || info.bufferGrown) && (
+          // (C6) Pont en retard : compteur, tampon, et quoi faire.
+          <div data-testid="vst-late-panel" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 space-y-2">
+            <p className="text-[11px] font-bold text-amber-200">
+              <i className="fas fa-hourglass-half mr-1.5" aria-hidden="true"></i>
+              {info.dropouts10s > 0
+                ? `Le plugin a pris du retard : ${coupures(info.dropouts10s)} en 10 s (${info.dropoutsTotal} en tout).`
+                : `Le pont a pris du retard (${coupures(info.dropoutsTotal)} depuis le chargement), plus rien depuis 10 s.`}
+            </p>
+            <p className="text-[11px] text-slate-300">
+              Tampon du pont : <b className="text-white">{info.bufferMs} ms</b>
+              {info.bufferAtMax ? ' (au maximum)' : info.bufferGrown ? ' (agrandi automatiquement)' : ''}. Ce retard est compensé à la lecture : la piste reste calée.
+              {info.bufferGrown ? ' Il redescend tout seul à l’arrêt quand tout va bien.' : ''}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {trackId && onToggleFreeze && (
+                <button type="button" data-testid="vst-late-freeze-window" onClick={() => onToggleFreeze(trackId)}
+                  title="L'effet est rendu dans l'audio de la piste : plus aucune dépendance au pont."
+                  className="h-8 px-2.5 rounded-md bg-cyan-400 text-black text-[11px] font-black">Geler la piste</button>
+              )}
+              {info.bufferGrown && (
+                <button type="button" data-testid="vst-late-reset" onClick={() => liveVstNodes.get(plugin.id)?.resetPrebuffer()}
+                  title="Revient tout de suite au tampon de base (la latence baisse ; les coupures peuvent revenir si le pont est toujours lent)."
+                  className="h-8 px-2.5 rounded-md border border-white/20 text-white text-[11px] font-bold">Revenir au tampon normal</button>
+              )}
+            </div>
+          </div>
         )}
         {openError && <p role="alert" className="text-[11px] text-red-300">{openError}</p>}
       </div>
