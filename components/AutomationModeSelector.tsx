@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { Track } from '../types';
 import { automationRecorder } from '../services/AutomationManager';
 import {
@@ -66,10 +67,24 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
     onUpdate(clearTrackAutomation(track));
   };
 
-  const rect = btnRef.current?.getBoundingClientRect();
-  const menuStyle: React.CSSProperties = rect
-    ? { top: Math.min(rect.bottom + 4, window.innerHeight - 340), left: Math.max(8, Math.min(rect.left, window.innerWidth - 272)) }
-    : {};
+  // Menu posé sur la page (portail) : dans l'en-tête de piste, il passait SOUS les pistes
+  // suivantes et sortait de l'écran au doigt (tablette). Mesuré après rendu : sous le
+  // bouton s'il tient, sinon au-dessus, sinon collé au bas, avec défilement.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setMenuPos(null); return; }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const h = menuRef.current?.scrollHeight || 340;
+    const maxHeight = vh - 16;
+    let top = r.bottom + 4;
+    if (top + h > vh - 8) top = r.top - 4 - h >= 8 ? r.top - 4 - h : Math.max(8, vh - 8 - Math.min(h, maxHeight));
+    setMenuPos({ top, left: Math.max(8, Math.min(r.left, vw - 264)), maxHeight });
+  }, [open]);
+  const menuStyle: React.CSSProperties = menuPos
+    ? { top: menuPos.top, left: menuPos.left, maxHeight: menuPos.maxHeight }
+    : { top: -9999, left: -9999 };
 
   const label = simple ? info.fr : variant === 'mixer' ? info.label.toUpperCase() : info.short;
 
@@ -102,14 +117,14 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
           <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full" style={{ backgroundColor: info.color }} aria-hidden />
         )}
       </button>
-      {open && (
+      {open && createPortal((
         <div
           ref={menuRef}
           role="menu"
           aria-label={`Automation de ${track.name}`}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="fixed z-[650] w-64 rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl"
+          className="fixed z-[900] w-64 overflow-y-auto rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl"
           style={menuStyle}
         >
           <p className="px-2 pb-1 pt-0.5 text-[10px] font-black uppercase tracking-widest text-slate-500">Automation · {track.name}</p>
@@ -143,7 +158,7 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
             {written.length > 0 && <span className="ml-auto text-[10px] font-normal text-slate-500">{written.reduce((n, l) => n + l.points.length, 0)} pts</span>}
           </button>
         </div>
-      )}
+      ), document.body)}
     </>
   );
 };

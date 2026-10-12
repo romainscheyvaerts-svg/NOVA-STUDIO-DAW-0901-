@@ -551,6 +551,8 @@ export interface StoredNoteEdit {
   drift: number;
   /** Vibrato (1 = intact, 0 = supprimé, 2 = doublé). */
   vibrato: number;
+  /** Formant de la note (demi-tons, −12 à +12 ; absent = timbre gardé). */
+  formant?: number;
   /** Transition depuis la note précédente (ms). */
   transitionMs?: number;
   /** Retouchée à la main (sinon : par « Corriger tout », recalculée si on change le dosage). */

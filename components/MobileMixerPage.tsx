@@ -7,6 +7,7 @@ import StripHead from './meters/StripHead';
 import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
 import { MobileSoloMuteBar, MobileSoloMuteButtons } from './MobileSoloMute';
+import MobileSends from './MobileSends';
 
 interface MobileMixerPageProps {
   tracks: Track[];
@@ -238,6 +239,8 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
             <button type="button" onClick={() => loudnessPanel.toggle()} aria-label="Ouvrir la fenêtre Loudness"
               className="h-11 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-[11px] font-bold text-cyan-300"><i className="fas fa-wave-square mr-1" />LUFS</button>
           </div>
+          {/* Envois réglés au doigt comme un fader (components/MobileSends). */}
+          <MobileSends track={current} tracks={tracks} onUpdateTrack={onUpdateTrack} />
           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
             Inserts ({insertPlugins.length})
           </h4>

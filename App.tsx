@@ -285,6 +285,7 @@ import { setFeedbackUserEmail } from './services/feedback';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
 import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/trackPlaylists';
 import { useProToolsEcarts } from './hooks/useProToolsEcarts';
+import { useProToolsEcarts2 } from './hooks/useProToolsEcarts2';
 import { soloModeStore } from './utils/soloModes';
 import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
@@ -5685,6 +5686,17 @@ function Studio() {
   // Écarts Pro Tools restants (playlists de piste, écrire l'automation sur la sélection, solo X-OR, Commit / gel en lot).
   useProToolsEcarts({
     stateRef, setState, selectedTrackIds, freezeTrack: handleFreezeTrack,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 7000); },
+  });
+  // Presets synchronisés entre postes (services/PresetCloud) : chargé à la demande, sans boucle.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    void import('./services/PresetCloud').then(m => { stop = m.startPresetCloud(); }).catch(() => {});
+    return () => { stop?.(); };
+  }, []);
+  // 2e tour (chantier 19) : sélection → nouvelle playlist, Write to Start / End / All / Punch, Glide, fusion d'un VCA.
+  useProToolsEcarts2({
+    stateRef, setState, selectedTrackIds,
     notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 7000); },
   });
 

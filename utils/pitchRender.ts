@@ -215,7 +215,7 @@ export function synthesisPlan(marks: PitchMarks, curve: Float32Array, hop: numbe
  * Applique la courbe de correction (demi-tons, une valeur par trame de
  * `track`) à tous les canaux. Les canaux gardent la même longueur.
  */
-export function renderPitch(channels: Float32Array[], track: PitchTrack, curve: Float32Array, mono?: Float32Array): Float32Array[] {
+export function renderPitch(channels: Float32Array[], track: PitchTrack, curve: Float32Array, mono?: Float32Array, formant?: Float32Array): Float32Array[] {
   const n = channels[0]?.length || 0;
   if (!n) return channels.map(c => new Float32Array(c));
   let x = mono;
@@ -243,21 +243,30 @@ export function renderPitch(channels: Float32Array[], track: PitchTrack, curve: 
       k > 0 ? pos[k] - pos[k - 1] : 0,
     );
     const voicedGrain = marks.voiced[k] === 1;
+    // Formant par note : le grain est relu `fr` fois plus vite (fr > 1 : voix plus fine),
+    // à la même place (la hauteur, donnée par l'espacement des grains, ne change pas).
+    const fs = voicedGrain && formant ? corrAt(formant, track.hop, s) : 0;
+    const fr = Math.abs(fs) >= 0.05 ? Math.pow(2, Math.max(-12, Math.min(12, fs)) / 12) : 1;
     let L = s - prev, R = next - s;
     if (voicedGrain && Pa > 0) { L = Math.min(L, Math.max(1, Math.round(Pa * 1.0))) || L; R = Math.min(R, Math.max(1, Math.round(Pa * 1.0))) || R; }
     // Bords du fichier : fenêtre pleine jusqu'au bord.
     const lo = j === 0 ? -s : -L;
     const hi = j === J - 1 ? n - 1 - s : R;
     for (let d = lo; d <= hi; d++) {
-      const o = s + d, i = m + d;
-      if (o < 0 || o >= n || i < 0 || i >= n) continue;
+      const o = s + d;
+      if (o < 0 || o >= n) continue;
+      let i = m + d;
+      let frac = 0;
+      if (fr !== 1) { const x = m + d * fr; i = Math.floor(x); frac = x - i; if (i < 0 || i + 1 >= n) continue; }
+      else if (i < 0 || i >= n) continue;
       let w: number;
       if (d < 0) w = j === 0 ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * d) / L);
       else if (d > 0) w = j === J - 1 ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * d) / R);
       else w = 1;
       if (d === hi && j !== J - 1 && R > 0) continue; // le bord appartient au grain suivant
       wsum[o] += w;
-      for (let c = 0; c < channels.length; c++) outs[c][o] += channels[c][i] * w;
+      if (frac) for (let c = 0; c < channels.length; c++) outs[c][o] += (channels[c][i] + (channels[c][i + 1] - channels[c][i]) * frac) * w;
+      else for (let c = 0; c < channels.length; c++) outs[c][o] += channels[c][i] * w;
     }
   }
   // Fenêtres complémentaires : somme = 1. Elle creuse seulement quand une note

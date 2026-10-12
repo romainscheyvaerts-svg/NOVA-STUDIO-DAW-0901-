@@ -28,6 +28,8 @@ import { useSoloMuteLongPress } from './MobileSoloMute';
 import { dropModeOf, INSERT_MIME, insertCopyMenuItems, SEND_MIME, transferInsert, transferSend } from '../utils/insertCopy';
 import { keymapStore } from '../utils/keymapStore';
 import { applyTracks } from '../utils/structureBus';
+import SendFader from './SendFader';
+import { sendTransferMenuItems } from '../utils/sendFader';
 
 /**
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
@@ -100,6 +102,32 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
   // Pendant la lecture, l'envoi suit son automation.
   const shownLevel = useLiveParam(track.id, `send::${send.id}`, send.level);
   const getSendColor = sendColor;
+  // Au doigt (tablette) : l'envoi devient une barre qu'on glisse comme un fader (components/SendFader).
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  if (coarse) {
+    const bus = sendLabel(send.id, allTracks);
+    const setLevel = (val: number) => onUpdate({ ...track, sends: track.sends.map(s => sameSend(s, send) ? { ...s, level: val } : s) });
+    const togglePre = () => onUpdate({ ...track, sends: track.sends.map(s => sameSend(s, send) ? { ...s, preFader: !s.preFader } : s) });
+    return (
+      <div className="col-span-3 flex items-center gap-1 min-w-0">
+        <SendFader trackId={track.id} sendId={send.id} label={`Envoi vers ${bus}`} level={shownLevel} color={getSendColor(send.id)} muted={!!send.isMuted}
+          testId={`send-fader-${track.id}-${send.id}`} onChange={setLevel} onMenu={(x, y) => setMenu({ x, y })} />
+        <button type="button" onClick={togglePre}
+          aria-pressed={!!send.preFader} aria-label={`Envoi vers ${bus} : ${send.preFader ? 'pré-fader' : 'post-fader'}`}
+          className={`h-8 w-9 shrink-0 rounded text-[8px] font-black ${send.preFader ? 'bg-amber-400/90 text-black' : 'bg-white/10 text-slate-400'}`}>{send.preFader ? 'PRÉ' : 'POST'}</button>
+        {menu && (
+          <FloatingMenu x={menu.x} y={menu.y} title={`Envoi vers ${bus}`} onClose={() => setMenu(null)}
+            items={[
+              { label: 'Remettre à 0 dB', icon: 'fa-undo', onClick: () => setLevel(1) },
+              { label: send.preFader ? 'Passer après le fader (post)' : 'Passer avant le fader (pré)', icon: 'fa-exchange-alt', onClick: togglePre },
+              'separator',
+              ...sendTransferMenuItems(track, send, allTracks, bus, (fn, label) => applyTracks(fn, label)),
+            ]} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-w-0" title={`Envoi vers ${sendLabel(send.id, allTracks)}${sendHelp(send.id) ? ` : ${sendHelp(send.id)}` : ''}`}>
@@ -292,7 +320,7 @@ const ChannelStrip: React.FC<{
         <div className="h-[104px] shrink-0 bg-cyan-500/[0.04] border-b border-white/[0.04] p-2 overflow-hidden"><SendViewStrip track={track} all={allTracks} slot={sendViewSlot} /></div>
       )}
       {!isMaster && sendViewSlot === null && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
-        <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
+        <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden [@media(pointer:coarse)]:gap-1 [@media(pointer:coarse)]:overflow-y-auto">
           {track.sends.map((s, i) => <SendKnob key={`${s.id}-${s.slot ?? i}`} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
       )}
