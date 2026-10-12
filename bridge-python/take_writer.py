@@ -28,13 +28,15 @@ import logging
 import os
 import re
 import struct
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+
+# Même écriture atomique et mêmes noms sûrs que les projets sur le disque (pont v13).
+import project_store
 
 logger = logging.getLogger('NovaASIO')
 
@@ -207,41 +209,21 @@ def repair_wav(path: Path) -> int:
 # Prise en cours
 # ─────────────────────────────────────────────────────────────────────────────
 
-def documents_dir() -> Path:
-    """Dossier Documents de l'utilisateur (redirection OneDrive comprise)."""
-    if sys.platform == 'win32':
-        try:
-            import ctypes
-            buf = ctypes.create_unicode_buffer(260)
-            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
-                return Path(buf.value)
-        except Exception:
-            pass
-    return Path.home() / 'Documents'
-
-
 def takes_root() -> Path:
-    """Documents\\Nova Studio\\Prises (NOVA_TAKES_DIR : autre dossier, pour les tests)."""
+    """Documents\\Nova Studio\\Prises : à côté des projets sur le disque (project_store,
+    Documents\\Nova Studio\\Projets). NOVA_TAKES_DIR : autre dossier (tests)."""
     env = os.environ.get('NOVA_TAKES_DIR')
-    return Path(env) if env else documents_dir() / 'Nova Studio' / 'Prises'
+    return Path(env) if env else project_store.default_root().parent / 'Prises'
 
 
 def safe_name(s: Any, fallback: str = 'Sans titre', limit: int = 60) -> str:
-    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', ' ', str(s or ''))
-    s = re.sub(r'\s+', ' ', s).strip(' .')
-    return (s[:limit].strip(' .') or fallback)
+    """Nom de dossier / fichier sûr : même règle que les projets (noms réservés de Windows compris)."""
+    return project_store.safe_name(str(s or ''), fallback)[:limit].strip(' .') or fallback
 
 
 def _write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix('.json.tmp')
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
-    for _ in range(20):
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:          # Windows : fichier ouvert un instant par un autre lecteur
-            time.sleep(0.02)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    """Métadonnées écrites comme les projets : fichier temporaire, fsync, puis remplacement atomique."""
+    project_store.write_atomic(path, json.dumps(data, ensure_ascii=False, indent=1).encode('utf-8'))
 
 
 class TakeTrack:

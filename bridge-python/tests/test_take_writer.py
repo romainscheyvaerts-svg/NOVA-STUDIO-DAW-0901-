@@ -161,7 +161,7 @@ class TestRingAndWav(Base):
 class TestTakes(Base):
     def make(self, st, tracks, **kw):
         mgr = TakeManager(self.root, threaded=False)
-        s = mgr.start(st.capture, kw.pop('take_id', 'tk-test'), {'id': 'p1', 'name': 'Séance: test/1'}, tracks, st.block_size, **kw)
+        s = mgr.start(st.capture, kw.pop('take_id', 'tk-test'), {'id': 'p1', 'name': kw.pop('project', 'Séance: test/1')}, tracks, st.block_size, **kw)
         return mgr, s
 
     def read(self, path):
@@ -263,6 +263,20 @@ class TestTakes(Base):
             mgr.stop('tk-test')
         finally:
             take_writer.HEADER_EVERY = old
+
+    def test_names_and_root_follow_project_store(self):
+        """Prises à côté des projets sur le disque, noms sûrs comme les projets (CON, NUL…)."""
+        old = os.environ.pop('NOVA_TAKES_DIR', None)
+        try:
+            self.assertEqual(take_writer.takes_root(), take_writer.project_store.default_root().parent / 'Prises')
+        finally:
+            if old is not None:
+                os.environ['NOVA_TAKES_DIR'] = old
+        st, card = self.open_stream()
+        mgr, s = self.make(st, [{'track_id': 'a', 'name': 'NUL', 'inputs': [0]}], take_id='tk-con', project='CON')
+        self.assertNotEqual(s.folder.name.lower(), 'con')
+        mgr.stop('tk-con')
+        self.assertFalse(list(s.folder.glob('*.tmp')))          # écriture atomique : aucun reste
 
     def test_refuses_bad_ids_and_files_outside(self):
         st, card = self.open_stream()
