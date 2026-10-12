@@ -83,6 +83,29 @@ describe('daw-session', () => {
     expect(stale.json.version).toBe(1);
   });
 
+  it("sign_upload : quelques morceaux signés sans lister la séance ; un gros envoi saute ce qui y est déjà", async () => {
+    const { json: s } = await call(dawSession, { action: 'create', name: 'S' });
+    const store = (db.storage['daw-sessions'] ||= new Map());
+    const deja = 'b'.repeat(40);
+    store.set(`${s.id}/${deja}`, { size: 10, created_at: new Date().toISOString() });
+    // Un morceau de prise (1 par seconde) : signé directement, la séance n'est pas listée.
+    let listes = 0;
+    const spy = new Proxy(store, { get(t, k) { if (k === 'entries') listes++; const v = (t as any)[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+    db.storage['daw-sessions'] = spy as any;
+    const petit = await call(dawSession, { action: 'sign_upload', id: s.id, secret: s.secret, parts: ['c'.repeat(40)] });
+    expect(petit.status).toBe(200);
+    expect(Object.keys(petit.json.uploads)).toEqual(['c'.repeat(40)]);
+    expect(listes).toBe(0);
+    // Gros envoi (séance entière) : ce qui est déjà stocké n'est pas renvoyé.
+    const parts = [deja, ...'01234'.split('').map(ch => ch.repeat(40))];
+    const gros = await call(dawSession, { action: 'sign_upload', id: s.id, secret: s.secret, parts });
+    expect(gros.status).toBe(200);
+    expect(Object.keys(gros.json.uploads)).not.toContain(deja);
+    expect(Object.keys(gros.json.uploads)).toHaveLength(5);
+    expect(listes).toBeGreaterThan(0);
+    db.storage['daw-sessions'] = store;
+  });
+
   it('collaboration : compte connecté ET abonné exigé ; une clé par appareil ; op seulement après join', async () => {
     const { json: s } = await call(dawSession, { action: 'create', name: 'Feat' });
     const join = { action: 'join', id: s.id, secret: s.secret, role: 'artist', device_id: 'tel-1' };
