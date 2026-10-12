@@ -51,7 +51,8 @@ import { directMonitorRoutes, outputLayout } from '../utils/cueMix';
 import { newTakeGroupId } from '../utils/takeGroups';
 import type { CueMix, RecordInput } from '../types';
 import { metronomeService } from '../services/MetronomeService';
-import type { ASIOStreamInfo, ASIOLatencyResult } from '../services/ASIOBridge';
+import type { ASIOStreamInfo, ASIOLatencyResult, BridgeTakeInfo } from '../services/ASIOBridge';
+import { bridgeTakePlacement, bridgeTakesEnabled, bridgeTrackSpec, lossMessage, newBridgeTakeId, parseWav } from '../utils/bridgeTake';
 import { CaptureRing as _CaptureRing, chooseCapture, captureMinutes, captureWorkletSource, type PlayRun } from '../utils/audioCapture';
 void _CaptureRing;
 
@@ -169,14 +170,30 @@ function medianOf(v: number[]): number {
 /** Prise à journaliser : piste, position, latence ; `group` et `channels` en multipiste (R14). */
 export interface TakeJournalMeta { trackId: string; recordedAt: number; latency: number; sampleRate: number; group?: string; channels?: number }
 
-/** Résultat d'une prise : un clip par piste armée ; `group` = groupe de prises (passage multipiste). */
-export interface TakeResult { clip: Clip; trackId: string; group?: string }
+/**
+ * Résultat d'une prise : un clip par piste armée ; `group` = groupe de prises (passage multipiste).
+ * C1 : `bridgeFile` = fichier écrit par le pont ASIO (la prise vient de lui) ; `note` = message
+ * pour l'ingé (blocs perdus, ou prise du navigateur gardée faute de fichier du pont).
+ */
+export interface TakeResult { clip: Clip; trackId: string; group?: string; bridgeFile?: string; note?: string }
+
+/** Référence au fichier du pont, gardée dans le journal de prise (récupération après plantage). */
+export interface BridgeTakeRef {
+  takeId: string; trackId: string; startFrame: number; sampleRate: number;
+  /** Calage (connu ~0,2 s après le début) : n° d'image de la carte du 1er échantillon de la page, sa position, l'avance (images). */
+  anchorFrame?: number; pos0?: number; lead?: number;
+  /** Latence compensée de la piste (s), la même que celle notée par le pont. */
+  latency?: number;
+}
+
+/** Projet et noms des pistes, pour ranger les prises du pont (Documents\Nova Studio\Prises\<projet>). */
+export interface TakeContext { projectId: string; projectName: string; trackName: (id: string) => string }
 
 /** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
 export interface TakeJournalLike {
   push(chunk: Float32Array): void;
   /** Avance du son sur le départ de la lecture (s) : la prise récupérée est replacée au bon endroit. */
-  annotate?(patch: { lead?: number }): void;
+  annotate?(patch: { lead?: number; bridge?: BridgeTakeRef }): void;
   finish(): Promise<void>;
   discard(): Promise<void>;
 }
@@ -252,6 +269,19 @@ export class AudioEngine {
   private takeJournalFactory: ((m: TakeJournalMeta) => TakeJournalLike | null) | null = null;
   /** R14 : un journal par piste de la prise. */
   private recJournals = new Map<string, TakeJournalLike>();
+  /** C1 : projet et noms des pistes (App), pour nommer les fichiers du pont. */
+  private takeContext: (() => TakeContext) | null = null;
+  /** C1 : prise écrite en même temps par le pont ASIO (la page ne garde que l'aperçu). */
+  private bridgeTake: {
+    id: string;
+    info: BridgeTakeInfo | null;
+    started: Promise<BridgeTakeInfo | null>;
+    /** n° d'image de la carte du 1er échantillon de la page (repère du lecteur d'entrée). */
+    anchorFrame: number | null;
+    anchorSent: boolean;
+  } | null = null;
+  /** QA (localStorage nova_qa_take_debug = 1) : prise de la page et prise du pont de la dernière prise. */
+  public lastTakeDebug: any = null;
   /** R14 : entrées des pistes armées (plusieurs à la fois), source partagée. */
   private inputRouter: InputRouter | null = null;
   /** Entrée demandée par piste armée (Track.recordInput). */
@@ -702,6 +732,8 @@ export class AudioEngine {
   }
 
   /** Journal des prises (récupération après plantage) : branché par l'appli. */
+  public setTakeContext(f: (() => TakeContext) | null) { this.takeContext = f; }
+
   public setTakeJournalFactory(f: ((m: TakeJournalMeta) => TakeJournalLike | null) | null) {
     this.takeJournalFactory = f;
   }
@@ -2162,9 +2194,10 @@ export class AudioEngine {
             } catch { /* le journal ne doit jamais empêcher la prise */ }
           }
           this.recLeadDone = false;
-          if (this.recJournals.size) {
+          if (this.recJournals.size || this.canBridgeTake()) {
             session.onChunks = cs => {
               this.annotateLead();
+              this.sendBridgeAnchor();
               for (const l of input.layout) {
                 const j = this.recJournals.get(l.trackId);
                 if (!j) continue;
@@ -2188,6 +2221,8 @@ export class AudioEngine {
           this.recordingTrackId = this.recordingTrackIds[0];
           this.latencySamples = [];
           if (!this.latencyTimer) this.startLatencyWatch();
+          // C1 : Nova Studio — le pont écrit la prise lui-même, depuis le callback de la carte.
+          this.startBridgeTake(input.layout, currentTime);
           console.log("[AudioEngine] Recording started (enregistreur calé) on tracks:", this.recordingTrackIds, `${input.channels} canaux`);
           return true;
         }
@@ -2238,6 +2273,141 @@ export class AudioEngine {
     this.recLeadDone = true;
     const lead = Math.max(0, (playStart + this.recStartTime) - first / this.ctx.sampleRate);
     this.recJournals.forEach(j => { try { j.annotate?.({ lead }); } catch { /* */ } });
+  }
+
+  // ─── C1 · prise écrite par le pont ASIO ──────────────────────────────────────
+
+  /** Le pont peut-il écrire la prise (Nova Studio, flux de la carte, pont récent) ? */
+  private canBridgeTake(): boolean {
+    return !!this.asioBridge && this.asioConnected && this.asioStreamActive && this.asioBridge.supportsTakeWriter()
+      && this.inputRouter?.getSource()?.kind === 'asio' && bridgeTakesEnabled();
+  }
+
+  private startBridgeTake(layout: { trackId: string; first: number; width: 1 | 2 }[], position: number) {
+    this.bridgeTake = null;
+    if (!this.canBridgeTake()) return;
+    const ctxInfo = (() => { try { return this.takeContext?.() || null; } catch { return null; } })();
+    const tracks = layout.map(l => {
+      const tap = this.inputRouter!.tap(l.trackId);
+      const spec = bridgeTrackSpec(tap?.channels || [], l.width);
+      return { track_id: l.trackId, name: ctxInfo?.trackName(l.trackId) || l.trackId, ...spec };
+    }).filter(t => t.inputs.length);
+    if (!tracks.length) return;
+    const id = newBridgeTakeId();
+    const bt: NonNullable<AudioEngine['bridgeTake']> = { id, info: null, started: Promise.resolve(null), anchorFrame: null, anchorSent: false };
+    bt.started = this.asioBridge!.recStart({ take_id: id, project_id: ctxInfo?.projectId, project_name: ctxInfo?.projectName, position, tracks }).then(r => {
+      if (r && r.success) {
+        bt.info = r;
+        // Journal de la page : il renvoie au fichier du pont (récupéré en priorité après un plantage).
+        this.recJournals.forEach((j, trackId) => { try { j.annotate?.({ bridge: { takeId: id, trackId, startFrame: r.start_frame || 0, sampleRate: r.sample_rate || 0 } }); } catch { /* */ } });
+        console.log(`[AudioEngine] Prise écrite par le pont : ${r.dir}`);
+        this.sendBridgeAnchor();
+      } else {
+        console.warn('[AudioEngine] Le pont n\'écrit pas cette prise :', r?.error || 'pas de réponse');
+      }
+      return bt.info;
+    });
+    this.bridgeTake = bt;
+  }
+
+  /** Position (s, avant compensation) du 1er échantillon de la page, comme stopCalibratedRecording. */
+  private recPos0(firstFrame: number, sr: number): { pos0: number; lead: number } {
+    const playStart = this.recPlayStart ?? (this.isPlaying ? this.playbackStartTime : null);
+    if (playStart === null || firstFrame < 0) return { pos0: this.recStartTime, lead: 0 };
+    const playCtxAtStart = playStart + this.recStartTime;
+    const lead = Math.max(0, Math.round((playCtxAtStart - firstFrame / sr) * sr));
+    return { pos0: firstFrame / sr - playStart, lead };
+  }
+
+  /**
+   * Calage de la prise du pont, dès que le 1er échantillon de la page est connu : n° d'image
+   * de la carte de cet échantillon (lecteur d'entrée), noté par le pont et dans le journal.
+   */
+  private sendBridgeAnchor() {
+    const bt = this.bridgeTake;
+    const session = this.recSession;
+    if (!bt || !session || !this.ctx || session.firstFrame < 0) return;
+    if (bt.anchorFrame === null) {
+      const y = this.asioInput?.srcFrameAt(session.firstFrame);
+      if (y === null || y === undefined || !Number.isFinite(y)) return;
+      bt.anchorFrame = Math.round(y);
+    }
+    if (bt.anchorSent || !bt.info) return;
+    bt.anchorSent = true;
+    const sr = this.ctx.sampleRate;
+    const { pos0, lead } = this.recPos0(session.firstFrame, sr);
+    const common = this.measureRecordLatency().total + this.recOffsetMs / 1000;
+    const offs = channelOffsets();
+    const offsets: Record<string, number> = {};
+    for (const [id, ch] of this.recChannels) offsets[id] = common + channelOffsetSec(ch, offs);
+    this.asioBridge?.recAnchor({ take_id: bt.id, frame: bt.anchorFrame, pos0, latency: common, offsets, lead, ctx_rate: sr });
+    this.recJournals.forEach((j, trackId) => {
+      try { j.annotate?.({ bridge: { takeId: bt.id, trackId, startFrame: bt.info!.start_frame || 0, sampleRate: bt.info!.sample_rate || sr, anchorFrame: bt.anchorFrame!, pos0, lead, latency: offsets[trackId] ?? common } }); } catch { /* */ }
+    });
+  }
+
+  /**
+   * Fin de la prise côté pont : fichiers fermés, relus, et posés EXACTEMENT où la prise de la
+   * page l'aurait été. Rend, par piste, le son du pont (ou rien : la prise de la page reste).
+   */
+  private async finishBridgeTake(bt: NonNullable<AudioEngine['bridgeTake']>, p: { firstFrame: number; pos0: number; lead: number; sr: number; lats: Map<string, number>; widths: Map<string, 1 | 2> }):
+    Promise<{ byTrack: Map<string, { channels: Float32Array[]; start: number; path: string }>; note?: string }> {
+    const byTrack = new Map<string, { channels: Float32Array[]; start: number; path: string }>();
+    const bridge = this.asioBridge;
+    const info = await bt.started;
+    if (!info || !bridge) return { byTrack, note: info === null && bridge ? 'Le pont n\'a pas écrit cette prise : prise du navigateur gardée.' : undefined };
+    const stopped = await bridge.recStop(bt.id);
+    if (!stopped || !stopped.success || !stopped.files) {
+      return { byTrack, note: `Prise de la carte non relue (${stopped?.error || 'pas de réponse du pont'}) : prise du navigateur gardée.` };
+    }
+    if (bt.anchorFrame === null && p.firstFrame >= 0) {
+      const y = this.asioInput?.srcFrameAt(p.firstFrame);
+      if (y !== null && y !== undefined && Number.isFinite(y)) bt.anchorFrame = Math.round(y);
+    }
+    const sr = p.sr;
+    if (bt.anchorFrame === null || (stopped.sample_rate && stopped.sample_rate !== sr)) {
+      return { byTrack, note: `Prise de la carte écrite (${stopped.dir}) mais non calée ici (fréquence ${stopped.sample_rate} Hz ≠ ${sr} Hz) : prise du navigateur gardée.` };
+    }
+    const Y = bt.anchorFrame;
+    for (const f of stopped.files) {
+      const lat = p.lats.get(f.track_id);
+      if (lat === undefined) continue;
+      const got = await bridge.recFetch(bt.id, f.track_id);
+      if (!got) continue;
+      let wav;
+      try { wav = parseWav(got.buffer); } catch (e) { console.warn('[AudioEngine] Fichier du pont illisible', e); continue; }
+      if (wav.sampleRate !== sr || wav.channels.length !== (p.widths.get(f.track_id) || 1)) continue;
+      const pl = bridgeTakePlacement({ startFrame: stopped.start_frame || 0, anchorFrame: Y, pos0: p.pos0, latency: lat, lead: p.lead, sampleRate: sr, frames: wav.frames });
+      if (pl.frames < sr * 0.05) continue;
+      byTrack.set(f.track_id, { channels: wav.channels.map(c => c.subarray(pl.from)), start: pl.start, path: f.path });
+    }
+    if (byTrack.size) bridge.recImported(bt.id);
+    const lat0 = byTrack.size ? (p.lats.get([...byTrack.keys()][0]) || 0) : 0;
+    const loss = lossMessage(stopped.losses || [], stopped.block_size || this.asioBlockSize, frame => p.pos0 + (frame - Y) / sr - lat0);
+    const missing = stopped.files.filter(f => p.lats.has(f.track_id) && !byTrack.has(f.track_id)).length;
+    const parts = [loss, missing ? `${missing} fichier${missing > 1 ? 's' : ''} du pont non relu${missing > 1 ? 's' : ''} : prise du navigateur gardée pour ${missing > 1 ? 'ces pistes' : 'cette piste'}` : null].filter(Boolean);
+    try { window.dispatchEvent(new CustomEvent('nova:bridge-take', { detail: { takeId: bt.id, dir: stopped.dir, files: stopped.files, losses: stopped.losses, lostBlocks: stopped.lost_blocks, used: [...byTrack.keys()] } })); } catch { /* */ }
+    return { byTrack, note: parts.length ? parts.join(' — ') : undefined };
+  }
+
+  /**
+   * C1 · Prise du pont retrouvée après un plantage de la page (journal annoté) : son fichier,
+   * posé à sa place. null si le pont ne l'a pas (ou pas encore calée) : le journal sert alors.
+   */
+  public async recoverBridgeTake(ref: BridgeTakeRef, latency: number): Promise<{ channels: Float32Array[]; sampleRate: number; start: number; path: string } | null> {
+    if (ref.anchorFrame === undefined || ref.pos0 === undefined) return null;
+    if (!this.asioConnected) { try { await this.connectASIO(); } catch { return null; } }
+    for (let i = 0; i < 30 && this.asioBridge && !this.asioBridge.supportsTakeWriter(); i++) await new Promise(r => setTimeout(r, 100));
+    if (!this.asioBridge?.supportsTakeWriter()) return null;
+    const got = await this.asioBridge.recFetch(ref.takeId, ref.trackId);
+    if (!got) return null;
+    let wav;
+    try { wav = parseWav(got.buffer); } catch { return null; }
+    const sr = wav.sampleRate;
+    const pl = bridgeTakePlacement({ startFrame: Number(got.meta.start_frame ?? ref.startFrame), anchorFrame: ref.anchorFrame, pos0: ref.pos0, latency: ref.latency ?? latency, lead: ref.lead || 0, sampleRate: sr, frames: wav.frames });
+    if (pl.frames <= 0) return null;
+    this.asioBridge.recImported(ref.takeId);
+    return { channels: wav.channels.map(c => c.subarray(pl.from)), sampleRate: sr, start: pl.start, path: got.path };
   }
 
   /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
@@ -2352,22 +2522,42 @@ export class AudioEngine {
     const offs = channelOffsets();
     const stamp = Date.now();
     const out: TakeResult[] = [];
+    const lats = new Map(input.layout.map(l => [l.trackId, latency + channelOffsetSec(recChannels.get(l.trackId) || [], offs)] as [string, number]));
+    // C1 : la prise écrite par le pont remplace celle de la page (même calage, sans trou).
+    const bt = this.bridgeTake;
+    this.bridgeTake = null;
+    let bridged: Awaited<ReturnType<AudioEngine['finishBridgeTake']>> = { byTrack: new Map() };
+    if (bt) {
+      try {
+        bridged = await this.finishBridgeTake(bt, { firstFrame, pos0: playStart !== null && firstFrame >= 0 ? firstFrame / sr - playStart : recordedAt, lead, sr, lats, widths: new Map(input.layout.map(l => [l.trackId, l.width])) });
+      } catch (e) {
+        console.warn('[AudioEngine] Prise du pont non relue', e);
+        bridged = { byTrack: new Map(), note: 'Prise de la carte non relue : prise du navigateur gardée.' };
+      }
+    }
+    const debug = (() => { try { return localStorage.getItem('nova_qa_take_debug') === '1'; } catch { return false; } })();
+    const dbg: Record<string, any> = {};
     input.layout.forEach((l, k) => {
-      const lat = latency + channelOffsetSec(recChannels.get(l.trackId) || [], offs);
+      const lat = lats.get(l.trackId)!;
       let start = rawStart - lat;
       let skip = 0;
       if (start < 0) { skip = Math.round(-start * sr); start = 0; }
       const from = Math.min(len, lead + skip);
-      const bodies = (l.width === 1 ? [channels[l.first]] : [channels[l.first], channels[l.first + 1]]).map(c => c.subarray(from));
+      const browserBodies = (l.width === 1 ? [channels[l.first]] : [channels[l.first], channels[l.first + 1]]).map(c => c.subarray(from));
+      const br = bridged.byTrack.get(l.trackId);
+      if (debug) dbg[l.trackId] = { browserStart: start, browser: browserBodies[0], bridgeStart: br?.start ?? null, bridge: br?.channels[0] ?? null, path: br?.path ?? null };
+      const bodies = br ? br.channels : browserBodies;
+      if (br) start = br.start;
       if (bodies[0].length < sr * 0.05) return;
       const buffer = ctx.createBuffer(l.width, bodies[0].length, sr);
       bodies.forEach((b, i) => buffer.copyToChannel(b, i));
       const blob = encodeWav24(l.width === 1 ? bodies[0] : bodies, sr);
-      console.log(`[AudioEngine] Prise replacée (${l.trackId}) : latence ${Math.round(lat * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)`);
-      try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(lat * 1000), sec: lat, raw: rawStart, trackId: l.trackId } })); } catch { /* */ }
+      console.log(`[AudioEngine] Prise replacée (${l.trackId}) : latence ${Math.round(lat * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)${br ? ` — fichier du pont : ${br.path}` : ''}`);
+      try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(lat * 1000), sec: lat, raw: rawStart, trackId: l.trackId, bridge: !!br } })); } catch { /* */ }
       out.push({
         trackId: l.trackId,
         ...(group ? { group } : {}),
+        ...(br ? { bridgeFile: br.path } : {}),
         clip: {
           id: k ? `rec-${stamp}-t${k}` : `rec-${stamp}`,
           name: `Vocal Take ${new Date().toLocaleTimeString()}`,
@@ -2383,6 +2573,8 @@ export class AudioEngine {
         },
       });
     });
+    if (bridged.note && out.length) out[0].note = bridged.note;
+    this.lastTakeDebug = debug ? { at: Date.now(), bridgeTake: bt?.id ?? null, anchorFrame: bt?.anchorFrame ?? null, firstFrame, lead, sr, tracks: dbg, note: bridged.note ?? null } : null;
     return out;
   }
 

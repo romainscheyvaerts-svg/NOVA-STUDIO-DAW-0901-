@@ -20,8 +20,29 @@
  * exactement autant d'échantillons. La correspondance entrée de la carte → horloge du
  * DAW reste la même : une prise ne glisse pas sur la grille après un à-coup (avant, chaque
  * à-coup la décalait de la durée du trou, mesuré : +10,6 ms sous charge).
+ *
+ * Chantier C1 · Repères carte ↔ contexte : chaque échantillon du tampon garde le n° d'image
+ * de la carte dont il vient. Le lecteur envoie un repère {image du contexte, image de la
+ * carte} à chaque discontinuité (départ, rattrapage, saut) : entre deux repères la relation
+ * est linéaire. La prise écrite par le pont se cale ainsi exactement sur la prise de la page
+ * (srcFrameAt), même si la page se fige ensuite.
  */
 import { blockJoin } from '../utils/asioProtocol';
+
+/** Repère carte ↔ contexte : l'image `ctx` du contexte joue l'image `src` de la carte. */
+export interface SrcAnchor { ctx: number; src: number; ratio: number }
+
+/**
+ * Image de la carte jouée à l'image `ctxFrame` du contexte : dernier repère avant elle (le
+ * premier après, s'il n'y en a pas), puis la droite. null sans repère (ancien pont, v1).
+ */
+export function srcFrameFromAnchors(anchors: SrcAnchor[], ctxFrame: number): number | null {
+  if (!anchors.length) return null;
+  let a: SrcAnchor | null = null;
+  for (const x of anchors) { if (x.ctx <= ctxFrame) a = x; else break; }
+  if (!a) a = anchors[0];
+  return a.src + (ctxFrame - a.ctx) * a.ratio;
+}
 
 const WORKLET = `
 const blockJoin = (${blockJoin.toString()});
@@ -33,6 +54,9 @@ class AsioInputPlayer extends AudioWorkletProcessor {
     this.size = sampleRate * 2;            // 2 s de tampon
     this.bufs = [];
     for (let c = 0; c < this.n; c++) this.bufs.push(new Float32Array(this.size));
+    this.src = new Float64Array(this.size);  // n° d'image de la carte de chaque échantillon (NaN : inconnu)
+    this.ratio = 1;
+    this.aCtx = -1; this.aSrc = 0;           // dernier repère envoyé
     this.w = 0;                             // index d'écriture (échantillons rééchantillonnés)
     this.r = 0;                             // index de lecture
     this.fill = 0;
@@ -66,6 +90,9 @@ class AsioInputPlayer extends AudioWorkletProcessor {
       }
       const n = pad + frames - skip;
       if (n <= 0) return;
+      // Image de la carte de la position 0 de la suite (le dernier échantillon du bloc précédent).
+      const seq0 = typeof m.frameIndex === 'number' ? m.frameIndex - pad + skip - 1 : NaN;
+      this.ratio = ratio;
       // Rééchantillonnage linéaire vers sampleRate, continu d'un bloc à l'autre
       // (le dernier échantillon du bloc précédent sert de point de départ).
       const src = (c, i) => {
@@ -82,6 +109,7 @@ class AsioInputPlayer extends AudioWorkletProcessor {
           const a = src(c, i), b = src(c, i + 1);
           this.bufs[c][this.w] = a + (b - a) * f;
         }
+        this.src[this.w] = seq0 + pos;
         this.w = (this.w + 1) % this.size;
         if (this.fill < this.size) this.fill++;
         else this.r = (this.r + 1) % this.size;
@@ -122,6 +150,15 @@ class AsioInputPlayer extends AudioWorkletProcessor {
       let v = 0;
       if (this.fill > 0) {
         const r = this.r;
+        const sf = this.src[r];
+        if (sf === sf) {
+          // Repère carte ↔ contexte à chaque discontinuité (les autres échantillons suivent la droite).
+          const fr = currentFrame + i;
+          if (this.aCtx < 0 || Math.abs(sf - (this.aSrc + (fr - this.aCtx) * this.ratio)) > 1e-3) {
+            this.aCtx = fr; this.aSrc = sf;
+            this.port.postMessage({ type: 'anchor', ctx: fr, src: sf, ratio: this.ratio });
+          }
+        }
         if (sel >= 0 && sel < this.n) v = this.bufs[sel][r];
         else { v = this.bufs[0][r]; if (this.n > 1) v += this.bufs[1][r]; }
         if (multi) for (let c = 0; c < multi.length; c++) multi[c][i] = c < this.n ? this.bufs[c][r] : 0;
@@ -161,6 +198,8 @@ export class ASIOInput {
   /** Échantillons joués en silence faute de données, puis rattrapés (calage gardé). */
   public underruns = 0;
   public caught = 0;
+  /** Repères carte ↔ contexte (les plus récents), dans l'ordre. */
+  public anchors: SrcAnchor[] = [];
 
   /** Nœud du lecteur : sortie 0 = voix mono (historique), sortie 1 = toutes les entrées. */
   public getNode(): AudioNode | null { return this.node; }
@@ -189,6 +228,11 @@ export class ASIOInput {
       this.node.port.postMessage({ type: 'channel', channel: this.channel });
       this.node.port.onmessage = (e) => {
         const d = e.data;
+        if (d?.type === 'anchor') {
+          this.anchors.push({ ctx: d.ctx, src: d.src, ratio: d.ratio || 1 });
+          if (this.anchors.length > 512) this.anchors.splice(0, this.anchors.length - 512);
+          return;
+        }
         if (d?.type !== 'fill') return;
         this.fillSec = d.fill / this.ctx.sampleRate;
         this.gaps = d.gaps || 0; this.gapFrames = d.gapFrames || 0; this.dups = d.dups || 0;
@@ -216,6 +260,11 @@ export class ASIOInput {
     // Copie : le tampon d'origine est une vue sur le message WebSocket.
     const copy = new Float32Array(data);
     this.node.port.postMessage({ type: 'audio', data: copy, channels, rate: rate || this.sourceRate, frameIndex }, [copy.buffer]);
+  }
+
+  /** Chantier C1 · image de la carte jouée à l'image `ctxFrame` du contexte (null : inconnue). */
+  public srcFrameAt(ctxFrame: number): number | null {
+    return srcFrameFromAnchors(this.anchors, ctxFrame);
   }
 
   /** -1 = mix des entrées 1+2 (défaut), 0 = entrée 1, 1 = entrée 2… (sortie 0). */

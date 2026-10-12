@@ -833,6 +833,23 @@ function Studio() {
       if (!project) project = { ...stateRef.current, isPlaying: false, isRecording: false };
       if (opts.takes) {
         const takes = await store.takesToRecover();
+        // C1 · Nova Studio : la prise écrite par le pont (fichier complet sur le disque) passe
+        // avant le journal de la page (qui peut avoir des trous si la page s'était figée).
+        let fromBridge = 0;
+        for (let i = 0; i < takes.length; i++) {
+          const ref = takes[i].meta.bridge;
+          if (!ref) continue;
+          try {
+            const r = await audioEngine.recoverBridgeTake(ref, takes[i].meta.latency || 0);
+            if (!r) continue;
+            const nc = r.channels.length, len = r.channels[0].length;
+            const samples = nc === 1 ? r.channels[0] : new Float32Array(len * nc);
+            if (nc > 1) for (let k = 0; k < len; k++) for (let c = 0; c < nc; c++) samples[k * nc + c] = r.channels[c][k];
+            takes[i] = { meta: { ...takes[i].meta, recordedAt: r.start, latency: 0, lead: 0, sampleRate: r.sampleRate, ...(nc > 1 ? { channels: nc } : { channels: undefined }) }, samples, seconds: len / r.sampleRate };
+            fromBridge++;
+          } catch (e) { console.warn('[Récupération] prise du pont', e); }
+        }
+        if (fromBridge) report.push(`${fromBridge > 1 ? `${fromBridge} prises reprises` : 'prise reprise'} du fichier écrit par la carte son (complet)`);
         const items = takes.map(t => {
           const id = `recup-${t.meta.takeId}`;
           // R14 : entrée stéréo = échantillons entrelacés G/D dans le journal.
@@ -2072,10 +2089,12 @@ function Studio() {
     const clipIds = [...placed.values()].flatMap(p => p.newClipIds);
     setTimeout(() => requestBreaths({ mode: 'auto', trackIds, clipIds, reason: 'take' }), 400);
     const p0 = placed.get(first.trackId)!;
+    // C1 : blocs perdus pendant la prise (pont), ou prise du navigateur gardée faute de fichier.
+    const bridgeNote = kept.map(r => r.note).filter(Boolean).join(' — ');
     const names = (ids: string[]) => ids.map(id => `« ${stateRef.current.tracks.find(t => t.id === id)?.name || id} »`).join(', ');
     if (p0.loopCount) {
       setTakeLanesOpen(prev => ({ ...prev, ...Object.fromEntries(trackIds.map(id => [id, true])) }));
-      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.`);
+      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.${bridgeNote ? ` ${bridgeNote}.` : ''}`);
       return first;
     }
     const mutedOld = [...placed.values()].reduce((s, p) => s + p.mutedOld, 0);
@@ -2088,6 +2107,7 @@ function Studio() {
     if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
     if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
     if (p0.droppedPass) parts.push(droppedPassNote(p0.droppedPass).trim());
+    if (bridgeNote) parts.push(bridgeNote);
     parts.push('▶ pour l\'écouter · Annuler pour revenir');
     setAiNotification(parts.join(' — '));
     // QuickPunch : la lecture continue, pas de carte de coaching au milieu (ni en multipiste).
@@ -4933,6 +4953,11 @@ function Studio() {
   qaHooksRef.current.setCueMixes = handleCueMixesChange;
   // Journal de prise : le moteur écrit chaque morceau capté pendant l'enregistrement.
   useEffect(() => {
+    // C1 : les prises écrites par le pont sont rangées par projet, nommées comme les pistes.
+    audioEngine.setTakeContext(() => {
+      const st = stateRef.current;
+      return { projectId: st.id, projectName: (st as any).name || st.id, trackName: id => st.tracks.find(x => x.id === id)?.name || id };
+    });
     audioEngine.setTakeJournalFactory(m => {
       const st = stateRef.current;
       const t = st.tracks.find(x => x.id === m.trackId);
@@ -4944,7 +4969,7 @@ function Studio() {
         ...(m.group ? { group: m.group } : {}), ...(m.channels && m.channels > 1 ? { channels: m.channels } : {}),
       }, m.channels && m.channels > 1 ? Math.round(m.sampleRate / 2) * m.channels : undefined);
     });
-    return () => audioEngine.setTakeJournalFactory(null);
+    return () => { audioEngine.setTakeJournalFactory(null); audioEngine.setTakeContext(null); };
   }, []);
 
   // --- Session à emporter (en ligne) -------------------------------------------------

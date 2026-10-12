@@ -10,8 +10,14 @@ La carte simulée « Carte simulée 8x8 » (QA_INS entrées, QA_OUTS sorties, 44
     ADAT, préampli externe) : c'est ce que la compensation par entrée doit rattraper ;
   - mesure de latence : boucle sortie 1 → entrées 1-4 (384 échantillons, 408 pour l'entrée 3).
 
+QA_SIGNAL=rampe (chantier C1, prise écrite par le pont) : chaque entrée porte le NUMÉRO de
+chaque échantillon (entrée c, image i : ((i + 1000·c) mod 2^20) / 2^20 − 0,5, exact en
+float32) : une prise relue doit redonner des numéros consécutifs, au bit près.
+
 Actions de test en plus du protocole : QA_DUMP {path, seconds} (sorties écrites par la
-carte, .npy images × canaux), QA_STATS (flux ouverts : tampon, canaux).
+carte, .npy images × canaux), QA_STATS (flux ouverts : tampon, canaux), QA_DROP {blocks,
+after} (le pilote perd `blocks` blocs dans `after` secondes : drapeau input_overflow).
+Les prises écrites par le pont vont dans NOVA_TAKES_DIR (jamais dans les Documents).
 
 Usage : <python du pont> qa/harness/pont_asio_simule.py  (port : NOVA_ASIO_PORT, 8796 par défaut)
 """
@@ -55,8 +61,15 @@ def generator(frame, frames, n_in, sr):
     return out
 
 
+def ramp(frame, frames, n_in, sr):
+    idx = frame + np.arange(frames)
+    return np.stack([((idx + 1000 * c) % (1 << 20)) / (1 << 20) - 0.5 for c in range(n_in)], axis=1).astype(np.float32)
+
+
+GEN = ramp if os.environ.get("QA_SIGNAL") == "rampe" else generator
+
 fsd.STATE['devices'] = [{'name': 'Carte simulée 8x8', 'hostapi': 0, 'max_input_channels': INS, 'max_output_channels': OUTS, 'default_samplerate': float(SR)}]
-fsd.STATE['generator'] = generator
+fsd.STATE['generator'] = GEN
 fsd.STATE['capture_seconds'] = 90.0
 fsd.STATE['realtime'] = True
 
@@ -77,7 +90,7 @@ def start_probe(self, outs, seconds=0.6, amp=0.5):
 
 def finish_probe(self, p):
     fsd.STATE['loopback'] = {}
-    fsd.STATE['generator'] = generator
+    fsd.STATE['generator'] = GEN
     return _finish_probe(self, p)
 
 
@@ -94,6 +107,17 @@ class QAServer(ab.ASIOBridgeServer):
             n = int(float(data.get("seconds", 2)) * SR)
             np.save(data["path"], x[-n:] if n > 0 else x)
             await self._send(client_id, {"action": "QA_DUMPED", "frames": int(min(n, len(x))), "channels": int(x.shape[1]) if x.ndim == 2 else 0})
+            return
+        if a == "QA_DROP":
+            st = fsd.streams[-1] if fsd.streams else None
+            if st is None:
+                await self._send(client_id, {"action": "QA_DROPPED", "ok": False})
+                return
+            bs = st.blocksize
+            at = ((st.frame + int(float(data.get("after", 0.5)) * st.samplerate)) // bs) * bs
+            n = int(data.get("blocks", 2)) * bs
+            fsd.STATE['drop'] = lambda f, at=at, n=n: at <= f < at + n
+            await self._send(client_id, {"action": "QA_DROPPED", "ok": True, "at": int(at), "frames": n, "block": bs})
             return
         if a == "QA_STATS":
             await self._send(client_id, {"action": "QA_STATS", "opened": fsd.STATE['opened'], "frames": fsd.streams[-1].frame if fsd.streams else 0,

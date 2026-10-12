@@ -87,3 +87,33 @@ export function blockJoin(expected: number | null, frameIndex: number | undefine
   if (d > 0) return { pad: d, skip: 0, reset: false };
   return { pad: 0, skip: Math.min(frames, -d), reset: false };
 }
+
+/**
+ * Chantier C1 · Fichier de prise écrit par le pont, envoyé par morceaux (REC_FETCH) :
+ * 'NVF1', u32 n° de demande, u32 n° du morceau, u32 nombre de morceaux, puis les octets.
+ */
+export const FILE_MAGIC = 0x3146564e;       // 'NVF1'
+export const FILE_HEADER = 16;
+
+export interface FileChunk { req: number; index: number; count: number; data: Uint8Array }
+
+export function decodeFileChunk(buf: ArrayBuffer): FileChunk | null {
+  if (buf.byteLength < FILE_HEADER) return null;
+  const v = new DataView(buf);
+  if (v.getUint32(0, true) !== FILE_MAGIC) return null;
+  return { req: v.getUint32(4, true), index: v.getUint32(8, true), count: v.getUint32(12, true), data: new Uint8Array(buf, FILE_HEADER) };
+}
+
+/** Morceaux remis bout à bout (dans l'ordre de leur n°) ; null s'il en manque. */
+export function joinFileChunks(chunks: FileChunk[]): ArrayBuffer | null {
+  if (!chunks.length) return null;
+  const count = chunks[0].count;
+  const byIndex = new Map(chunks.map(c => [c.index, c]));
+  if (byIndex.size !== count) return null;
+  let total = 0;
+  for (let i = 0; i < count; i++) { const c = byIndex.get(i); if (!c) return null; total += c.data.length; }
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (let i = 0; i < count; i++) { const d = byIndex.get(i)!.data; out.set(d, o); o += d.length; }
+  return out.buffer;
+}

@@ -7,7 +7,8 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
-import { decodeInputMessage, encodeOutputInterleaved, encodeOutputMessage, InputBlock } from '../utils/asioProtocol';
+import { decodeFileChunk, decodeInputMessage, encodeOutputInterleaved, encodeOutputMessage, FileChunk, InputBlock, joinFileChunks } from '../utils/asioProtocol';
+import type { BridgeLoss } from '../utils/bridgeTake';
 
 // Types pour la configuration ASIO
 export interface ASIOConfig {
@@ -75,6 +76,31 @@ export interface ASIOLatencyResult {
   error?: string;
 }
 
+/** Chantier C1 · Prise écrite par le pont : un fichier par piste. */
+export interface BridgeTakeFile { track_id: string; path: string; frames: number; channels: number; inputs: number[]; mode: string }
+export interface BridgeTakeInfo {
+  success: boolean;
+  take_id: string;
+  error?: string;
+  status?: string;
+  sample_rate?: number;
+  block_size?: number;
+  start_frame?: number;
+  end_frame?: number;
+  dir?: string;
+  meta?: string;
+  files?: BridgeTakeFile[];
+  losses?: BridgeLoss[];
+  lost_blocks?: number;
+  lost_frames?: number;
+}
+export interface BridgeTakeTrack { track_id: string; name: string; inputs: number[]; mode: 'mono' | 'stereo' | 'sum' }
+export interface BridgeFetched {
+  buffer: ArrayBuffer;
+  path: string;
+  meta: { sample_rate?: number; start_frame?: number; end_frame?: number; anchor?: any; losses?: BridgeLoss[]; lost_blocks?: number; status?: string; block_size?: number };
+}
+
 // Types pour les messages WebSocket
 type ASIOMessageHandler = (data: any) => void;
 
@@ -113,7 +139,13 @@ export class ASIOBridgeClient {
   private pingInterval: NodeJS.Timeout | null = null;
   /** Protocole binaire négocié avec le pont : 2 = blocs horodatés et sorties multiples (R15). */
   public protocol = 1;
+  /** Fonctions annoncées par le pont (HELLO_OK) : 'take_writer' = il écrit les prises lui-même. */
+  public features: string[] = [];
   private latencyWaiters: ((r: ASIOLatencyResult) => void)[] = [];
+  /** Réponses attendues aux commandes de prise (action + identifiant). */
+  private recWaiters = new Map<string, (m: any) => void>();
+  private fetches = new Map<number, { chunks: FileChunk[]; done: (r: BridgeFetched | null) => void }>();
+  private fetchSeq = 1;
 
   constructor(host: string = '127.0.0.1', port: number = 8766) {
     // Port de test (pont simulé) : jamais celui du pont du studio par accident.
@@ -142,6 +174,7 @@ export class ASIOBridgeClient {
           this.isConnected = true;
           this.reconnectAttempts = 0;
           this.protocol = 1;
+          this.features = [];
           // R15 : on annonce le protocole v2 (un ancien pont l'ignore et garde le v1).
           try { this.ws!.send(JSON.stringify({ action: 'HELLO', protocol: 2 })); } catch { /* */ }
           this.startPing();
@@ -152,6 +185,7 @@ export class ASIOBridgeClient {
         this.ws.onclose = () => {
           console.log('[ASIO Bridge] Disconnected');
           this.isConnected = false;
+          this.failPending();
           this.stopPing();
           this.handlers.onDisconnect?.();
           this.attemptReconnect();
@@ -222,7 +256,26 @@ export class ASIOBridgeClient {
 
         case 'HELLO_OK':
           this.protocol = message.protocol >= 2 ? 2 : 1;
+          this.features = Array.isArray(message.features) ? message.features : [];
           break;
+
+        case 'REC_STARTED':
+        case 'REC_STOPPED':
+        case 'REC_ANCHORED':
+        case 'REC_IMPORTED_OK': {
+          const w = this.recWaiters.get(`${action}:${message.take_id}`);
+          if (w) { this.recWaiters.delete(`${action}:${message.take_id}`); w(message); }
+          break;
+        }
+
+        case 'REC_FETCHED': {
+          const f = this.fetches.get(message.req);
+          if (!f) break;
+          this.fetches.delete(message.req);
+          const buffer = message.success ? joinFileChunks(f.chunks) : null;
+          f.done(buffer ? { buffer, path: message.path, meta: message.meta || {} } : null);
+          break;
+        }
 
         case 'CONFIG_SET':
           this.handlers.onConfigSet?.(message.success, message.config, message.error);
@@ -267,6 +320,13 @@ export class ASIOBridgeClient {
    * Gérer l'audio binaire entrant
    */
   private handleBinaryAudio(data: ArrayBuffer): void {
+    // Morceau d'un fichier de prise (REC_FETCH)
+    const chunk = decodeFileChunk(data);
+    if (chunk) {
+      // Copie : la vue pointe dans le message WebSocket.
+      this.fetches.get(chunk.req)?.chunks.push({ ...chunk, data: new Uint8Array(chunk.data) });
+      return;
+    }
     try {
       const block = decodeInputMessage(data);
       this.handlers.onAudioInput?.(block.data, block.channels, block);
@@ -401,6 +461,65 @@ export class ASIOBridgeClient {
       this.latencyWaiters.push(done);
       this.send({ action: 'MEASURE_LATENCY', out_channels: outChannels, seconds });
     });
+  }
+
+  // ─── Chantier C1 · prises écrites par le pont ─────────────────────────────
+
+  /** Le pont écrit-il les prises lui-même ? */
+  supportsTakeWriter(): boolean {
+    return this.isConnectedToServer() && this.protocol >= 2 && this.features.includes('take_writer');
+  }
+
+  private recRequest(msg: object, reply: string, takeId: string, timeoutMs: number): Promise<any | null> {
+    if (!this.isConnectedToServer()) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const key = `${reply}:${takeId}`;
+      const timer = setTimeout(() => { if (this.recWaiters.get(key) === done) this.recWaiters.delete(key); resolve(null); }, timeoutMs);
+      const done = (m: any) => { clearTimeout(timer); resolve(m); };
+      this.recWaiters.set(key, done);
+      this.send(msg);
+    });
+  }
+
+  /** Début d'une prise écrite par le pont (un WAV par piste). */
+  recStart(p: { take_id: string; project_id?: string; project_name?: string; position?: number; tracks: BridgeTakeTrack[] }): Promise<BridgeTakeInfo | null> {
+    return this.recRequest({ action: 'REC_START', ...p }, 'REC_STARTED', p.take_id, 4000);
+  }
+
+  /** Calage de la prise, noté par le pont dans ses métadonnées (récupération après plantage). */
+  recAnchor(p: { take_id: string; frame: number; pos0: number; latency: number; offsets: Record<string, number>; lead: number; ctx_rate: number }): void {
+    this.send({ action: 'REC_ANCHOR', ...p });
+  }
+
+  /** Fin de la prise : le pont ferme les fichiers et rend chemins + pertes. */
+  recStop(takeId: string): Promise<BridgeTakeInfo | null> {
+    return this.recRequest({ action: 'REC_STOP', take_id: takeId }, 'REC_STOPPED', takeId, 15000);
+  }
+
+  /** Fichier d'une piste d'une prise (WAV entier). */
+  recFetch(takeId: string, trackId: string, timeoutMs = 120000): Promise<BridgeFetched | null> {
+    if (!this.isConnectedToServer()) return Promise.resolve(null);
+    const req = this.fetchSeq++ >>> 0;
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.fetches.delete(req); resolve(null); }, timeoutMs);
+      this.fetches.set(req, { chunks: [], done: r => { clearTimeout(timer); resolve(r); } });
+      this.send({ action: 'REC_FETCH', take_id: takeId, track_id: trackId, req });
+    });
+  }
+
+  /** Prise posée dans le projet : notée dans ses métadonnées. */
+  recImported(takeId: string): void {
+    this.send({ action: 'REC_IMPORTED', take_id: takeId });
+  }
+
+  /** Connexion perdue : toutes les attentes reçoivent « rien » (la page se rabat sur sa prise). */
+  private failPending() {
+    const w = [...this.recWaiters.values()];
+    this.recWaiters.clear();
+    w.forEach(f => f(null));
+    const f = [...this.fetches.values()];
+    this.fetches.clear();
+    f.forEach(x => x.done(null));
   }
 
   /**

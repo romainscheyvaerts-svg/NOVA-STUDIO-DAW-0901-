@@ -92,6 +92,11 @@ export interface TakeMetaRecord {
    * prise : retirée à la récupération (la prise revient à sa place exacte).
    */
   lead?: number;
+  /**
+   * C1 · Nova Studio : la même prise écrite par le pont ASIO (fichier WAV complet, même si la
+   * page s'est figée). Après un plantage, ce fichier est repris en priorité sur le journal.
+   */
+  bridge?: { takeId: string; trackId: string; startFrame: number; sampleRate: number; anchorFrame?: number; pos0?: number; lead?: number; latency?: number };
 }
 
 export interface RecoveredTake { meta: TakeMetaRecord; samples: Float32Array; seconds: number }
@@ -443,7 +448,7 @@ export class TakeJournal {
   get takeId() { return this.meta.takeId; }
 
   /** Complète la description de la prise (écrite avec le prochain morceau). */
-  annotate(patch: Partial<Pick<TakeMetaRecord, 'lead'>>) {
+  annotate(patch: Partial<Pick<TakeMetaRecord, 'lead' | 'bridge'>>) {
     if (this.closed) return;
     Object.assign(this.meta, patch);
     this.metaDirty = true;
