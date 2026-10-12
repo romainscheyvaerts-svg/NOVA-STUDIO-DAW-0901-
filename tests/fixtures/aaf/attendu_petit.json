@@ -1,0 +1,684 @@
+{
+ "lie": {
+  "sampleRate": 48000,
+  "editRate": 48000,
+  "tracks": [
+   {
+    "name": "Lead",
+    "channels": 1,
+    "volume": 0.467735,
+    "pan": null,
+    "clips": [
+     {
+      "name": "Lead 1",
+      "pos": 85089,
+      "offset": 142142,
+      "len": 12891,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 388,
+       "shape": "LINEAR",
+       "approx": false
+      }
+     },
+     {
+      "name": "Lead 2",
+      "pos": 119584,
+      "offset": 207971,
+      "len": 20090,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 482,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 886,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      }
+     },
+     {
+      "name": "Lead 3",
+      "pos": 158985,
+      "offset": 270673,
+      "len": 16618,
+      "media": "Lead_01",
+      "gain": 0.25704,
+      "fadeIn": {
+       "len": 1200,
+       "shape": "EQUAL_POWER",
+       "approx": true,
+       "rendered": true
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Lead 4",
+      "pos": 181546,
+      "offset": 14568,
+      "len": 15844,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 658,
+       "shape": "LINEAR",
+       "approx": true
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Lead 5",
+      "pos": 236976,
+      "offset": 49489,
+      "len": 19173,
+      "media": "Lead_01",
+      "gain": 0.851138,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Lead 6",
+      "pos": 299041,
+      "offset": 255133,
+      "len": 7902,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1166,
+       "shape": "LINEAR",
+       "approx": false
+      }
+     },
+     {
+      "name": "Lead 7",
+      "pos": 341236,
+      "offset": 262395,
+      "len": 14018,
+      "media": "Lead_01",
+      "gain": 0.451856,
+      "fadeIn": {
+       "len": 488,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Lead 8",
+      "pos": 358448,
+      "offset": 59703,
+      "len": 18296,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Lead 9",
+      "pos": 423020,
+      "offset": 238638,
+      "len": 17471,
+      "media": "Lead_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 1181,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 1459,
+       "shape": "S_CURVE",
+       "approx": false
+      }
+     },
+     {
+      "name": "Lead 10",
+      "pos": 460112,
+      "offset": 206610,
+      "len": 20349,
+      "media": "Lead_01",
+      "gain": 0.338844,
+      "fadeIn": {
+       "len": 1500,
+       "shape": "LINEAR",
+       "approx": true
+      },
+      "fadeOut": null
+     }
+    ]
+   },
+   {
+    "name": "Double",
+    "channels": 1,
+    "volume": null,
+    "pan": 0.31,
+    "clips": [
+     {
+      "name": "Double 1",
+      "pos": 18504,
+      "offset": 221831,
+      "len": 18093,
+      "media": "Double_01",
+      "gain": 0.467735,
+      "fadeIn": {
+       "len": 1406,
+       "shape": "LINEAR",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 1204,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      }
+     },
+     {
+      "name": "Double 2",
+      "pos": 51528,
+      "offset": 293539,
+      "len": 6202,
+      "media": "Double_01",
+      "gain": 0.375837,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1800,
+       "shape": "EQUAL_POWER",
+       "approx": true,
+       "rendered": true
+      }
+     },
+     {
+      "name": "Double 3",
+      "pos": 61774,
+      "offset": 307255,
+      "len": 4811,
+      "media": "Double_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Double 4",
+      "pos": 84429,
+      "offset": 104353,
+      "len": 9590,
+      "media": "Double_01",
+      "gain": 0.421697,
+      "fadeIn": {
+       "len": 752,
+       "shape": "S_CURVE",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Double 5",
+      "pos": 134957,
+      "offset": 152764,
+      "len": 15679,
+      "media": "Double_01",
+      "gain": 1.698244,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Double 6",
+      "pos": 162366,
+      "offset": 192135,
+      "len": 11266,
+      "media": "Double_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1034,
+       "shape": "LINEAR",
+       "approx": true
+      }
+     },
+     {
+      "name": "Double 7",
+      "pos": 196633,
+      "offset": 16543,
+      "len": 20789,
+      "media": "Double_01",
+      "gain": 0.431519,
+      "fadeIn": {
+       "len": 1119,
+       "shape": "LINEAR",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Double 8",
+      "pos": 225548,
+      "offset": 73736,
+      "len": 6587,
+      "media": "Double_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 1237,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 1355,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      }
+     },
+     {
+      "name": "Double 9",
+      "pos": 238178,
+      "offset": 134627,
+      "len": 8285,
+      "media": "Double_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     }
+    ]
+   },
+   {
+    "name": "Backs",
+    "channels": 1,
+    "volume": 0.47863,
+    "pan": null,
+    "clips": [
+     {
+      "name": "Backs 1",
+      "pos": 38531,
+      "offset": 9002,
+      "len": 9602,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1564,
+       "shape": "S_CURVE",
+       "approx": false
+      }
+     },
+     {
+      "name": "Backs 2",
+      "pos": 74222,
+      "offset": 24268,
+      "len": 23061,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Backs 3",
+      "pos": 119793,
+      "offset": 32456,
+      "len": 16776,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Backs 4",
+      "pos": 144269,
+      "offset": 223524,
+      "len": 7047,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 345,
+       "shape": "LINEAR",
+       "approx": true
+      }
+     },
+     {
+      "name": "Backs 5",
+      "pos": 164218,
+      "offset": 12,
+      "len": 7032,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 516,
+       "shape": "LINEAR",
+       "approx": false
+      }
+     },
+     {
+      "name": "Backs 6",
+      "pos": 211720,
+      "offset": 2554,
+      "len": 9710,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Backs 7",
+      "pos": 257402,
+      "offset": 142313,
+      "len": 7462,
+      "media": "Backs_01",
+      "gain": 1.972423,
+      "fadeIn": {
+       "len": 1455,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Backs 8",
+      "pos": 281655,
+      "offset": 187842,
+      "len": 5053,
+      "media": "Backs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     }
+    ]
+   },
+   {
+    "name": "Beat",
+    "channels": 2,
+    "volume": null,
+    "pan": null,
+    "clips": [
+     {
+      "name": "Beat 1",
+      "pos": 59707,
+      "offset": 132297,
+      "len": 5758,
+      "media": "Beat_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 1400,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Beat 2",
+      "pos": 80997,
+      "offset": 13388,
+      "len": 19311,
+      "media": "Beat_01",
+      "gain": 0.555904,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1137,
+       "shape": "S_CURVE",
+       "approx": false
+      }
+     },
+     {
+      "name": "Beat 3",
+      "pos": 142226,
+      "offset": 131125,
+      "len": 18644,
+      "media": "Beat_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Beat 4",
+      "pos": 175307,
+      "offset": 249579,
+      "len": 17140,
+      "media": "Beat_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 1304,
+       "shape": "LINEAR",
+       "approx": true
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Beat 5",
+      "pos": 209259,
+      "offset": 129299,
+      "len": 7256,
+      "media": "Beat_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Beat 6",
+      "pos": 221168,
+      "offset": 222261,
+      "len": 14075,
+      "media": "Beat_01",
+      "gain": 0.291743,
+      "fadeIn": null,
+      "fadeOut": null
+     }
+    ]
+   },
+   {
+    "name": "Guitare",
+    "channels": 2,
+    "volume": 0.398107,
+    "pan": 0.18,
+    "clips": [
+     {
+      "name": "Guitare 1",
+      "pos": 64849,
+      "offset": 106186,
+      "len": 19902,
+      "media": "Guitare_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 1473,
+       "shape": "LINEAR",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 686,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      }
+     },
+     {
+      "name": "Guitare 2",
+      "pos": 109628,
+      "offset": 261039,
+      "len": 15743,
+      "media": "Guitare_01",
+      "gain": 0.891251,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Guitare 3",
+      "pos": 156938,
+      "offset": 249273,
+      "len": 13810,
+      "media": "Guitare_01",
+      "gain": 0.74131,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Guitare 4",
+      "pos": 216837,
+      "offset": 155101,
+      "len": 16760,
+      "media": "Guitare_01",
+      "gain": 1.244515,
+      "fadeIn": {
+       "len": 597,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 288,
+       "shape": "S_CURVE",
+       "approx": false
+      }
+     },
+     {
+      "name": "Guitare 5",
+      "pos": 243879,
+      "offset": 162147,
+      "len": 12274,
+      "media": "Guitare_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Guitare 6",
+      "pos": 280470,
+      "offset": 291308,
+      "len": 12879,
+      "media": "Guitare_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1308,
+       "shape": "LINEAR",
+       "approx": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "Adlibs",
+    "channels": 1,
+    "volume": null,
+    "pan": null,
+    "clips": [
+     {
+      "name": "Adlibs 1",
+      "pos": 38524,
+      "offset": 104182,
+      "len": 14647,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1288,
+       "shape": "LINEAR",
+       "approx": false
+      }
+     },
+     {
+      "name": "Adlibs 2",
+      "pos": 70646,
+      "offset": 147480,
+      "len": 17510,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 471,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      }
+     },
+     {
+      "name": "Adlibs 3",
+      "pos": 129552,
+      "offset": 285902,
+      "len": 7316,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1450,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      }
+     },
+     {
+      "name": "Adlibs 4",
+      "pos": 175225,
+      "offset": 197576,
+      "len": 22446,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 405,
+       "shape": "S_CURVE",
+       "approx": false
+      },
+      "fadeOut": {
+       "len": 1522,
+       "shape": "LINEAR",
+       "approx": true
+      }
+     },
+     {
+      "name": "Adlibs 5",
+      "pos": 208346,
+      "offset": 47417,
+      "len": 7444,
+      "media": "Adlibs_01",
+      "gain": 1.798871,
+      "fadeIn": null,
+      "fadeOut": null
+     },
+     {
+      "name": "Adlibs 6",
+      "pos": 225902,
+      "offset": 166182,
+      "len": 20229,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": {
+       "len": 372,
+       "shape": "LINEAR",
+       "approx": false
+      },
+      "fadeOut": null
+     },
+     {
+      "name": "Adlibs 7",
+      "pos": 271147,
+      "offset": 177615,
+      "len": 21358,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 1231,
+       "shape": "EQUAL_POWER",
+       "approx": false
+      }
+     },
+     {
+      "name": "Adlibs 8",
+      "pos": 301570,
+      "offset": 20783,
+      "len": 16415,
+      "media": "Adlibs_01",
+      "gain": 1.0,
+      "fadeIn": null,
+      "fadeOut": {
+       "len": 367,
+       "shape": "EXPONENTIAL",
+       "approx": false
+      }
+     }
+    ]
+   }
+  ],
+  "clips": 47
+ },
+ "manquant": [
+  "Adlibs_01"
+ ]
+}

@@ -11,6 +11,7 @@ import { stateFromVersion } from '../utils/recoverySnapshot';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { applyR21, r21Bus } from '../utils/r21Bus';
 import { novaBridge } from '../services/NovaBridge';
+import { openAafImport } from '../utils/aaf/aafBus';
 
 /**
  * R21 · « Importer depuis une session » (Pro Tools : File › Import › Session
@@ -168,6 +169,10 @@ const ImportSessionDialog: React.FC<{
             </button>
             <input ref={fileRef} type="file" accept=".zip,application/zip" className="hidden" data-testid="import-zip-input"
               onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void fromZip(f); }} />
+            <button type="button" className={card} onClick={() => { onClose(); openAafImport(); }} data-testid="import-from-aaf">
+              <span className="block text-[13px] font-black text-nv-ink">🎚️ Une séance Pro Tools (.aaf)</span>
+              <span className="block text-[11px] text-nv-muted">Pro Tools : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF.</span>
+            </button>
             <div>
               <p className="mb-1 text-[11px] font-black uppercase tracking-wider text-nv-muted">Projets récents (cet appareil)</p>
               {recents === null && <p className="text-[12px] text-nv-muted">Chargement…</p>}

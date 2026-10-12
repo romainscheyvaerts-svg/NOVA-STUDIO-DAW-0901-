@@ -8,6 +8,7 @@ import { track } from '../utils/analytics';
 import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
 import { simpleModeStore } from '../utils/simpleMode';
 import { MidiExportRow } from './MidiFileMenu';
+import { openAafExport } from '../utils/aaf/aafBus';
 import { runExport, outputBits, outputRate, type ExportSettings, type ExportFormat, type ExportSource } from '../services/ExportPipeline';
 import { exportQueue } from '../services/ExportQueue';
 import { reportLine } from './ExportQueueToast';
@@ -897,6 +898,17 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
             {/* Notes MIDI en .mid (V25) */}
             <MidiExportRow tracks={projectState.tracks} />
+            {/* Séance pour Pro Tools : AAF + BWF horodatés (chantier 14) */}
+            <button type="button" data-testid="export-aaf" onClick={() => openAafExport()}
+              title="Pro Tools : Fichier › Ouvrir (AAF) ou Importer › Données de session"
+              className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center gap-3">
+              <span className="text-2xl leading-none" aria-hidden="true">🎚️</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-black text-white">Séance pour Pro Tools (AAF + BWF)</span>
+                <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Gratuit.</span>
+              </span>
+              <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
+            </button>
         </div>
       </div>
     </div>

@@ -185,6 +185,8 @@ import { RedoSpotsSheet, RepunchCompareCard, R23VoiceTools } from './components/
 import { applyBeatSwapOp, BeatSwapOp, hasVoicesToKeep } from './utils/beatSwap';
 import { currentBeatClip } from './services/beatSwapRun';
 import { openSessionPanel, openImportSession, useSessionPanel } from './utils/r21Bus';
+import AafHost from './components/AafHost';
+import { openAafExport, openAafImport } from './utils/aaf/aafBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
@@ -9763,6 +9765,8 @@ function Studio() {
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
+      a('Fichier', 'pal.aafImport', 'Importer une séance Pro Tools (AAF)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf pro tools protools séance session importer ingé' }),
+      a('Fichier', 'pal.aafExport', 'Exporter la séance pour Pro Tools (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf pro tools protools séance session exporter ingé bwf' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
       a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
       a('Édition', 'pt.restoreSelection', 'Restaurer la dernière sélection', () => { const st = stateRef.current; const tr = new Set(st.tracks.map(t => t.id)); const cl = new Set(st.tracks.flatMap(t => t.clips.map(c => c.id))); setAiNotification(restoreLastSelection({ track: id => tr.has(id), clip: id => cl.has(id) })); }, { keys: 'Ctrl+Alt+Z', pt: 'Restore Last Selection (Opt+Cmd+Z)', keywords: 'sélection précédente plage reprendre' }),
@@ -10198,6 +10202,7 @@ function Studio() {
             </PanelBoundary>
           )}
         </main>
+        <AafHost getState={() => stateRef.current} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>
             <Suspense fallback={null}>
