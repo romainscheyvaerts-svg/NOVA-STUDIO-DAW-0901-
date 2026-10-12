@@ -33,6 +33,8 @@ interface DoubleVoice {
   gain: GainNode;
   panner: StereoPannerNode;
   /** LFO calés sur le morceau (même phase en lecture et à l'export). */
+  /** Partie fixe du retard, en échantillons entiers (copie exacte) ; le retard modulé reste court. */
+  pre: DelayNode;
   lfoSlow: TimelineLfo;
   lfoFast: TimelineLfo;
   slowHz: number;
@@ -86,8 +88,15 @@ export class VocalDoublerNode {
 
   private createVoice(baseDelay: number, slowHz: number, fastHz: number): DoubleVoice {
     const ctx = this.ctx;
-    const delay = ctx.createDelay(0.04); // tampon court : position de lecture interpolée plus précise (lecture = export)
-    delay.delayTime.value = baseDelay;
+    // Retard de base en deux étages : une partie fixe en échantillons entiers (exacte), puis un
+    // retard modulé à tampon court (12 ms) : position de lecture interpolée plus précise, la
+    // lecture retombe sur l'export à moins d'1 LSB 16 bits (avant : jusqu'à 1,1 LSB à 44,1 kHz).
+    const pre = ctx.createDelay(0.05);
+    const preSec = Math.floor((baseDelay - 0.005) * ctx.sampleRate) / ctx.sampleRate;
+    pre.delayTime.value = preSec;
+    const delay = ctx.createDelay(0.012);
+    delay.delayTime.value = baseDelay - preSec;
+    pre.connect(delay);
     // Doublure allegee dans le grave (pas d'empatement ni d'annulation de
     // phase dans le bas) et un peu plus douce dans l'aigu : elle reste
     // derriere la voix principale.
@@ -110,7 +119,7 @@ export class VocalDoublerNode {
     const lfoFast = new TimelineLfo(ctx, depthFast, fastHz, 0, 'triangle');
     depthSlow.connect(delay.delayTime);
     depthFast.connect(delay.delayTime);
-    return { delay, hp, lp, gain, panner, lfoSlow, lfoFast, depthSlow, depthFast, slowHz, fastHz };
+    return { pre, delay, hp, lp, gain, panner, lfoSlow, lfoFast, depthSlow, depthFast, slowHz, fastHz };
   }
 
   private setupGraph() {
@@ -120,7 +129,7 @@ export class VocalDoublerNode {
 
     // 2. Doublures gauche et droite
     for (const v of [this.voiceL, this.voiceR]) {
-      this.input.connect(v.delay);
+      this.input.connect(v.pre);
       v.delay.connect(v.hp);
       v.hp.connect(v.lp);
       v.lp.connect(v.gain);
@@ -191,7 +200,7 @@ export class VocalDoublerNode {
   public dispose() {
     for (const v of [this.voiceL, this.voiceR]) {
       v.lfoSlow.stop(); v.lfoFast.stop();
-      for (const n of [v.delay, v.hp, v.lp, v.gain, v.panner, v.depthSlow, v.depthFast]) {
+      for (const n of [v.pre, v.delay, v.hp, v.lp, v.gain, v.panner, v.depthSlow, v.depthFast]) {
         try { n.disconnect(); } catch (e) {}
       }
     }

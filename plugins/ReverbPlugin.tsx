@@ -627,7 +627,7 @@ export class ReverbNode {
     const stKey = `${p.isEnabled ? 1 : 0}`;
     const force = stKey !== this.autoState;
     this.autoState = stKey;
-    this.auto.get('preDelay')?.setStatic(clamp(safeNum(p.preDelay, 0.025), 0, 0.45), { force, tau: T });
+    this.auto.get('preDelay')?.setStatic(Math.round(clamp(safeNum(p.preDelay, 0.025), 0, 0.45) * this.ctx.sampleRate) / this.ctx.sampleRate, { force, tau: T });  // à l'échantillon : copie exacte
     this.setP(this.lowCutFilter.frequency, clamp(safeNum(p.lowCut, 160), 20, 2000), T);
     this.setP(this.highCutFilter.frequency, clamp(safeNum(p.highCut, 10000), 500, 20000), T);
     this.setP(this.bassBoostFilter.gain, clamp(safeNum(p.bassBoost, 0), 0, 1) * 12, T);
@@ -709,7 +709,10 @@ export class ReverbNode {
     const width = clamp(safeNum(this.params.width, 1), 0, 2);
 
     for (let i = 0; i < this.erDelays.length && i < baseERTimes.length; i++) {
-      this.setP(this.erDelays[i].delayTime, baseERTimes[i] * timeMult * (0.8 + size * 0.4), SMOOTH);
+      // Arrondi à l'échantillon : retard fixe = copie exacte (sans interpolation, dont l'arrondi
+      // dépendait de la position dans le tampon : lecture ≠ export de près d'1 LSB 16 bits).
+      const sr = this.ctx.sampleRate;
+      this.setP(this.erDelays[i].delayTime, Math.round(baseERTimes[i] * timeMult * (0.8 + size * 0.4) * sr) / sr, SMOOTH);
       const pan = (i % 2 === 0 ? -1 : 1) * clamp((0.35 + 0.1 * i) * width, 0, 1);
       this.setP(this.erPanners[i].pan, pan, SMOOTH);
     }
