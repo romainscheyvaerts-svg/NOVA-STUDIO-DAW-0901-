@@ -115,6 +115,15 @@ describe('C6 · VSTPluginNode face à un pont en retard', () => {
     expect(n.getInfo().dropouts10s).toBe(12);
     await vi.advanceTimersByTimeAsync(10_500);
     expect(n.getInfo().dropouts10s).toBe(0);
+    // La pastille est prévenue quand la fenêtre se vide (stats suivantes, sans nouvelle coupure).
+    const { onVstNodesChange } = await import('../engine/VSTPluginNode');
+    let notified = 0;
+    const off = onVstNodesChange(() => { notified++; });
+    stats({ dropouts: 12 });
+    expect(notified).toBe(1);
+    stats({ dropouts: 12 });
+    expect(notified).toBe(1);
+    off();
     expect(n.getInfo().dropoutsTotal).toBe(12);
     n.dispose();
   });

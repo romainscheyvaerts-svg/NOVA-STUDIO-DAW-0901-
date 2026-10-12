@@ -348,6 +348,8 @@ export class VSTPluginNode {
   }
 
   private resetWanted = false;
+  /** Coupures sur 10 s déjà annoncées à l'interface. */
+  private shown10s = 0;
 
   /**
    * Bouton « Revenir au tampon normal ». En pleine lecture, fait à l'arrêt : une latence qui
@@ -394,7 +396,13 @@ export class VSTPluginNode {
     const before = this.adapt.dropoutsTotal;
     const changed = this.adapt.onStats(d, Date.now());
     if (changed) this.updateLatency(true);
-    if (d.underruns !== this.underruns || this.adapt.dropoutsTotal !== before || changed) { this.underruns = Number(d.underruns) || 0; notifyInfo(); }
+    // Fenêtre de 10 s qui se vide aussi : la pastille de l'insert doit suivre.
+    const n10 = this.adapt.dropouts10s(Date.now());
+    if (d.underruns !== this.underruns || this.adapt.dropoutsTotal !== before || changed || n10 !== this.shown10s) {
+      this.underruns = Number(d.underruns) || 0;
+      this.shown10s = n10;
+      notifyInfo();
+    }
     if (this.adapt.dropoutsTotal !== before) this.emitLate();
     if (!transportPlaying) this.maybeShrink();
   }
