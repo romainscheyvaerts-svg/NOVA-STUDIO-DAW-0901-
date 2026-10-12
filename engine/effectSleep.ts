@@ -35,9 +35,9 @@ export const SLEEP_SAFE = new Set(['PROEQ12', 'COMPRESSOR', 'DEESSER', 'VOCALSAT
 /** Niveau « muet » de la sentinelle (≈ −240 dBFS) : sous ce niveau, aucun format de fichier ne le voit. */
 export const QUIET_LEVEL = 1e-12;
 /** Silence minimal avant la mise en veille (s), latence de la chaîne en plus. */
-export const QUIET_S = 0.15;
+export const QUIET_S = 0.05;
 /** Pas de mise en veille si un clip commence dans moins de ce délai (s) : évite les va-et-vient. */
-export const AHEAD_S = 0.5;
+export const AHEAD_S = 0.3;
 const SLOTS = 16;
 
 export interface SleepChain {
@@ -186,7 +186,7 @@ export class EffectSleepManager {
       try {
         const node = (this.host.makeSentinel ? this.host.makeSentinel(ctx) : new AudioWorkletNode(ctx, 'nova-veille-sentinel', {
           numberOfInputs: SLOTS, numberOfOutputs: 0,
-          processorOptions: { level: QUIET_LEVEL, minQuiet: Math.round(0.1 * ctx.sampleRate) },
+          processorOptions: { level: QUIET_LEVEL, minQuiet: Math.round(0.05 * ctx.sampleRate) },
         })) as AudioWorkletNode;
         const b = { node, used: new Array(SLOTS).fill(null) as (string | null)[] };
         const index = this.banks.length;

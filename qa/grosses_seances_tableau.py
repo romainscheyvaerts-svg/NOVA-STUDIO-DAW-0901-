@@ -7,6 +7,10 @@ audio, sous-régimes par minute, pistes en veille, pire image en édition).
   python qa/grosses_seances_tableau.py
 """
 import json, re, statistics, sys
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from pathlib import Path
 
 AB = Path(r"D:\1 WORK\CONTENU\nova-128-pistes\ab")
@@ -20,7 +24,7 @@ def med(xs):
 def load():
     rows = {}
     for f in AB.glob("paliers_*.json"):
-        m = re.match(r"paliers_(base|new)_(realiste|dense)_(\d+)_r(\w+)\.json", f.name)
+        m = re.match(r"paliers_(base|new2|new)_(realiste|dense)_(\d+)_r(\w+)\.json", f.name)
         if not m:
             continue
         ver, prof, n, rep = m.group(1), m.group(2), int(m.group(3)), m.group(4)
@@ -44,14 +48,17 @@ def load():
 
 def main():
     rows = load()
-    out = ["| Profil | Pistes | Fil audio moyen (avant → après) | Fil audio max | Sous-régimes / min (avant → après) | Pistes en veille (moy.) | Pire image en édition, ms (avant → après) | Mesures |",
+    vers = [v for v in ("base", "new", "new2") if any(k[2] == v for k in rows)]
+    names = {"base": "avant", "new": "étape 1", "new2": "après"}
+    hdr = " → ".join(names[v] for v in vers)
+    out = [f"| Profil | Pistes | Fil audio moyen ({hdr}) | Fil audio max | Sous-régimes / min | Pistes en veille (moy.) | Pire image en édition, ms | Mesures |",
            "|---|---|---|---|---|---|---|---|"]
+    f = lambda xs, k: med([x[k] for x in xs])
     for prof in ("realiste", "dense"):
         for n in sorted({k[1] for k in rows if k[0] == prof}):
-            a, b = rows.get((prof, n, "base"), []), rows.get((prof, n, "new"), [])
-            f = lambda xs, k: med([x[k] for x in xs])
-            out.append(f"| {prof} | {n} | {f(a, 'moy')} % → **{f(b, 'moy')} %** | {f(a, 'max')} % → {f(b, 'max')} % | {f(a, 'ur_min')} → **{f(b, 'ur_min')}** "
-                       f"| {f(b, 'veille')} | {f(a, 'image')} → {f(b, 'image')} | {len(a)} + {len(b)} |")
+            rs = [rows.get((prof, n, v), []) for v in vers]
+            j = lambda k, fmt="{}": " → ".join(fmt.format(f(r, k)) for r in rs)
+            out.append(f"| {prof} | {n} | {j('moy', '{} %')} | {j('max', '{} %')} | {j('ur_min')} | {f(rs[-1], 'veille')} | {j('image')} | {' + '.join(str(len(r)) for r in rs)} |")
     (AB / "tableau.md").write_text("\n".join(out) + "\n", encoding="utf-8")
     (AB / "tableau.json").write_text(json.dumps({f"{k[0]}_{k[1]}_{k[2]}": v for k, v in rows.items()}, ensure_ascii=False, indent=1), encoding="utf-8")
     print("\n".join(out))

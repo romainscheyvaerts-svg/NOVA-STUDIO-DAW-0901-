@@ -211,7 +211,9 @@ export class VocalSaturatorNode {
     this.ctx = ctx;
     this.createdAt = ctx.currentTime;
     this.input = ctx.createGain();
-    this.output = ctx.createGain();
+    // Sortie = gain de sortie (somme sec + saturé) : un nœud de copie en moins par effet.
+    this.makeupGain = ctx.createGain();
+    this.output = this.makeupGain;
     this.driveGain = ctx.createGain();
     this.shaper = ctx.createWaveShaper();
     this.shaper.oversample = 'none';
@@ -238,7 +240,6 @@ export class VocalSaturatorNode {
     this.eqHighNode.frequency.value = 8000;
     this.wetGain = ctx.createGain();
     this.dryGain = ctx.createGain();
-    this.makeupGain = ctx.createGain();
     this.setupChain();
     this.generateCurve();
     this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain }, { param: this.dryGain.gain, map: v => 1 - v }], { min: 0, max: 1, value: 0.5, affine: true }));
@@ -261,7 +262,6 @@ export class VocalSaturatorNode {
     // autoGain -> [couleur : tilt, EQ grave / médium / aigu] -> wetGain : voir relinkColor().
     this.wetGain.connect(this.makeupGain);
 
-    this.makeupGain.connect(this.output);
   }
 
   private async initWorklet() {
@@ -278,11 +278,10 @@ export class VocalSaturatorNode {
       node.port.onmessage = (e) => { if (e.data && typeof e.data.rest === 'boolean') this.atRest = e.data.rest; };
       // Bascule de l'etage de courbe : meme courbe, meme niveau, meme retard (~0).
       // Le worklet fait aussi l'anti-continu et la compensation : le gain natif passe à 1.
+      // Le worklet fait aussi l'anti-continu et la compensation : il prend la tête de la
+      // chaîne de couleur à la place du gain natif (un nœud de copie en moins).
       this.driveGain.connect(node);
-      this.autoGain.gain.cancelScheduledValues(0);
-      this.autoGain.gain.setValueAtTime(1, 0);
-      node.connect(this.autoGain);
-      try { this.dcBlock.disconnect(this.autoGain); } catch (e) {}
+      this.moveColorHead(node);
       try { this.driveGain.disconnect(this.shaper); } catch (e) {}
     } catch (e) {
       console.warn('[VocalSaturator] ADAA indisponible, courbe simple :', e);
@@ -320,7 +319,19 @@ export class VocalSaturatorNode {
     if (on && nz(this.params.eqHigh)) out.push(this.eqHighNode);
     return out;
   }
+  /** Tête de la chaîne de couleur : le gain natif (repli courbe simple) ou le worklet ADAA. */
+  private colorHead: AudioNode | null = null;
+  private moveColorHead(head: AudioNode) {
+    const old = this.colorHead;
+    if (old === head) return;
+    const first = this.colorLinked ? (this.colorLinked[0] || this.wetGain) : null;
+    this.colorHead = head;
+    if (!first) return;
+    if (old) { try { old.disconnect(first); } catch { /* */ } }
+    head.connect(first);
+  }
   private relinkColor(deferRemoval = false) {
+    if (!this.colorHead) this.colorHead = this.autoGain;
     const want = this.colorWanted();
     const cur = this.colorLinked;
     if (cur && want.length === cur.length && want.every((n, i) => n === cur[i])) return;
@@ -333,17 +344,17 @@ export class VocalSaturatorNode {
       this.colorTimer = setTimeout(() => { this.colorTimer = null; if (!this.disposed) this.relinkColor(false); }, 300);
     }
     if (cur && next.length === cur.length && next.every((n, i) => n === cur[i])) return;
-    const chain = [this.autoGain, ...next, this.wetGain];
-    // Nouveaux liens d'abord, anciens ensuite : jamais de trou dans la voie saturée.
-    const links = new Set<string>();
-    for (let i = 0; i < chain.length - 1; i++) { chain[i].connect(chain[i + 1]); links.add(`${i}`); }
-    const oldChain = cur ? [this.autoGain, ...cur, this.wetGain] : [];
+    const head = this.colorHead!;
+    const chain = [head, ...next, this.wetGain];
+    // Liens qui changent seulement : anciens coupés d'abord (jamais deux chemins à la fois,
+    // qui doubleraient le son un instant), nouveaux ensuite.
+    const oldChain = cur ? [head, ...cur, this.wetGain] : [];
+    const inChain = (arr: AudioNode[], a: AudioNode, b: AudioNode) => { const ia = arr.indexOf(a); return ia >= 0 && arr[ia + 1] === b; };
     for (let i = 0; i < oldChain.length - 1; i++) {
-      const a = oldChain[i], b = oldChain[i + 1];
-      const ia = chain.indexOf(a);
-      if (ia >= 0 && chain[ia + 1] === b) continue;
-      try { a.disconnect(b); } catch { /* déjà débranché */ }
+      if (inChain(chain, oldChain[i], oldChain[i + 1])) continue;
+      try { oldChain[i].disconnect(oldChain[i + 1]); } catch { /* déjà débranché */ }
     }
+    for (let i = 0; i < chain.length - 1; i++) { if (!inChain(oldChain, chain[i], chain[i + 1])) chain[i].connect(chain[i + 1]); }
     this.colorLinked = next;
   }
   /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */

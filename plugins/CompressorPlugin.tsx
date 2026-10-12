@@ -683,22 +683,55 @@ export class CompressorNode {
    * 2,3 LSB16 mesurés sans elle.)
    */
   private dryWired = true;
-  private dryTimer: ReturnType<typeof setTimeout> | null = null;
+  private wetWired = true;
+  private pathTimer: ReturnType<typeof setTimeout> | null = null;
   private mixAutomated = false;
-  private syncPaths(look: number) {
-    if (!this.worklet) return;
+  /** Voie sèche utile : mélange < 1 (ou automatisé), effet contourné, ou pré-lecture. */
+  private dryNeeded(look = this.effectiveLookahead()): boolean {
     const mix = Number(this.params.mix);
-    const wantDry = this.mixAutomated || !this.params.isEnabled || !(Number.isFinite(mix) && mix >= 1) || look > 0;
-    if (wantDry && !this.dryWired) {
-      if (this.dryTimer) { clearTimeout(this.dryTimer); this.dryTimer = null; }
-      try { this.input.connect(this.dryDelay); } catch { /* */ }
-      this.dryWired = true;
-    } else if (!wantDry && this.dryWired) {
-      // En direct, la voie sèche n'est retirée qu'une fois son gain arrivé à 0 (fin du glissement).
-      const cut = () => { this.dryTimer = null; if (this.dryWired && !this.disposed && this.params.mix >= 1 && !this.mixAutomated) { try { this.input.disconnect(this.dryDelay); } catch { /* */ } this.dryWired = false; } };
-      if (isOfflineContext(this.ctx) || this.ctx.currentTime <= 0) cut();
-      else if (!this.dryTimer) this.dryTimer = setTimeout(cut, 250);
+    return this.mixAutomated || !this.params.isEnabled || !(Number.isFinite(mix) && mix >= 1) || look > 0;
+  }
+  /** Gain de mélange (voie compressée) utile : mélange < 1 (ou automatisé) ou effet contourné ; à 1 c'est une copie. */
+  private wetNeeded(): boolean {
+    const mix = Number(this.params.mix);
+    return this.mixAutomated || !this.params.isEnabled || !(Number.isFinite(mix) && mix >= 1);
+  }
+  private setDry(on: boolean) {
+    if (on === this.dryWired) return;
+    try { if (on) this.input.connect(this.dryDelay); else this.input.disconnect(this.dryDelay); } catch { /* */ }
+    this.dryWired = on;
+  }
+  private setWet(on: boolean) {
+    if (on === this.wetWired) return;
+    // Jamais deux chemins à la fois (le son doublerait un instant) : l'ancien est coupé d'abord.
+    try {
+      if (on) { this.makeupGainNode.disconnect(this.output); this.makeupGainNode.connect(this.wetGain); }
+      else { this.makeupGainNode.disconnect(this.wetGain); this.makeupGainNode.connect(this.output); }
+    } catch { /* */ }
+    this.wetWired = on;
+  }
+  /**
+   * Ajout d'une voie : tout de suite (son gain part de sa valeur actuelle). Retrait : tout de
+   * suite à la mise en place (sortie encore muette) et à l'export, sinon 250 ms plus tard
+   * (fin du glissement du mélange).
+   */
+  private syncPaths(look: number, immediate = false) {
+    if (!this.worklet) return;
+    const wantDry = this.dryNeeded(look), wantWet = this.wetNeeded();
+    if (wantDry) this.setDry(true);
+    if (wantWet) this.setWet(true);
+    if ((wantDry || !this.dryWired) && (wantWet || !this.wetWired)) {
+      if (this.pathTimer) { clearTimeout(this.pathTimer); this.pathTimer = null; }
+      return;
     }
+    const cut = () => {
+      this.pathTimer = null;
+      if (this.disposed || !this.worklet) return;
+      if (!this.dryNeeded()) this.setDry(false);
+      if (!this.wetNeeded()) this.setWet(false);
+    };
+    if (immediate || isOfflineContext(this.ctx) || this.ctx.currentTime <= 0) cut();
+    else if (!this.pathTimer) this.pathTimer = setTimeout(cut, 250);
   }
 
   /** immediate : valeurs posees sans lissage (mise en place du worklet) ; force : réglages fixes reposés même inchangés. */
@@ -733,7 +766,7 @@ export class CompressorNode {
       const ck = JSON.stringify(cfg);
       if (ck !== this.cfgKey || force) { this.cfgKey = ck; this.worklet.port.postMessage({ cfg }); }
       set(this.dryDelay.delayTime, look, 0.005);
-      this.syncPaths(look);
+      this.syncPaths(look, immediate);
     } else if (this.compressor) {
       set(this.compressor.knee, dyn.knee);
       set(this.compressor.attack, dyn.attack);
@@ -828,7 +861,7 @@ export class CompressorNode {
   public dispose() {
     this.disposed = true;
     if (this.tapsTimer) { clearInterval(this.tapsTimer); this.tapsTimer = null; }
-    if (this.dryTimer) { clearTimeout(this.dryTimer); this.dryTimer = null; }
+    if (this.pathTimer) { clearTimeout(this.pathTimer); this.pathTimer = null; }
     try { this.input.disconnect(); } catch (e) {}
     // Clé de side-chain (R7) : plus rien n'entre dans le worklet retiré.
     try { this.sidechainInput.disconnect(); } catch (e) {}
