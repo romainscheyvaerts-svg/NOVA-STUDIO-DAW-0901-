@@ -29,6 +29,7 @@
  * l'échantillon d'entrée t / rapport (fenêtres centrées). La sortie a
  * exactement la longueur demandée.
  */
+import { currentRate } from '../utils/projectRate';
 
 // ─── FFT complexe radix 2 (tables précalculées par taille) ─────────────────────
 
@@ -105,7 +106,7 @@ export function pvStretch(chs: Float32Array[], outLen: number, opts: PvOptions =
   }
   const inLen = chs[0]?.length || 0;
   if (!inLen || outLen <= 0) return chs.map(() => new Float32Array(Math.max(0, outLen)));
-  const N = opts.fftSize ?? defaultFftSize(opts.sampleRate ?? 44100);
+  const N = opts.fftSize ?? defaultFftSize(opts.sampleRate ?? currentRate());
   const ov = opts.overlap ?? 4;
   const Hs = N / ov;
   const half = N / 2;
@@ -133,7 +134,7 @@ export function pvStretch(chs: Float32Array[], outLen: number, opts: PvOptions =
 
   // Formants : enveloppe lissée (cepstre), coupure ~1 ms (plus lisse que l'écart entre harmoniques d'une voix aiguë).
   const fp = opts.formantPitch && Math.abs(opts.formantPitch - 1) > 1e-4 ? opts.formantPitch : 0;
-  const lifter = Math.max(8, Math.round((opts.sampleRate ?? 44100) * 0.001));
+  const lifter = Math.max(8, Math.round((opts.sampleRate ?? currentRate()) * 0.001));
   const cre = fp ? new Float64Array(N) : null, cim = fp ? new Float64Array(N) : null;
   const env = fp ? new Float64Array(bins) : null;
   const gain = fp ? new Float64Array(bins) : null;

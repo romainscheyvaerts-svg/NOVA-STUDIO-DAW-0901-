@@ -55,6 +55,13 @@ class PortAudioError(Exception):
     pass
 
 
+def check_output_settings(device=None, channels=None, dtype=None, extra_settings=None, samplerate=None):
+    """Fréquences acceptées par la carte simulée : STATE['rates'] (None = toutes)."""
+    rates = STATE.get('rates')
+    if rates is not None and samplerate is not None and int(samplerate) not in rates:
+        raise PortAudioError(f'Invalid sample rate {samplerate}')
+
+
 def query_hostapis(index=None):
     apis = [{'name': 'ASIO', 'devices': [0]}]
     return apis if index is None else apis[index]

@@ -73,6 +73,7 @@
  * sur le pont VST, état du plugin capturé, rapport.
  */
 import { NamedBus, PluginInstance, PluginType, Track, TrackSend, TrackType } from '../types';
+import { sanitizeRate } from './projectRate';
 import { groupNameKey, groupsFromSpec, SpecGroup, syncGroupFields } from './editGroups';
 import { isExcluded } from './autotuneVst';
 import { classifyPlugin } from './vstKnowledge';
@@ -199,6 +200,8 @@ export interface TemplateSpec {
   /** D'où vient la fiche (« Pro Tools, Session Info as Text du 12/10 »). */
   source?: string;
   bpm?: number;
+  /** Fréquence de la session d'origine (44100, 48000, 88200, 96000). Absente : 48 kHz. */
+  sampleRate?: number;
   /** « 4/4 », « 6/8 ». */
   timeSignature?: string;
   /** « F# minor », « C major ». */
@@ -695,6 +698,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
     keepClips: false,
     session: {
       ...(spec.bpm ? { bpm: spec.bpm } : {}),
+      ...(sanitizeRate(spec.sampleRate) ? { sampleRate: sanitizeRate(spec.sampleRate)! } : {}),
       ...(ts ? { timeSignature: { numerator: Number(ts[1]), denominator: Number(ts[2]) } } : {}),
       ...(key ? { projectKey: key.key, projectScale: key.scale } : {}),
       isDelayCompEnabled: true,

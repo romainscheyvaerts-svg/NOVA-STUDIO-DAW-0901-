@@ -5,6 +5,7 @@ import { AudioEncoder } from '../services/AudioEncoder';
 import { supabaseManager } from '../services/SupabaseManager';
 import { getCatalogBeat } from './studioLinks';
 import { capTruePeak, MP3_TRUE_PEAK_CEILING } from './loudness';
+import { resampleBuffer } from './hqAudio';
 
 /**
  * Démo gratuite et extrait partageable.
@@ -109,7 +110,11 @@ export async function renderTagged(st: DAWState, start: number, duration: number
   const prep = await prepareTracksForOffline(st.tracks);
   let mix: AudioBuffer;
   try {
-    mix = await audioEngine.renderProject(prep.tracks, duration, start, 44100, onProgress);
+    // Rendu à la fréquence du projet ; au-delà de 48 kHz (88,2 / 96), converti en qualité
+    // studio vers 44,1 / 48 kHz : le MP3 s'arrête à 48 kHz.
+    const sr = audioEngine.getProjectSampleRate();
+    mix = await audioEngine.renderProject(prep.tracks, duration, start, sr, onProgress);
+    if (sr > 48000) mix = await resampleBuffer(mix, sr / 2);
   } finally {
     prep.cleanup();
   }

@@ -19,6 +19,7 @@ import type { StemGrouping, ReturnsMode } from '../utils/stemPlan';
 import type { TailMode, RangeMode } from '../utils/exportTail';
 import { renderArrangement } from '../utils/arrangements';
 import { takeExportArrangement } from '../utils/r21Bus';
+import { projectRateOf, rateLabel } from '../utils/projectRate';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -34,7 +35,10 @@ export const warmExportAdmin = () => {
 /** Réglages d'export retenus d'une fois sur l'autre (format, stems, queue, artiste…). */
 const PREFS_KEY = 'nova_export_prefs';
 interface ExportPrefs {
-  format?: ExportFormat; bits?: '16' | '24' | '32'; mp3?: string; sr?: number; layout?: ChannelLayout; dither?: boolean;
+  format?: ExportFormat; bits?: '16' | '24' | '32'; mp3?: string; sr?: number;
+  /** Fréquence d'export : « projet » (par défaut) ou une fréquence choisie. (`sr` : ancienne préférence, ignorée.) */
+  srChoice?: 'projet' | number;
+  layout?: ChannelLayout; dither?: boolean;
   normalize?: string; tailMode?: TailMode; tailSec?: number; grouping?: StemGrouping; returns?: ReturnsMode; masterFx?: boolean; artist?: string;
 }
 const readPrefs = (): ExportPrefs => { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } };
@@ -189,7 +193,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const prefs0 = React.useMemo(readPrefs, []);
   // FORMAT & QUALITÉ
   const [format, setFormat] = useState<ExportFormat>(prefs0.format || 'WAV');
-  const [sampleRate, setSampleRate] = useState<number>(prefs0.sr || 44100);
+  // Fréquence : celle du PROJET par défaut (comme le bounce de Pro Tools), ou une autre
+  // fréquence choisie (conversion de qualité studio, utils/resample).
+  const projectRate = projectRateOf(projectState);
+  const [srChoice, setSrChoice] = useState<'projet' | number>(prefs0.srChoice === 'projet' || typeof prefs0.srChoice === 'number' ? prefs0.srChoice : 'projet');
+  const sampleRate = srChoice === 'projet' ? projectRate : srChoice;
   const [bitDepth, setBitDepth] = useState<'16' | '24' | '32'>(prefs0.bits || '24');
   const [mp3Bitrate, setMp3Bitrate] = useState<string>(prefs0.mp3 || '320');
   const [layout, setLayout] = useState<ChannelLayout>(prefs0.layout || 'stereo');
@@ -320,7 +328,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       return;
     }
     if (!isrcOk) { setStatusText('ISRC invalide : 12 caractères, par exemple FR-Z03-26-00001. Laisse vide si tu n\'en as pas.'); return; }
-    writePrefs({ format, bits: bitDepth, mp3: mp3Bitrate, sr: sampleRate, layout, dither, normalize, tailMode, tailSec, grouping, returns, masterFx, artist: metaArtist });
+    writePrefs({ format, bits: bitDepth, mp3: mp3Bitrate, srChoice, layout, dither, normalize, tailMode, tailSec, grouping, returns, masterFx, artist: metaArtist });
     const settings = buildSettings(source);
     const snapshot = projectState.tracks;
     const projMarkers = markers.map(m => ({ name: m.name, time: m.time }));
@@ -701,12 +709,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             </label>
                             <label className="space-y-1 block">
                                 <span className={lab}>Fréquence d'échantillonnage</span>
-                                <select value={sampleRate} onChange={e => setSampleRate(Number(e.target.value))} disabled={isRendering} className={sel}
-                                  title="Conversion de qualité studio (filtre anti-repliement), comme le SRC de Pro Tools ou de Logic à l'export">
-                                    <option value="44100">44,1 kHz (CD, streaming)</option>
-                                    <option value="48000">48 kHz (vidéo)</option>
-                                    <option value="88200" disabled={format === 'MP3'}>88,2 kHz (Hi-Res)</option>
-                                    <option value="96000" disabled={format === 'MP3'}>96 kHz (studio)</option>
+                                <select value={String(srChoice)} onChange={e => setSrChoice(e.target.value === 'projet' ? 'projet' : Number(e.target.value))} disabled={isRendering} className={sel}
+                                  data-testid="export-rate"
+                                  title="Fréquence du projet : aucune conversion. Autre fréquence : conversion de qualité studio (filtre anti-repliement, plat jusqu'à 20 kHz), comme le SRC de Pro Tools ou de Logic à l'export">
+                                    <option value="projet">Celle du projet ({rateLabel(projectRate)}, sans conversion)</option>
+                                    <option value="44100">44,1 kHz (CD, streaming){projectRate !== 44100 ? ' · converti' : ''}</option>
+                                    <option value="48000">48 kHz (vidéo){projectRate !== 48000 ? ' · converti' : ''}</option>
+                                    <option value="88200" disabled={format === 'MP3'}>88,2 kHz (Hi-Res){projectRate !== 88200 ? ' · converti' : ''}</option>
+                                    <option value="96000" disabled={format === 'MP3'}>96 kHz (studio){projectRate !== 96000 ? ' · converti' : ''}</option>
                                 </select>
                             </label>
                             {format !== 'MP3' ? (

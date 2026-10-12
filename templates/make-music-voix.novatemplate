@@ -12,6 +12,7 @@
   },
   "keepClips": false,
   "session": {
+    "sampleRate": 48000,
     "timeSignature": {
       "numerator": 4,
       "denominator": 4

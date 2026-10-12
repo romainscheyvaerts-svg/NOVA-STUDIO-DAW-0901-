@@ -3,6 +3,7 @@ import { supabase, catalogSupabase } from './supabase';
 import { User, DAWState, Clip, Instrument, Instrumental, PendingUpload, Track } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
+import { projectRateOf } from '../utils/projectRate';
 import { SessionSerializer } from './SessionSerializer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
@@ -674,6 +675,8 @@ export class SupabaseManager {
   }
 
   private async hydrateAudioBuffers(state: DAWState) {
+      // Moteur à la fréquence du projet avant de décoder (absente : 44,1 kHz).
+      await audioEngine.setSampleRate?.(projectRateOf(state));
       await audioEngine.init();
       const promises: Promise<void>[] = [];
 

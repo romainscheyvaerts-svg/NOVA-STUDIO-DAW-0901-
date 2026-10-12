@@ -24,6 +24,7 @@ import {
   AutomationLane, Clip, DAWState, Marker, PluginInstance, PluginType, ProjectPhase, TimeSignature, Track, TrackGroup, TrackType,
 } from '../types';
 import { TEMPLATE_ACCESS_GROUPS, privateLabel } from '../config/templateAccess';
+import { NEW_PROJECT_RATE, ProjectRate, sanitizeRate } from './projectRate';
 import { BUILTIN_LABEL_FR, builtinFor, resolveVst, VstCandidate } from './vstMatch';
 
 export const TEMPLATE_FORMAT = 'novatemplate';
@@ -54,6 +55,12 @@ export interface SessionTemplate {
   keepClips?: boolean;
   session: {
     bpm?: number;
+    /**
+     * Fréquence d'échantillonnage (utils/projectRate) du projet créé. Absente : 48 kHz
+     * (celle d'un nouveau projet). Modèle relevé dans Pro Tools : celle de la session
+     * d'origine (LENNON : 44,1 kHz, lue par PTSL le 08/10/2026).
+     */
+    sampleRate?: ProjectRate;
     timeSignature?: TimeSignature;
     projectKey?: number;
     projectScale?: string;
@@ -179,6 +186,8 @@ export const createTemplateFromState = (state: DAWState, opts: CreateTemplateOpt
     isDelayCompEnabled: state.isDelayCompEnabled,
     ...(state.projectMode ? { projectMode: state.projectMode } : {}),
     ...(state.vocalMixStyle ? { vocalMixStyle: state.vocalMixStyle } : {}),
+    // Fréquence de la session (comme un modèle Pro Tools).
+    ...(sanitizeRate(state.sampleRate) ? { sampleRate: sanitizeRate(state.sampleRate)! } : {}),
   };
   if (keepTempo) {
     session.bpm = state.bpm;
@@ -368,7 +377,12 @@ export interface InstantiateOptions {
   /** Fabrique d'effets de NOVA du studio (App) ; sinon les réglages par défaut d'ici. */
   makeBuiltin?: (type: PluginType, overrides: Record<string, any>) => PluginInstance;
   projectId?: string;
+  /** Fréquence choisie à la création (sinon celle du modèle, sinon 48 kHz). */
+  sampleRate?: ProjectRate;
 }
+
+/** Fréquence d'un projet créé depuis ce modèle (sans choix à la création). */
+export const templateRate = (tpl: Pick<SessionTemplate, 'session'>): ProjectRate => sanitizeRate(tpl.session?.sampleRate) ?? NEW_PROJECT_RATE;
 
 export interface TemplateLoadReport {
   /** Plugin absent remplacé par un effet de NOVA. */
@@ -484,6 +498,7 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
     id: opts.projectId || `proj-${Date.now().toString(36)}`,
     name: (opts.name || tpl.name || 'Projet').slice(0, 80),
     schemaVersion: 2,
+    sampleRate: sanitizeRate(opts.sampleRate) ?? templateRate(tpl),
     bpm,
     timeSignature: s.timeSignature || { numerator: 4, denominator: 4 },
     ...(s.projectKey !== undefined ? { projectKey: s.projectKey } : {}),

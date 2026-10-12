@@ -9,9 +9,16 @@
  * Logic ou Ableton à l'export).
  *
  * Filtre polyphasé : pour un rapport L/M (après réduction par le PGCD), chaque
- * phase a sa table de coefficients. Coupure à 0,46 × la plus basse des deux
- * fréquences (≈ 20,3 kHz pour 44,1 kHz), 16 passages par zéro, Kaiser β = 8,6
- * (réjection ≈ −80 dB).
+ * phase a sa table de coefficients.
+ *
+ * Réglage « studio » (fréquence du projet, 12/10/2026) : bande passante PLATE
+ * jusqu'à 0,907 × la Nyquist la plus basse (20 kHz pour 44,1 kHz, 21,8 kHz
+ * pour 48 kHz), réjection ≥ 100 dB dès la Nyquist (Kaiser β = 10,06, 66
+ * passages par zéro, coupure 0,9535). Mesuré : 0,00 dB à 20 kHz en 44,1 ↔ 48,
+ * repliement ≤ −114 dB. L'ancien réglage (16 passages, β = 8,6, coupure 0,92)
+ * perdait −4,4 dB à 20 kHz ; le décodeur du navigateur (decodeAudioData)
+ * perd −6,9 dB à 20 kHz et la lecture d'un buffer à une autre fréquence
+ * (interpolation linéaire de Chromium) −1,5 dB dès 10 kHz.
  */
 
 const gcd = (a: number, b: number): number => { while (b) { const t = a % b; a = b; b = t; } return a; };
@@ -23,13 +30,16 @@ function besselI0(x: number): number {
 }
 
 export interface ResampleOptions {
-  /** Passages par zéro de chaque côté (qualité / vitesse). 16 par défaut. */
+  /** Passages par zéro de chaque côté (qualité / vitesse). 66 par défaut. */
   zeroCrossings?: number;
-  /** Bêta de la fenêtre de Kaiser. 8,6 par défaut. */
+  /** Bêta de la fenêtre de Kaiser. 10,06 par défaut (≈ 100 dB). */
   beta?: number;
-  /** Coupure relative à la Nyquist la plus basse (0,92 par défaut). */
+  /** Coupure relative à la Nyquist la plus basse (0,9535 par défaut). */
   rolloff?: number;
 }
+
+/** Réglage studio (par défaut) : plat à 20 kHz, réjection ≥ 100 dB. */
+export const STUDIO_RESAMPLE: Required<ResampleOptions> = { zeroCrossings: 66, beta: 10.06, rolloff: 0.9535 };
 
 /** Longueur de sortie exacte pour `n` échantillons d'entrée. */
 export const resampledLength = (n: number, from: number, to: number): number =>
@@ -43,10 +53,10 @@ export function resampleChannel(input: Float32Array, from: number, to: number, o
   const L = Math.round(to) / g;   // facteur de suréchantillonnage
   const M = Math.round(from) / g; // facteur de décimation
   const ratio = to / from;
-  const zc = opts.zeroCrossings ?? 16;
-  const beta = opts.beta ?? 8.6;
+  const zc = opts.zeroCrossings ?? STUDIO_RESAMPLE.zeroCrossings;
+  const beta = opts.beta ?? STUDIO_RESAMPLE.beta;
   // Coupure normalisée (1 = Nyquist de l'entrée).
-  const fc = Math.min(1, ratio) * (opts.rolloff ?? 0.92);
+  const fc = Math.min(1, ratio) * (opts.rolloff ?? STUDIO_RESAMPLE.rolloff);
   const K = Math.ceil(zc / fc);        // demi-largeur en échantillons d'entrée
   const taps = 2 * K;
   const ib = besselI0(beta);

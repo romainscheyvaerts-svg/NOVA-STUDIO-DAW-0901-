@@ -596,7 +596,7 @@ export async function prepareTracksForOffline(tracks: Track[], onStep?: (msg: st
         const solo = out.some(x => x.isSolo);
         const sources = busSources(bus, out).filter(s => !s.isMuted && (!solo || s.isSolo || !!s.soloSafe) && !!sourcePlayable(s));
         if (sources.length === 0) { out[idx] = { ...bus, isFrozen: false }; continue; }
-        const sr = audioEngine.ctx?.sampleRate || 44100;
+        const sr = audioEngine.getProjectSampleRate();
         const end = sources.reduce((m, s) => Math.max(m, ...(s.clips || []).map(c => c.start + c.duration)), 0);
         onStep?.(`Rendu de ${bus.name}…`);
         const feed = await renderFeed(sources, bus, end + SEND_RENDER_TAIL, sr);

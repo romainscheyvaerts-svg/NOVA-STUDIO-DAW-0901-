@@ -10,6 +10,9 @@ import {
 import { editSelectionStore } from '../utils/editSelection';
 import { recoveryStore, isNamedVersion, VersionMeta } from '../utils/recoveryStore';
 import { compareVersions, diffLines, nextVersionNumber, versionName } from '../utils/projectVersions';
+import { projectRateOf, ProjectRate, rateLabel, RATE_HINT } from '../utils/projectRate';
+import { ProjectRatePicker, requestProjectRate } from './ProjectRateControls';
+import { audioEngine } from '../engine/AudioEngine';
 
 /**
  * R21 · Panneau « Session » : notes (projet et pistes), liste des clips,
@@ -21,6 +24,7 @@ const TABS: { id: R21Tab; label: string; icon: string; title: string }[] = [
   { id: 'clips', label: 'Clips', icon: 'fa-th-list', title: 'Liste des clips de la session (Pro Tools : Clips List ; Logic : Project Audio Browser)' },
   { id: 'arrangements', label: 'Arrangements', icon: 'fa-random', title: 'Arrangements multiples : clean, explicite, radio edit (Logic : Arrangement Alternatives)' },
   { id: 'versions', label: 'Versions', icon: 'fa-code-branch', title: 'Versions nommées v2, v3… (Pro Tools : Save As New Version ; Logic : Project Alternatives)' },
+  { id: 'reglages', label: 'Réglages', icon: 'fa-sliders-h', title: "Réglages de la session : fréquence d'échantillonnage (Pro Tools : Session Setup)" },
 ];
 
 const btn = 'nova-hit-tactile h-9 rounded-lg border border-nv-line px-3 text-[12px] font-bold text-nv-ink hover:bg-nv-accent/15 disabled:opacity-40';
@@ -316,6 +320,40 @@ const VersionsTab: React.FC<{ state: DAWState; compact?: boolean }> = ({ state }
   );
 };
 
+// ─── Réglages de la session (Pro Tools : Session Setup) ─────────────────────────
+
+const SettingsTab: React.FC<{ state: DAWState }> = ({ state }) => {
+  const rate = projectRateOf(state);
+  const [pick, setPick] = useState<ProjectRate>(rate);
+  useEffect(() => setPick(rate), [rate]);
+  const [engineRate, setEngineRate] = useState(() => audioEngine.ctx?.sampleRate || null);
+  useEffect(() => {
+    const on = () => setEngineRate(audioEngine.ctx?.sampleRate || null);
+    on();
+    window.addEventListener('nova:samplerate', on);
+    const t = window.setInterval(on, 1500);
+    return () => { window.removeEventListener('nova:samplerate', on); window.clearInterval(t); };
+  }, []);
+  return (
+    <div className="flex flex-col gap-3" data-testid="session-settings">
+      <section className="rounded-xl border border-nv-line p-3">
+        <h3 className="text-[13px] font-bold text-nv-ink">Fréquence d'échantillonnage</h3>
+        <p className="mt-1 text-[12px] text-nv-muted">
+          Projet en <b className="text-nv-ink" data-testid="session-rate">{rateLabel(rate)}</b>{state.sampleRate ? '' : ' (projet d’avant ce réglage)'}
+          {engineRate && engineRate !== rate ? ` · moteur en ${rateLabel(engineRate)}, passage en cours…` : engineRate ? ' · moteur audio à la même fréquence' : ''}.
+          {' '}Enregistrement, lecture, effets, VST et export suivent cette fréquence.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <ProjectRatePicker value={pick} onChange={setPick} testId="session-rate-pick" />
+          <button type="button" className={btnMain} disabled={pick === rate} data-testid="session-rate-apply"
+            onClick={() => requestProjectRate(pick)}>Changer…</button>
+        </div>
+        <p className="mt-2 text-[11px] text-nv-muted">{RATE_HINT[pick]}. Changer convertit tous les sons du projet (avertissement avant).</p>
+      </section>
+    </div>
+  );
+};
+
 // ─── Panneau ────────────────────────────────────────────────────────────────────
 
 const SessionProPanel: React.FC<{ state: DAWState; tab: R21Tab; phone?: boolean; className?: string }> = ({ state, tab, phone, className }) => {
@@ -338,7 +376,7 @@ const SessionProPanel: React.FC<{ state: DAWState; tab: R21Tab; phone?: boolean;
       <div className="flex gap-1 rounded-xl bg-nv-well p-1" role="tablist" aria-label="Session">
         {tabs.map(t => (
           <button key={t.id} type="button" role="tab" aria-selected={cur === t.id} onClick={() => sessionPanelStore.set(t.id)} title={t.title} data-testid={`session-tab-${t.id}`}
-            className={`nova-hit-tactile h-9 min-w-0 flex-1 rounded-lg px-1 text-[11px] font-bold ${cur === t.id ? 'bg-nv-accent text-black' : 'text-nv-muted hover:text-nv-ink'}`}>
+            className={`nova-hit-tactile h-9 min-w-0 flex-auto whitespace-nowrap rounded-lg px-1.5 text-[11px] font-bold ${cur === t.id ? 'bg-nv-accent text-black' : 'text-nv-muted hover:text-nv-ink'}`}>
             <i className={`fas ${t.icon} mr-1 text-[10px]`} />{t.label}
           </button>
         ))}
@@ -347,6 +385,7 @@ const SessionProPanel: React.FC<{ state: DAWState; tab: R21Tab; phone?: boolean;
       {cur === 'clips' && <ClipsList state={state} />}
       {cur === 'arrangements' && <ArrangementsTab state={state} />}
       {cur === 'versions' && <VersionsTab state={state} compact={phone} />}
+      {cur === 'reglages' && <SettingsTab state={state} />}
     </aside>
   );
 };

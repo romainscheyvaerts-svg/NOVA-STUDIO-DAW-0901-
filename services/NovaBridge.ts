@@ -29,6 +29,7 @@
  */
 
 import { isNovaDesktop } from '../utils/desktopApp';
+import { currentRate } from '../utils/projectRate';
 
 export interface BridgePlugin {
   id: string;
@@ -520,7 +521,7 @@ class NovaBridgeService {
       if (!this.pending.has(meta.req_id)) return;
       const list = this.stemFrames.get(meta.req_id) || [];
       list.push({ key: String(meta.key), label: String(meta.label || meta.key), channels: deinterleave(),
-        sampleRate: Number(meta.sample_rate) || 44100, path: String(meta.path || '') });
+        sampleRate: Number(meta.sample_rate) || currentRate(), path: String(meta.path || '') });
       this.stemFrames.set(meta.req_id, list);
       return;
     }
@@ -528,7 +529,7 @@ class NovaBridgeService {
     if (meta.action === 'ARA_RENDERED') {
       if (!this.pending.has(meta.req_id)) return;
       const list = this.araFrames.get(meta.req_id) || [];
-      list.push({ clipId: String(meta.clip_id), channels: deinterleave(), sampleRate: Number(meta.sample_rate) || 44100 });
+      list.push({ clipId: String(meta.clip_id), channels: deinterleave(), sampleRate: Number(meta.sample_rate) || currentRate() });
       this.araFrames.set(meta.req_id, list);
       return;
     }

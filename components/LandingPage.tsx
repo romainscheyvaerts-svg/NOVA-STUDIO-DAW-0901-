@@ -15,6 +15,8 @@ import CachedImage from './CachedImage';
 import CatalogUnavailable from './CatalogUnavailable';
 import { fetchAudioPreview } from '../utils/audioCache';
 import { catalogStatus, isQuotaError } from '../utils/catalogStatus';
+import type { ProjectRate } from '../utils/projectRate';
+import { ProjectRatePicker } from './ProjectRateControls';
 
 interface LandingPageProps {
   user: User | null;
@@ -33,6 +35,9 @@ interface LandingPageProps {
   onLogout: () => void;
   /** « Nouveau projet depuis un modèle » (modèles de session). */
   onOpenTemplates?: () => void;
+  /** Fréquence d'échantillonnage d'un nouveau projet (48 kHz par défaut). */
+  newProjectRate?: ProjectRate;
+  onNewProjectRate?: (r: ProjectRate) => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
@@ -47,7 +52,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onOpenVersions,
   onLogin,
   onLogout,
-  onOpenTemplates
+  onOpenTemplates,
+  newProjectRate,
+  onNewProjectRate,
 }) => {
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
@@ -402,9 +409,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Nouveau Projet</p>
-                <p className="text-[11px] text-slate-400">Projet vierge</p>
+                <p className="text-[11px] text-slate-400">Projet vierge{newProjectRate ? ` · ${newProjectRate % 1000 ? (newProjectRate / 1000).toFixed(1).replace('.', ',') : newProjectRate / 1000} kHz` : ''}</p>
               </div>
             </button>
+            {newProjectRate && onNewProjectRate && (
+              <ProjectRatePicker value={newProjectRate} onChange={onNewProjectRate} tone="dark" label="Fréquence"
+                testId="landing-project-rate" className="justify-end px-1 -mt-1" />
+            )}
 
             {/* Nouveau projet depuis un modèle de session */}
             {onOpenTemplates && (

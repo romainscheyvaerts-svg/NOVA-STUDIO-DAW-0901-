@@ -53,6 +53,9 @@ MULTI = [40, 100, 250, 1000, 3000, 5000, 8000, 10000, 12000, 14000, 16000, 17000
 A_LR, A_MULTI = 10 ** (-12 / 20), 10 ** (-32 / 20)
 DUREE = 40  # s : couvre largement l'écoute
 TALK_FIRST = os.environ.get("TALK_FIRST", "1") != "0"  # talkback des deux côtés avant le mix (cas réel)
+# Fréquence du PROJET de test (12/10/2026) : PROJET_SR=48000 → session en 48 kHz, moteurs des deux
+# côtés à 48 kHz, plus aucun rééchantillonnage avant Opus ; comparé à la référence « Opus seul ».
+PROJET_SR = int(os.environ.get("PROJET_SR", "0") or 0)
 
 # Toutes les connexions WebRTC de la page (pour lire SDP et codec négocié), sans rien changer à l'appli.
 PCS_INIT = """(() => { const O = window.RTCPeerConnection; if (!O || O.__qa) return; const list = []; window.__qaPcs = list;
@@ -87,6 +90,8 @@ def stereo_project(path: Path):
         "metronome": {"enabled": False, "volume": 0.7, "countIn": 0, "accentDownbeat": True, "sound": "CLICK"},
         "punch": {"enabled": False, "punchIn": 0, "punchOut": 0, "preRoll": 0, "postRoll": 0},
     }
+    if PROJET_SR:
+        state["sampleRate"] = PROJET_SR
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("project.json", json.dumps(state))
         z.writestr("audio/test_stereo.wav", stereo_wav())
@@ -278,6 +283,8 @@ def run():
             E.evaluate("() => window.DAW_CONTROL.seek(0)"); E.wait_for_timeout(300)
             E.get_by_role("button", name=re.compile(r"^(Lecture|Lire)")).locator("visible=true").first.click()
             freqs = sorted(set([F_L, F_R] + MULTI))
+            rates_js = "async () => { const m = await window.__novaAppModule('/engine/AudioEngine.ts'); return m.audioEngine.ctx ? m.audioEngine.ctx.sampleRate : null; }"
+            res["frequence_moteur"] = {"lina": A.evaluate(rates_js), "max": E.evaluate(rates_js), "projet": PROJET_SR or "absente (44,1 kHz)"}
             recu = A.evaluate(MEASURE_JS, {"which": "recu", "freqs": freqs, "secs": 2})
             envoye = E.evaluate(MEASURE_JS, {"which": "envoye", "freqs": freqs, "secs": 2})
             kin, sA = bitrate(A, "inbound-rtp", (recu or {}).get("piste_id"))
@@ -345,6 +352,15 @@ def run():
             else:
                 check("références Opus mesurées", False)
             res["mesures"]["reference_opus_seul_48k_relative_1kHz_db"] = (refs or {}).get("48000") if isinstance(refs, dict) else refs
+            ref48 = (refs or {}).get("48000") if isinstance(refs, dict) else None
+            if PROJET_SR == 48000 and isinstance(ref48, dict) and str(1000) in ref48:
+                # Projet en 48 kHz : le mix ne passe plus par aucun rééchantillonnage ; il doit
+                # coller à « Opus seul » jusqu'à 20 kHz (± 1 dB).
+                e48 = {f: round((rep[f] - rep[1000]) - ref48[str(f)], 2) for f in MULTI if f >= 12000}
+                res["mesures"]["ecart_a_opus_seul_48k_db"] = e48
+                fm = res.get("frequence_moteur") or {}
+                check(f"moteurs à 48 kHz des deux côtés ({fm})", fm.get("lina") == 48000 and fm.get("max") == 48000)
+                check(f"projet en 48 kHz : réponse = Opus seul à ± 1 dB jusqu'à 20 kHz ({e48})", all(abs(v) <= 1.0 for v in e48.values()))
             res["mesures"]["reference_opus_contexte_44k_relative_1kHz_db"] = ref44
             check(f"débit réel du mix ≥ 256 kb/s (reçu {m['debit_recu_kbps']} kb/s)", (m["debit_recu_kbps"] or 0) >= 256)
             st = m["envoye"].get("reglages_piste") or {}

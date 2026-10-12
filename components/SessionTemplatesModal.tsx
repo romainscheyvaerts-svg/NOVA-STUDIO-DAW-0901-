@@ -9,8 +9,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DAWState } from '../types';
 import {
   accessGroupsOf, createTemplateFromState, instantiateTemplate, InstantiateOptions, MissingVstMode, SessionTemplate,
-  templateBadge, templateInfo, TemplateLoadReport,
+  templateBadge, templateInfo, TemplateLoadReport, templateRate,
 } from '../utils/sessionTemplate';
+import { ProjectRate, rateLabel } from '../utils/projectRate';
+import { ProjectRatePicker } from './ProjectRateControls';
 import {
   deleteTemplate, duplicateTemplate, exportTemplateFile, importTemplateText, listTemplates, renameTemplate, saveTemplate,
 } from '../services/TemplateStore';
@@ -47,6 +49,8 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [missingMode, setMissingMode] = useState<MissingVstMode>('replace');
   const [enableAll, setEnableAll] = useState(false);
+  // Fréquence du projet créé (par modèle) : celle du modèle par défaut (LENNON : 44,1 kHz).
+  const [rateFor, setRateFor] = useState<Record<string, ProjectRate>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Formulaire « Enregistrer la session »
@@ -96,6 +100,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
     const { state, report } = instantiateTemplate(t, {
       plugins: plugins ? plugins.map(p => ({ name: p.name, vendor: p.vendor, path: p.path, pluginName: p.pluginName ?? null, isInstrument: p.isInstrument ?? null })) : null,
       missingVst: missingMode, enableAll, makeBuiltin,
+      sampleRate: rateFor[t.id] ?? templateRate(t),
     });
     onCreateProject?.(state, report, t);
     onClose();
@@ -230,7 +235,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                             </div>
                             <p className="text-[11px] text-slate-400 mt-1">
                               {plural(info.tracks, 'piste')} · {plural(info.buses, 'bus', 'bus')} · {plural(info.sends, 'retour')} · {plural(info.plugins, 'effet')}{info.vst ? ` (${info.vst} VST)` : ''}{info.inactive ? ` · ${plural(info.inactive, 'effet inactif', 'effets inactifs')}` : ''}{info.folders ? ` · ${plural(info.folders, 'dossier')}` : ''}{info.vcas ? ` · ${plural(info.vcas, 'VCA', 'VCA')}` : ''}{info.hiddenTracks ? ` · ${plural(info.hiddenTracks, 'piste masquée', 'pistes masquées')}` : ''}{info.inactiveTracks ? ` · ${plural(info.inactiveTracks, 'piste inactive', 'pistes inactives')}` : ''}
-                              {t.session.bpm ? ` · ${t.session.bpm} BPM` : ''}{!t.bundled ? ` · ${formatAgo(t.updatedAt)}` : ''}
+                              {t.session.bpm ? ` · ${t.session.bpm} BPM` : ''} · {rateLabel(rateFor[t.id] ?? templateRate(t))}{!t.bundled ? ` · ${formatAgo(t.updatedAt)}` : ''}
                             </p>
                             {t.description && <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{t.description}</p>}
                           </div>
@@ -247,6 +252,8 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                               <input type="checkbox" checked={enableAll} onChange={e => setEnableAll(e.target.checked)} className="mt-0.5 w-5 h-5 accent-cyan-400" data-testid="tpl-enable-all" />
                               <span>Activer tous les effets inactifs{info.inactive ? ` (${plural(info.inactive, 'effet inactif ou en bypass', 'effets inactifs ou en bypass')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine (Pro Tools) mais qui servent au mix : on garde la trace de ce qui était inactif.</span></span>
                             </label>}
+                            <ProjectRatePicker value={rateFor[t.id] ?? templateRate(t)} onChange={r => setRateFor(m => ({ ...m, [t.id]: r }))}
+                              tone="dark" label="Fréquence du projet" testId="tpl-rate" />
                             {inStudio && <p className="text-[11px] text-amber-200">Ton projet en cours sera remplacé : sauvegarde-le avant si tu veux le garder.</p>}
                             <div className="flex flex-wrap gap-2">
                               <button type="button" disabled={busy} onClick={() => void create(t)} className={primary} data-testid="tpl-create">{busy ? 'Création…' : 'Créer le projet'}</button>

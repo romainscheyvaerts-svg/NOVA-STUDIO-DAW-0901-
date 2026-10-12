@@ -31,6 +31,14 @@ class AudioBufferRegistry {
     }
     
     /**
+     * Remplace le son d'un identifiant (même URL d'objet) : conversion de
+     * fréquence du projet (utils/hqAudio.convertRegistryTo).
+     */
+    replace(id: string, buffer: AudioBuffer): void {
+        if (this.buffers.has(id)) this.buffers.set(id, buffer);
+    }
+
+    /**
      * Récupère un AudioBuffer par son ID
      */
     get(id: string): AudioBuffer | undefined {

@@ -215,8 +215,13 @@ export const sameOrder = (a: string[], b: string[]): boolean => a.length === b.l
 
 // --- Session : tonalité, arrangements, paroles --------------------------------------------------
 
-/** Champs de la session partagés en plus (dernière écriture gagne, champ par champ). */
-export const SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'lyrics', 'lyricsRegions'] as const;
+/**
+ * Champs de la session partagés en plus (dernière écriture gagne, champ par champ).
+ * sampleRate (12/10/2026) : la fréquence du projet est UNE pour tout le monde ;
+ * reçue, le moteur de chacun s'y règle et convertit ses sons (App, utils/hqAudio).
+ * null = projet d'avant le réglage (44,1 kHz). Ignorée par les anciennes versions.
+ */
+export const SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'lyrics', 'lyricsRegions', 'sampleRate'] as const;
 export type SongField = typeof SONG_FIELDS[number];
 
 export function songFieldsOf(s: Record<string, any>): Record<SongField, unknown> {
@@ -233,6 +238,7 @@ export function sanitizeSongField(f: SongField, v: unknown): unknown {
     case 'projectScale': return typeof v === 'string' && v.length <= 40 ? v : undefined;
     case 'lyrics': return typeof v === 'string' ? v.slice(0, 20000) : undefined;
     case 'lyricsRegions': return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined;
+    case 'sampleRate': return v === 44100 || v === 48000 || v === 88200 || v === 96000 ? v : undefined;
     case 'arrangements': return Array.isArray(v)
       ? v.filter((a: any) => a && typeof a.id === 'string' && Array.isArray(a.sections)).slice(0, 50)
         .map((a: any) => ({ ...a, name: String(a.name || 'Arrangement').slice(0, 80), sections: a.sections.filter((x: unknown) => typeof x === 'string'), mutedClipIds: Array.isArray(a.mutedClipIds) ? a.mutedClipIds.filter((x: unknown) => typeof x === 'string') : [] }))

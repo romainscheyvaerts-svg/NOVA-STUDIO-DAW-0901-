@@ -13,6 +13,7 @@
   },
   "keepClips": false,
   "session": {
+    "sampleRate": 44100,
     "bpm": 140,
     "timeSignature": {
       "numerator": 4,

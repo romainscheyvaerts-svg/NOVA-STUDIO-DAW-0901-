@@ -39,6 +39,7 @@ export const HISTORY_MAX = 120;
 
 export const SONG_LABEL: Record<string, string> = {
   projectKey: 'la tonalité', projectScale: 'la gamme', arrangements: 'les arrangements', lyrics: 'les paroles', lyricsRegions: 'les paroles par section',
+  sampleRate: "la fréquence d'échantillonnage du projet",
 };
 
 /** Ce qu'un champ de mix veut dire, en français. */

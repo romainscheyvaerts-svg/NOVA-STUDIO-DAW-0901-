@@ -17,7 +17,9 @@ Usage (serveur NOVA : npx vite --port 3479 --strictPort) :
 import json, os, subprocess, sys, time
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+sys.path.insert(0, str(Path(__file__).parent))
+import qa_hors_prod  # noqa: E402,F401  QA hors production : AVANT le lancement du navigateur (Supabase simulé, prod bloquée)
+from playwright.sync_api import sync_playwright  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(os.environ.get("QA_OUT", r"D:\1 WORK\CONTENU\nova-ara\insert"))
@@ -30,7 +32,7 @@ MEL = r"C:\Program Files\Common Files\VST3\Celemony\Melodyne\Melodyne.vst3"
 EXE = os.environ.get("NOVA_CHROME", r"C:\Users\lenno\AppData\Local\ms-playwright\chromium_headless_shell-1243\chrome-headless-shell-win64\chrome-headless-shell.exe")
 
 JS = r"""
-async ({ mel }) => {
+async ({ mel, sr }) => {
   const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
   const { TrackType } = await window.__novaAppModule('/types.ts');
   const { novaBridge } = await window.__novaAppModule('/services/NovaBridge.ts');
@@ -40,6 +42,8 @@ async ({ mel }) => {
   const { buildTempoMap } = await window.__novaAppModule('/utils/tempoMap.ts');
   const { renderTrackFreeze } = await window.__novaAppModule('/services/VstFreeze.ts');
   const out = {};
+  // Fréquence du projet (PROJET_SR, 12/10/2026) : moteur réglé avant de démarrer.
+  if (sr) await e.setSampleRate(sr);
   await e.init(); await e.resume();
   if (!(await novaBridge.connect())) return { error: 'pont injoignable' };
   out.pont = { version: novaBridge.getBridgeState().version, araInsert: novaBridge.getBridgeState().araInsert };
@@ -93,16 +97,27 @@ async ({ mel }) => {
     recNode.port.postMessage(false);
     const blocks = rec; rec = null;
     const clicks = []; let last = -1;
-    for (const bl of blocks) { const d = bl[1]; for (let i = 1; i < d.length - 1; i++) {
+    // Diagnostic : crête et nombre de blocs reçus (une lecture muette se voit tout de suite).
+    let pk = 0; for (const bl of blocks) for (const v of bl[1]) pk = Math.max(pk, Math.abs(v));
+    clicks.diag = { blocs: blocks.length, crete: Math.round(pk * 1000) / 1000 };
+    // Blocs mis bout à bout (un clic peut tomber au 1er échantillon d'un bloc : à 48 kHz, 1,000 s = 375 × 128).
+    // (bl[0] : instant du bloc en secondes de contexte → image)
+    const fr = bl => Math.round(bl[0] * SR);
+    const f0 = blocks.length ? fr(blocks[0]) : 0, tot = blocks.length ? fr(blocks[blocks.length - 1]) + blocks[blocks.length - 1][1].length - f0 : 0;
+    const d = new Float32Array(Math.max(0, tot)); for (const bl of blocks) d.set(bl[1], fr(bl) - f0);
+    { let im = 0; for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > Math.abs(d[im])) im = i;
+      clicks.diag.autour_crete = Array.from(d.subarray(Math.max(0, im - 3), im + 4)).map(v => Math.round(v * 1000) / 1000);
+      clicks.diag.t_crete = Math.round(((f0 + im) / SR - origin) * 1e6) / 1e6; }
+    for (let i = 1; i < d.length - 1; i++) {
       // clic = un seul échantillon fort entouré de presque rien (les notes sont des sinus)
       if (Math.abs(d[i]) > 0.2 && Math.abs(d[i - 1]) < 0.05 && Math.abs(d[i + 1]) < 0.05) {
-        const s = bl[0] + i / SR - origin; if (s - last > 0.2) clicks.push({ t: Math.round(s * 1e6) / 1e6, v: Math.round(Math.abs(d[i]) * 1000) / 1000 }); last = s; } } }
+        const s = (f0 + i) / SR - origin; if (s - last > 0.2) clicks.push({ t: Math.round(s * 1e6) / 1e6, v: Math.round(Math.abs(d[i]) * 1000) / 1000 }); last = s; } }
     return clicks;
   };
   const gap = (c, k = 1) => (c.length > k ? Math.round((c[k].t - c[0].t) * 1e6) / 1000 : null);   // ms
   await play(0, 0.5);   // amorce (premier passage dans le plugin)
   const c1 = await play(0, 2.6);
-  out.lecture_depuis_0 = { clics: c1, ecart_ref_plugin_ms: gap(c1), attendu_ms: 1000 };
+  out.lecture_depuis_0 = { clics: c1, ecart_ref_plugin_ms: gap(c1), attendu_ms: 1000, diag: c1.diag };
   const c2 = await play(0.8, 1.8);
   out.saut_depuis_0_8s = { clics: c2, ecart_ref_plugin_ms: gap(c2), attendu_ms: 1000 };
   e.setLoop(true, 0.8, 2.4);
@@ -160,7 +175,7 @@ def main():
             pg.goto(URL, wait_until="domcontentloaded")
             pg.wait_for_timeout(3000)
             pg.set_default_timeout(900000)
-            rep = pg.evaluate(JS, {"mel": MEL})
+            rep = pg.evaluate(JS, {"mel": MEL, "sr": int(os.environ.get("PROJET_SR", "0") or 0)})
             rep["erreurs_page"] = errs[:5]
             b.close()
     finally:

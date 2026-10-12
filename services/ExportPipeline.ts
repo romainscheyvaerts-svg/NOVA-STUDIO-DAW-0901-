@@ -82,7 +82,8 @@ const chans = (b: AudioBuffer) => Array.from({ length: b.numberOfChannels }, (_,
 const asBuf = (ch: Float32Array[], sr: number) => ({ sampleRate: sr, numberOfChannels: ch.length, length: ch[0]?.length || 0, getChannelData: (c: number) => ch[c] }) as unknown as AudioBuffer;
 
 /** Fréquence de rendu : celle du moteur (= des prises décodées). */
-export const renderRate = (): number => audioEngine.ctx?.sampleRate || 48000;
+/** Fréquence du rendu = celle du projet (le moteur y est réglé ; utils/projectRate). */
+export const renderRate = (): number => audioEngine.getProjectSampleRate();
 
 /** Fréquence de sortie réelle (le MP3 ne dépasse pas 48 kHz). */
 export const outputRate = (s: Pick<ExportSettings, 'format' | 'sampleRate'>) => (s.format === 'MP3' ? Math.min(48000, s.sampleRate) : s.sampleRate);

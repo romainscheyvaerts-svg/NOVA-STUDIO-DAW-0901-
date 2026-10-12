@@ -162,6 +162,8 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
   if (typeof state.id !== 'string' || !state.id) { if (state.id !== undefined) bump('projectId'); state.id = `proj-repare-${Date.now().toString(36)}`; }
   if (typeof state.name !== 'string') { state.name = 'Projet récupéré'; bump('projectName'); }
   if (!finite(state.bpm) || state.bpm < 20 || state.bpm > 400) { if (state.bpm !== undefined) bump('bpm'); state.bpm = 120; }
+  // Fréquence du projet (utils/projectRate) : illisible → retirée (= 44,1 kHz, comme un ancien projet).
+  if (state.sampleRate !== undefined && ![44100, 48000, 88200, 96000].includes(state.sampleRate)) { bump('sampleRate'); delete state.sampleRate; }
   const ts = state.timeSignature;
   if (!isObj(ts) || !Number.isInteger(ts.numerator) || ts.numerator < 1 || ts.numerator > 32 || !DENOMINATORS.has(ts.denominator)) {
     if (ts !== undefined) bump('timeSignature');
@@ -381,6 +383,7 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
     ['send', n => `${plural(n, 'envoi vers une piste absente (ou en double) retiré', 'envois vers des pistes absentes (ou en double) retirés')}${who('send')}.`],
     ['structure', n => `${plural(n, 'lien de dossier / VCA vers une piste absente retiré', 'liens de dossiers / VCA vers des pistes absentes retirés')}${who('structure')}.`],
     ['bpm', () => 'Tempo invalide : remis à 120 BPM.'],
+    ['sampleRate', () => "Fréquence d'échantillonnage illisible : projet ouvert en 44,1 kHz."],
     ['timeSignature', () => 'Signature rythmique invalide : remise à 4/4.'],
     ['markers', () => 'Liste des repères illisible : remise à vide.'],
     ['markerDropped', n => `${plural(n, 'repère invalide retiré', 'repères invalides retirés')}.`],

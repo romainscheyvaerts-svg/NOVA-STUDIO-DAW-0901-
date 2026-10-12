@@ -57,6 +57,7 @@ class Base(unittest.TestCase):
         fsd.STATE['generator'] = sines
         fsd.STATE['loopback'] = {}
         fsd.STATE['opened'].clear()
+        fsd.STATE['rates'] = None
         fsd.streams.clear()
 
     def open_stream(self, **kw):
@@ -273,6 +274,31 @@ class TestServer(Base):
         # Le retour direct survit à la recréation du flux
         self.assertEqual(srv.config.monitor_routes, [(1, 2, 0.7)])
         self.assertIs(srv.audio_stream.config, srv.config)
+
+    def test_project_rate_followed_or_refused_clearly(self):
+        # Fréquence du projet NOVA : la carte la suit (flux recréé) ; une carte qui ne la
+        # prend pas garde la sienne et le DAW reçoit la liste de ce qu'elle accepte.
+        fsd.STATE['rates'] = [44100, 48000]
+        srv, ws = self.make_server()
+
+        async def go():
+            srv.running = True
+            await srv._handle_message('c1', {'action': 'START_STREAM'})
+            await srv._handle_message('c1', {'action': 'SET_CONFIG', 'sample_rate': 48000})
+            self.assertEqual(srv.config.sample_rate, 48000)
+            self.assertTrue(srv.audio_stream.state.is_running)
+            await srv._handle_message('c1', {'action': 'SET_CONFIG', 'sample_rate': 96000})
+            self.assertEqual(srv.config.sample_rate, 48000)
+            await srv._handle_message('c1', {'action': 'STOP_STREAM'})
+        self.run_async(go())
+        self.assertEqual([o['samplerate'] for o in fsd.STATE['opened']], [44100, 48000])
+        ok, refused = ws.json('CONFIG_SET')
+        self.assertTrue(ok['success'])
+        self.assertEqual(ok['config']['sample_rate'], 48000)
+        self.assertFalse(refused['success'])
+        self.assertEqual(refused['error'], 'rate_unsupported')
+        self.assertEqual(refused['supported_rates'], [44100, 48000])
+        self.assertEqual(refused['config']['sample_rate'], 48000)
 
     def test_measure_latency_action(self):
         fsd.STATE['generator'] = None

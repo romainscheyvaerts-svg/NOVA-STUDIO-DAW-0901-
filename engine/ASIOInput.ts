@@ -165,7 +165,7 @@ export class ASIOInput {
   /** Nœud du lecteur : sortie 0 = voix mono (historique), sortie 1 = toutes les entrées. */
   public getNode(): AudioNode | null { return this.node; }
 
-  constructor(ctx: AudioContext, sourceRate = 44100, channels = 2) {
+  constructor(ctx: AudioContext, sourceRate = ctx.sampleRate, channels = 2) {
     this.ctx = ctx;
     this.sourceRate = sourceRate;
     this.channels = Math.max(1, Math.min(32, Math.floor(channels) || 2));

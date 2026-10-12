@@ -93,7 +93,8 @@ describe('modèle de session : enregistrement', () => {
     const { state } = instantiateTemplate(tpl, { plugins: null });
     const again = createTemplateFromState(state, { name: 'Mon modèle', id: 'tpl-test', now: 1000, source: tpl.source });
     // Les pistes recréées reçoivent une courbe de volume vide : sans objet dans le modèle.
-    expect(again.session).toEqual(tpl.session);
+    // Fréquence : un modèle sans fréquence crée un projet en 48 kHz, gardée au nouvel enregistrement.
+    expect(again.session).toEqual({ ...tpl.session, sampleRate: 48000 });
     expect(state.tracks.find(t => t.id === 'voix')!.isTrackArmed).toBe(false);
     expect(state.tracks.find(t => t.id === 'voix')!.automationLanes[0].parameterName).toBe('volume');
   });

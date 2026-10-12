@@ -92,6 +92,8 @@ import { SidechainRouter, KeyPath, KeyRoute, keyRoutes, pdcKeysFor, latencyBefor
 import { meterBank } from './meters/meterBank';
 import { buildStrip, disposeStrip, setStrip, stripParam, stripSignature, StripNodes, TRIM_PARAM, WIDTH_PARAM } from './meters/channelStrip';
 import { GrPart, readGainReduction } from './meters/gainReduction';
+import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../utils/projectRate';
+import { installHQDecode } from '../utils/hqAudio';
 
 interface TrackDSP {
   input: GainNode;          
@@ -313,7 +315,15 @@ export class AudioEngine {
   // --- DEVICE MANAGEMENT ---
   private currentInputDeviceId: string = 'default';
   private currentOutputDeviceId: string = 'default';
-  public sampleRate: number = 44100;
+  /**
+   * Fréquence du contexte audio = celle du PROJET (utils/projectRate) : 48 kHz pour
+   * un nouveau projet, celle du fichier pour un projet ouvert (44,1 kHz s'il n'en a
+   * pas). Avant le 12/10/2026, le contexte était fixé à 44,1 kHz : le mix diffusé
+   * en direct (Opus 48 kHz) était rééchantillonné par le navigateur (−3 dB à
+   * 19 kHz, −12 dB à 20 kHz). Voir setSampleRate().
+   */
+  public sampleRate: number = NEW_PROJECT_RATE;
+  private desiredSampleRate: number = NEW_PROJECT_RATE;
   public latency: number = 0;
   private currentBpm: number = 120;
 
@@ -400,10 +410,16 @@ export class AudioEngine {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AudioContextClass({ 
       latencyHint: 'interactive',
-      sampleRate: 44100
+      // Contexte à la fréquence du projet (plus de 44,1 kHz codé en dur).
+      sampleRate: this.desiredSampleRate
     });
+    // Imports (fichiers, collaboration, cloud) : décodés à LEUR fréquence puis
+    // convertis une fois en qualité studio (le décodeur du navigateur perd
+    // −6,9 dB à 20 kHz en 44,1 → 48). Voir utils/hqAudio.
+    installHQDecode(this.ctx);
     
     this.sampleRate = this.ctx.sampleRate;
+    setCurrentRate(this.ctx.sampleRate);
     this.latency = this.ctx.baseLatency;
     this.hookAutoResume();
 
@@ -472,6 +488,124 @@ export class AudioEngine {
     // Auto-connect to ASIO Bridge if available (Windows only)
     // This allows users who have installed the bridge to have it connect automatically
     this.tryAutoConnectASIO();
+  }
+
+  /** Fréquence voulue pour le contexte (celle du projet ouvert). */
+  public getProjectSampleRate(): number { return this.ctx?.sampleRate || this.desiredSampleRate; }
+
+  /**
+   * Règle la fréquence du moteur sur celle du projet.
+   *  - Moteur pas encore démarré : le contexte naîtra à cette fréquence (rien d'autre à faire).
+   *  - Même fréquence : rien.
+   *  - Autre fréquence : le contexte est RECRÉÉ proprement (lecture arrêtée, pistes
+   *    désarmées, chaînes d'effets, worklets, entrées, envoi ASIO, mixes casque et
+   *    flux de la collaboration libérés, ancien contexte fermé), puis reconstruit à la
+   *    nouvelle fréquence. L'appelant reconstruit ensuite les pistes (updateTrack) :
+   *    App.ensureAudioEngine le fait dès qu'il voit un nouveau contexte. Les sons du
+   *    registre se convertissent à part (utils/hqAudio.convertRegistryTo).
+   * Refusé pendant une prise (la prise serait coupée).
+   */
+  public async setSampleRate(rate: number): Promise<{ changed: boolean; from: number; to: number }> {
+    const to = sanitizeRate(rate) ?? NEW_PROJECT_RATE;
+    const from = this.ctx?.sampleRate || this.desiredSampleRate;
+    this.desiredSampleRate = to;
+    if (!this.ctx) setCurrentRate(to);
+    if (!this.ctx || this.ctx.sampleRate === to) return { changed: false, from, to };
+    if (this.recordingTrackId || this.recordingTrackIds.length) {
+      this.desiredSampleRate = from;
+      throw new Error(`Une prise est en cours : change la fréquence (${rateLabel(to)}) après l'arrêt.`);
+    }
+    const old = this.ctx;
+    // Réglages du master à garder (le nouveau graphe naît avec les valeurs par défaut).
+    const keep = { limiter: this.safetyLimiterOn, monitor: this.masterOutput?.gain.value ?? 1, collabMuted: this.collabOutputMuted, asio: this.asioStreamActive };
+    // 1. Tout ce qui joue s'arrête.
+    try { this.stopAll(); } catch { /* */ }
+    try { this.stopPreview(); } catch { /* */ }
+    try { this.cancelHumTake(); } catch { /* */ }
+    try { this.disarmTrack(); } catch { /* */ }
+    // 2. Pistes (effets, worklets, envois, PDC, instruments) libérées.
+    for (const id of [...this.tracksDSP.keys()]) { try { this.disposeTrack(id); } catch { /* */ } }
+    try { this.detachFlashback(); } catch { /* */ }
+    // 3. Entrées / sorties liées à l'ancien contexte.
+    try { this.teardownAsioOutput(); } catch { /* */ }
+    try { this.resetASIOInput(); } catch { /* */ }
+    try { this.closeInputSource(); } catch { /* */ }
+    try { (this.inputRouter as unknown as { dispose?: () => void } | null)?.dispose?.(); } catch { /* */ }
+    this.inputRouter = null;
+    try { this.cueEngine?.dispose(); } catch { /* */ }
+    this.cueEngine = null;
+    try { this.collabMixDest?.disconnect(); } catch { /* */ }
+    this.collabMixDest = null;
+    this.scrubber = null;
+    for (const n of [this.previewGain, this.previewAnalyzer, this.masterOutput, this.masterLimiter, this.masterAnalyzer, this.masterSplitter,
+      this.masterAnalyzerL, this.masterAnalyzerR, this.browserOutput, this.mainSel, this.mainOut, this.monitorGain]) {
+      try { n?.disconnect(); } catch { /* */ }
+    }
+    this.previewGain = this.previewAnalyzer = null;
+    this.masterOutput = this.browserOutput = this.mainSel = this.mainOut = this.monitorGain = null;
+    this.masterLimiter = null; this.masterAnalyzer = null; this.masterSplitter = null;
+    this.masterAnalyzerL = this.masterAnalyzerR = null;
+    this.activeSources.clear();
+    this.scrubbingSources.clear();
+    this.reversedBufferCache.clear();
+    this.clipSigs.clear();
+    this.samplerSigs.clear();
+    this.trackMix.clear();
+    this.isPlaying = false;
+    // 4. Nouveau contexte.
+    this.ctx = null;
+    try { await old.close(); } catch { /* déjà fermé */ }
+    await this.init();
+    // 5. Réglages du master rétablis : limiteur de sécurité, niveau d'écoute, sortie coupée (collaboration).
+    this.safetyLimiterOn = true;
+    if (!keep.limiter) this.setSafetyLimiter(false);
+    if (keep.monitor !== 1 && this.masterOutput) this.masterOutput.gain.value = keep.monitor;
+    if (keep.collabMuted) this.setCollabOutputMuted(true);
+    // 6. Carte ASIO : à la nouvelle fréquence (le pont recrée son flux), puis l'envoi est refait.
+    if (this.asioConnected && keep.asio) {
+      const r = await this.syncASIORate();
+      if (r.ok && this.ctx) {
+        this.rebuildAsioOutput();
+        this.browserOutput?.gain.setValueAtTime(0, this.ctx.currentTime);
+      }
+    }
+    try { window.dispatchEvent(new CustomEvent('nova:samplerate', { detail: { from, to } })); } catch { /* hors navigateur */ }
+    return { changed: true, from, to };
+  }
+
+  /**
+   * Carte ASIO : son flux suit la fréquence du projet (une carte à 48 kHz sous un
+   * projet à 44,1 jouait l'envoi trop vite). Carte qui ne la prend pas : message
+   * clair (« nova:asio-rate ») et le son reste sur la sortie du navigateur.
+   */
+  private asioRateOk = true;
+  public isASIORateOk(): boolean { return this.asioRateOk; }
+  public async syncASIORate(): Promise<{ ok: boolean; rate: number; card?: number; error?: string }> {
+    const want = this.ctx?.sampleRate || this.desiredSampleRate;
+    if (!this.asioBridge || !this.asioConnected) return { ok: true, rate: want };
+    const cur = this.asioConfig?.sample_rate;
+    if (cur === want) { this.asioRateOk = true; return { ok: true, rate: want, card: cur }; }
+    const res = await new Promise<any>(resolve => {
+      const done = (m: any) => { clearTimeout(timer); resolve(m); };
+      const timer = setTimeout(() => { this.configWaiters = this.configWaiters.filter(f => f !== done); resolve(null); }, 8000);
+      this.configWaiters.push(done);
+      this.asioBridge!.setConfig({ sample_rate: want });
+    });
+    const got = Number(res?.config?.sample_rate || this.asioConfig?.sample_rate || 0);
+    const ok = !!res && res.success !== false && got === want;
+    this.asioRateOk = ok;
+    if (!ok) {
+      const supported: number[] = Array.isArray(res?.supported_rates) ? res.supported_rates : [];
+      const card = this.asioConfig?.device_name || 'La carte son';
+      const error = res?.error === 'rate_unsupported' || (res && got && got !== want)
+        ? `${card} ne fonctionne pas en ${rateLabel(want)}${supported.length ? ` (elle accepte : ${supported.map(rateLabel).join(', ')})` : ''}. Le son reste sur la sortie de l'ordinateur ; règle le projet sur une fréquence de la carte, ou change-la dans le panneau ASIO.`
+        : `${card} n'a pas répondu au changement de fréquence (${rateLabel(want)}). Le son reste sur la sortie de l'ordinateur.`;
+      if (this.asioStreamActive) this.stopASIOStream();
+      try { window.dispatchEvent(new CustomEvent('nova:asio-rate', { detail: { ok: false, want, card: got || null, supported, error } })); } catch { /* */ }
+      return { ok: false, rate: want, card: got || undefined, error };
+    }
+    try { window.dispatchEvent(new CustomEvent('nova:asio-rate', { detail: { ok: true, want, card: got } })); } catch { /* */ }
+    return { ok: true, rate: want, card: got };
   }
 
   /**
@@ -1098,7 +1232,9 @@ export class AudioEngine {
    * @param options.pluginAutomation avec preFader : l'automation des réglages d'effets
    *        est rejouée quand même (Commit / bounce : le rendu remplace les effets).
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean } = {}): Promise<AudioBuffer> {
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate?: number, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean } = {}): Promise<AudioBuffer> {
+    // Fréquence du rendu : celle du projet par défaut (avant : 44,1 kHz codé en dur).
+    if (!targetSampleRate) targetSampleRate = this.getProjectSampleRate();
     // Pistes guides (R3) : entendues pendant la prise, jamais dans un export, un master ni un mix auto.
     // (Gel d'une piste, rendu avant fader : la piste elle-même est rendue. Lecture ralentie, R13 : on les entend, comme en lecture.)
     if (!options.preFader && !options.keepGuides) tracks = tracks.filter(t => !t.isGuide);
@@ -4513,6 +4649,10 @@ export class AudioEngine {
       console.warn('[AudioEngine] ASIO non connecté');
       return;
     }
+    // La carte d'abord à la fréquence du projet : l'envoi part à la fréquence du contexte,
+    // une carte à une autre fréquence le jouerait trop vite / trop lentement.
+    const rate = await this.syncASIORate();
+    if (!rate.ok) { console.warn('[AudioEngine] ASIO : ' + rate.error); return; }
     
     // Envoi vers la carte : master sur 1-2, chaque mix casque sur sa paire (R15).
     if (this.ctx && !this.asioOutputProcessor) this.rebuildAsioOutput();
@@ -4560,7 +4700,7 @@ export class AudioEngine {
     if (!this.ctx) return null;
     if (this.asioInput && this.asioInput.channels !== this.asioInputChannels && !this.recordingTrackId) this.resetASIOInput();
     if (this.asioInput) return this.asioInput;
-    this.asioInput = new ASIOInput(this.ctx, this.asioConfig?.sample_rate || 44100, this.asioInputChannels);
+    this.asioInput = new ASIOInput(this.ctx, this.asioConfig?.sample_rate || this.ctx.sampleRate, this.asioInputChannels);
     this.asioInput.setChannel(this.getASIOInputChannel());
     return this.asioInput;
   }
@@ -4638,7 +4778,7 @@ export class AudioEngine {
     const r = await this.asioBridge.measureLatency(outChannels);
     if (!r.success || !r.delays) return r;
     const reported = ((r.input_latency_ms || 0) + (r.output_latency_ms || 0)) / 1000;
-    const offsetsMs = offsetsFromProbe(r.delays, r.sample_rate || this.asioConfig?.sample_rate || 44100, reported);
+    const offsetsMs = offsetsFromProbe(r.delays, r.sample_rate || this.asioConfig?.sample_rate || this.getProjectSampleRate(), reported);
     if (Object.keys(offsetsMs).length) setChannelOffsets({ ...channelOffsets(), ...offsetsMs });
     return { ...r, offsetsMs };
   }

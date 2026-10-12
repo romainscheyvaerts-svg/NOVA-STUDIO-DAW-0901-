@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { canvasTheme } from '../utils/canvasTheme';
+import { currentRate } from '../utils/projectRate';
 
 interface WaveformRendererProps {
   buffer?: AudioBuffer;
@@ -46,7 +47,7 @@ const WaveformRenderer: React.FC<WaveformRendererProps> = ({
     const data = buffer ? buffer.getChannelData(0) : (peaks ? Float32Array.from(peaks) : null);
     if (!data) return;
 
-    const sampleRate = buffer ? buffer.sampleRate : 44100; // Estimation si buffer absent
+    const sampleRate = buffer ? buffer.sampleRate : currentRate(); // Estimation si buffer absent : fréquence du projet
     const startSample = Math.floor(offset * sampleRate);
     const endSample = Math.floor((offset + duration) * sampleRate);
     const totalSamplesToRender = endSample - startSample;

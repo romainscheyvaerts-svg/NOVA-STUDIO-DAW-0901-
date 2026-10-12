@@ -76,7 +76,9 @@ logger = logging.getLogger('NovaASIO')
 class ASIOConfig:
     """Configuration ASIO"""
     device_name: Optional[str] = None  # None = périphérique par défaut
-    sample_rate: int = 44100
+    # Fréquence du projet NOVA, envoyée par le DAW avant chaque flux (SET_CONFIG) ;
+    # 48 kHz tant qu'il ne l'a pas dit (nouveau projet).
+    sample_rate: int = 48000
     block_size: int = 256  # Taille du buffer ASIO (latence)
     # 0 = toutes les entrées / sorties de la carte (32 au plus) : plusieurs pistes armées
     # lisent chacune leur canal, les mixes casque sortent sur leurs paires (R15).
@@ -305,6 +307,19 @@ class ASIODriverInstance:
         except Exception as e:
             logger.warning(f"   Impossible de récupérer les infos du driver: {e}")
     
+    def can_sample_rate(self, rate: int) -> Optional[bool]:
+        """canSampleRate() du pilote ASIO (index 12) : True / False, None si inconnu."""
+        if not self.is_loaded or not self.p_driver or not self.vtable_ptr:
+            return None
+        try:
+            import ctypes
+            CAN_SR = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_double)
+            can_sr = CAN_SR(self.vtable_ptr[12])
+            return can_sr(self.p_driver.value, ctypes.c_double(float(rate))) == 0  # ASE_OK
+        except Exception as e:
+            logger.warning(f"   canSampleRate({rate}) illisible: {e}")
+            return None
+
     def open_control_panel(self) -> bool:
         """Ouvrir le panneau de configuration du driver"""
         if not self.is_loaded or not self.p_driver:
@@ -1366,6 +1381,32 @@ class ASIOBridgeServer:
             "max_channels": MAX_BRIDGE_CHANNELS,
         })
 
+    # Fréquences de projet de NOVA (utils/projectRate) : la carte doit suivre celle du projet.
+    PROJECT_RATES = (44100, 48000, 88200, 96000)
+
+    def _rate_supported(self, rate: int) -> Optional[bool]:
+        """La carte accepte-t-elle cette fréquence ? Pilote ASIO (canSampleRate), sinon
+        PortAudio (check_output_settings). None : impossible à savoir (on essaie)."""
+        if self.asio_driver.is_loaded:
+            ok = self.asio_driver.can_sample_rate(rate)
+            if ok is not None:
+                return ok
+        if not SOUNDDEVICE_AVAILABLE or not hasattr(sd, 'check_output_settings'):
+            return None
+        try:
+            device = None
+            if self.config.device_name:
+                info = self.device_manager.get_device_by_name(self.config.device_name)
+                if info:
+                    device = info.get('sounddevice_id', info.get('id'))
+            sd.check_output_settings(device=device, samplerate=float(rate))
+            return True
+        except Exception:
+            return False
+
+    def _supported_rates(self) -> List[int]:
+        return [r for r in self.PROJECT_RATES if self._rate_supported(r) is not False]
+
     def _config_payload(self) -> dict:
         st = self.audio_stream if (self.audio_stream and self.audio_stream.state.is_running) else None
         return {
@@ -1428,6 +1469,23 @@ class ASIOBridgeServer:
                 driver_changed = True
                 stream_changed = True
                 self.config.device_name = new_device_name
+
+            # Fréquence du projet NOVA : vérifiée AVANT d'être appliquée. Une carte qui ne la
+            # prend pas garde la sienne et le DAW affiche un message clair (au lieu d'un flux
+            # qui ne s'ouvre pas, ou d'un son joué trop vite / trop lentement).
+            if data.get("sample_rate") is not None and not driver_changed:
+                try:
+                    want_sr = int(data["sample_rate"])
+                except (TypeError, ValueError):
+                    want_sr = None
+                if want_sr and want_sr != self.config.sample_rate and self._rate_supported(want_sr) is False:
+                    await self._send(client_id, {
+                        "action": "CONFIG_SET", "success": False, "error": "rate_unsupported",
+                        "wanted_sample_rate": want_sr, "supported_rates": self._supported_rates(),
+                        "driver_loaded": False, "driver_info": {}, "stream_restarted": False,
+                        "config": self._config_payload(), "stream": None,
+                    })
+                    return
 
             for key in ("sample_rate", "block_size", "input_channels", "output_channels"):
                 if key in data and data[key] is not None:

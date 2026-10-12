@@ -1,4 +1,5 @@
 import { savedVersionsToKeep } from './revertToSaved';
+import { currentRate } from './projectRate';
 /**
  * Sauvegarde automatique incrémentale, historique des versions et récupération
  * après plantage (onglet tué, appli fermée de force, coupure de courant).
@@ -389,7 +390,7 @@ export class RecoveryStore {
     const samples = new Float32Array(total);
     let o = 0;
     for (const c of chunks) { samples.set(c, o); o += c.length; }
-    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || 44100) / Math.max(1, meta.channels || 1) };
+    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || currentRate()) / Math.max(1, meta.channels || 1) };
   }
 
   /**

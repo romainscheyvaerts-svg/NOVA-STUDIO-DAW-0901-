@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { GRID_OPTIONS, gridStepSeconds, snapToGrid } from './grid';
+import { currentRate } from './projectRate';
 
 /**
  * Modes d'édition de Pro Tools : Shuffle, Slip, Spot et Grid (absolu ou
@@ -156,7 +157,7 @@ export function toggleShuffleLock(): { locked: boolean; message: string } {
 
 // ------------------------------------------------------------- positions
 
-/** Fréquence d'échantillonnage par défaut (avant que le moteur audio ne soit lancé). */
+/** Fréquence d'échantillonnage par défaut (avant que le moteur audio ne soit lancé) : celle du projet. */
 export const SAMPLE_RATE = 48000;
 let rateProvider: (() => number | undefined | null) | null = null;
 /** Le studio donne la vraie fréquence de la session (contexte audio du moteur). */
@@ -164,7 +165,7 @@ export const setSampleRateProvider = (fn: (() => number | undefined | null) | nu
 /** Fréquence de la session : « à l'échantillon près » et format Échantillons du Spot. */
 export const sessionSampleRate = (): number => {
   const r = rateProvider?.();
-  return r && r > 0 ? r : SAMPLE_RATE;
+  return r && r > 0 ? r : currentRate();
 };
 export const toSample = (t: number, sr = sessionSampleRate()): number => Math.round(t * sr) / sr;
 

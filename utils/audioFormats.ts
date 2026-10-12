@@ -406,7 +406,7 @@ export function decodeWav(bytes: Uint8Array): DecodedPcm {
   const id = (o: number) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
   if (id(0) !== 'RIFF' || id(8) !== 'WAVE') throw new Error('Pas un WAV');
   let p = 12;
-  let fmtTag = 1, nc = 2, sr = 44100, bits = 16;
+  let fmtTag = 1, nc = 2, sr = 0, bits = 16; // sr : lu dans le chunk « fmt »
   let data: Uint8Array | null = null;
   const chunks: { id: string; data: Uint8Array }[] = [];
   while (p + 8 <= bytes.length) {
@@ -521,7 +521,7 @@ export function decodeAiff(bytes: Uint8Array): DecodedPcm {
   const id = (o: number) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
   if (id(0) !== 'FORM' || (id(8) !== 'AIFF' && id(8) !== 'AIFC')) throw new Error('Pas un AIFF');
   let p = 12;
-  let nc = 2, frames = 0, bits = 16, sr = 44100, float = false;
+  let nc = 2, frames = 0, bits = 16, sr = 0, float = false; // sr : lu dans « COMM »
   let ssnd: Uint8Array | null = null;
   const chunks: { id: string; data: Uint8Array }[] = [];
   while (p + 8 <= bytes.length) {

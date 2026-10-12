@@ -7,7 +7,7 @@ import type { DAWState } from '../types';
  * qu'App passe des dizaines de props. Branché par hooks/useR21.
  */
 
-export type R21Tab = 'notes' | 'clips' | 'arrangements' | 'versions';
+export type R21Tab = 'notes' | 'clips' | 'arrangements' | 'versions' | 'reglages';
 
 export type R21Command =
   /** Ouvre le panneau Session sur un onglet (null : le ferme). */

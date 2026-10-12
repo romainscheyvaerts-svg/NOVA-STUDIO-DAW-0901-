@@ -16,7 +16,8 @@ import { lufsOf } from '../utils/audioMeasure';
 export const MASTER_ID = 'master';
 export const isMasterNovaPlugin = (p: PluginInstance) => !!(p.params && (p.params as any).masterNova);
 
-const SR = 44100;
+/** Rendu à la fréquence du projet (avant : 44,1 kHz codé en dur). */
+const projectSr = () => audioEngine.getProjectSampleRate();
 
 /** Pistes telles que le master Nova les écoute : sans ses propres effets, fader master à 0 dB. */
 export function tracksWithoutMasterNova(tracks: Track[]): Track[] {
@@ -75,13 +76,13 @@ export interface MasterNovaOptions { target: PlatformTarget; character: MasterCh
 /** Rend le mix actuel (master Nova exclu) : ce que le mastering reçoit. */
 export async function renderMixForMaster(tracks: Track[], onProgress?: (p: number) => void): Promise<AudioBuffer> {
   await audioEngine.init?.();
-  return audioEngine.renderProject(tracksWithoutMasterNova(tracks), projectDuration(tracks), 0, SR, onProgress);
+  return audioEngine.renderProject(tracksWithoutMasterNova(tracks), projectDuration(tracks), 0, projectSr(), onProgress);
 }
 
 /** Mesure la loudness du mix tel qu'il sort (master Nova compris) : sert à aligner la référence. */
 export async function measureCurrentMix(tracks: Track[]): Promise<{ lufs: number; buffer: AudioBuffer }> {
   await audioEngine.init?.();
-  const b = await audioEngine.renderProject(tracks, projectDuration(tracks), 0, SR);
+  const b = await audioEngine.renderProject(tracks, projectDuration(tracks), 0, projectSr());
   return { lufs: lufsOf(channels(b), b.sampleRate), buffer: b };
 }
 

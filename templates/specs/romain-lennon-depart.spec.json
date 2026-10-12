@@ -5,6 +5,7 @@
  "description": "Copie fidèle de la session Pro Tools de départ de Romain (LENNON) : 78 pistes, dossiers, bus, retours d'effets, PRE MASTER → MASTER. Tous les effets sont prévus ACTIFS à la création du projet (option « activer tous les effets ») ; l'état d'origine de chaque insert est noté (state / wasInactiveInProTools).",
  "privateTo": "romain",
  "source": "Relevé Pro Tools du 08/10/2026 (PTSL + fenêtres de plugins), D:\\1 WORK\\CONTENU\\nova-modeles\\lennon",
+ "sampleRate": 44100,
  "bpm": 140,
  "timeSignature": "4/4",
  "keepExcludedPlugins": true,

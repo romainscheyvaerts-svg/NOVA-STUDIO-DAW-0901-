@@ -4,6 +4,7 @@
   "name": "Session voix · Make Music",
   "description": "La séance voix du studio Make Music, prête à enregistrer : voix lead, double et backs (coupe-bas 80 Hz sur la lead ; 200 Hz + coupe-haut 15 kHz sur double et backs ; compresseur opto 2:1 ; de-esser 8 kHz) → bus voix (2e étage 2:1) ; retours Reverb courte, Reverb longue et Écho 1/4 ; master avec Master Nova. Seulement des effets NOVA : marche partout, sur le site comme dans Nova Studio.",
   "source": "Règles de mix du studio Make Music (08/10/2026)",
+  "sampleRate": 48000,
   "timeSignature": "4/4",
   "tracks": [
     {

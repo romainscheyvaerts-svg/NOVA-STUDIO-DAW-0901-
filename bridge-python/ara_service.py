@@ -118,7 +118,7 @@ def install(Server, build_render_frame):
             plug = self._ara_plugins().get(kind)
             if not plug:
                 raise ara_host.AraHostError(f"{ara_host.KNOWN.get(kind, {}).get('label', kind)} n'est pas installé sur ce PC")
-            sr = int(meta.get("sample_rate") or 44100)
+            sr = int(meta.get("sample_rate") or 48000)  # le DAW envoie toujours la fréquence du projet
             clips = meta.get("clips") or []
             audio = _split_audio(clips, data)
             old = self._sessions().pop(sid, None)
@@ -171,7 +171,7 @@ def install(Server, build_render_frame):
             plug = self._ara_plugins().get("vocalign")
             if not plug:
                 raise ara_host.AraHostError("VocAlign n'est pas installé sur ce PC")
-            sr = int(meta.get("sample_rate") or 44100)
+            sr = int(meta.get("sample_rate") or 48000)  # le DAW envoie toujours la fréquence du projet
             guide = meta.get("guide") or {}
             dubs = meta.get("dubs") or []
             if not dubs:

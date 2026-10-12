@@ -136,7 +136,10 @@ export function createLofiCore(sampleRate: number) {
     driveK = 1 + 6 * Math.max(0, Math.min(1, P.drive || 0));
     const bits = Math.max(1, Math.min(16, P.bits || 16));
     q = bits >= 16 ? 0 : Math.pow(2, bits - 1);
-    step = P.rate > 0 && P.rate < sr * 0.98 ? Math.max(0.0005, P.rate / sr) : 1;
+    // « Intact » au-delà de 44,1 kHz quelle que soit la fréquence du projet (réglage max 48 000 ;
+    // seuil écrit en dur : ce cœur est sérialisé tel quel dans le worklet, sans import) :
+    // à 88,2 / 96 kHz, 48 000 réduisait l'échantillonnage alors que l'interface disait « intact ».
+    step = P.rate > 0 && P.rate < Math.min(sr, 44100) * 0.98 ? Math.max(0.0005, P.rate / sr) : 1;
     noiseAmp = (P.noise || 0) > 0 ? Math.pow(10, (-66 + 40 * Math.min(1, P.noise)) / 20) : 0;
     outG = Math.pow(10, (P.output || 0) / 20);
     mix = Math.max(0, Math.min(1, P.mix ?? 1));

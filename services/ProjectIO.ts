@@ -10,6 +10,7 @@ import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/pr
 import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
 import { samplerBufferKey } from '../utils/melodicSampler';
 import { salvageJson, repairProject } from '../utils/projectRepair';
+import { projectRateOf } from '../utils/projectRate';
 
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
 export const REPAIR_REPORT = '__repairReport';
@@ -316,7 +317,10 @@ export class ProjectIO {
     let unreadable = 0;
     const unreadableTracks = new Set<string>();
 
-    // Initialisation moteur si nécessaire
+    // Moteur à la fréquence DU PROJET avant de décoder (absente : 44,1 kHz) : les sons
+    // sont décodés une seule fois, directement à la bonne fréquence (utils/hqAudio).
+    // Import de pistes d'une autre session (bufferPrefix) : on garde celle du projet ouvert.
+    if (!opts.bufferPrefix) await audioEngine.setSampleRate?.(projectRateOf(loadedState));
     await audioEngine.init();
 
     // 2. Reconstruction des AudioBuffers via Registry (un décodage par fichier)

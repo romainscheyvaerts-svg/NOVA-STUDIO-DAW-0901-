@@ -8,6 +8,7 @@ import { isNovaDesktop } from '../utils/desktopApp';
 import { useSimpleMode } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
+import { rateLabel } from '../utils/projectRate';
 
 /**
  * R14 / R15 · Enregistrement multipiste : armement (plusieurs pistes ou une seule),
@@ -168,7 +169,19 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
   const [asioInputChannel, setAsioInputChannel] = useState<number>(() => audioEngine.getASIOInputChannel());
   const [asioLatency, setAsioLatency] = useState(0);
   const [asioBlockSize, setAsioBlockSize] = useState(256);
-  const [asioSampleRate, setAsioSampleRate] = useState(44100);
+  // La carte suit la fréquence du PROJET (Session > Réglages) : affichée, plus choisie ici.
+  const [asioSampleRate, setAsioSampleRate] = useState(() => audioEngine.getProjectSampleRate());
+  useEffect(() => {
+    const onRate = () => setAsioSampleRate(audioEngine.getProjectSampleRate());
+    const onAsioRate = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      if (d.ok === false && d.error) setStatus(`⚠️ ${d.error}`);
+      else if (d.ok) setStatus(`Carte son en ${rateLabel(d.want)} (fréquence du projet)`);
+    };
+    window.addEventListener('nova:samplerate', onRate);
+    window.addEventListener('nova:asio-rate', onAsioRate);
+    return () => { window.removeEventListener('nova:samplerate', onRate); window.removeEventListener('nova:asio-rate', onAsioRate); };
+  }, []);
 
   // Status
   const [status, setStatus] = useState<string>('Initialisation...');
@@ -351,13 +364,6 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
       } else audioEngine.configureASIO({ block_size: blockSize });
   };
 
-  const handleAsioSampleRateChange = (sampleRate: number) => {
-      setAsioSampleRate(sampleRate);
-      // Recalculate latency
-      const latency = (asioBlockSize / sampleRate) * 1000 * 2;
-      setAsioLatency(latency);
-      audioEngine.configureASIO({ sample_rate: sampleRate });
-  };
 
   const handleAsioStreamToggle = async () => {
       if (asioStreamActive) {
@@ -582,17 +588,11 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 <div className="flex items-center justify-between bg-black/20 rounded-lg px-4 py-3">
                                     <div className="flex items-center space-x-4">
                                         <div className="flex items-center space-x-2">
-                                            <span className="text-[8px] text-slate-500 uppercase">Sample Rate:</span>
-                                            <select
-                                                value={asioSampleRate}
-                                                onChange={(e) => handleAsioSampleRateChange(parseInt(e.target.value))}
-                                                className="bg-transparent text-[10px] font-mono text-white outline-none cursor-pointer"
-                                            >
-                                                <option value="44100">44.1 kHz</option>
-                                                <option value="48000">48 kHz</option>
-                                                <option value="88200">88.2 kHz</option>
-                                                <option value="96000">96 kHz</option>
-                                            </select>
+                                            <span className="text-[8px] text-slate-500 uppercase">Fréquence :</span>
+                                            <span className="text-[10px] font-mono text-white" data-testid="asio-rate"
+                                                title="La carte son suit la fréquence du projet (Session › Réglages). Une carte qui ne la prend pas : un message l'indique et le son reste sur la sortie de l'ordinateur.">
+                                                {rateLabel(asioSampleRate)} · projet
+                                            </span>
                                         </div>
                                         <div className="w-px h-4 bg-white/10"></div>
                                         <div className="flex items-center space-x-2">

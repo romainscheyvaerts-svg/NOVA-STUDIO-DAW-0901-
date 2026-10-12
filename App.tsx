@@ -119,6 +119,9 @@ import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './co
 const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDialog'));
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
+import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
+import { ProjectRateConfirm } from './components/ProjectRateControls';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
 // Pages du téléphone : chargées à la demande (un PC ne les affiche jamais) ; sur téléphone,
 // préchargées dès l'ouverture du studio (Studio : useEffect sur isMobile).
@@ -607,7 +610,9 @@ const useUndoRedo = (initialState: DAWState) => {
         // R23 : changer de beat change aussi la tonalité du projet et le titre du beat (une étape).
         newState.projectKey !== curr.present.projectKey ||
         newState.projectScale !== curr.present.projectScale ||
-        newState.beatTitle !== curr.present.beatTitle;
+        newState.beatTitle !== curr.present.beatTitle ||
+        // Fréquence du projet (Session › Réglages) : Ctrl+Z revient à l'ancienne (sons reconvertis).
+        newState.sampleRate !== curr.present.sampleRate;
 
       if (!modificationReelle) return { ...curr, present: newState };
       // Autre projet ouvert : historique vidé (Ctrl+Z ne ramène plus le projet d'avant, utils/undoHistory).
@@ -631,7 +636,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre', 'sampleRate'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -710,7 +715,15 @@ function Studio() {
   const [pendingAudioFile, setPendingAudioFile] = useState<File | null>(null);
   const [pendingProject, setPendingProject] = useState<any>(null);
 
+  // Fréquence d'un nouveau projet (accueil) : 48 kHz par défaut, mémorisée sur l'appareil.
+  const [newProjectRate, setNewProjectRateState] = useState<ProjectRate>(() => {
+    try { return sanitizeRate(localStorage.getItem('nova_new_project_rate')) ?? NEW_PROJECT_RATE; } catch { return NEW_PROJECT_RATE; }
+  });
+  const setNewProjectRate = (r: ProjectRate) => { setNewProjectRateState(r); try { localStorage.setItem('nova_new_project_rate', String(r)); } catch { /* */ } };
   const handleEnterStudio = () => {
+    // Projet vierge : il prend la fréquence choisie à l'accueil (un projet déjà commencé garde la sienne).
+    const blank = !stateRef.current.tracks.some(t => (t.clips || []).length > 0);
+    if (blank && projectRateOf(stateRef.current) !== newProjectRate) setSilently(s => ({ ...s, sampleRate: newProjectRate }));
     setShowLanding(false);
   };
   
@@ -1035,6 +1048,8 @@ function Studio() {
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
+    // Nouveau projet : 48 kHz (utils/projectRate). Un projet ouvert garde la sienne.
+    sampleRate: NEW_PROJECT_RATE,
     isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
@@ -1336,6 +1351,72 @@ function Studio() {
     }
   };
 
+  // ─── Fréquence d'échantillonnage du projet (utils/projectRate, utils/hqAudio) ──────
+  // Le moteur suit TOUJOURS la fréquence de l'état : réglage de session, opération de
+  // collaboration (champ « sampleRate »), Ctrl+Z / Ctrl+Y. Contexte recréé, sons convertis
+  // une fois en qualité studio, pistes recâblées, mixes casque et pistes armées rétablis.
+  const rateLoadingRef = useRef(0);
+  const rateJobRef = useRef<Promise<unknown>>(Promise.resolve());
+  const [rateBusy, setRateBusy] = useState<string | null>(null);
+  const [rateConfirm, setRateConfirm] = useState<null | { from: ProjectRate; to: ProjectRate; buffers: number; seconds: number }>(null);
+  const syncEngineRateRef = useRef<(rate: ProjectRate) => Promise<unknown>>(async () => {});
+  syncEngineRateRef.current = (rate: ProjectRate) => {
+    const run = async () => {
+      if (audioEngine.getProjectSampleRate() === rate && (!audioEngine.ctx || registryConversionPlan(rate).buffers === 0)) return;
+      const r = await audioEngine.setSampleRate(rate);
+      if (!audioEngine.ctx) return; // moteur pas encore démarré : il naîtra à cette fréquence
+      const plan = registryConversionPlan(rate);
+      if (plan.buffers) setRateBusy(`Conversion des sons en ${rateLabel(rate)}… 0 / ${plan.buffers}`);
+      await convertRegistryTo(rate, (d, t) => setRateBusy(`Conversion des sons en ${rateLabel(rate)}… ${d} / ${t}`));
+      if (r.changed || plan.buffers) {
+        await ensureAudioEngine();
+        const s = stateRef.current;
+        s.tracks.forEach(t => audioEngine.updateTrack(t, s.tracks));
+        if (s.cueMixes?.length) audioEngine.setCueMixes(s.cueMixes, s.tracks);
+        await rearmArmedRef.current?.();
+      }
+    };
+    const job = rateJobRef.current.then(run)
+      .catch((e: any) => setAiNotification(`⚠️ Fréquence du projet : ${e?.message || e}`))
+      .finally(() => setRateBusy(null));
+    rateJobRef.current = job;
+    return job;
+  };
+  useEffect(() => {
+    if (state.isRecording || rateLoadingRef.current > 0) return;
+    const want = projectRateOf(state);
+    if (audioEngine.getProjectSampleRate() !== want) void syncEngineRateRef.current(want);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.sampleRate, state.isRecording]);
+  // Demande de changement (Session › Réglages) : avertissement d'abord (convertir les clips ou annuler).
+  useEffect(() => {
+    const onReq = (e: Event) => {
+      const to = sanitizeRate((e as CustomEvent).detail?.rate);
+      if (!to) return;
+      const from = projectRateOf(stateRef.current);
+      if (to === from) return;
+      if (stateRef.current.isRecording) { setAiNotification('🎙️ Arrête la prise avant de changer la fréquence du projet.'); return; }
+      setRateConfirm({ from, to, ...registryConversionPlan(to) });
+    };
+    window.addEventListener('nova:request-samplerate', onReq);
+    return () => window.removeEventListener('nova:request-samplerate', onReq);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const confirmRateChange = () => {
+    const c = rateConfirm;
+    if (!c) return;
+    setRateConfirm(null);
+    setState(s => ({ ...s, sampleRate: c.to }));
+    setAiNotification(`🎚️ Projet en ${rateLabel(c.to)} : sons rééchantillonnés en qualité studio, effets rechargés à la nouvelle fréquence.`);
+  };
+  // Carte ASIO qui ne prend pas la fréquence du projet : message clair.
+  useEffect(() => {
+    const on = (e: Event) => { const d = (e as CustomEvent).detail || {}; if (d.ok === false && d.error) setAiNotification(`🔊 ${d.error}`); };
+    window.addEventListener('nova:asio-rate', on);
+    return () => window.removeEventListener('nova:asio-rate', on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleLogout = async () => {
     // Au studio (pont VST) : pistes VST gelées + session sauvegardée avant de se déconnecter.
     if (novaBridge.isConnected() && !showLanding) {
@@ -1433,7 +1514,14 @@ function Studio() {
   
   const handleLoadProject = useCallback((rawState: DAWState) => {
     const loadedState = migrateLoadedState(rawState);
-    ensureAudioEngine().then(() => {
+    // Le moteur passe à la fréquence DU PROJET (ancien projet sans fréquence : 44,1 kHz,
+    // exactement comme avant) ; rien ne la change pendant l'ouverture.
+    const rate = projectRateOf(loadedState);
+    rateLoadingRef.current++;
+    (async () => {
+      try { await audioEngine.setSampleRate(rate); } catch (e) { console.warn('[Ouverture] fréquence du projet', e); }
+      await ensureAudioEngine();
+    })().then(async () => {
         // On libère l'audio de l'ancien projet, mais pas celui que ProjectIO
         // vient de décoder pour CE projet : clear() effaçait toutes les prises
         // d'un projet ouvert depuis un fichier ou une session sauvegardée.
@@ -1458,11 +1546,16 @@ function Studio() {
             }
             track.drumPads?.forEach(pad => {
                 if (pad.buffer) {
-                    audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
+                    const b = pad.buffer;
+                    // Pad à une autre fréquence : converti une fois (qualité studio).
+                    void resampleBuffer(b, rate).then(nb => audioEngine.loadDrumRackSample(track.id, pad.id, nb));
                     delete (pad as Partial<DrumPad>).buffer;
                 }
             });
         });
+        // Sons pas encore à la fréquence du projet (version gardée sur l'appareil, collaboration,
+        // décodés avant) : convertis une seule fois, en qualité studio (utils/hqAudio).
+        try { await convertRegistryTo(rate); } catch (e) { console.warn('[Ouverture] conversion des sons', e); }
 
         setState(loadedState);
         audioEngine.setBpm(loadedState.bpm);
@@ -1470,7 +1563,7 @@ function Studio() {
         setTimeout(() => {
             loadedState.tracks.forEach(t => audioEngine.updateTrack(t, loadedState.tracks));
         }, 100);
-    });
+    }).finally(() => { rateLoadingRef.current = Math.max(0, rateLoadingRef.current - 1); });
   }, [setState]);
 
   const handleLoadLocalFile = useCallback(async (file: File) => {
@@ -6748,6 +6841,18 @@ function Studio() {
       : '📡 Diffusion du mix arrêtée.');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Fréquence du projet changée (contexte audio recréé) pendant la diffusion du mix :
+  // le flux est repris sur le nouveau contexte (l'ancien est fermé, il ne porterait plus rien).
+  useEffect(() => {
+    const on = () => {
+      const rtc = rtcRef.current;
+      if (!rtc || !rtc.isSending('mix')) return;
+      const stream = audioEngine.getCollabMixStream();
+      if (stream) rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+    };
+    window.addEventListener('nova:samplerate', on);
+    return () => window.removeEventListener('nova:samplerate', on);
+  }, []);
   /**
    * Pendant l'écoute du mix de l'ingé : ce qui arrive vraiment (getStats, toutes les secondes).
    * Rien ne passe pendant 3 s : reprise demandée à l'ingé (offre neuve) ; encore rien à 10 s :
@@ -8800,6 +8905,8 @@ function Studio() {
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
         onOpenTemplates={() => setTemplatesModal('browse')}
+        newProjectRate={newProjectRate}
+        onNewProjectRate={setNewProjectRate}
       />
       {templatesModal && (
         <Suspense fallback={null}>
@@ -8855,6 +8962,7 @@ function Studio() {
       a('Édition', 'pt.restoreSelection', 'Restaurer la dernière sélection', () => { const st = stateRef.current; const tr = new Set(st.tracks.map(t => t.id)); const cl = new Set(st.tracks.flatMap(t => t.clips.map(c => c.id))); setAiNotification(restoreLastSelection({ track: id => tr.has(id), clip: id => cl.has(id) })); }, { keys: 'Ctrl+Alt+Z', pt: 'Restore Last Selection (Opt+Cmd+Z)', keywords: 'sélection précédente plage reprendre' }),
       a('Fichier', 'pal.notes', 'Notes et commentaires de session', () => openSessionPanel('notes'), { pt: 'Comments', keywords: 'notes commentaires' }),
       a('Fichier', 'pal.clips', 'Liste des clips', () => openSessionPanel('clips'), { pt: 'Clips List', keywords: 'clips region' }),
+      a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
       // Voix
@@ -9849,6 +9957,12 @@ function Studio() {
         onApply={applyStems} onClose={() => setStemTarget(null)} />
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
       
+      {rateConfirm && <ProjectRateConfirm {...rateConfirm} onConfirm={confirmRateChange} onCancel={() => setRateConfirm(null)} />}
+      {rateBusy && (
+        <div className="fixed bottom-4 left-1/2 z-[9997] -translate-x-1/2 rounded-xl border border-nv-line bg-nv-surface px-4 py-2 text-[12px] font-bold text-nv-ink shadow-2xl" role="status" data-testid="rate-busy">
+          <i className="fas fa-sync fa-spin mr-2 text-nv-accent" />{rateBusy}
+        </div>
+      )}
       {/* Modal Récupération de Backup Automatique */}
       {showBackupRecovery && pendingBackup && (
         <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">

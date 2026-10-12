@@ -1127,6 +1127,12 @@ export interface DAWState {
    * 2 : gel automatique avec photo, journal pré-effet et rendus d'envois VST.
    */
   schemaVersion?: number;
+  /**
+   * Fréquence d'échantillonnage du projet (Hz) : 44100, 48000, 88200 ou 96000
+   * (utils/projectRate). Nouveau projet : 48 kHz. Absente (projet d'avant le
+   * réglage) : 44,1 kHz, la fréquence fixe de l'ancien moteur.
+   */
+  sampleRate?: import('./utils/projectRate').ProjectRate;
   bpm: number;
   timeSignature: TimeSignature;  // NEW
   /** Changements de tempo et de mesure (piste tempo, R2). utils/tempoMap. */
