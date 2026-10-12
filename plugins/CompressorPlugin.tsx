@@ -327,8 +327,9 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     this.quietRun = peakIn <= 1e-12 ? this.quietRun + n : 0;
     if (this.quietRun >= this.SIZE && y1 < 1e-9 && yL < 1e-9) { y1 = 0; yL = 0; }
     this.ms = ms; this.y1 = y1; this.yL = yL; this.charge = q; this.w = w; this.grPeak = grPeak;
-    // Au repos : détecteur sous 1 dB (il ne fait plus que retomber, rattrapé par catchUp).
-    const rest = this.quietRun >= this.SIZE && this.xf <= 0 && y1 <= 1 && yL <= 1 && ms === 0 && !useKey
+    // Au repos : détecteur retombé à zéro (seule la « charge » bouge encore, rattrapée en O(1)
+    // au réveil : jamais de calcul en rafale quand 40 pistes se réveillent au même refrain).
+    const rest = this.quietRun >= this.SIZE && this.xf <= 0 && y1 === 0 && yL === 0 && ms === 0 && !useKey
       && s[2] === 0 && s[3] === 0 && s[6] === 0 && s[7] === 0 && this.dcQuiet();
     if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
     if (++this.msg >= 8) {

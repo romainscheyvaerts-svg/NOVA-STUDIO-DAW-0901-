@@ -78,9 +78,8 @@ export interface DeesserCore {
   takeMeters(): DeesserMeters;
   reset(): void;
   /**
-   * Au repos (veille des effets) : filtres de bande vides (résidus sous −240 dBFS) et
-   * détecteur sous son seuil, si bien que la réduction visée reste nulle tant que rien
-   * n'entre ; enveloppes et réduction ne font plus que retomber (rattrapées par catchUp).
+   * Au repos (veille des effets) : filtres de bande vides (résidus sous −240 dBFS), enveloppes
+   * et réduction à zéro. catchUp reste exact si on l'appelle plus tôt (tests, sécurité).
    */
   atRest(): boolean;
   /** Rattrapage de K échantillons muets sautés pendant la veille (même calcul que process). */
@@ -248,10 +247,9 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
     reset: reset,
     atRest: function () {
       for (var i = 0; i < 8; i++) { if (z[i] > 1e-12 || z[i] < -1e-12 || zk[i] > 1e-12 || zk[i] < -1e-12) return false; }
-      // Réduction visée nulle et le restant tant que l'entrée est muette (enveloppes en baisse).
-      if (!(enabled && maxRange > 0)) return true;
-      if (relative) return envB <= floorMs && -120 <= thrRel - knee / 2;
-      return envB + 1e-30 < Math.pow(10, (thrAbs - knee / 2 - absOffset) / 10) * (1 - 1e-9);
+      // Enveloppes et réduction retombées à zéro : rien à rattraper au réveil (pas de rafale de
+      // calcul quand beaucoup de pistes se réveillent ensemble).
+      return envB === 0 && envW === 0 && gr === 0;
     },
     catchUp: function (K: number) {
       // Entrée muette : bande nulle, pb = pw = 0 (enveloppes en relâchement), réduction visée 0.
