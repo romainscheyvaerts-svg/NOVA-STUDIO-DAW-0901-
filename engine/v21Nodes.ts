@@ -369,7 +369,9 @@ export class V21EffectNode {
     this.origin = origin;
     if (!this.worklet) return;
     const hi = Math.floor(origin);
-    const at = Math.max(this.ctx.currentTime, when ?? 0);
+    // Un demi-échantillon avant l'instant voulu : un départ calé sur le début d'un bloc prend
+    // la nouvelle origine DÈS ce bloc (sinon, à l'arrondi près, le bloc gardait l'ancienne).
+    const at = Math.max(this.ctx.currentTime, (when ?? 0) - 0.5 / this.ctx.sampleRate);
     const P = this.worklet.parameters as any;
     try { P.get('originHi').setValueAtTime(hi, at); P.get('originLo').setValueAtTime(origin - hi, at); } catch { /* contexte fermé */ }
   }
