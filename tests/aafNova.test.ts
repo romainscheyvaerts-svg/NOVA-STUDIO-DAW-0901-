@@ -8,6 +8,8 @@ import { writeAaf } from '../utils/aaf/aafWrite';
 import { readAaf } from '../utils/aaf/aafRead';
 import { aafToNova } from '../utils/aaf/aafToNova';
 import { decodeWav } from '../utils/aaf/aafMedia';
+import { applyImport, ImportPart } from '../utils/sessionImport';
+import { repairProject } from '../utils/projectRepair';
 
 const SR = 48000;
 const tone = (n: number, f: number) => Float32Array.from({ length: n }, (_, i) => 0.4 * Math.sin((2 * Math.PI * f * i) / SR) + 0.1 * Math.sin(i * 0.37));
@@ -99,5 +101,24 @@ describe('NOVA → AAF → NOVA', () => {
     expect(r.report.lines[0]).toBe("47 clips importés sur 6 pistes, à l'échantillon près.");
     expect(r.report.lines.join('\n')).toMatch(/le projet est à 44,1 kHz/);
     expect(r.report.summary).toMatch(/^47 clips importés, 6 pistes, \d fondus approchés, 1 son introuvable$/);
+  });
+
+  it('import AAF dans un projet sans commentaires horodatés : projet valide, aucun champ ajouté ; commentaires existants gardés', () => {
+    const sess = readAaf(new Uint8Array(gunzipSync(readFileSync(path.join(__dirname, 'fixtures', 'aaf', 'ref_lie_petit.aaf.gz')))));
+    const silent = (m: { channels: number; length: number; sampleRate: number }) => ({ channels: Array.from({ length: m.channels }, () => new Float32Array(8)), sampleRate: m.sampleRate });
+    const conv = aafToNova(sess, silent, { projectRate: SR, idPrefix: 'aafc' });
+    const run = (target: DAWState) => applyImport(target, { tracks: conv.tracks, bpm: target.bpm }, conv.tracks.map(t => ({ sourceId: t.id, parts: ['clips', 'plugins', 'color'] as ImportPart[] })),
+      { sameName: 'add', matchTempo: false }, b => `${b}-x`).state;
+    const sans = project();
+    expect('timelineComments' in sans).toBe(false);
+    const out = run(sans);
+    expect('timelineComments' in out).toBe(false);
+    expect(out.tracks.length).toBe(sans.tracks.length + 6);
+    const fixed = repairProject(JSON.parse(JSON.stringify(out)));
+    expect(fixed.fatal).toBeFalsy();
+    expect(fixed.state!.tracks.length).toBe(out.tracks.length);
+    const comments = [{ id: 'cm1', time: 72, text: 'le « s » siffle' }] as any;
+    const avec = run({ ...project(), timelineComments: comments } as DAWState);
+    expect(avec.timelineComments).toBe(comments);
   });
 });
