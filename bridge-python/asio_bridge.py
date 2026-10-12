@@ -63,6 +63,9 @@ except ImportError:
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+# Prises écrites par le pont (chantier C1) : anneau de capture + fil d'écriture WAV.
+from take_writer import CaptureRing, TakeManager, TAKE_ID_RX
+
 # Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
@@ -649,6 +652,11 @@ OUT_TARGET_MAX = 24
 INPUT_MAGIC_V2 = b'NVI2'
 OUTPUT_MAGIC_V2 = b'NVO2'
 INPUT_HEADER_V2 = struct.Struct('<4sIIIQd')   # magie, images, canaux, fréquence, n° de la 1re image, heure ADC (s)
+# Fichier de prise envoyé à la page (REC_FETCH), par morceaux : 'NVF1', n° de demande,
+# n° du morceau, nombre de morceaux, puis les octets du fichier WAV.
+FILE_MAGIC = b'NVF1'
+FILE_HEADER = struct.Struct('<4sIII')
+FILE_CHUNK = 1 << 20
 
 
 def encode_input_block_v2(block: np.ndarray, frame_index: int, sample_rate: int, adc_time: float) -> bytes:
@@ -745,6 +753,14 @@ class ASIOAudioStream:
 
         self._lock = threading.Lock()
         self.stats = {'blocks_in': 0, 'blocks_out': 0, 'total_samples': 0, 'start_time': 0}
+        # Prises écrites par le pont : chaque bloc d'entrée est copié (sans verrou) dans cet
+        # anneau ; le fil d'écriture des prises le vide sur le disque (take_writer).
+        self.capture: Optional[CaptureRing] = None
+        # Pertes signalées par le pilote (drapeau input_overflow) : nombre et images comblées.
+        self.input_losses = 0
+        self.input_lost_frames = 0
+        self._last_adc: Optional[float] = None
+        self._last_frames = 0
 
     def _alloc_output(self, channels: int):
         self._out = np.zeros((self._out_cap, max(1, channels)), dtype=np.float32)
@@ -763,15 +779,40 @@ class ASIOAudioStream:
             if getattr(status, 'output_underflow', False):
                 self.state.buffer_underruns += 1
 
-        frame_index = self.frames_in
-        self.frames_in += frames
         adc = 0.0
         try:
             adc = float(getattr(time_info, 'inputBufferAdcTime', 0.0) or 0.0)
         except Exception:
             adc = 0.0
+        # Blocs perdus par la carte (le pilote lève input_overflow) : la durée perdue se lit
+        # dans le saut de l'heure du convertisseur. Du silence est inséré à leur place, et le
+        # compteur d'images avance d'autant : la prise (et les blocs envoyés à la page)
+        # restent calés. Sans saut mesurable, la perte est seulement comptée.
+        if status and getattr(status, 'input_overflow', False):
+            lost = 0
+            if adc > 0 and self._last_adc is not None:
+                jump = (adc - self._last_adc) * float(self.config.sample_rate) - self._last_frames
+                if jump >= 0.5 * frames:
+                    lost = max(1, int(round(jump / frames))) * frames
+            self.input_losses += 1
+            if lost:
+                cap = self.capture
+                if cap is not None:
+                    lost = cap.skip(lost, 'asio')
+                self.frames_in += lost
+                self.input_lost_frames += lost
+            elif self.capture is not None:
+                self.capture.note_loss(frames, 'asio')
+        self._last_adc = adc
+        self._last_frames = frames
+        frame_index = self.frames_in
+        self.frames_in += frames
 
         if indata is not None:
+            # 1er geste du callback : la copie pour la prise écrite par le pont (aucun verrou).
+            cap = self.capture
+            if cap is not None:
+                cap.write(indata)
             self.state.input_level = float(np.max(np.abs(indata))) if indata.size else 0.0
             block = indata.copy()
             with self._lock:
@@ -902,6 +943,8 @@ class ASIOAudioStream:
             self._resolve_channels(device)
             self._alloc_output(self.out_channels)
             self.frames_in = 0
+            self._last_adc = None
+            self.capture = CaptureRing(self.in_channels, int(self.config.sample_rate))
             self.stream = sd.Stream(
                 device=device,
                 samplerate=self.config.sample_rate,
@@ -1039,6 +1082,8 @@ class ASIOAudioStream:
             'blocks_processed': self.stats['blocks_in'],
             'frames_in': self.frames_in,
             'dropped_input_blocks': self.dropped_input_blocks,
+            'input_losses': self.input_losses,
+            'input_lost_frames': self.input_lost_frames,
             'elapsed_seconds': elapsed,
             'input_buffer_size': len(self.input_buffer),
             'output_buffer_size': len(self.output_buffer),
@@ -1090,6 +1135,9 @@ class ASIOBridgeServer:
         
         # Tâche d'envoi audio
         self._audio_send_task: Optional[asyncio.Task] = None
+
+        # Prises écrites par le pont : Documents/Nova Studio/Prises/<projet>/ (take_writer)
+        self.takes = TakeManager()
     
     async def start(self):
         """Démarrer le serveur"""
@@ -1149,6 +1197,9 @@ class ASIOBridgeServer:
                 if client_id in self.clients:
                     del self.clients[client_id]
                 self.client_proto.pop(client_id, None)
+            # Page fermée ou plantée pendant une prise : le fichier est fermé proprement
+            # (lisible, complet jusqu'ici) et la page le retrouvera au redémarrage.
+            await self._stop_takes('interrompue', client_id)
             logger.info(f"🔌 Disconnected: {client_id}")
     
     async def _handle_message(self, client_id: str, data: dict):
@@ -1169,6 +1220,11 @@ class ASIOBridgeServer:
             "SET_MONITOR": self._handle_set_monitor,
             "HELLO": self._handle_hello,
             "MEASURE_LATENCY": self._handle_measure_latency,
+            "REC_START": self._handle_rec_start,
+            "REC_ANCHOR": self._handle_rec_anchor,
+            "REC_STOP": self._handle_rec_stop,
+            "REC_FETCH": self._handle_rec_fetch,
+            "REC_IMPORTED": self._handle_rec_imported,
         }
         
         handler = handlers.get(action)
@@ -1377,7 +1433,7 @@ class ASIOBridgeServer:
         await self._send(client_id, {
             "action": "HELLO_OK",
             "protocol": self.client_proto[client_id],
-            "features": ["multichannel", "timestamps", "multi_output", "monitor_routes", "latency_probe", "live_buffer_size"],
+            "features": ["multichannel", "timestamps", "multi_output", "monitor_routes", "latency_probe", "live_buffer_size", "take_writer"],
             "max_channels": MAX_BRIDGE_CHANNELS,
         })
 
@@ -1442,6 +1498,7 @@ class ASIOBridgeServer:
             except (asyncio.CancelledError, Exception):
                 pass
             self._audio_send_task = None
+        await self._stop_takes('interrompue')
         if self.audio_stream:
             self.audio_stream.stop()
         self.audio_stream = ASIOAudioStream(self.config, device_manager=self.device_manager)
@@ -1565,6 +1622,7 @@ class ASIOBridgeServer:
             self._audio_send_task.cancel()
             self._audio_send_task = None
 
+        await self._stop_takes('interrompue')
         if self.audio_stream:
             self.audio_stream.stop()
 
@@ -1672,9 +1730,121 @@ class ASIOBridgeServer:
             except Exception as e:
                 logger.error(f"Error processing audio data: {e}")
     
+    # ─────────────────────────────────────────────────────────────
+    # PRISES ÉCRITES PAR LE PONT (chantier C1)
+    # ─────────────────────────────────────────────────────────────
+
+    async def _stop_takes(self, status: str, client_id: Optional[str] = None):
+        if not self.takes.active:
+            return []
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self.takes.stop_all(status, client_id))
+
+    async def _handle_rec_start(self, client_id: str, data: dict):
+        """Début d'une prise : un WAV par piste armée, écrit par le pont depuis le callback.
+
+        {take_id, project_id, project_name, position, tracks: [{track_id, name, inputs: [n°…],
+        mode: mono | stereo | sum}]} → REC_STARTED {start_frame, sample_rate, files…}."""
+        take_id = str(data.get("take_id") or "")
+        st = self.audio_stream
+        reply = {"action": "REC_STARTED", "take_id": take_id, "success": False}
+        if not st or not st.state.is_running or st.capture is None:
+            await self._send(client_id, {**reply, "error": "Flux de la carte arrêté : la prise ne peut pas être écrite par le pont."})
+            return
+        tracks = []
+        for t in (data.get("tracks") or [])[:32]:
+            try:
+                ins = [int(c) for c in (t.get("inputs") or [])][:8]
+                mode = str(t.get("mode") or ("stereo" if len(ins) == 2 else "mono"))
+                tid = str(t["track_id"])[:128]
+            except (TypeError, ValueError, KeyError, AttributeError):
+                continue
+            if not ins or any(c < 0 or c >= MAX_BRIDGE_CHANNELS for c in ins) or mode not in ("mono", "stereo", "sum"):
+                continue
+            if mode == "stereo" and len(ins) != 2:
+                continue
+            tracks.append({"track_id": tid, "name": str(t.get("name") or tid)[:80], "inputs": ins, "mode": mode})
+        try:
+            pos = data.get("position")
+            pos = float(pos) if pos is not None else None
+        except (TypeError, ValueError):
+            pos = None
+        try:
+            s = self.takes.start(st.capture, take_id, {"id": data.get("project_id"), "name": data.get("project_name")},
+                                 tracks, st.block_size, client_id, pos)
+        except (ValueError, OSError) as e:
+            await self._send(client_id, {**reply, "error": f"Prise non écrite par le pont : {e}"})
+            return
+        logger.info(f"⏺️ Prise {take_id} écrite par le pont : {len(tracks)} piste(s) → {s.folder}")
+        await self._send(client_id, {**reply, "success": True, **s.result()})
+
+    async def _handle_rec_anchor(self, client_id: str, data: dict):
+        """Calage de la prise (noté dans ses métadonnées, pour la retrouver à sa place
+        après un plantage de la page) : n° d'image de la carte ↔ position du morceau."""
+        take_id = str(data.get("take_id") or "")
+        anchor = {k: data.get(k) for k in ("frame", "pos0", "latency", "offsets", "lead", "ctx_rate") if k in data}
+        ok = self.takes.anchor(take_id, anchor)
+        await self._send(client_id, {"action": "REC_ANCHORED", "take_id": take_id, "success": ok})
+
+    async def _handle_rec_stop(self, client_id: str, data: dict):
+        """Fin de la prise : le fil d'écriture vide l'anneau jusqu'à maintenant, ferme les
+        fichiers (en-têtes à jour) ; la page reçoit les chemins et les pertes éventuelles."""
+        take_id = str(data.get("take_id") or "")
+        end = data.get("end_frame")
+        try:
+            end = int(end) if end is not None else None
+        except (TypeError, ValueError):
+            end = None
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(None, lambda: self.takes.stop(take_id, end))
+        if not res:
+            await self._send(client_id, {"action": "REC_STOPPED", "take_id": take_id, "success": False, "error": "Prise inconnue du pont"})
+            return
+        if res.get("lost_blocks"):
+            logger.warning(f"Prise {take_id} : {res['lost_blocks']} bloc(s) perdu(s), comblé(s) de silence")
+        await self._send(client_id, {"action": "REC_STOPPED", "success": not res.get("error"), **res})
+
+    async def _handle_rec_fetch(self, client_id: str, data: dict):
+        """Fichier d'une piste d'une prise, envoyé par morceaux binaires 'NVF1' puis REC_FETCHED."""
+        take_id = str(data.get("take_id") or "")
+        track_id = str(data.get("track_id") or "")
+        try:
+            req = int(data.get("req") or 0) & 0xFFFFFFFF
+        except (TypeError, ValueError):
+            req = 0
+        done = {"action": "REC_FETCHED", "take_id": take_id, "track_id": track_id, "req": req}
+        path = self.takes.file_for(take_id, track_id)
+        ws = self.clients.get(client_id)
+        if path is None or ws is None:
+            await self._send(client_id, {**done, "success": False, "error": "Fichier de prise introuvable"})
+            return
+        try:
+            size = path.stat().st_size
+            count = max(1, (size + FILE_CHUNK - 1) // FILE_CHUNK)
+            with open(path, "rb") as f:
+                for i in range(count):
+                    chunk = f.read(FILE_CHUNK)
+                    await ws.send(FILE_HEADER.pack(FILE_MAGIC, req, i, count) + chunk)
+        except Exception as e:
+            await self._send(client_id, {**done, "success": False, "error": str(e)})
+            return
+        meta = self.takes.read_meta(take_id) or {}
+        await self._send(client_id, {**done, "success": True, "bytes": size, "path": str(path),
+                                     "meta": {k: meta.get(k) for k in ("sample_rate", "start_frame", "end_frame", "anchor", "losses", "lost_blocks", "status", "block_size")}})
+
+    async def _handle_rec_imported(self, client_id: str, data: dict):
+        take_id = str(data.get("take_id") or "")
+        ok = self.takes.mark_imported(take_id)
+        await self._send(client_id, {"action": "REC_IMPORTED_OK", "take_id": take_id, "success": ok})
+
     def stop(self):
         """Arrêter le serveur"""
         self.running = False
+        try:
+            self.takes.stop_all('interrompue', timeout=3.0)
+            self.takes.shutdown()
+        except Exception:
+            pass
         
         if self._audio_send_task:
             self._audio_send_task.cancel()

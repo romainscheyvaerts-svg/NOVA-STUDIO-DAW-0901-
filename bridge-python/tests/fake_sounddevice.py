@@ -9,6 +9,9 @@ dans sys.modules AVANT l'import de asio_bridge.
 - `loopback` : {sortie: [(entrée, retard en échantillons), …]} — ce qui sort sur une
   sortie revient sur ces entrées (câble de boucle, mesure de latence par canal).
 - `captured` : tout ce que le flux a écrit sur les sorties (images × canaux).
+- `drop(frame_index) -> bool` : le pilote PERD ce bloc (pas de callback ; le suivant arrive
+  avec le drapeau input_overflow et l'heure du convertisseur qui a sauté), comme une carte
+  ASIO dont le callback a raté un tour.
 - Deux modes : temps réel (fil qui cadence les blocs, scénario navigateur) ou pas à pas
   (`stream.step(n)` dans les tests unitaires).
 """
@@ -30,6 +33,7 @@ STATE = {
     'opened': [],                       # paramètres de chaque flux ouvert (tests)
     'realtime': True,
     'block_jitter': 0.0,
+    'drop': None,
 }
 
 streams = []
@@ -95,6 +99,7 @@ class Stream:
         # Historique des sorties pour la boucle (retards jusqu'à 1 s)
         self.hist = np.zeros((int(self.samplerate) + self.blocksize, self.n_out), dtype=np.float32)
         self._thread = None
+        self._overflow = False
         self._stop = threading.Event()
         self.lock = threading.Lock()
         STATE['opened'].append({'samplerate': self.samplerate, 'blocksize': self.blocksize, 'channels': (self.n_in, self.n_out)})
@@ -104,6 +109,12 @@ class Stream:
     def step(self, n=1):
         for _ in range(n):
             f = self.blocksize
+            drop = STATE.get('drop')
+            if drop is not None and drop(self.frame):
+                # Bloc perdu par le pilote : le temps de la carte avance, le callback n'a pas lieu.
+                self.frame += f
+                self._overflow = True
+                continue
             gen = STATE['generator']
             indata = gen(self.frame, f, self.n_in, self.samplerate) if gen else np.zeros((f, self.n_in), dtype=np.float32)
             indata = np.array(indata, dtype=np.float32).reshape(f, self.n_in)
@@ -119,7 +130,11 @@ class Stream:
                     indata[ok, in_ch] += self.hist[k[ok] % self.hist.shape[0], out_ch]
             outdata = np.zeros((f, self.n_out), dtype=np.float32)
             if self.callback:
-                self.callback(indata, outdata, f, _TimeInfo(self.frame / self.samplerate), CallbackFlags())
+                flags = CallbackFlags()
+                if self._overflow:
+                    flags.input_overflow = True
+                    self._overflow = False
+                self.callback(indata, outdata, f, _TimeInfo(self.frame / self.samplerate), flags)
             with self.lock:
                 self.hist[(self.frame + np.arange(f)) % self.hist.shape[0]] = outdata
                 n = min(f, self.capture.shape[0] - self.cap_pos)
