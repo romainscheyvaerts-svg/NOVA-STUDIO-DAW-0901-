@@ -203,6 +203,10 @@ import {
 import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
 import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, guestCanEditContent, guestCanMix, guestOpVerdict, guestRefusalText, isLimitedGuest, sanitizeGuestRights } from './utils/guestRights';
 import GuestStudio from './components/GuestStudio';
+import CommentsPanel, { CommentPins } from './components/CommentsPanel';
+import { useTimelineComments } from './hooks/useTimelineComments';
+import { commentCounts } from './utils/timelineComments';
+import { renderMixBounce } from './services/mixBounce';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 // Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
@@ -5595,6 +5599,62 @@ function Studio() {
   });
   r21Ref.current = r21;
 
+  // --- Chantier 11 · Commentaires horodatés + versions validées (hooks/useTimelineComments).
+  const reviewsRef = useRef<ReturnType<typeof useTimelineComments> | null>(null);
+  const reviews = useTimelineComments(state, {
+    stateRef, setSilently,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 6000); },
+    me: () => {
+      const c = collabRef.current;
+      if (c) return { key: c.key, name: c.name, role: c.role };
+      return { key: 'local', name: (user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : '') || 'Moi', role: null };
+    },
+    collab: () => (collabRef.current ? { queue: (k, kind, op) => collabRef.current?.client.queue(k, kind, op), role: collabRef.current.role } : null),
+    seek: (t) => handleSeek(Math.max(0, t)),
+    position: () => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get()),
+    selection: () => { const sel = editSelectionStore.get().time; return sel ? { start: sel.start, end: sel.end } : null; },
+    history: (e) => noteHistoryRef.current?.(e),
+    saveSnapshot: async (comment) => {
+      let history: { projectId: string; versionNumber?: number }[] = [];
+      try { history = await recoveryStore().listVersions(stateRef.current.id); } catch { /* historique indisponible */ }
+      const n = nextVersionNumber(stateRef.current, history);
+      const ok = await autosaveNow('named', true, { versionNumber: n, comment, state: stateRef.current });
+      return ok ? n : null;
+    },
+    bounce: async (step) => {
+      const c = collabRef.current;
+      if (!c) return null;
+      const r = await renderMixBounce(stateRef.current.tracks, stateRef.current.name || 'Mix', t => step(`rendu du mix… ${t}`));
+      const id = `mixv-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      audioBufferRegistry.register(r.buffer, id);
+      step('envoi du son…');
+      const refs = await uploadBuffers(c.client.link, [id], (sent, total) => { c.client.reportUpload(sent, total); step(`envoi du son… ${Math.round((sent / Math.max(1, total)) * 100)} %`); });
+      const ref = refs[id];
+      // Envoyé : plus besoin de le garder en mémoire (réécoute = téléchargé à nouveau, jamais renvoyé).
+      audioBufferRegistry.remove(id);
+      return ref ? { bufferId: id, parts: ref.parts, size: ref.size, duration: Math.round(r.buffer.duration * 1000) / 1000 } : null;
+    },
+    fetchAudio: async (ref) => {
+      // Une seule version en mémoire à la fois (≈ 30 Mo par minute de mix) : les autres sont relâchées.
+      (stateRef.current.mixVersions || []).forEach(v => { if (v.audio && v.audio.bufferId !== ref.bufferId && audioBufferRegistry.has(v.audio.bufferId)) audioBufferRegistry.remove(v.audio.bufferId); });
+      if (!audioBufferRegistry.has(ref.bufferId)) {
+        const c = collabRef.current;
+        if (!c) return null;
+        await ensureBuffers(c.client.link, { [ref.bufferId]: { parts: ref.parts, size: ref.size } });
+      }
+      return audioBufferRegistry.get(ref.bufferId) || null;
+    },
+    audioContext: async () => { await audioEngine.init(); return audioEngine.ctx || null; },
+    print: () => sigOf(sessionPrint(stateRef.current)),
+  });
+  reviewsRef.current = reviews;
+  const reviewCounts = commentCounts(state.timelineComments);
+  const reviewsWaiting = (state.mixVersions || []).filter(v => !v.decision.v).length;
+  const rulerOverlay = useCallback((g: { zoomH: number; scrollLeft: number; width: number }) => (
+    <CommentPins comments={reviews.comments} zoomH={g.zoomH} scrollLeft={g.scrollLeft} width={g.width} focusId={reviews.focusId} onOpen={(id) => reviews.openAt(id)} />
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [reviews.comments, reviews.focusId, reviews.openAt]);
+
   // --- Commandes Pro Tools du quotidien (hooks/useProToolsUtiles) : solos / mutes (Alt+clic, Maj+S, Maj+M),
   // solo safe (Ctrl+clic), diodes de saturation (Alt+C), verrou de clip (Ctrl+L, Alt+Maj+L).
   useProToolsUtiles({
@@ -5951,6 +6011,11 @@ function Studio() {
       return;
     }
     switch (o.kind) {
+      case 'comments':
+      case 'mixver':
+        // Chantier 11 : commentaires horodatés, versions envoyées / validées (fusion qui converge).
+        reviewsRef.current?.onRemote(o);
+        break;
       case 'chat': {
         const text = String(p.text || '').slice(0, 2000);
         setCollabMessages(m => [...m.slice(-199), { id: String(o.seq), from: o.author_name, role: o.role, text, at: Date.parse(o.created_at || '') || Date.now() }]);
@@ -9742,6 +9807,7 @@ function Studio() {
       a('Vues', 'pal.automation', 'Éditeur d’automation', () => setState(s => ({ ...s, currentView: 'AUTOMATION' })), { keywords: 'automation volume' }),
       a('Vues', 'pal.memory', 'Repères (Memory Locations)', () => openNovaWindow('memory-locations'), { keys: k('pt.memoryWindow'), pt: 'Memory Locations (Ctrl+5)', keywords: 'marqueur repère marker' }),
       a('Vues', 'pal.collab', 'Collaborer à distance (artiste, ingé, beatmaker)', () => setCollabOpen(true), { keywords: 'collab collaboration distance ingé' }),
+      a('Vues', 'pal.reviews', 'Commentaires et versions (retours)', () => reviews.openAt(null), { keywords: 'commentaire retour version valider frame.io note timeline' }),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
       a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Pro Tools, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
@@ -9763,6 +9829,8 @@ function Studio() {
           onDspFreezeTrack={(id) => { void freezeTrackRef.current(id); }}
           dspSafety={{ isRecording: !!state.isRecording, bridgeConnected: novaBridge.isConnected(), busyTrackIds: Object.keys(collabLiveStore.get().recs || {}) }}
           onOpenCollab={() => setCollabOpen(true)}
+          onOpenReviews={() => reviews.openAt(null)}
+          reviewsLabel={`Commentaires et versions${reviewCounts.open ? ` · ${reviewCounts.open} ouvert${reviewCounts.open > 1 ? 's' : ''}` : ''}`}
           collabLabel={remote.active ? 'Ingé à distance' : collab ? `Collaboration · ${collabOnline.length || 1} en ligne` : 'Collaborer à distance'}
           onOpenTakeHome={() => setTakeHomeOpen(true)}
           takeHomeLabel={isCloudProject ? `En ligne · ${cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}` : 'Emporter la session'}
@@ -9872,6 +9940,7 @@ function Studio() {
                 <PanelBoundary name="l'arrangement">
                 <StructureTracksContext.Provider value={state.tracks}>
                 <ArrangementView
+                   rulerOverlay={rulerOverlay}
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                    onSetLoop={onSetLoopStable}
                    onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={onSelectTrackStable}
@@ -9956,6 +10025,12 @@ function Studio() {
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
                   <span data-dock-icon className="mr-1">{remote.active ? '🎧' : '👥'}</span><span data-dock-label>{remote.active ? `Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : (collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer')}</span>
+                </button>
+                <button type="button" data-testid="dock-reviews" onClick={() => (reviews.open ? reviews.setOpen(false) : reviews.openAt(null))} aria-pressed={reviews.open} {...dockItem(3)}
+                  aria-label={`Commentaires et versions${reviewCounts.open ? ` : ${reviewCounts.open} ouvert${reviewCounts.open > 1 ? 's' : ''}` : ''}`}
+                  title="Retours : commentaires horodatés sur la timeline (« 1:12 le s siffle »), versions du mix envoyées à l'artiste et validées"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${reviews.open ? 'border-amber-300 bg-amber-400/25 text-white' : 'border-amber-400/40 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20'}`}>
+                  <span data-dock-icon className="mr-1">💬</span><span data-dock-label>Retours{reviewCounts.open ? ` · ${reviewCounts.open}` : ''}{reviewsWaiting ? ` · ${reviewsWaiting} à valider` : ''}</span>
                 </button>
                 {isCloudProject && (
                   <button type="button" onClick={() => setTakeHomeOpen(true)} {...dockItem(2)} aria-label="Session en ligne"
@@ -10610,6 +10685,16 @@ function Studio() {
         }}
       />
       </PanelBoundary>
+      {reviews.open && !(guestMode && !guestShowSession) && (
+        <PanelBoundary name="les retours" overlay onClose={() => reviews.setOpen(false)}>
+          <CommentsPanel api={reviews} variant="side" role={collab?.role ?? null} touch={isMobile}
+            engineerName={guestEngineerView?.name || state.collabHost?.name || null}
+            position={() => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get())}
+            selection={() => { const sel = editSelectionStore.get().time; return sel ? { start: sel.start, end: sel.end } : null; }}
+            colorOf={(k) => collabPeerViews.find(v => v.key === k)?.color || undefined}
+            onClose={() => reviews.setOpen(false)} />
+        </PanelBoundary>
+      )}
       {guestMode && collab && !guestShowSession && (
         <PanelBoundary name="l'écran de l'artiste invité" overlay onClose={() => setGuestShowSession(true)}>
         <GuestStudio
@@ -10671,6 +10756,12 @@ function Studio() {
             void leaveCollab();
           }}
           onShowSession={() => setGuestShowSession(true)}
+          review={(
+            <CommentsPanel api={reviews} variant="inline" role="artist" touch
+              engineerName={guestEngineerView?.name || state.collabHost?.name || null}
+              position={() => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get())} />
+          )}
+          reviewBadge={reviewCounts.open + reviewsWaiting}
         />
         </PanelBoundary>
       )}
