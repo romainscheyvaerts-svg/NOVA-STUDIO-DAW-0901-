@@ -54,7 +54,9 @@ const VstLateAlert: React.FC<Props> = ({ tracks, onFreezeTrack }) => {
       className="fixed z-[689] top-[72px] right-3 w-[min(400px,calc(100vw-24px))] rounded-2xl border border-amber-400/40 bg-[#1a1610] p-4 shadow-2xl text-[12px] text-slate-200">
       <p className="font-black text-white text-[13px] mb-1">
         <i className="fas fa-hourglass-half text-amber-300 mr-2" aria-hidden="true"></i>
-        Le plugin {alert.name} a pris du retard : <span data-testid="vst-late-count">{coupures(Math.max(n10, 0))}</span> en 10 s
+        {n10 > 0
+          ? <>Le plugin {alert.name} a pris du retard : <span data-testid="vst-late-count">{coupures(n10)}</span> en 10 s</>
+          : <>Le plugin {alert.name} avait pris du retard : plus de coupure depuis 10 s</>}
       </p>
       <p className="text-slate-300 mb-1">
         Le pont VST du PC renvoie le son de ce plugin trop tard : sans marge, on entend des trous.

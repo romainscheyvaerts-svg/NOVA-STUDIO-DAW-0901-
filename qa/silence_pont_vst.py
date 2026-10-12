@@ -118,25 +118,29 @@ async ({ SR, path, name, sets }) => {
       const during = S.info();
       e.stopAll(); await new Promise(r => setTimeout(r, 300)); rec.port.postMessage(false);
       try { tap.disconnect(rec); rec.disconnect(); mute.disconnect(); } catch (err) {}
-      const n = Math.round(dur * SR), L = new Float32Array(n), R = new Float32Array(n), f0 = Math.round(origin * SR);
-      for (const [fr, a, b] of blocks) for (let i = 0; i < a.length; i++) { const k = fr + i - f0; if (k >= 0 && k < n) { L[k] = a[i]; R[k] = b[i]; } }
-      S.last = { L, R, n, dur, holdK: Math.round(((e.transportHoldTotal || 0) - hold0) * SR) };
+      const n = Math.round(dur * SR), L = new Float32Array(n), R = new Float32Array(n), got = new Uint8Array(n), f0 = Math.round(origin * SR);
+      for (const [fr, a, b] of blocks) for (let i = 0; i < a.length; i++) { const k = fr + i - f0; if (k >= 0 && k < n) { L[k] = a[i]; R[k] = b[i]; got[k] = 1; } }
+      S.last = { L, R, got, n, dur, holdK: Math.round(((e.transportHoldTotal || 0) - hold0) * SR) };
       return { avant: before, pendant: during, apres_arret: S.info(), attente_transport_ech: S.last.holdK };
     })();
     return true;
   };
   // Analyse de la dernière écoute.
   S.analyse = async (withExport) => {
-    const { L, R, n, holdK } = S.last;
+    const { L, R, got, n, holdK } = S.last;
     const clipStart = Math.round(CLIP0 * SR);
     // Trous : ≥ 64 échantillons de silence numérique pendant le son. Gauche = piste VST ;
     // droite = piste de référence (sa pause volontaire quand le transport attend).
-    const holesOf = (x) => { const h = []; let run = 0;
+    // Un bloc que l'ENREGISTREUR n'a pas reçu (raté de la machine, pas du pont : la piste de
+    // référence ne passe pas par le pont) n'est pas un trou du pont ; il est compté à part.
+    const missed = []; { let run = 0; for (let i = clipStart; i < n; i++) { if (!got[i]) run++; else { if (run) missed.push({ debut_s: +((i - run) / SR).toFixed(4), duree_ms: +(run / SR * 1000).toFixed(2) }); run = 0; } } if (run) missed.push({ debut_s: +((n - run) / SR).toFixed(4), duree_ms: +(run / SR * 1000).toFixed(2) }); }
+    const holesOf = (x) => { const h = []; let run = 0, cap = 0;
+      const close = (end) => { if (run >= 64 && cap < run) h.push({ debut_s: +((end - run) / SR).toFixed(4), duree_ms: +(run / SR * 1000).toFixed(2) }); run = 0; cap = 0; };
       for (let i = clipStart + 48; i < n - 2400; i++) {
-        if (Math.abs(x[i]) < 1e-7) run++;
-        else { if (run >= 64) h.push({ debut_s: +((i - run) / SR).toFixed(4), duree_ms: +(run / SR * 1000).toFixed(2) }); run = 0; }
+        if (Math.abs(x[i]) < 1e-7) { run++; if (!got[i]) cap++; }
+        else close(i);
       }
-      if (run >= 64) h.push({ debut_s: +((n - 2400 - run) / SR).toFixed(4), duree_ms: +(run / SR * 1000).toFixed(2) });
+      close(n - 2400);
       return h; };
     const holes = holesOf(L), holesR = holesOf(R);
     const after2 = [...holes, ...holesR].filter(h => h.debut_s >= CLIP0 + 2);
@@ -157,6 +161,7 @@ async ({ SR, path, name, sets }) => {
     const out = {
       trous: holes.length, trous_ms_total: +holes.reduce((s, h) => s + h.duree_ms, 0).toFixed(1),
       silence_pct: +(100 * holes.reduce((s, h) => s + h.duree_ms, 0) / 1000 / ((n - clipStart) / SR)).toFixed(1),
+      blocs_non_captures: missed.length, blocs_non_captures_detail: missed.slice(0, 8),
       trous_reference: holesR.length, trous_reference_ms_total: +holesR.reduce((s, h) => s + h.duree_ms, 0).toFixed(1),
       trous_apres_2s: after2.length, dernier_trou_fin_s: +lastEnd.toFixed(3), premiers_trous: holes.slice(0, 8), trous_reference_detail: holesR.slice(0, 8),
       salves_mesurees: measured.length, decalages_gauche_droite: [...new Set(measured)], attente_transport_ech: holdK,
@@ -172,7 +177,7 @@ async ({ SR, path, name, sets }) => {
       // Après l'agrandissement (dernier trou + 0,3 s), lecture[t] = export[t − K].
       const from = Math.max(clipStart, Math.round((lastEnd + 0.3) * SR));
       let m = 0, at = -1;
-      for (let i = from; i < n - 1200; i++) { const j = i - holdK; if (j < 0) continue; const d = Math.max(Math.abs(L[i] - EL[j]), Math.abs(R[i] - ER[j])); if (d > m) { m = d; at = i; } }
+      for (let i = from; i < n - 1200; i++) { const j = i - holdK; if (j < 0 || !got[i]) continue; const d = Math.max(Math.abs(L[i] - EL[j]), Math.abs(R[i] - ER[j])); if (d > m) { m = d; at = i; } }
       out.lecture_vs_export = { depuis_s: +(from / SR).toFixed(3), decalage_K_ech: holdK, ecart_max_lsb16: +(m * 32768).toFixed(4), a_s: +(at / SR).toFixed(4) };
     }
     return out;
@@ -248,14 +253,17 @@ def main():
             def phase(key, dur, export=True, shots=()):
                 close_dialogs()
                 pg.evaluate(f"() => window.__silence.capture({dur})")
+                pendant = None
                 for at, name in shots:
                     pg.wait_for_timeout(int(at * 1000))
                     pg.screenshot(path=str(OUT / f"{LABEL}_{name}.png"))
+                    al = pg.locator("[data-testid=vst-late-alert]")
+                    pendant = {"visible": al.count() > 0 and al.first.is_visible(), "texte": al.first.inner_text() if al.count() else None}
                 info = pg.evaluate("() => window.__silence.pending")
                 ana = pg.evaluate("(w) => window.__silence.analyse(w)", export)
                 alert = pg.locator("[data-testid=vst-late-alert]")
-                r = {**ana, "noeud": info, "alerte_visible": alert.count() > 0 and alert.first.is_visible(),
-                     "alerte_texte": alert.first.inner_text() if alert.count() else None}
+                r = {**ana, "noeud": info, "alerte_pendant_l_ecoute": pendant, "alerte_visible_a_la_fin": alert.count() > 0 and alert.first.is_visible(),
+                     "alerte_texte_a_la_fin": alert.first.inner_text() if alert.count() else None}
                 res["phases"][key] = r
                 print(key, json.dumps({k: r[k] for k in ("trous", "trous_ms_total", "silence_pct", "trous_reference", "trous_apres_2s", "dernier_trou_fin_s",
                                                           "decalages_gauche_droite", "attente_transport_ech") if k in r},
@@ -308,8 +316,10 @@ def main():
         v = res["verifications"] = {
             "0 · pont normal : aucun trou, lecture = export (≤ 1 LSB16)": p0["trous"] == 0 and p0["trous_reference"] == 0 and lsb(p0) <= 1,
             "A · avant (tampon fixe) : le pont ralenti fait des trous": pA["trous"] > 0,
-            "A · alerte affichée même tampon fixe": bool(pA["alerte_visible"]),
-            "B · alerte affichée « a pris du retard … coupure(s) en 10 s »": bool(pB["alerte_visible"]) and "a pris du retard" in (pB.get("alerte_texte") or "") and "en 10 s" in (pB.get("alerte_texte") or ""),
+            "A · alerte affichée même tampon fixe": bool((pA["alerte_pendant_l_ecoute"] or {}).get("visible")),
+            "B · alerte affichée « a pris du retard : N coupure(s) en 10 s » + action « Geler »": bool((pB["alerte_pendant_l_ecoute"] or {}).get("visible"))
+                and "a pris du retard" in ((pB["alerte_pendant_l_ecoute"] or {}).get("texte") or "") and "en 10 s" in ((pB["alerte_pendant_l_ecoute"] or {}).get("texte") or "")
+                and "Geler" in ((pB["alerte_pendant_l_ecoute"] or {}).get("texte") or ""),
             "B · pastille de l'insert et fenêtre de l'effet (compteur, actions)": bool(res.get("pastille_insert")) and "Geler la piste" in (res.get("fenetre_effet_texte") or ""),
             "B · tampon agrandi (> 2048)": ((nB.get("pendant") or {}).get("tampon_echantillons") or 0) > 2048,
             "B · 0 silence après 2 s": pB["trous_apres_2s"] == 0,
