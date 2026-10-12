@@ -441,7 +441,7 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
-        features: Object.freeze(['google-login', 'stems', 'reveal-download']),
+        features: Object.freeze(['google-login', 'stems', 'reveal-download', 'pick-folder']),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d }),
         hwnd: %(hwnd)d
       }),
@@ -999,6 +999,11 @@ def run_window(url: str, url_mode: bool) -> None:
                 if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
                     self.reveal_download(msg[len("nova-desktop:reveal:"):])
                 return
+            if msg.startswith("nova-desktop:pick-folder:"):
+                # Pont Pro Tools : sélecteur de dossier de Windows (seulement pour le DAW).
+                if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
+                    self.pick_folder(msg[len("nova-desktop:pick-folder:"):])
+                return
             if msg == "nova-desktop:apply-update" and ui.pending is not None:
                 log.info(f"mise à jour appliquée tout de suite : {ui.pending.id}")
                 ui.active, ui.pending = ui.pending, None
@@ -1029,6 +1034,36 @@ def run_window(url: str, url_mode: bool) -> None:
                 log.info(f"export : dossier ouvert ({'fichier' if target else 'dossier'})")
             except Exception as e:
                 log.warning(f"export : ouverture du dossier impossible ({type(e).__name__})")
+
+        # ── pont Pro Tools : dossier des prises (sélecteur de Windows) ──
+        def pick_folder(self, raw: str):
+            """Ouvre le sélecteur de dossier de Windows (fenêtre de NOVA comme parent) et renvoie
+            le chemin choisi à la page ({type: 'nova-desktop-folder', path}). Annulé : path null."""
+            try:
+                initial = str((json.loads(raw or "{}") or {}).get("initial") or "")[:400]
+            except ValueError:
+                initial = ""
+
+            def go():
+                path = None
+                try:
+                    dlg = WinForms.FolderBrowserDialog()
+                    dlg.Description = "Dossier où NOVA dépose les prises pour Pro Tools"
+                    dlg.ShowNewFolderButton = True
+                    if initial and os.path.isdir(initial):
+                        dlg.SelectedPath = initial
+                    if dlg.ShowDialog(self.form) == WinForms.DialogResult.OK:
+                        path = str(dlg.SelectedPath) or None
+                    dlg.Dispose()
+                except Exception as e:
+                    log.warning(f"pont Pro Tools : sélecteur de dossier impossible ({type(e).__name__})")
+                log.info(f"pont Pro Tools : dossier {'choisi' if path else 'non choisi'}")
+                self.post_to_page({"type": "nova-desktop-folder", "path": path})
+
+            try:
+                self.form.BeginInvoke(Action(go))
+            except Exception:
+                self.post_to_page({"type": "nova-desktop-folder", "path": None})
 
         # ── connexion Google (google_login.py) ──────────────────────────
         def post_to_page(self, payload: dict):
