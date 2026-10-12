@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
 import { midiManager } from '../services/MidiManager';
+import { ControlSurfaceSettings } from './ControlSurfaceSettings';
 import { MidiDevice } from '../types';
 import { AudioDevice as ASIODevice } from '../services/ASIOBridge';
 import DesktopAppDownload from './DesktopAppDownload';
@@ -136,6 +137,8 @@ const LatencyCompensation: React.FC = () => {
 
 interface AudioSettingsPanelProps {
   onClose: () => void;
+  /** Ouvre la fenêtre sur une section (Préférences › Surfaces de contrôle), même en mode simple. */
+  focusSection?: 'surfaces';
 }
 
 interface AudioDevice {
@@ -144,7 +147,12 @@ interface AudioDevice {
   kind: 'audioinput' | 'audiooutput';
 }
 
-const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
+const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusSection }) => {
+  useEffect(() => {
+    if (focusSection !== 'surfaces') return;
+    const t = setTimeout(() => document.getElementById('nova-surfaces-controle')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+    return () => clearTimeout(t);
+  }, [focusSection]);
   // Mode simple : choix du micro / de la sortie et calage de latence seulement.
   const { simple } = useSimpleMode();
   const [inputs, setInputs] = useState<AudioDevice[]>([]);
@@ -704,6 +712,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     </div>
                 </div>}
 
+                {simple && focusSection === 'surfaces' && <ControlSurfaceSettings />}
                 {!simple && <>
                 <div className="h-px bg-white/5 w-full"></div>
 
@@ -749,6 +758,11 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                         </div>
                     </div>
                 </div>
+
+                <div className="h-px bg-white/5 w-full"></div>
+
+                {/* SURFACES DE CONTRÔLE (Mackie Control / HUI) */}
+                <ControlSurfaceSettings />
 
                 <div className="h-px bg-white/5 w-full"></div>
 
