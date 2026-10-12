@@ -80,6 +80,10 @@ export interface GuestStudioProps {
   notice: { text: string; id: number } | null;
   onLeave: () => void;
   onShowSession: () => void;
+  /** Chantier 11 : carte « Retours » (commentaires horodatés, versions à valider), components/CommentsPanel. */
+  review?: React.ReactNode;
+  /** Commentaires ouverts + versions en attente de son avis (pastille du bouton 💬). */
+  reviewBadge?: number;
   /** B3 : où en est l'envoi de ma prise (« Prise en cours d'envoi… 80 % », « Prise reçue par Max ✓ »). */
   takeSend?: React.ReactNode;
   /** B3 : test de connexion en un bouton (verdict, temps d'arrivée d'une prise). */
@@ -103,6 +107,7 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
   const [setupOpen, setSetupOpen] = useState<boolean | null>(null);
   const setupExpanded = setupOpen ?? p.takes.length === 0;
   const chatRef = useRef<HTMLDivElement>(null);
+  const reviewRef = useRef<HTMLDivElement>(null);
   const eng = p.engineer?.name || "l'ingé";
 
   // Raccourcis du DAW coupés (Ctrl+Z annulait chez lui les réglages de l'ingé, Suppr effaçait une piste…).
@@ -171,6 +176,13 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
               ))}
             </p>
           </div>
+          {p.review && (
+            <button type="button" data-testid="guest-review-jump" aria-label={`Commentaires et versions${p.reviewBadge ? ` (${p.reviewBadge})` : ''}`}
+              onClick={() => reviewRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })}
+              className="relative h-12 shrink-0 rounded-2xl bg-amber-400/90 px-3 text-[14px] font-black text-black">💬
+              {!!p.reviewBadge && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-500 px-1 text-[11px] leading-5 text-white">{p.reviewBadge}</span>}
+            </button>
+          )}
           <div className="relative shrink-0">
             <button type="button" data-testid="guest-menu" aria-label="Plus d'options" aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}
               className="h-12 w-12 rounded-2xl bg-white/10 text-[20px] font-black">⋯</button>
@@ -343,6 +355,9 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
               </>
             )}
           </section>
+
+          {/* Retours : commentaires sur la timeline, versions envoyées par l'ingé (à valider) */}
+          {p.review && <div ref={reviewRef} className="scroll-mt-2 md:col-span-2" data-testid="guest-review">{p.review}</div>}
 
           {/* 6. Parler à l'ingé */}
           <section className={`${card} md:col-span-2`} data-testid="guest-chat" aria-labelledby="guest-chat-t">

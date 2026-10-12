@@ -82,6 +82,9 @@ interface TransportProps {
   /** Menu mobile : collaboration et session en ligne (plus de boutons flottants). */
   onOpenCollab?: () => void;
   collabLabel?: string;
+  /** Menu mobile : retours (commentaires horodatés, versions à valider). */
+  onOpenReviews?: () => void;
+  reviewsLabel?: string;
   onOpenTakeHome?: () => void;
   takeHomeLabel?: string;
   
@@ -216,7 +219,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -758,6 +761,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-violet-300 fas fa-user-group"></i>
                     <span>{collabLabel || 'Collaborer'}</span>
+                  </button>
+                )}
+                {onOpenReviews && (
+                  <button onClick={() => { onOpenReviews(); setIsMobileMenuOpen(false); }} data-testid="menu-reviews" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-amber-300 fas fa-comment-dots"></i>
+                    <span>{reviewsLabel || 'Commentaires et versions'}</span>
                   </button>
                 )}
               </div>

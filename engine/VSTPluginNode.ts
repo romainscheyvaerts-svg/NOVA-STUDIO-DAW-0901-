@@ -1,6 +1,8 @@
 import { PluginInstance } from '../types';
 import { novaBridge, BridgeState, VstAutomatableParam } from '../services/NovaBridge';
 import { vstParamCatalog, vstParamTexts, notifyVstCatalog as notifyCatalog } from '../utils/vstParamCatalog';
+import { VST_PREBUFFER_FRAMES, VST_PREBUFFER_MAX_FRAMES, VstAdaptiveController, vstAdaptiveEnabled, vstLateMessage } from '../utils/vstAdaptiveBuffer';
+export { VST_PREBUFFER_FRAMES, VST_PREBUFFER_MAX_FRAMES } from '../utils/vstAdaptiveBuffer';
 export { vstParamCatalog, vstParamTexts, onVstCatalogChange, vstValueText, vstParamDisplayName } from '../utils/vstParamCatalog';
 
 /**
@@ -31,10 +33,12 @@ export { vstParamCatalog, vstParamTexts, onVstCatalogChange, vstValueText, vstPa
  * - (R10) Side-chain : `sidechainInput` (2e entrée du worklet). Clé active : les
  *   blocs partent en 4 canaux, le pont alimente l'entrée side-chain du plugin
  *   (hôte natif, voir bridge-python/vst_sidechain.py).
+ * - (C6) Pont en retard : coupures comptées (fenêtre de 10 s, alerte « nova:vst-late »),
+ *   tampon adaptatif par paliers (utils/vstAdaptiveBuffer.ts). Le worklet agrandit son tampon
+ *   sans perdre de bloc ; `latency` suit, le moteur décale la PDC ET le transport d'autant
+ *   (raison « adaptive » du latencyListener) : les pistes restent calées. Le tampon redescend
+ *   seulement transport arrêté.
  */
-
-/** Pré-tampon, en échantillons : absorbe les à-coups du pont sans craquement. */
-export const VST_PREBUFFER_FRAMES = 2048;
 
 export type VstNodeStatus = 'offline' | 'loading' | 'active' | 'error';
 
@@ -47,6 +51,14 @@ export interface VstNodeInfo {
   name: string;
   latencyMs: number;
   underruns: number;
+  /** (C6) Coupures des 10 dernières secondes (pont en retard). */
+  dropouts10s: number;
+  /** (C6) Coupures depuis le chargement. */
+  dropoutsTotal: number;
+  /** (C6) Tampon du pont (ms) ; agrandi automatiquement si le pont prend du retard. */
+  bufferMs: number;
+  bufferGrown: boolean;
+  bufferAtMax: boolean;
   /**
    * (R10) Clé de side-chain : 'ok' (le plugin la reçoit), 'none' (pas d'entrée clé),
    * 'host' (l'hôte du pont ne sait pas encore alimenter l'entrée clé des VST3), null (pas chargé).
@@ -125,6 +137,32 @@ export interface VstCrashDetail {
   message: string;
 }
 
+/** Alerte « le plugin a pris du retard » (événement fenêtre « nova:vst-late »). */
+export interface VstLateDetail {
+  pluginId: string;
+  name: string;
+  dropouts10s: number;
+  dropoutsTotal: number;
+  bufferMs: number;
+  grown: boolean;
+  atMax: boolean;
+  adaptive: boolean;
+  /** Message prêt à afficher. */
+  message: string;
+}
+
+/** Transport en lecture (le tampon ne redescend qu'à l'arrêt : rien ne bouge en pleine écoute). */
+let transportPlaying = false;
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('nova:transport-start', () => { transportPlaying = true; });
+  window.addEventListener('nova:transport-stop', () => {
+    transportPlaying = false;
+    liveVstNodes.forEach(n => { try { n.maybeShrink(); } catch { /* nœud libéré */ } });
+  });
+}
+/** Tests : état du transport vu par les effets VST. */
+export const setVstTransportPlaying = (on: boolean) => { transportPlaying = on; };
+
 const crashReasonLabel = (reason: string): string =>
   reason === 'hang' ? 'il ne répondait plus' : reason === 'nan' ? 'son invalide' : 'erreur interne';
 
@@ -149,7 +187,9 @@ export class VSTPluginNode {
   private loadSeq = 0;
   private unsubs: (() => void)[] = [];
   private slotUnsub: (() => void) | null = null;
-  private latencyListener: (() => void) | null = null;
+  private latencyListener: ((reason?: 'adaptive') => void) | null = null;
+  /** (C6) Tampon adaptatif : suivi des coupures et du tampon du worklet. */
+  protected adapt: VstAdaptiveController;
   private statusListeners = new Set<(s: VstNodeStatus) => void>();
   private licenseRequired = false;
   /** Réglages de Nova déjà appliqués (JSON) : réappliqués s'ils changent (Annuler, nouveau mix). */
@@ -187,6 +227,7 @@ export class VSTPluginNode {
     this.sidechainInput.channelCount = 2;
     this.sidechainInput.channelCountMode = 'explicit';
     this.knownState = plugin.params?.stateB64 || null;
+    this.adapt = new VstAdaptiveController({ base: VST_PREBUFFER_FRAMES, max: this.adaptiveMaxFrames(), sampleRate: ctx.sampleRate });
     // Tant que le flux n'est pas prêt : passe-plat direct.
     this.input.connect(this.output);
 
@@ -233,7 +274,8 @@ export class VSTPluginNode {
     this.updateLatency(false);
   }
 
-  setLatencyListener(cb: (() => void) | null) { this.latencyListener = cb; }
+  /** reason « adaptive » : tampon agrandi en lecture, le moteur fait aussi attendre le transport. */
+  setLatencyListener(cb: ((reason?: 'adaptive') => void) | null) { this.latencyListener = cb; }
 
   /**
    * Départ de la lecture depuis l'arrêt : le prochain bloc envoyé au pont porte le drapeau
@@ -257,6 +299,7 @@ export class VSTPluginNode {
       pluginId: this.plugin.id, status: this.status, error: this.error, licenseRequired: this.licenseRequired,
       name: this.loadedName || this.plugin.name, underruns: this.underruns,
       latencyMs: Math.round(this.latency * 1000),
+      ...this.lateInfo(),
       sidechain: this.status !== 'active' ? null : this.keyInputs === null ? 'host' : this.keyInputs > 0 ? 'ok' : 'none',
     };
   }
@@ -276,6 +319,93 @@ export class VSTPluginNode {
   }
 
   getSlotId(): string | null { return this.status === 'active' ? this.slotId : null; }
+
+  // --- Pont en retard : coupures, tampon adaptatif (C6) ------------------------------
+
+  private lateInfo() {
+    const st = this.adapt.state(Date.now());
+    return {
+      dropouts10s: st.dropouts10s, dropoutsTotal: st.dropoutsTotal,
+      bufferMs: Math.round((st.prebufferFrames / (this.ctx.sampleRate || 48000)) * 1000),
+      bufferGrown: st.grown, bufferAtMax: st.atMax,
+    };
+  }
+
+  /** Tampon actuel du pont (échantillons). */
+  getPrebufferFrames(): number { return this.adapt.prebuffer; }
+
+  /** Plafond du tampon adaptatif (insert ARA : avance fixe, la position du morceau en dépend). */
+  protected adaptiveMaxFrames(): number { return vstAdaptiveEnabled() ? VST_PREBUFFER_MAX_FRAMES : VST_PREBUFFER_FRAMES; }
+
+  /** Transport arrêté et tout va bien depuis un moment : le tampon redescend. */
+  maybeShrink() {
+    if (this.resetWanted && !transportPlaying) { this.resetPrebuffer(); return; }
+    const order = this.adapt.shrink(transportPlaying);
+    if (!order) return;
+    this.worklet?.port.postMessage({ type: 'delay', frames: order.frames, id: order.id });
+    this.updateLatency(true);
+    notifyInfo();
+  }
+
+  private resetWanted = false;
+  /** Coupures sur 10 s déjà annoncées à l'interface. */
+  private shown10s = 0;
+
+  /**
+   * Bouton « Revenir au tampon normal ». En pleine lecture, fait à l'arrêt : une latence qui
+   * BAISSE en cours d'écoute décalerait la suite (le transport ne peut pas reculer).
+   */
+  resetPrebuffer() {
+    if (transportPlaying) { this.resetWanted = true; return; }
+    this.resetWanted = false;
+    const order = this.adapt.resetToBase();
+    if (!order) return;
+    this.worklet?.port.postMessage({ type: 'delay', frames: order.frames, id: order.id });
+    this.updateLatency(true);
+    notifyInfo();
+  }
+
+  private emitLate(force = false) {
+    const now = Date.now();
+    if (!this.adapt.alertDue(now, force)) return;
+    const st = this.adapt.state(now);
+    const name = this.loadedName || this.plugin.name || 'VST';
+    const info = this.lateInfo();
+    const detail: VstLateDetail = {
+      pluginId: this.plugin.id, name, dropouts10s: st.dropouts10s, dropoutsTotal: st.dropoutsTotal,
+      bufferMs: info.bufferMs, grown: st.grown, atMax: st.atMax, adaptive: st.adaptive,
+      message: vstLateMessage(name, st, this.ctx.sampleRate),
+    };
+    try {
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') window.dispatchEvent(new CustomEvent('nova:vst-late', { detail }));
+    } catch { /* hors navigateur */ }
+  }
+
+  /** Messages du worklet : statistiques (≈ 1 s) et agrandissement du tampon (aussitôt). */
+  protected onWorkletMessage(d: any) {
+    if (!d) return;
+    if (d.type === 'delay') {
+      // Tampon agrandi EN LECTURE : latence annoncée tout de suite (PDC + attente du transport).
+      if (this.adapt.onGrow(Number(d.frames) || 0)) this.updateLatency(true, 'adaptive');
+      this.emitLate(true);
+      notifyInfo();
+      return;
+    }
+    if (d.type !== 'stats') return;
+    this.paramStats = { paramsSent: Number(d.paramsSent) || 0, paramBlocks: Number(d.paramBlocks) || 0 };
+    const before = this.adapt.dropoutsTotal;
+    const changed = this.adapt.onStats(d, Date.now());
+    if (changed) this.updateLatency(true);
+    // Fenêtre de 10 s qui se vide aussi : la pastille de l'insert doit suivre.
+    const n10 = this.adapt.dropouts10s(Date.now());
+    if (d.underruns !== this.underruns || this.adapt.dropoutsTotal !== before || changed || n10 !== this.shown10s) {
+      this.underruns = Number(d.underruns) || 0;
+      this.shown10s = n10;
+      notifyInfo();
+    }
+    if (this.adapt.dropoutsTotal !== before) this.emitLate();
+    if (!transportPlaying) this.maybeShrink();
+  }
 
   // --- Automation (R9) -----------------------------------------------------------
 
@@ -497,14 +627,10 @@ export class VSTPluginNode {
       // 2e entrée : clé de side-chain (R10).
       numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
       channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
-      processorOptions: { prebufferFrames: VST_PREBUFFER_FRAMES },
+      // (C6) Tampon adaptatif : du pré-tampon au plafond (identiques : avance fixe).
+      processorOptions: { prebufferFrames: VST_PREBUFFER_FRAMES, maxPrebufferFrames: this.adapt.max },
     });
-    node.port.onmessage = (e) => {
-      if (e.data?.type === 'stats') {
-        this.paramStats = { paramsSent: Number(e.data.paramsSent) || 0, paramBlocks: Number(e.data.paramBlocks) || 0 };
-        if (e.data.underruns !== this.underruns) { this.underruns = e.data.underruns; notifyInfo(); }
-      }
-    };
+    node.port.onmessage = (e) => this.onWorkletMessage(e.data);
     this.sidechainInput.connect(node, 0, 1);
     this.worklet = node;
     return node;
@@ -618,14 +744,14 @@ export class VSTPluginNode {
     if (had !== 0) this.latencyListener?.();
   }
 
-  protected updateLatency(notify: boolean) {
+  protected updateLatency(notify: boolean, reason?: 'adaptive') {
     const sr = this.ctx.sampleRate || 48000;
     const next = (this.status === 'active' && !this.monitorBypass)
-      ? (VST_PREBUFFER_FRAMES + this.pluginLatencySamples) / sr
+      ? (this.adapt.prebuffer + this.pluginLatencySamples) / sr
       : 0;
     if (Math.abs(next - this.latency) < 1e-9) return;
     this.latency = next;
     notifyInfo();
-    if (notify) this.latencyListener?.();
+    if (notify) this.latencyListener?.(reason);
   }
 }
