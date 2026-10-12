@@ -1256,6 +1256,17 @@ export interface DAWState {
    */
   projectNotes?: import('./utils/sessionNotes').ProjectNotes;
   /**
+   * Chantier 11 · Commentaires horodatés sur la timeline (« 1:12 le "s" siffle ») :
+   * réponses, résolus, archivés. Fusionnables (utils/timelineComments) ; voyagent
+   * en collaboration (opération « comments »). Une ancienne version les ignore.
+   */
+  timelineComments?: import('./utils/timelineComments').TimelineComment[];
+  /**
+   * Chantier 11 · Versions du mix envoyées à l'artiste, et sa décision
+   * (validée / retouches demandées). utils/mixVersions ; opération « mixver ».
+   */
+  mixVersions?: import('./utils/mixVersions').MixVersion[];
+  /**
    * Arrangements du morceau (« clean » / « explicite », « radio edit »…) : ordre
    * des sections de la piste Arrangement et clips coupés. utils/arrangements.
    */

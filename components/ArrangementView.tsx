@@ -131,6 +131,8 @@ interface ArrangementViewProps {
   tempoLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
   /** Piste Arrangement (R12, components/ArrangeLane) : sections à glisser, juste sous la règle. */
   arrangeLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
+  /** Chantier 11 : calque posé sur la règle (puces des commentaires horodatés, components/CommentsPanel). */
+  rulerOverlay?: (v: { zoomH: number; scrollLeft: number; width: number }) => React.ReactNode;
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -204,7 +206,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy, onClipsMoved,
-  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane, arrangeLane
+  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane, arrangeLane, rulerOverlay
 }) => {
   // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
   const chordH = chordLane ? chordLane.height : 0;
@@ -2862,6 +2864,12 @@ useEffect(() => {
                 onWheel={(e) => { const sc = scrollContainerRef.current; if (sc) { sc.scrollTop += e.deltaY; sc.scrollLeft += e.deltaX; } }} />;
             });
           })()}
+        </div>
+      )}
+      {/* Chantier 11 : puces des commentaires sur la règle (le clic ouvre le commentaire et y amène la lecture) */}
+      {rulerOverlay && (
+        <div data-testid="ruler-overlay" style={{ position: 'absolute', top: TOOLBAR_H, left: headerWidth, right: 0, height: RULER_H, overflow: 'hidden', pointerEvents: 'none', zIndex: 44 }}>
+          {rulerOverlay({ zoomH, scrollLeft, width: Math.max(1, viewportSize.width - headerWidth) })}
         </div>
       )}
       {/* R23 : passages « à refaire » (bandeau rouge en bas de la piste) */}
