@@ -89,6 +89,19 @@ describe('réception chez l’ingé : ce qu’un artiste en mode simple ne peut 
       expect(v(kind, { trackId: 'voix', bpm: 140 }, voixLead).ok).toBe(false);
     }
   });
+  it('playlists de piste (Pro Tools) : un invité ne bascule ni ne supprime celles de l’ingé ; les siennes oui ; mode libre : oui', () => {
+    // Les playlists voyagent dans l'opération « content » (playlist active + autres playlists).
+    const switchOp = (tr: Track) => ({ trackId: tr.id, cv: 2, changed: ['c9'], removed: ['p1', 'p2', 'p3'], meta: true,
+      content: { type: 'AUDIO', clips: [], activePlaylistId: 'pl-2', playlists: [{ id: 'pl-1', name: 'Voix lead', clips: [] }, { id: 'pl-2', name: 'Voix lead.02', clips: [] }] } });
+    const deleteOp = (tr: Track) => ({ trackId: tr.id, cv: 2, changed: [], removed: [], meta: true, content: { type: 'AUDIO', clips: [], playlists: [{ id: 'pl-1', name: 'Voix lead', clips: [] }] } });
+    for (const tr of [voixLead, beat, autreArtiste]) {
+      expect(v('content', switchOp(tr), tr).ok).toBe(false);
+      expect(v('content', deleteOp(tr), tr).ok).toBe(false);
+      expect(v('content', switchOp(tr), tr, { limited: false }).ok).toBe(true);
+    }
+    expect(v('content', switchOp(maVoix), maVoix).ok).toBe(true);
+    expect(v('content', deleteOp(maVoix), maVoix).ok).toBe(true);
+  });
   it('tonalité et arrangements : refusés ; les paroles passent seules', () => {
     expect(v('song', { fields: { projectKey: 3 } }).ok).toBe(false);
     expect(v('song', { fields: { arrangements: [] } }).ok).toBe(false);
