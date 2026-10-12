@@ -20,8 +20,9 @@ import {
   matchesPreset, PluginPreset, PRESET_EXT, sameSettings, soundSettingsOf, withSoundSettings,
 } from '../utils/presets';
 import {
-  deletePreset, exportPresetFile, importPresetText, isFavorite, listPluginPresets, renamePreset, savePreset, setFavorite,
+  deletePreset, exportPresetFile, importPresetText, isFavorite, listPluginPresets, onPresetsChanged, renamePreset, savePreset, setFavorite,
 } from '../services/PresetStore';
+import PresetCloudStatus from './PresetCloudStatus';
 import { applyVstStateVerified, readVstSlot, slotOfPlugin } from '../services/VstPresets';
 import { liveVstNodes } from '../engine/VSTPluginNode';
 import { saveBlob } from '../utils/saveBlob';
@@ -77,6 +78,8 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
     try { setList(await listPluginPresets(plugin)); } catch (e: any) { setStatus({ kind: 'error', text: `Presets illisibles : ${e?.message || e}` }); }
   }, [plugin.type, plugin.params?.localPath, plugin.params?.pluginName, plugin.params?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void refresh(); }, [refresh]);
+  // Presets reçus d'un autre poste (services/PresetCloud) : la liste se met à jour.
+  useEffect(() => onPresetsChanged(c => { if (c.type === 'remote') void refresh(); }), [refresh]);
 
   const current = list.find(p => p.name === presetName && matchesPreset(plugin, p)) || list.find(p => p.name === presetName) || null;
   const idx = current ? list.indexOf(current) : -1;
@@ -223,6 +226,7 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
           className="fixed z-[950] max-h-[min(70vh,520px)] overflow-y-auto rounded-xl border border-nv-line bg-nv-raised p-2 text-nv-ink shadow-2xl"
           style={{ left: pos.left, top: pos.top, width: pos.width }}>
           <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-nv-muted truncate">Presets · {plugin.params?.name || plugin.name}</p>
+          <div className="mb-2"><PresetCloudStatus compact /></div>
           {status && (
             <p role={status.kind === 'error' ? 'alert' : 'status'} className={`mb-2 rounded-lg px-2 py-1.5 text-[11px] ${status.kind === 'error' ? 'bg-red-500/10 text-red-400' : status.kind === 'ok' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-nv-accent/10 text-nv-ink'}`}>{status.text}</p>
           )}
