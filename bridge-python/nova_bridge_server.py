@@ -543,7 +543,10 @@ class NovaBridgeServer:
                               "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
                               "ara": bool(ara_service.ara_host.find_host_exe()),
                               # (v12) Melodyne / VocAlign en insert sur une piste, comme Pro Tools
-                              "ara_insert": bool(ara_service.ara_host.find_host_exe())})
+                              "ara_insert": bool(ara_service.ara_host.find_host_exe()),
+                              # Trame drapeau RESET (0x08) : départ de lecture = plugin remis à zéro
+                              # (hôte natif), comme l'instance de l'export
+                              "stream_reset": vst_host.ENGINE == "native"})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -866,6 +869,9 @@ class NovaBridgeServer:
                 # Ses réglages d'automation ne sont pas perdus : posés au bloc suivant.
                 if slot is not None and old is not None and len(old) > 4 and old[4]:
                     slot.carry_changes(old[4])
+                # Sa remise à zéro (départ de lecture) non plus : faite avant le bloc suivant.
+                if slot is not None and old is not None and len(old) > 7 and old[7] and hasattr(slot, "reset_stream"):
+                    slot.reset_stream()
             except asyncio.QueueEmpty:
                 pass
         q.put_nowait(item)
@@ -886,6 +892,9 @@ class NovaBridgeServer:
         if flags & vst_automation.FLAG_SIDECHAIN and nch >= 4:
             block, key = block[:2], block[2:4]
         item = (ws, "bin", seq, block, changes, key) if timeline is None else (ws, "bin", seq, block, changes, key, timeline)
+        if flags & vst_automation.FLAG_RESET:
+            # Départ de lecture : remise à zéro du plugin juste avant CE bloc (dans l'ordre du flux).
+            item = (ws, "bin", seq, block, changes, key, timeline, True)
         self._enqueue(q, item, self.slots.get(slot_id))
 
     async def _slot_worker(self, slot: Slot, q: asyncio.Queue):
@@ -906,6 +915,9 @@ class NovaBridgeServer:
                 if slot.failed:
                     out = slot.dry_block(block)
                 else:
+                    if len(item) > 7 and item[7] and hasattr(slot, "reset_stream"):
+                        # Même exécuteur que les blocs : la remise à zéro tombe juste avant ce bloc.
+                        await self.loop.run_in_executor(slot.executor, slot.reset_stream)
                     extra = (changes, key) if (changes or key is not None) else ()
                     if timeline is not None:
                         extra = (changes, key, timeline)

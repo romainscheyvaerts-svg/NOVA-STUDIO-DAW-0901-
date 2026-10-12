@@ -103,6 +103,12 @@ namespace nova
         void release();
         void reset();                    // setActive off/on (comme AudioPluginInstance::reset de JUCE)
         bool isPrepared() const { return prepared; }
+        double preparedRate() const { return currentRate; }
+        // Réglages posés par l'hôte ou la fenêtre (pendingToProcessor) remis au processeur TOUT DE
+        // SUITE, sans audio : appel process() à 0 échantillon (« parameter flush » du SDK VST3).
+        // Sans ça, un réglage posé à l'arrêt n'arrivait qu'au bloc audio suivant : l'état relu
+        // (export) était l'ancien. Faux si rien n'était en attente ou si l'instance n'est pas prête.
+        bool flushParams();
         int latency() const { return cachedLatency.load(); }
         void processRequest (shm::Header& h, float* in, float* key, float* out);
 
@@ -131,10 +137,12 @@ namespace nova
         void reinstantiate();
         // Test de pedalboard (detectReloadType) : du bruit, une remise à zéro, du silence ; vrai si le
         // silence qui suit sort plus fort que 5 × le bruit de fond. Instrument (pas d'entrée) : vrai.
-        bool persistsAudioOnReset();
-        // Instrument : « mise en route » de pedalboard (attemptToWarmUp) : à 44,1 kHz, une note (do 4,
-        // vélocité 127) jouée jusqu'à ce qu'il sorte du son (10 s au plus), toutes notes coupées, arrêt.
-        void warmUp (double timeoutSeconds = 10.0);
+        // sampleRate : fréquence du PROJET (avant : 44,1 kHz codé en dur, comme pedalboard ; un plugin
+        // préparé une fois à 44,1 kHz puis à 48 kHz pouvait garder des traces de la 1re préparation).
+        bool persistsAudioOnReset (double sampleRate = 44100.0);
+        // Instrument : « mise en route » de pedalboard (attemptToWarmUp) : à la fréquence du projet, une
+        // note (do 4, vélocité 127) jouée jusqu'à ce qu'il sorte du son (10 s au plus), notes coupées, arrêt.
+        void warmUp (double timeoutSeconds = 10.0, double sampleRate = 44100.0);
 
         // ---- état
         bool getState (std::vector<uint8_t>& component, std::vector<uint8_t>& controller, bool& hasController);
@@ -164,6 +172,7 @@ namespace nova
         void runSilenceOrNoise (int channels, int frames, bool noise, float& magnitude);
         bool applyArrangements (int channels, bool sidechain);
         void deactivate();
+        bool flushParamsLocked();        // (processLock tenu) voir flushParams
         void handleRestart (int32_t flags);
         void updateMidiMappings();
 
