@@ -67,7 +67,15 @@ class MetronomeService {
   }
 
   public init(audioContext: AudioContext) {
-    if (this.ctx !== audioContext) this.taps.clear();
+    if (this.ctx !== audioContext) {
+      // Nouveau contexte (fréquence du projet changée, utils/projectRate) : les sorties et
+      // départs de l'ancien n'existent plus pour lui (connect() lèverait InvalidAccessError
+      // et bloquait l'ouverture d'un projet à 44,1 kHz). setOutputs() les redonne ensuite.
+      this.stop();
+      this.taps.clear();
+      this.outputs.main = null;
+      try { this.outputGain?.disconnect(); } catch { /* déjà détaché */ }
+    }
     this.ctx = audioContext;
     this.outputGain = this.ctx.createGain();
     this.outputGain.gain.value = this.settings.volume;
@@ -85,7 +93,9 @@ class MetronomeService {
   private routeOutput() {
     if (!this.outputGain || !this.ctx) return;
     try { this.outputGain.disconnect(); } catch { /* pas encore relié */ }
-    const target = (this.settings.output === 'system' ? this.outputs.system : this.outputs.main) || this.outputs.system || this.ctx.destination;
+    // Seules les sorties de CE contexte comptent (un nœud d'un contexte fermé ferait lever connect()).
+    const own = (n: AudioNode | null) => (n && n.context === this.ctx ? n : null);
+    const target = (this.settings.output === 'system' ? own(this.outputs.system) : own(this.outputs.main)) || own(this.outputs.system) || this.ctx.destination;
     this.outputGain.connect(target);
     this.taps.forEach(n => { try { this.outputGain!.connect(n); } catch { /* autre contexte */ } });
   }

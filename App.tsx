@@ -1521,15 +1521,18 @@ function Studio() {
     }
   };
   
-  const handleLoadProject = useCallback((rawState: DAWState) => {
+  /** Ouvre un projet ; se résout à true quand il est vraiment à l'écran (false : échec, déjà signalé). */
+  const handleLoadProject = useCallback((rawState: DAWState): Promise<boolean> => {
     const loadedState = migrateLoadedState(rawState);
     // Le moteur passe à la fréquence DU PROJET (ancien projet sans fréquence : 44,1 kHz,
     // exactement comme avant) ; rien ne la change pendant l'ouverture.
     const rate = projectRateOf(loadedState);
     rateLoadingRef.current++;
-    (async () => {
+    return (async () => {
       try { await audioEngine.setSampleRate(rate); } catch (e) { console.warn('[Ouverture] fréquence du projet', e); }
-      await ensureAudioEngine();
+      // Un raté du câblage audio (métronome, sorties) ne doit jamais empêcher le projet de
+      // s'ouvrir : avant, l'erreur interrompait la suite et l'ancien projet restait affiché.
+      try { await ensureAudioEngine(); } catch (e) { console.warn('[Ouverture] moteur audio', e); }
     })().then(async () => {
         // On libère l'audio de l'ancien projet, mais pas celui que ProjectIO
         // vient de décoder pour CE projet : clear() effaçait toutes les prises
@@ -1572,7 +1575,13 @@ function Studio() {
         setTimeout(() => {
             loadedState.tracks.forEach(t => audioEngine.updateTrack(t, loadedState.tracks));
         }, 100);
+        return true;
+    }).catch((e: any) => {
+        console.error('[Ouverture]', e);
+        setAiNotification(`❌ Le projet n'a pas pu s'ouvrir : ${e?.message || e}`);
+        return false;
     }).finally(() => { rateLoadingRef.current = Math.max(0, rateLoadingRef.current - 1); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setState]);
 
   const handleLoadLocalFile = useCallback(async (file: File) => {
@@ -1580,7 +1589,8 @@ function Studio() {
       try {
           const loadedProject = await ProjectIO.loadProject(file);
           if (loadedProject) {
-              handleLoadProject(loadedProject);
+              // « Projet chargé » seulement quand il est vraiment ouvert (fréquence, sons convertis).
+              if (!(await handleLoadProject(loadedProject))) { setExternalImportNotice("❌ Le projet n'a pas pu s'ouvrir."); return; }
               setExternalImportNotice("✅ Projet chargé !");
               setTimeout(() => { void restoreCatalogBeatRef.current('📂 Projet ouvert : tes prises et tes paroles sont là.'); }, 900);
           }
@@ -1596,7 +1606,7 @@ function Studio() {
       try {
           const loadedProject = await supabaseManager.loadUserSession(id);
           if (loadedProject) {
-              handleLoadProject(loadedProject);
+              if (!(await handleLoadProject(loadedProject))) { setExternalImportNotice("❌ Le projet n'a pas pu s'ouvrir."); return; }
               setExternalImportNotice("✅ Projet cloud chargé !");
           }
       } catch (e: any) {
