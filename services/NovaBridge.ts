@@ -25,6 +25,10 @@
  *   des essais (1 s, 2 s, 4 s… 10 s au plus) jusqu'à disconnect(). État visible :
  *   status « reconnecting », attempt, nextRetryAt ; retryNow() pour ne pas attendre.
  *
+ * - v13 : projets sur le DISQUE (Nova Studio) : chaque version de la sauvegarde automatique
+ *   est aussi écrite dans Documents\Nova Studio\Projets\<nom>\ (services/DiskProjectStore) :
+ *   PROJECT_AUDIO_MISSING / PROJECT_AUDIO_PUT / PROJECT_SAVE_VERSION / PROJECT_LIST / PROJECT_LOAD.
+ *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
 
@@ -115,6 +119,8 @@ export interface BridgeState {
   automation?: boolean;
   /** (v11, R10) Clé de side-chain des VST (hôte natif du pont). */
   sidechain?: boolean;
+  /** (v13) Sauvegarde des projets sur le disque (Documents\Nova Studio\Projets). */
+  projects?: boolean;
 }
 
 /** Première version du pont qui sait caler un compresseur sur une réduction cible. */
@@ -213,6 +219,19 @@ export interface SetParamsResult {
 /** Première version du pont qui automatise les réglages des VST (R9) et alimente leur side-chain (R10). */
 export const BRIDGE_AUTOMATION_VERSION = 11;
 
+/** Première version du pont qui écrit les projets sur le disque (Nova Studio). */
+export const BRIDGE_PROJECTS_VERSION = 13;
+
+/** Version d'un projet telle que le pont la garde sur le disque (même forme que dans IndexedDB). */
+export interface DiskVersionRecord {
+  id: number; projectId: string; name: string; savedAt: number; reason: string; tracks: number; takes: number;
+  beatTitle: string | null; hasLyrics: boolean; needsCatalogBeat: boolean; versionNumber?: number; comment?: string;
+  json: string; audioIds: string[];
+}
+export type DiskVersionMeta = Omit<DiskVersionRecord, 'json' | 'audioIds'>;
+export interface DiskProjectInfo { projectId: string; name: string; folder: string; versions: number; latest: DiskVersionMeta }
+export interface DiskAudio { id: string; sampleRate: number; channels: Float32Array[] }
+
 /** Réglage automatisable d'un VST (« + voie »), valeur brute 0–1. */
 export interface VstAutomatableParam {
   name: string;
@@ -286,6 +305,8 @@ class NovaBridgeService {
   private stemsJobs = new Map<string, number>();
   /** Sons rendus par un plugin ARA (trames ARA_RENDERED) en attendant la réponse finale. */
   private araFrames = new Map<number, AraRender[]>();
+  /** (v13) Sons d'un projet relu sur le disque, gardés jusqu'à la trame finale PROJECT_LOAD. */
+  private projectFrames = new Map<number, DiskAudio[]>();
   private araListeners = new Set<(e: AraEvent) => void>();
   private araInsertListeners = new Map<string, Set<(e: any) => void>>();
 
@@ -411,6 +432,7 @@ class NovaBridgeService {
             calibrateGr: !!hello.calibrate_gr && (Number(hello.version) || 0) >= BRIDGE_CALIBRATE_VERSION,
             automation: !!hello.automation && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
             sidechain: !!hello.sidechain && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
+            projects: !!hello.projects && (Number(hello.version) || 0) >= BRIDGE_PROJECTS_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -429,6 +451,7 @@ class NovaBridgeService {
         this.pending.forEach(p => { window.clearTimeout(p.timer); p.reject(new Error('Pont VST déconnecté')); });
         this.pending.clear();
         this.stemFrames.clear();
+        this.projectFrames.clear();
         this.stemsJobs.clear();
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
@@ -525,6 +548,25 @@ class NovaBridgeService {
       this.stemFrames.set(meta.req_id, list);
       return;
     }
+    // (v13) Un son d'un projet relu sur le disque (canaux l'un après l'autre).
+    if (meta.action === 'PROJECT_AUDIO') {
+      const pend = this.pending.get(meta.req_id);
+      if (!pend) return;
+      const nch = Number(meta.nch) || 1, n = Number(meta.nframes) || 0;
+      const flat = new Float32Array(buf, off, nch * n);
+      const channels = Array.from({ length: nch }, (_, c) => flat.slice(c * n, (c + 1) * n));
+      const list = this.projectFrames.get(meta.req_id) || [];
+      list.push({ id: String(meta.audio_id), sampleRate: Number(meta.sample_rate) || currentRate(), channels });
+      this.projectFrames.set(meta.req_id, list);
+      // Un gros projet arrive en plusieurs secondes : chaque son repousse l'échéance.
+      window.clearTimeout(pend.timer);
+      pend.timer = window.setTimeout(() => {
+        this.pending.delete(meta.req_id);
+        this.projectFrames.delete(meta.req_id);
+        pend.reject(new Error('Le pont ne répond plus pendant la lecture du projet'));
+      }, 30000);
+      return;
+    }
     // (v9) Un clip rendu par Melodyne / VocAlign : gardé jusqu'à la réponse finale.
     if (meta.action === 'ARA_RENDERED') {
       if (!this.pending.has(meta.req_id)) return;
@@ -542,6 +584,13 @@ class NovaBridgeService {
       this.araFrames.delete(meta.req_id);
       if (!meta.success) p.reject(new Error(meta.error || 'Rendu du plugin impossible'));
       else p.resolve({ ...meta, renders });
+      return;
+    }
+    if (meta.action === 'PROJECT_LOAD') {
+      const audio = this.projectFrames.get(meta.req_id) || [];
+      this.projectFrames.delete(meta.req_id);
+      if (!meta.success) p.reject(new Error(meta.error || 'Projet illisible sur le disque'));
+      else p.resolve({ record: meta.record, missing: meta.missing || [], audio });
       return;
     }
     if (meta.action === 'STEMS_SEPARATE') {
@@ -935,6 +984,60 @@ class NovaBridgeService {
     } finally {
       this.stemsJobs.delete(opts.jobId);
     }
+  }
+
+  // --- Projets sur le disque (pont v13, Nova Studio) ----------------------------
+
+  /** Le pont connecté sait écrire les projets sur le disque. */
+  projectsOnDisk(): boolean { return this.isConnected() && !!this.state.projects; }
+
+  /** Sons du projet pas encore écrits sur le disque. */
+  async projectAudioMissing(projectId: string, name: string, audioIds: string[]): Promise<string[]> {
+    const r = await this.request({ action: 'PROJECT_AUDIO_MISSING', project_id: projectId, name, audio_ids: audioIds }, 30000);
+    return (r.missing || []).map(String);
+  }
+
+  /** Écrit un son sur le disque (trame binaire, canaux l'un après l'autre : rien à entrelacer ici). */
+  putProjectAudio(projectId: string, name: string, audioId: string, sampleRate: number, channels: Float32Array[]): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Pont non connecté'));
+    const req_id = this.nextId++;
+    const n = channels[0]?.length || 0;
+    const j = new TextEncoder().encode(JSON.stringify({
+      action: 'PROJECT_AUDIO_PUT', req_id, project_id: projectId, name, audio_id: audioId,
+      sample_rate: Math.round(sampleRate), nch: channels.length, nframes: n, planar: true,
+    }));
+    const off = align4(8 + j.length);
+    const buf = new ArrayBuffer(off + n * channels.length * 4);
+    const u8 = new Uint8Array(buf);
+    u8[0] = 2;
+    new DataView(buf).setUint32(4, j.length, true);
+    u8.set(j, 8);
+    const flat = new Float32Array(buf, off, n * channels.length);
+    channels.forEach((c, i) => flat.set(c.subarray(0, n), i * n));
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => { this.pending.delete(req_id); reject(new Error("Le pont ne répond pas à l'écriture du son")); }, 60000);
+      this.pending.set(req_id, { resolve: () => resolve(), reject, timer });
+      ws.send(buf);
+    });
+  }
+
+  async saveProjectVersion(projectId: string, name: string, record: DiskVersionRecord): Promise<{ folder: string; versionId: number; pruned: number }> {
+    const r = await this.request({ action: 'PROJECT_SAVE_VERSION', project_id: projectId, name, version: record }, 60000);
+    return { folder: String(r.folder || ''), versionId: Number(r.version_id), pruned: Number(r.pruned) || 0 };
+  }
+
+  async listDiskProjects(): Promise<{ root: string; projects: DiskProjectInfo[] }> {
+    const r = await this.request({ action: 'PROJECT_LIST' }, 30000);
+    const projects: DiskProjectInfo[] = (r.projects || []).map((p: any) => ({
+      projectId: String(p.project_id), name: String(p.name || ''), folder: String(p.folder || ''), versions: Number(p.versions) || 0, latest: p.latest,
+    }));
+    return { root: String(r.root || ''), projects };
+  }
+
+  /** Relit une version (la plus récente sans versionId) et ses sons. */
+  loadDiskProject(projectId: string, versionId?: number): Promise<{ record: DiskVersionRecord; missing: string[]; audio: DiskAudio[] }> {
+    return this.request({ action: 'PROJECT_LOAD', project_id: projectId, ...(versionId ? { version_id: versionId } : {}) }, 30000);
   }
 
   // --- Plugins ARA : Melodyne, VocAlign (pont v9) ----------------------------

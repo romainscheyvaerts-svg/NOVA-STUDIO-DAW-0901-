@@ -38,7 +38,7 @@ export async function saveBeforeLeaving(timeoutMs = 10_000): Promise<boolean> {
 
 export const SAVE_FAILED_MESSAGE =
   "Ton projet n'a pas pu être sauvegardé, donc la page reste ouverte pour ne rien perdre. "
-  + 'Exporte-le (Session › Exporter le projet .zip), puis réessaie.';
+  + 'Exporte-le (Sauvegarder › Fichier sur cet appareil (.zip)), puis réessaie.';
 
 /**
  * Quitte la page vers `url` après avoir sauvegardé le projet.
