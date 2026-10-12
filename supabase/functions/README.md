@@ -21,6 +21,12 @@ C'est une référence : ce n'est **pas** un dossier `migrations`, `supabase db p
 Les autres fonctions du dossier (`create-checkout-session`, `generate-invoice`,
 `stream-drive-audio`, `sync-drive-index`) étaient déjà là avant.
 
+`daw-listen` (12/10/2026, chantier 12 « Lien d'écoute client sans compte ») est **nouvelle** et
+**pas déployée** : liens d'écoute créés par l'ingé (`listen_create`, `listen_list`,
+`listen_revoke` : compte connecté + lien de la séance), ouverts par le client sans compte
+(`listen_open` : le jeton seul, lecture seule ; toute autre action avec un jeton → 403). Sa
+table est dans `supabase/migrations/20261012180000_daw_listen_links.sql` (non appliquée).
+
 ## Tests
 
 ```powershell
@@ -33,6 +39,13 @@ distants (`deno.land`, `esm.sh`) sont remplacés par des faux en mémoire
 Ils couvrent : CORS, secret haché, conflit 409, audio manquant, abonnement exigé pour
 collaborer (402), clé par appareil, codes d'invitation, adresse de retour refusée (pas de
 redirection ouverte), prix inchangés (2 €, 5 €/mois, 10 €/mois), 10 exports gratuits Nova Pro.
+
+`supabase/tests/daw-listen.test.ts` (même principe) couvre le lien d'écoute : jeton aléatoire
+de 32 caractères cherché par son empreinte, durées 24 h / 7 j / 30 j, expiration (410
+« expiré le … »), révocation (410 « désactivé »), mot de passe PBKDF2 et blocage après 8
+essais, contenu choisi (direct / versions / commentaires), **lecture seule** (toute écriture
+avec le jeton refusée par `daw-listen` et par `daw-session`, et rien d'écrit en base), vue
+publique des commentaires et versions (sans clé interne, archivés exclus).
 
 ## Déployer (seulement avec le GO de Romain)
 
@@ -64,6 +77,31 @@ de ce dépôt :
 git show c4d3f47:supabase/functions/daw-session/index.ts > $env:TEMP\daw-session-avant.ts
 # copier ce fichier dans un dossier supabase/functions/daw-session temporaire, puis la même commande deploy
 ```
+
+### Lien d'écoute client (`daw-listen`), dans cet ordre
+
+```powershell
+# 1. Table AVANT la fonction (sinon « relation daw_listen_links does not exist ») :
+#    tableau de bord → SQL Editor → contenu de supabase\migrations\20261012180000_daw_listen_links.sql → Run
+#    (pas « supabase db push » : il appliquerait aussi les autres migrations du dossier).
+
+# 2. La fonction, vérification JWT de la passerelle DÉSACTIVÉE comme daw-session (le client
+#    n'a pas de compte : clé anonyme ; la fonction vérifie elle-même compte et jeton).
+npx supabase functions deploy daw-listen --project-ref mxdrxpzxbgybchzzvpkf --no-verify-jwt
+
+# 3. Le site NOVA (Vercel) avec la branche fusionnée : il apporte ecoute.html (page du client)
+#    et le panneau « Lien d'écoute client » de l'ingé.
+```
+
+Rien d'autre à régler : le direct passe par Supabase Realtime (canaux publics, déjà utilisés par
+la collaboration) et WebRTC entre l'ingé et le client.
+
+Vérifier après coup : NOVA → Collaborer (ingé) → « Lien d'écoute client » → « Nouveau lien » →
+ouvrir le lien sur un téléphone en navigation privée → « En direct » quand l'ingé diffuse.
+
+Retour arrière : redéployer le site d'avant, puis
+`npx supabase functions delete daw-listen --project-ref mxdrxpzxbgybchzzvpkf`, puis dans le
+SQL Editor `drop table if exists public.daw_listen_links;`.
 
 ## Règle
 
