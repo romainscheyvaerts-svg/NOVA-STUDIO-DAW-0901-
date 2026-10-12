@@ -82,7 +82,7 @@ export const novaVstEvents = {
   emit(r: NovaSettingsReport) { this.listeners.forEach(cb => { try { cb(r); } catch { /* */ } }); },
 };
 
-/** Nombre d'AudioParam d'automation du worklet (vst-bridge-processor-v5 : p0 … p31). */
+/** Nombre d'AudioParam d'automation du worklet (vst-bridge-processor-v6 : p0 … p31). */
 export const VST_AUTO_SLOTS = 32;
 
 /** Réglages bougés dans la fenêtre du plugin (écriture Touch / Latch) : id de l'effet, clé, valeur brute. */
@@ -234,6 +234,17 @@ export class VSTPluginNode {
   }
 
   setLatencyListener(cb: (() => void) | null) { this.latencyListener = cb; }
+
+  /**
+   * Départ de la lecture depuis l'arrêt : le prochain bloc envoyé au pont porte le drapeau
+   * RESET (vst-bridge-processor-v6) ; le pont remet le plugin à zéro juste avant lui (réglages
+   * en attente, puis setActive off/on), sans décaler le flux. Le plugin repart ainsi de l'état
+   * de l'instance hors ligne de l'export (mesuré : Pro-C 3, 2e écoute ≠ export sans cela).
+   * Le départ a lieu au plus tôt 10 ms plus tard : les blocs d'avant sont du silence.
+   */
+  resetAt(_at: number) {
+    this.worklet?.port.postMessage({ type: 'reset' });
+  }
 
   /** Changements d'état (chargé, erreur, pont fermé). */
   onStatus(cb: (s: VstNodeStatus) => void): () => void {
@@ -478,11 +489,11 @@ export class VSTPluginNode {
     let p = workletLoaded.get(this.ctx);
     if (!p) {
       // Chemin relatif à la base du build (le DAW n'est pas toujours servi à la racine).
-      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/vst-bridge-processor-v5.js`);
+      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/vst-bridge-processor-v6.js`);
       workletLoaded.set(this.ctx, p);
     }
     await p;
-    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor-v5', {
+    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor-v6', {
       // 2e entrée : clé de side-chain (R10).
       numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
       channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',

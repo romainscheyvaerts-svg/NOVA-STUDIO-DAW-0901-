@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 
@@ -127,9 +128,8 @@ export class StereoSpreaderNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Fondu d'apparition (anti-clic) en direct ; aucun à l'export (le rendu démarre sur le son).
+    fadeInOnInsert(this.output.gain, ctx);
     
     // Analyzers
     this.analyzerL = ctx.createAnalyser();
@@ -368,32 +368,32 @@ export class StereoSpreaderNode {
       // Width control
       const sideGain = (this as any)._sideGain as GainNode;
       if (sideGain) {
-        sideGain.gain.setTargetAtTime(width, now, 0.02);
+        smoothSet(sideGain.gain, width, this.ctx, 0.02);
       }
       
       // Haas delay (only on right channel for widening)
-      this.haasDelayL.delayTime.setTargetAtTime(0, now, 0.02);
-      this.haasDelayR.delayTime.setTargetAtTime(haasDelay * haasAmount, now, 0.02);
+      smoothSet(this.haasDelayL.delayTime, 0, this.ctx, 0.02);
+      smoothSet(this.haasDelayR.delayTime, haasDelay * haasAmount, this.ctx, 0.02);
       
       // Grave mono. Le bouton et sa frequence existaient dans l'interface mais
       // n'etaient jamais lus : le grave restait stereo quel que soit le reglage.
-      this.sideHighpass.frequency.setTargetAtTime(
-        this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 10, now, 0.02);
+      smoothSet(this.sideHighpass.frequency, 
+        this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 10, this.ctx, 0.02);
 
       // Separateur 3 bandes. Hors mode multibande, seule la voie directe passe :
       // on evite ainsi la rotation de phase des filtres quand ils ne servent pas.
       const f1 = safe(this.params.lowMidFreq, 250);
       const f2 = safe(this.params.midHighFreq, 4000);
-      this.lowBandLP.frequency.setTargetAtTime(f1, now, 0.02);
-      this.lowBandLP2.frequency.setTargetAtTime(f1, now, 0.02);
-      this.highBandHP.frequency.setTargetAtTime(f2, now, 0.02);
-      this.highBandHP2.frequency.setTargetAtTime(f2, now, 0.02);
+      smoothSet(this.lowBandLP.frequency, f1, this.ctx, 0.02);
+      smoothSet(this.lowBandLP2.frequency, f1, this.ctx, 0.02);
+      smoothSet(this.highBandHP.frequency, f2, this.ctx, 0.02);
+      smoothSet(this.highBandHP2.frequency, f2, this.ctx, 0.02);
 
       const multi = !!this.params.multiBand;
-      this.gDirect.gain.setTargetAtTime(multi ? 0 : 1, now, 0.02);
-      this.gLow.gain.setTargetAtTime(multi ? safe(this.params.lowWidth, 0.8) : 0, now, 0.02);
-      this.gMid.gain.setTargetAtTime(multi ? safe(this.params.midWidth, 1.2) : 0, now, 0.02);
-      this.gHigh.gain.setTargetAtTime(multi ? safe(this.params.highWidth, 1.5) : 0, now, 0.02);
+      smoothSet(this.gDirect.gain, multi ? 0 : 1, this.ctx, 0.02);
+      smoothSet(this.gLow.gain, multi ? safe(this.params.lowWidth, 0.8) : 0, this.ctx, 0.02);
+      smoothSet(this.gMid.gain, multi ? safe(this.params.midWidth, 1.2) : 0, this.ctx, 0.02);
+      smoothSet(this.gHigh.gain, multi ? safe(this.params.highWidth, 1.5) : 0, this.ctx, 0.02);
 
       // Balance control
       // At balance = 0: both = 1
@@ -401,24 +401,24 @@ export class StereoSpreaderNode {
       // At balance = +1: L = 0, R = 1
       const leftGain = balance < 0 ? 1 : 1 - balance;
       const rightGain = balance > 0 ? 1 : 1 + balance;
-      this.balanceGainL.gain.setTargetAtTime(leftGain, now, 0.02);
-      this.balanceGainR.gain.setTargetAtTime(rightGain, now, 0.02);
+      smoothSet(this.balanceGainL.gain, leftGain, this.ctx, 0.02);
+      smoothSet(this.balanceGainR.gain, rightGain, this.ctx, 0.02);
       
     } else {
       // Bypass: width = 1, no Haas, no balance
       const sideGain = (this as any)._sideGain as GainNode;
       if (sideGain) {
-        sideGain.gain.setTargetAtTime(1.0, now, 0.02);
+        smoothSet(sideGain.gain, 1.0, this.ctx, 0.02);
       }
-      this.haasDelayL.delayTime.setTargetAtTime(0, now, 0.02);
-      this.haasDelayR.delayTime.setTargetAtTime(0, now, 0.02);
-      this.sideHighpass.frequency.setTargetAtTime(10, now, 0.02);
-      this.gDirect.gain.setTargetAtTime(1, now, 0.02);
-      this.gLow.gain.setTargetAtTime(0, now, 0.02);
-      this.gMid.gain.setTargetAtTime(0, now, 0.02);
-      this.gHigh.gain.setTargetAtTime(0, now, 0.02);
-      this.balanceGainL.gain.setTargetAtTime(1, now, 0.02);
-      this.balanceGainR.gain.setTargetAtTime(1, now, 0.02);
+      smoothSet(this.haasDelayL.delayTime, 0, this.ctx, 0.02);
+      smoothSet(this.haasDelayR.delayTime, 0, this.ctx, 0.02);
+      smoothSet(this.sideHighpass.frequency, 10, this.ctx, 0.02);
+      smoothSet(this.gDirect.gain, 1, this.ctx, 0.02);
+      smoothSet(this.gLow.gain, 0, this.ctx, 0.02);
+      smoothSet(this.gMid.gain, 0, this.ctx, 0.02);
+      smoothSet(this.gHigh.gain, 0, this.ctx, 0.02);
+      smoothSet(this.balanceGainL.gain, 1, this.ctx, 0.02);
+      smoothSet(this.balanceGainR.gain, 1, this.ctx, 0.02);
     }
   }
 

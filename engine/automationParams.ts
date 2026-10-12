@@ -128,7 +128,11 @@ export class MappedParam {
     if (!opts.force && c === this.lastStatic) return;
     this.lastStatic = c;
     const now = this.ctx.currentTime;
-    if (opts.immediate) {
+    // Export (contexte hors ligne) : posé tel quel. Sinon le rendu glissait de la valeur par
+    // défaut vers le réglage pendant ses premières dizaines de ms (pré-délai de la reverb :
+    // 25 → 20 ms, export lancé au milieu d'un clip à −28 dB de la lecture).
+    const offline = typeof OfflineAudioContext !== 'undefined' && this.ctx instanceof OfflineAudioContext;
+    if (opts.immediate || offline) {
       for (const tg of this.targets) { try { tg.param.cancelScheduledValues(now); tg.param.setValueAtTime(this.mapOf(tg, c), now); } catch { /* */ } }
       this.last = { t: now, v: c };
     } else this.setTargetAtTime(c, now, opts.tau ?? 0.01);

@@ -50,7 +50,7 @@ describe('R10 · clé des VST', () => {
   });
 
   it('worklet du pont : 2e entrée = clé, envoyée en 4 canaux seulement quand elle est active', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '../public/worklets/vst-bridge-processor-v5.js'), 'utf8');
+    const src = fs.readFileSync(path.resolve(__dirname, '../public/worklets/vst-bridge-processor-v6.js'), 'utf8');
     let Cls: any = null;
     class AudioWorkletProcessor { port: any = { postMessage: () => { /* */ }, onmessage: null }; }
     // eslint-disable-next-line no-new-func

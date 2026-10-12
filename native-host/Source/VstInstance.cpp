@@ -706,6 +706,9 @@ namespace nova
                 preparedChannels = channels;
                 sidechainOn = sidechain;
                 continuous = 0;
+                // Réglages posés avant la préparation : au processeur AVANT le premier bloc audio
+                // (sinon posés au début du 1er bloc, lissés par le plugin sur quelques ms).
+                flushParamsLocked();
             }
         }
         auto o = json::Value::object();
@@ -729,11 +732,99 @@ namespace nova
     {
         std::lock_guard<std::mutex> l (processLock);
         if (! prepared) return;
+        // Réglages en attente d'abord : la remise à zéro repart des réglages ACTUELS.
+        flushParamsLocked();
         processor->setProcessing (false);
         component->setActive (false);
         component->setActive (true);
         processor->setProcessing (true);
         continuous = 0;
+    }
+
+    bool VstInstance::flushParams()
+    {
+        std::lock_guard<std::mutex> l (processLock);
+        return flushParamsLocked();
+    }
+
+    bool VstInstance::flushParamsLocked()
+    {
+        if (! prepared || ! processor) return false;
+        std::map<ParamID, double> pending;
+        {
+            std::lock_guard<std::mutex> pl (paramLock);
+            if (pendingToProcessor.empty()) return false;
+            pending.swap (pendingToProcessor);
+        }
+        inChanges.clearQueue();
+        outChanges.clearQueue();
+        inEvents.clear();
+        outEvents.clear();
+        for (auto& [id, v] : pending)
+        {
+            int32 qi = 0, pi = 0;
+            if (auto* q = inChanges.addParameterData (id, qi)) q->addPoint (0, v, pi);
+        }
+        // Tampons valides (secours) avec 0 échantillon : un plugin qui lit outputs[0] sans
+        // regarder numSamples ne déréférence jamais un pointeur nul.
+        int sIdx = 0, flatIn = 0, flatOut = 0;
+        for (size_t b = 0; b < ins.size(); ++b)
+        {
+            const int nch = channelCount (ins[b].arr);
+            for (int c = 0; c < nch; ++c, ++sIdx, ++flatIn) inPtrs[(size_t) flatIn] = scratch[(size_t) sIdx].data();
+            inBus[b].numChannels = nch;
+            inBus[b].silenceFlags = 0;
+            inBus[b].channelBuffers32 = nch > 0 ? &inPtrs[(size_t) (flatIn - nch)] : nullptr;
+        }
+        for (size_t b = 0; b < outs.size(); ++b)
+        {
+            const int nch = channelCount (outs[b].arr);
+            for (int c = 0; c < nch; ++c, ++sIdx, ++flatOut) outPtrs[(size_t) flatOut] = scratch[(size_t) sIdx].data();
+            outBus[b].numChannels = nch;
+            outBus[b].silenceFlags = 0;
+            outBus[b].channelBuffers32 = nch > 0 ? &outPtrs[(size_t) (flatOut - nch)] : nullptr;
+        }
+        ProcessContext ctx {};
+        ctx.sampleRate = currentRate;
+        ctx.tempo = 120.0;
+        ctx.timeSigNumerator = 4;
+        ctx.timeSigDenominator = 4;
+        ctx.state = ProcessContext::kTempoValid | ProcessContext::kTimeSigValid;
+        ProcessData data;
+        data.processMode = offlineMode ? kOffline : kRealtime;
+        data.symbolicSampleSize = kSample32;
+        data.numSamples = 0;
+        data.numInputs = (int32) inBus.size();
+        data.numOutputs = (int32) outBus.size();
+        data.inputs = inBus.empty() ? nullptr : inBus.data();
+        data.outputs = outBus.empty() ? nullptr : outBus.data();
+        data.inputParameterChanges = &inChanges;
+        data.outputParameterChanges = &outChanges;
+        data.inputEvents = &inEvents;
+        data.outputEvents = &outEvents;
+        data.processContext = &ctx;
+        auto* proc = processor.get();
+        const bool fine = guard::call ([&] { proc->process (data); });
+        if (! fine)
+        {
+            // Plugin qui refuse un appel sans audio : les réglages repartent au bloc suivant (comme avant).
+            std::lock_guard<std::mutex> pl (paramLock);
+            for (auto& [id, v] : pending) pendingToProcessor.emplace (id, v);   // une valeur plus récente gagne
+            return false;
+        }
+        const auto nOut = outChanges.getParameterCount();
+        if (nOut > 0)
+        {
+            std::lock_guard<std::mutex> pl (paramLock);
+            for (int32 i = 0; i < nOut; ++i)
+                if (auto* q = outChanges.getParameterData (i); q != nullptr && q->getPointCount() > 0)
+                {
+                    int32 off = 0;
+                    ParamValue v = 0;
+                    if (q->getPoint (q->getPointCount() - 1, off, v) == kResultTrue) pendingToController[q->getParameterId()] = v;
+                }
+        }
+        return true;
     }
 
     //==========================================================================
@@ -803,6 +894,9 @@ namespace nova
 
         if (h.flags & shm::kResetFirst)
         {
+            // Réglages en attente d'abord (sans audio), puis remise à zéro : le plugin repart des
+            // réglages actuels, dans l'état d'une instance qu'on vient d'activer (comme l'export).
+            flushParamsLocked();
             processor->setProcessing (false);
             component->setActive (false);
             component->setActive (true);
@@ -1064,13 +1158,13 @@ namespace nova
                 magnitude = std::max (magnitude, std::abs (out[(size_t) c * shm::kMaxFrames + (size_t) i]));
     }
 
-    void VstInstance::warmUp (double timeoutSeconds)
+    void VstInstance::warmUp (double timeoutSeconds, double sampleRate)
     {
         if (mainInChannels() != 0) return;
         const int ch = std::max (mainInChannels(), mainOutChannels()) == 1 ? 1 : 2;
         const int frames = 2048;
         release();
-        prepare (44100.0, frames, true, ch, false);
+        prepare (sampleRate > 0 ? sampleRate : 44100.0, frames, true, ch, false);
         auto h = std::make_unique<shm::Header>();
         std::vector<float> in ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f),
                            out ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f), key ((size_t) 2 * shm::kMaxFrames, 0.0f);
@@ -1098,19 +1192,20 @@ namespace nova
         release();
     }
 
-    bool VstInstance::persistsAudioOnReset()
+    bool VstInstance::persistsAudioOnReset (double sampleRate)
     {
         const int ch = mainInChannels();
         if (ch == 0) return true;      // instrument : comportement inconnu, recréé à chaque remise à zéro
+        const double sr = sampleRate > 0 ? sampleRate : 44100.0;
         float floor = 0, loud = 0, after = 0;
         release();
-        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        prepare (sr, 512, true, ch == 1 ? 1 : 2, false);
         for (int i = 0; i < 5; ++i) runSilenceOrNoise (ch, 512, false, floor);
         release();
-        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        prepare (sr, 512, true, ch == 1 ? 1 : 2, false);
         for (int i = 0; i < 5; ++i) runSilenceOrNoise (ch, 512, true, loud);
         release();
-        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        prepare (sr, 512, true, ch == 1 ? 1 : 2, false);
         runSilenceOrNoise (ch, 512, false, after);
         release();
         return after > floor * 5.0f;
@@ -1119,6 +1214,9 @@ namespace nova
     //==========================================================================
     bool VstInstance::getState (std::vector<uint8_t>& comp, std::vector<uint8_t>& ctrl, bool& hasController)
     {
+        // Réglages posés à l'arrêt (pont ou fenêtre) : au processeur avant de lire son état. Sinon
+        // un export lancé juste après relisait l'ancien état (le réglage n'arrivait qu'au bloc suivant).
+        flushParams();
         flushToController();
         comp.clear();
         ctrl.clear();
@@ -1149,6 +1247,12 @@ namespace nova
         flushToController();
         if (comp != nullptr)
         {
+            // L'état restauré remplace les réglages encore en attente (sinon un ancien réglage,
+            // posé avant, l'aurait écrasé au premier bloc : instance hors ligne réutilisée).
+            {
+                std::lock_guard<std::mutex> pl (paramLock);
+                pendingToProcessor.clear();
+            }
             IPtr<MemoryStream> s = owned (new MemoryStream());
             int32 w = 0;
             s->write ((void*) comp->data(), (int32) comp->size(), &w);

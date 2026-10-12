@@ -65,12 +65,20 @@ class VocalGateProcessor extends AudioWorkletProcessor {
       { name: 'bypass', defaultValue: 0, minValue: 0, maxValue: 1 },
       { name: 'auto', defaultValue: 0, minValue: 0, maxValue: 1 },
       { name: 'lowCut', defaultValue: 0, minValue: 0, maxValue: 400 },
-      { name: 'hum', defaultValue: 0, minValue: 0, maxValue: 1 }
+      { name: 'hum', defaultValue: 0, minValue: 0, maxValue: 1 },
+      // Départ de lecture : compteur programmé au bloc du départ, tout repart à neuf (comme l'export).
+      { name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' }
     ];
   }
   constructor() {
     super();
-    this.ms = 0; this.gain = 1; this.open = true; this.holdLeft = 0;
+    this.gen = 0;
+    this.initState();
+  }
+  // État de départ = état de repos (porte FERMÉE, comme après un silence) : un export qui démarre
+  // sur du son s'ouvre avec la même attaque qu'en lecture (avant : ouverte d'emblée à l'export).
+  initState() {
+    this.ms = 0; this.gain = -1; this.open = false; this.holdLeft = 0; this.blocks = 0;
     this.x1 = 0; this.x2 = 0; this.y1 = 0; this.y2 = 0;
     this.lastFc = -1; this.msg = 0; this.levelDb = -100;
     // Plancher de bruit appris (statistiques de minimum) : niveau lisse 20 ms,
@@ -133,6 +141,7 @@ class VocalGateProcessor extends AudioWorkletProcessor {
     this.gS1.fill(0); this.gS2.fill(0); this.gCount = 0;
   }
   process(inputs, outputs, p) {
+    if (p.resetGen && p.resetGen[0] !== this.gen) { this.gen = p.resetGen[0]; this.initState(); }
     const input = inputs[0], output = outputs[0];
     if (!output || !output[0]) return true;
     const n = output[0].length;
@@ -159,6 +168,7 @@ class VocalGateProcessor extends AudioWorkletProcessor {
     this.thrEff = thr;
     const closeThr = thr - 4;  // hysteresis : pas de claquements autour du seuil
     const rangeLin = Math.pow(10, p.range[0] / 20);
+    if (this.gain < 0) this.gain = rangeLin;
     const aAtt = 1 - Math.exp(-1 / (Math.max(0.00005, p.attack[0]) * sampleRate));
     const aRel = 1 - Math.exp(-1 / (Math.max(0.005, p.release[0]) * sampleRate));
     // Detection 3 ms ; 10 ms en seuil automatique, ou le seuil est proche du
@@ -249,7 +259,7 @@ class VocalGateProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('vocal-gate-processor-v2', VocalGateProcessor); } catch (e) {}
+try { registerProcessor('vocal-gate-processor-v3', VocalGateProcessor); } catch (e) {}
 `;
 
 const gateModuleLoads = new WeakMap<BaseAudioContext, Promise<void>>();
@@ -311,7 +321,7 @@ export class DenoiserNode {
     try {
       await loadGateModule(this.ctx);
       if (this.disposed) return;
-      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-gate-processor-v2', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-gate-processor-v3', {
         numberOfInputs: 1,
         numberOfOutputs: 1
       });
@@ -332,6 +342,14 @@ export class DenoiserNode {
       console.error('[Denoiser] Worklet Load Error:', e);
       // Le passage direct reste en place : la voix n'est jamais coupee.
     }
+  }
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : porte, filtres et apprentissage repartent à neuf. */
+  public resetAt(at: number) {
+    const ap = this.worklet?.parameters.get('resetGen');
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
   }
 
   private applyParams() {

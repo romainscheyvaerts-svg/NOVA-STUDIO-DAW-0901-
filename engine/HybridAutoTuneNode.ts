@@ -86,6 +86,12 @@ export class HybridAutoTuneNode {
 
   setLatencyListener(cb: (() => void) | null) { this.latencyListener = cb; }
 
+  /** Départ de la lecture à `at` : l'autotune (NOVA ou VST du PC) repart d'un état connu, comme à l'export. */
+  resetAt(at: number) {
+    this.nova.resetAt(at);
+    (this.vst as any)?.resetAt?.(at);
+  }
+
   /** Visualisation de la fenêtre de l'autotune (analyse de l'autotune de NOVA). */
   setStatusCallback(cb: (data: any) => void) { this.nova.setStatusCallback(cb); }
 

@@ -1,5 +1,5 @@
 /**
- * VST Bridge Worker v5 (nom versionné : voir vst-bridge-processor-v5.js)
+ * VST Bridge Worker v6 (nom versionné : voir vst-bridge-processor-v6.js)
  *
  * Tient la connexion AUDIO avec le pont VST (ws://127.0.0.1:8765) hors du
  * thread principal : un rendu React ou un calcul de forme d'onde ne retarde
@@ -13,6 +13,7 @@
  *        flags & 2 → nch = 4, canaux 3-4 = clé de side-chain.
  *   v5 (insert ARA, pont v12) : flags & 4 → f64 position du morceau (échantillons, -1 = arrêt)
  *        juste après l'audio, AVANT les réglages horodatés.
+ *   v6 : flags & 8 → départ de lecture : le pont remet le plugin à zéro juste avant ce bloc.
  *   Retour : toujours nch = 2, flags = 0.
  */
 
@@ -66,7 +67,7 @@ function header(slotId) {
   return h;
 }
 
-function sendBlock(slotId, seq, data, nch, params, tl) {
+function sendBlock(slotId, seq, data, nch, params, tl, reset) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const { bytes, headerLen } = header(slotId);
   const ch = nch === 4 ? 4 : 2;
@@ -84,7 +85,7 @@ function sendBlock(slotId, seq, data, nch, params, tl) {
   dv.setUint32(h, seq >>> 0, true);
   dv.setUint16(h + 4, nframes, true);
   dv.setUint8(h + 6, ch);
-  dv.setUint8(h + 7, (pc ? 1 : 0) | (ch === 4 ? 2 : 0) | (hasTl ? 4 : 0));
+  dv.setUint8(h + 7, (pc ? 1 : 0) | (ch === 4 ? 2 : 0) | (hasTl ? 4 : 0) | (reset ? 8 : 0));
   new Float32Array(buf, headerLen, data.length).set(data);
   if (hasTl) dv.setFloat64(headerLen + data.byteLength, tl, true);
   if (pc) {
@@ -112,7 +113,7 @@ onmessage = (e) => {
     ports.set(slotId, port);
     port.onmessage = (ev) => {
       const b = ev.data;
-      if (b && b.data) sendBlock(slotId, b.seq, b.data, b.nch || 2, b.params || null, b.tl);
+      if (b && b.data) sendBlock(slotId, b.seq, b.data, b.nch || 2, b.params || null, b.tl, !!b.reset);
     };
   } else if (m.type === 'detach') {
     const p = ports.get(m.slotId);

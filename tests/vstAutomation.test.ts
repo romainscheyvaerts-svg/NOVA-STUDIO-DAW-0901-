@@ -23,9 +23,9 @@ const SR = 48000;
 const pts = (list: [number, number, AutomationPoint['curveType']?][]): AutomationPoint[] =>
   list.map(([time, value, curveType], i) => ({ id: `p${i}`, time, value, ...(curveType ? { curveType } : {}) }));
 
-/** Le vrai worklet du pont (public/worklets/vst-bridge-processor-v5.js), sans Web Audio. */
+/** Le vrai worklet du pont (public/worklets/vst-bridge-processor-v6.js), sans Web Audio. */
 function loadWorklet() {
-  const src = fs.readFileSync(path.resolve(__dirname, '../public/worklets/vst-bridge-processor-v5.js'), 'utf8');
+  const src = fs.readFileSync(path.resolve(__dirname, '../public/worklets/vst-bridge-processor-v6.js'), 'utf8');
   let Cls: any = null;
   class AudioWorkletProcessor { port: any = { postMessage: () => { /* */ }, onmessage: null }; }
   const register = (_n: string, c: any) => { Cls = c; };
