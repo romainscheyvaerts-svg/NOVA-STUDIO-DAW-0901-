@@ -98,6 +98,12 @@ const PROTOOLS: KeymapPreset = {
     'view.mixEdit': ['ctrl+='],
     'layout.list': ['ctrl+alt+j'],
     'keymap.editor': ['ctrl+alt+k'],
+    // Playlists de piste (Pro Tools : Démarrer+\ ; la touche Démarrer est réservée à Windows → Ctrl).
+    'pt.playlistNew': ['ctrl+\\'],
+    'pt.playlistDuplicate': ['ctrl+alt+\\'],
+    'pt.playlistPrev': ['shift+arrowup'],
+    'pt.playlistNext': ['shift+arrowdown'],
+    'pt.playlistRecent': ['shift+arrowleft'],
   },
 };
 

@@ -288,6 +288,9 @@ export const busFrozenSlices = (bus: Track, tracks: Track[]): Clip[] => {
 /** Tous les sons qu'une piste garde en mémoire (clips, rendus, photo du gel). */
 export const trackBufferIds = (t: Track): string[] => {
   const ids: string[] = [];
+  // Playlists rangées (utils/trackPlaylists) : leurs sons restent en mémoire et dans la sauvegarde.
+  const pl = (t.playlists || []).filter(p => p.id !== t.activePlaylistId).flatMap(p => p.clips || []);
+  if (pl.length) t = { ...t, clips: [...(t.clips || []), ...pl] };
   (t.clips || []).forEach(c => { if (c.bufferId) ids.push(c.bufferId); });
   // Prise d'origine d'un clip corrigé en justesse (V19) : gardée pour revenir en arrière.
   (t.clips || []).forEach(c => { if (c.pitchEdit?.sourceBufferId) ids.push(c.pitchEdit.sourceBufferId); });
