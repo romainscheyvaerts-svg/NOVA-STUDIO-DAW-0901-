@@ -29,10 +29,13 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       try {
         const res = await fetch(req);
-        const c = await caches.open(CACHE);
-        c.put('/', res.clone());
+        // Seule la page du DAW sert de copie hors ligne : la page d'écoute d'un client
+        // (/ecoute.html, lien d'écoute) ne doit pas la remplacer.
+        const daw = !url.pathname.endsWith('/ecoute.html');
+        if (daw && res.ok) (await caches.open(CACHE)).put('/', res.clone());
         return res;
       } catch {
+        if (url.pathname.endsWith('/ecoute.html')) return Response.error();
         return (await caches.match('/')) || Response.error();
       }
     })());

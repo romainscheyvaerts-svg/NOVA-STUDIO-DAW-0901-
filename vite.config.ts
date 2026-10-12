@@ -114,9 +114,16 @@ export default defineConfig(({ mode }) => {
         // Le bundle unique depassait 1,1 Mo : on isole les grosses dependances
         // pour qu'elles soient mises en cache separement du code applicatif.
         rollupOptions: {
+          // Deux pages : le DAW (index.html) et la page d'écoute du client (ecoute.html,
+          // lien d'écoute sans compte), qui ne charge ni App ni le moteur audio.
+          input: {
+            main: path.resolve(__dirname, 'index.html'),
+            ecoute: path.resolve(__dirname, 'ecoute.html'),
+          },
           output: {
             manualChunks: {
-              react: ['react', 'react-dom'],
+              // react-dom/client avec React : partagé (et mis en cache) par le DAW et la page d'écoute.
+              react: ['react', 'react-dom', 'react-dom/client'],
               supabase: ['@supabase/supabase-js'],
               zip: ['jszip']
             }
