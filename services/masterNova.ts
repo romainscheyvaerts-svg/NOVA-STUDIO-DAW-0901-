@@ -12,6 +12,7 @@ import { CompressorNode } from '../plugins/CompressorPlugin';
 import type { PluginInstance, Track } from '../types';
 import { analyzeMix, proposeChain, nextLimiterGain, MixAnalysis, MasterChainProposal, MasterCharacter, PlatformTarget } from '../utils/masterAssistant';
 import { lufsOf } from '../utils/audioMeasure';
+import { thirdOctaveSpectrum, matchToReference, proEq12ParamsFor, spectralDistance, EqBand } from '../utils/referenceMatch';
 
 export const MASTER_ID = 'master';
 export const isMasterNovaPlugin = (p: PluginInstance) => !!(p.params && (p.params as any).masterNova);
@@ -69,9 +70,23 @@ export interface MasterNovaResult {
   plugins: PluginInstance[];
   iterations: { gain: number; lufs: number }[];
   reached: boolean;
+  /** « Caler sur la référence » (lot 4b) : EQ calée et écart spectral moyen (dB) avant / après. */
+  refMatch?: { bands: EqBand[]; before: number; after: number; tonalBefore: number; tonalAfter: number; predicted: number };
 }
 
-export interface MasterNovaOptions { target: PlatformTarget; character: MasterCharacter; eqAmount: number }
+export interface MasterNovaOptions {
+  target: PlatformTarget;
+  character: MasterCharacter;
+  eqAmount: number;
+  /** Référence (spectre par tiers d'octave) : l'EQ se cale dessus (6 bandes, ±4 dB au plus) au lieu de la courbe cible. */
+  reference?: { curve: number[] } | null;
+}
+
+/** Cible « comme la référence » : sa loudness (bornée à −20 / −7 LUFS), crête vraie −1 dBTP. */
+export function referencePlatformTarget(refLufs: number): PlatformTarget {
+  const l = Math.round(Math.max(-20, Math.min(-7, Number.isFinite(refLufs) ? refLufs : -14)) * 10) / 10;
+  return { id: 'reference', label: 'Comme la référence', lufs: l, ceiling: -1, hint: 'Le même niveau que ton morceau de référence, crête vraie sous −1 dBTP.' };
+}
 
 /** Rend le mix actuel (master Nova exclu) : ce que le mastering reçoit. */
 export async function renderMixForMaster(tracks: Track[], onProgress?: (p: number) => void): Promise<AudioBuffer> {
@@ -93,6 +108,15 @@ export async function runMasterNova(tracks: Track[], opts: MasterNovaOptions, on
   const before = analyzeMix(channels(mix), mix.sampleRate);
   if (!Number.isFinite(before.lufs)) throw new Error('Le mix est silencieux : rien à masteriser.');
   const proposal = proposeChain(before, opts.target, opts.character, opts.eqAmount);
+  let match: ReturnType<typeof matchToReference> | null = null;
+  let mixCurve: number[] | null = null;
+  if (opts.reference?.curve) {
+    onStep?.('Courbe du mix et de la référence (tiers d’octave)…', 0.46);
+    mixCurve = thirdOctaveSpectrum(channels(mix), mix.sampleRate);
+    match = matchToReference(mixCurve, opts.reference.curve, mix.sampleRate, Math.max(0.5, Math.min(1, opts.eqAmount + 0.25)));
+    proposal.eqParams = proEq12ParamsFor(match.bands);
+    proposal.eqMoves = match.bands.map((b, i) => ({ band: `ref${i + 1}`, label: b.type === 'lowshelf' ? 'le grave' : b.type === 'highshelf' ? 'l’aigu' : 'la bande', freq: b.freq, gainDb: b.gainDb }));
+  }
 
   onStep?.('Égalisation et compression de bus…', 0.5);
   const glued = await throughChain(mix, { eq: proposal.eqParams, comp: proposal.compParams });
@@ -126,6 +150,15 @@ export async function runMasterNova(tracks: Track[], opts: MasterNovaOptions, on
     mk('COMPRESSOR', 'Master Nova · Compression', proposal.compParams, 1),
     mk('LIMITER', 'Master Nova · Limiteur', proposal.limiterParams, 2),
   ];
+  let refMatch: MasterNovaResult['refMatch'];
+  if (match && mixCurve && opts.reference) {
+    const outCurve = thirdOctaveSpectrum(channels(last), last.sampleRate);
+    refMatch = {
+      bands: match.bands, predicted: match.predicted,
+      before: spectralDistance(mixCurve, opts.reference.curve), after: spectralDistance(outCurve, opts.reference.curve),
+      tonalBefore: spectralDistance(mixCurve, opts.reference.curve, 2), tonalAfter: spectralDistance(outCurve, opts.reference.curve, 2),
+    };
+  }
   onStep?.('Terminé', 1);
-  return { before, after, proposal, plugins, iterations, reached: Math.abs(after.lufs - opts.target.lufs) <= 0.5 };
+  return { before, after, proposal, plugins, iterations, reached: Math.abs(after.lufs - opts.target.lufs) <= 0.5, refMatch };
 }

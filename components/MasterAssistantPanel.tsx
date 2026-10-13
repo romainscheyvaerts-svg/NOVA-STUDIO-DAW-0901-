@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PluginInstance, Track } from '../types';
 import { PLATFORM_TARGETS, CHARACTERS, MasterCharacter, eqMoveLabel, fmtDb } from '../utils/masterAssistant';
-import { runMasterNova, measureCurrentMix, isMasterNovaPlugin, MASTER_ID, MasterNovaResult } from '../services/masterNova';
+import { runMasterNova, measureCurrentMix, isMasterNovaPlugin, MASTER_ID, MasterNovaResult, referencePlatformTarget } from '../services/masterNova';
+import { matchBandLabel } from '../utils/referenceMatch';
 import { referencePlayer } from '../services/referenceTrack';
 import { truePeakOf } from '../utils/audioMeasure';
 
@@ -43,7 +44,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   const [refBusy, setRefBusy] = useState<string | null>(null);
   const [exportCheck, setExportCheck] = useState<{ lufs: number; truePeak: number; busy: boolean; duration?: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const target = PLATFORM_TARGETS.find(t => t.id === targetId) || PLATFORM_TARGETS[0];
+  const platformTarget = PLATFORM_TARGETS.find(t => t.id === targetId) || PLATFORM_TARGETS[0];
 
   useEffect(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify({ target: targetId, character, eq: eqAmount })); } catch { /* stockage indisponible */ } }, [targetId, character, eqAmount]);
   useEffect(() => referencePlayer.subscribe(() => force(x => x + 1)), []);
@@ -80,12 +81,17 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   closeRef.current = () => { referencePlayer.resetMonitoring(); if (bypassed) onSetBypass(false); };
   useEffect(() => () => closeRef.current(), []);
 
-  const run = async () => {
+  // « Caler sur la référence » (lot 4b) : EQ calée sur la référence et même niveau qu'elle.
+  const run = async (matchRef = false) => {
     setRunning(true); setError(null); setResult(null);
     try {
       if (bypassed) onSetBypass(false);
       setAb('avec');
-      const r = await runMasterNova(tracks, { target, character, eqAmount: eqAmount / 100 }, (label, p) => setStep({ label, p }));
+      const refInfo = matchRef ? referencePlayer.info : null;
+      const r = await runMasterNova(tracks, {
+        target: refInfo ? referencePlatformTarget(refInfo.lufs) : platformTarget, character, eqAmount: eqAmount / 100,
+        reference: refInfo ? { curve: refInfo.curve } : null,
+      }, (label, p) => setStep({ label, p }));
       setResult(r);
     } catch (e: any) {
       setError(e?.message || 'Analyse impossible');
@@ -120,6 +126,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   }, [result, applied, ab, levelDb]);
 
   const ref = referencePlayer.info;
+  const target = result?.proposal.target || platformTarget;
   const Row = ({ label, before, after, unit, hint, good }: { label: string; before?: number; after?: number; unit: string; hint: string; good?: boolean }) => (
     <tr className="border-t border-white/5" title={hint}>
       <td className="py-2 pr-3 text-slate-300">{label}</td>
@@ -156,7 +163,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-[11px] text-slate-500">{target.hint}</p>
+            <p className="mt-2 text-[11px] text-slate-500">{platformTarget.hint}</p>
           </section>
 
           {/* 2. Caractère et EQ */}
@@ -180,7 +187,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
 
           {/* Lancer */}
           <section>
-            <button type="button" data-nova-master-run="" onClick={run} disabled={running}
+            <button type="button" data-nova-master-run="" onClick={() => void run(false)} disabled={running}
               className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-[14px] disabled:opacity-60">
               {running ? <><i className="fas fa-circle-notch fa-spin mr-2"></i>{step?.label || 'Analyse…'}</> : <><i className="fas fa-magic mr-2"></i>{result ? 'Refaire l’analyse' : 'Analyser et masteriser'}</>}
             </button>
@@ -195,20 +202,26 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
               <table className="w-full text-[12px]">
                 <thead><tr className="text-[10px] uppercase tracking-widest text-slate-500"><th className="text-left font-black">Mesure</th><th className="text-right font-black px-3">Avant</th><th className="text-right font-black pl-3">Après</th></tr></thead>
                 <tbody>
-                  <Row label={`Loudness (cible ${fmtDb(target.lufs, 0)})`} before={result.before.lufs} after={result.after.lufs} unit="LUFS" good={result.reached} hint="Loudness intégrée BS.1770 : ce que mesurent Spotify, Apple Music et YouTube." />
+                  <Row label={`Loudness (cible ${fmtDb(target.lufs, target.id === 'reference' ? 1 : 0)})`} before={result.before.lufs} after={result.after.lufs} unit="LUFS" good={result.reached} hint="Loudness intégrée BS.1770 : ce que mesurent Spotify, Apple Music et YouTube." />
                   <Row label={`Crête vraie (plafond ${fmtDb(target.ceiling)})`} before={result.before.truePeak} after={result.after.truePeak} unit="dBTP" good={result.after.truePeak <= target.ceiling} hint="Crête entre les échantillons (dBTP) : au-dessus de −1, le MP3 / AAC des plateformes peut saturer." />
                   <Row label="Dynamique (crête − loudness)" before={result.before.plr} after={result.after.plr} unit="dB" hint="PLR : plus c'est bas, plus le son est compressé. En dessous de 6 dB, ça devient écrasé." />
                   <Row label="Variations de niveau (LRA)" before={result.before.lra} after={result.after.lra} unit="LU" hint="Écart entre passages calmes et forts du morceau." />
                 </tbody>
               </table>
               <p className={`mt-3 text-[12px] ${result.reached ? 'text-emerald-300' : 'text-amber-300'}`}>
-                {result.reached ? `✓ Cible atteinte : ${fmtDb(result.after.lufs)} LUFS pour ${fmtDb(target.lufs, 0)} visés, crête vraie ${fmtDb(result.after.truePeak)} dBTP.` : `Cible pas tout à fait atteinte (${fmtDb(result.after.lufs)} LUFS) : le mix est très dynamique, essaie la couleur Punch ou une cible moins forte.`}
+                {result.reached ? `✓ Cible atteinte : ${fmtDb(result.after.lufs)} LUFS pour ${fmtDb(target.lufs, target.id === 'reference' ? 1 : 0)} visés, crête vraie ${fmtDb(result.after.truePeak)} dBTP.` : `Cible pas tout à fait atteinte (${fmtDb(result.after.lufs)} LUFS) : le mix est très dynamique, essaie la couleur Punch ou une cible moins forte.`}
                 {result.after.plr < 6 && ' Attention : la dynamique devient faible (son écrasé).'}
               </p>
+              {result.refMatch && (
+                <p className="mt-2 text-[12px] text-slate-300" data-nova-ref-ecart="" data-avant={result.refMatch.before.toFixed(2)} data-apres={result.refMatch.after.toFixed(2)}>
+                  🎯 Calé sur la référence : écart d’équilibre tonal <b className="text-white">{fmtDb(result.refMatch.tonalBefore)} dB → {fmtDb(result.refMatch.tonalAfter)} dB</b>
+                  <span className="text-slate-500"> (tiers d’octave : {fmtDb(result.refMatch.before)} → {fmtDb(result.refMatch.after)} dB), même niveau qu’elle ({fmtDb(result.proposal.target.lufs)} LUFS).</span>
+                </p>
+              )}
               <details className="mt-3 text-[12px] text-slate-300">
                 <summary className="cursor-pointer text-slate-400">Ce que Nova a réglé</summary>
                 <ul className="mt-2 space-y-1 list-disc pl-5">
-                  <li>EQ : {result.proposal.eqMoves.filter(m => m.gainDb !== 0).map(eqMoveLabel).join(' · ') || 'aucune correction nécessaire'}</li>
+                  <li>EQ{result.refMatch ? ' calée sur la référence' : ''} : {(result.refMatch ? result.refMatch.bands.filter(b => Math.abs(b.gainDb) >= 0.1).map(matchBandLabel) : result.proposal.eqMoves.filter(m => m.gainDb !== 0).map(eqMoveLabel)).join(' · ') || 'aucune correction nécessaire'}</li>
                   <li>Compression de bus : ratio {String(result.proposal.compParams.ratio).replace('.', ',')}:1, seuil {fmtDb(result.proposal.compParams.threshold)} dB, attaque {Math.round(result.proposal.compParams.attack * 1000)} ms</li>
                   <li>Limiteur : +{fmtDb(result.proposal.limiterParams.inputGain)} dB d'entrée, plafond {fmtDb(result.proposal.limiterParams.ceiling)} dBTP, relâchement {result.proposal.limiterParams.release} ms ({result.iterations.length} essai{result.iterations.length > 1 ? 's' : ''})</li>
                 </ul>
@@ -242,7 +255,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                   title="Le projet est rendu exactement comme à l’export (même moteur), master Nova compris.">
                   {exportCheck.busy ? <span className="text-slate-400"><i className="fas fa-circle-notch fa-spin mr-1.5"></i>Vérification du fichier exporté…</span>
                     : <span className={Math.abs(exportCheck.lufs - target.lufs) <= 0.5 && exportCheck.truePeak <= target.ceiling ? 'text-emerald-300' : 'text-amber-300'}>
-                        À l’export : <b>{fmtDb(exportCheck.lufs)} LUFS</b> · crête vraie <b>{fmtDb(exportCheck.truePeak)} dBTP</b>{Math.abs(exportCheck.lufs - target.lufs) <= 0.5 ? ' ✓' : ` (cible ${fmtDb(target.lufs, 0)} : relance l’analyse si tu as changé le mix)`}
+                        À l’export : <b>{fmtDb(exportCheck.lufs)} LUFS</b> · crête vraie <b>{fmtDb(exportCheck.truePeak)} dBTP</b>{Math.abs(exportCheck.lufs - target.lufs) <= 0.5 ? ' ✓' : ` (cible ${fmtDb(target.lufs, target.id === 'reference' ? 1 : 0)} : relance l’analyse si tu as changé le mix)`}
                       </span>}
                 </p>
               )}
@@ -253,7 +266,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
           {/* Référence */}
           <section data-nova-reference="" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Morceau de référence</h3>
-            <p className="text-[11px] text-slate-500 mb-3">Importe un son du commerce que tu aimes et compare-le à ton mix, au même niveau (comme Reference Track / le comparateur du Mastering Assistant). Il n’est jamais exporté.</p>
+            <p className="text-[11px] text-slate-500 mb-3">Importe un son du commerce que tu aimes et compare-le à ton mix, au même niveau (comme Reference Track / le comparateur du Mastering Assistant). « Caler sur la référence » règle l’EQ du master sur son équilibre tonal (±4 dB au plus) et vise son niveau. Elle n’est jamais exportée.</p>
             <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void loadRef(f); e.target.value = ''; }} />
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={() => fileRef.current?.click()} disabled={!!refBusy} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-[12px] font-bold disabled:opacity-50"><i className="fas fa-file-import mr-1.5"></i>{ref ? 'Changer de référence' : 'Importer une référence'}</button>
@@ -262,6 +275,11 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                   <button type="button" role="radio" aria-checked={!referencePlayer.active} onClick={() => referencePlayer.setActive(false)} className={`h-10 px-4 text-[12px] font-black ${!referencePlayer.active ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300'}`}>Mon mix</button>
                   <button type="button" role="radio" aria-checked={referencePlayer.active} data-nova-ref-play="" onClick={() => referencePlayer.setActive(true)} className={`h-10 px-4 text-[12px] font-black ${referencePlayer.active ? 'bg-fuchsia-500 text-black' : 'bg-white/5 text-slate-300'}`}>Référence</button>
                 </div>
+              )}
+              {ref && (
+                <button type="button" data-nova-ref-match="" onClick={() => void run(true)} disabled={running || !!refBusy}
+                  title="Mesure l’équilibre tonal (tiers d’octave) du mix et de la référence, corrige l’EQ du master (6 bandes, ±4 dB au plus, lissée) et vise le niveau de la référence."
+                  className="h-10 px-4 rounded-xl bg-fuchsia-500/15 border border-fuchsia-400/40 hover:bg-fuchsia-500/25 text-fuchsia-200 text-[12px] font-black disabled:opacity-50">🎯 Caler sur la référence</button>
               )}
             </div>
             {refBusy && <p className="mt-2 text-[12px] text-slate-300"><i className="fas fa-circle-notch fa-spin mr-1.5"></i>{refBusy}</p>}

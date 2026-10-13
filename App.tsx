@@ -51,6 +51,7 @@ const LyricClipModal = lazy(() => import('./components/LyricClipModal'));
 const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(Math.max(0, t) % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
 const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazyWithPreload(() => import('./components/MasterAssistantPanel'));
+const QuickMasterPage = lazy(() => import('./components/QuickMasterPage'));
 
 const AudioSettingsPanel = lazyWithPreload(() => import('./components/AudioSettingsPanel'));
 const CueMixPanel = lazy(() => import('./components/CueMixPanel'));
@@ -1034,6 +1035,9 @@ function Studio() {
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [masterNovaOpen, setMasterNovaOpen] = useState(false);
+  // « Masteriser un morceau » (lot 4a) : depuis l'accueil, la palette, le menu du téléphone ou le lien ?masteriser.
+  const [quickMasterOpen, setQuickMasterOpen] = useState(() => { try { return new URLSearchParams(window.location.search).has('masteriser'); } catch { return false; } });
+  const quickMasterNode = quickMasterOpen ? <Suspense fallback={null}><QuickMasterPage onClose={() => setQuickMasterOpen(false)} /></Suspense> : null;
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(initialSidebarOpen);
   // Passage en mode avancé après l’ouverture (ingé son, mode instru) : le store se replie si rien n’a été choisi.
@@ -9983,7 +9987,9 @@ function Studio() {
         onOpenTemplates={() => setTemplatesModal('browse')}
         newProjectRate={newProjectRate}
         onNewProjectRate={setNewProjectRate}
+        onOpenQuickMaster={() => setQuickMasterOpen(true)}
       />
+      {quickMasterNode}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
@@ -10062,6 +10068,7 @@ function Studio() {
       a('Pistes', 'pal.groups', 'Groupes de pistes', () => setR12Panel({ panel: 'groups' }), { pt: 'Groups List', keywords: 'groupe' }),
       a('Pistes', 'pal.time', 'Insérer ou supprimer du temps', () => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } }), { keys: k('pt.insertTime'), pt: 'Insert Silence / Insert Time' }),
       a('Mix', 'pal.masterNova', 'Master Nova : mastering en un clic', () => setMasterNovaOpen(true), { pt: 'Mastering Assistant (Logic)', keywords: 'master mastering spotify loudness' }),
+      a('Mix', 'pal.quickMaster', '🎚️ Masteriser un morceau (un fichier WAV / MP3, sans projet)', () => setQuickMasterOpen(true), { keywords: 'masteriser master mastering fichier wav mp3 flac référence bandlab express' }),
       a('Mix', 'pal.loudness', 'Loudness du master (LUFS, true peak)', () => loudnessPanel.set(true), { keywords: 'lufs loudness true peak mètres metre' }),
       a('Mix', 'pal.cue', 'Mixes casque (cue) des artistes', () => setCueMixesOpen(true), { keywords: 'casque cue retour headphone' }),
       a('Mix', 'pal.plugins', 'Gestionnaire de plugins (VST)', () => setIsPluginManagerOpen(true), { pt: 'Plug-In Manager', keywords: 'vst plugins effets' }),
@@ -10131,7 +10138,7 @@ function Studio() {
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)}
+          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)} onOpenQuickMaster={() => setQuickMasterOpen(true)}
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
@@ -11143,6 +11150,7 @@ function Studio() {
       )}
       {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
+      {quickMasterNode}
       <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenLyricClip={() => { setShareOpen(false); setShareAuto(null); setLyricClipOpen(true); }} />
       {lyricClipOpen && <PanelBoundary name="le clip vidéo" overlay onClose={() => setLyricClipOpen(false)}><Suspense fallback={null}><LyricClipModal open={lyricClipOpen} onClose={() => setLyricClipOpen(false)} state={state} ownedInstrumentIds={ownedInstruments}
         onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenExport={() => { setLyricClipOpen(false); setIsExportMenuOpen(true); }} /></Suspense></PanelBoundary>}

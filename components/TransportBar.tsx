@@ -31,6 +31,8 @@ import { fitBar, barItem } from '../utils/barFit';
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
   onOpenMasterNova?: () => void;
+  /** Ouvre « Masteriser un morceau » (un fichier, sans projet, lot 4a). */
+  onOpenQuickMaster?: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -221,7 +223,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -650,6 +652,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               {onOpenMasterNova && (
                 <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} data-testid="menu-master-nova" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 text-amber-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                   <i className="w-5 text-center text-amber-300 fas fa-crown" aria-hidden="true"></i><span className="flex-1">Master Nova</span><span className="text-[10px] font-normal text-amber-200/70">mastering en un clic</span>
+                </button>
+              )}
+              {onOpenQuickMaster && (
+                <button onClick={() => { onOpenQuickMaster(); setIsMobileMenuOpen(false); }} data-testid="menu-quick-master" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎚️</span><span className="flex-1">Masteriser un morceau</span><span className="text-[10px] font-normal text-slate-400">un fichier, sans projet</span>
                 </button>
               )}
             </div>

@@ -39,6 +39,8 @@ interface LandingPageProps {
   /** Fréquence d'échantillonnage d'un nouveau projet (48 kHz par défaut). */
   newProjectRate?: ProjectRate;
   onNewProjectRate?: (r: ProjectRate) => void;
+  /** « Masteriser un morceau » : mastering d'un simple fichier, sans projet (lot 4a). */
+  onOpenQuickMaster?: () => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
@@ -56,6 +58,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onOpenTemplates,
   newProjectRate,
   onNewProjectRate,
+  onOpenQuickMaster,
 }) => {
   const grille = useNovaPricing();
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
@@ -423,6 +426,23 @@ const LandingPage: React.FC<LandingPageProps> = ({
             {newProjectRate && onNewProjectRate && (
               <ProjectRatePicker value={newProjectRate} onChange={onNewProjectRate} tone="dark" label="Fréquence"
                 testId="landing-project-rate" className="justify-end px-1 -mt-1" />
+            )}
+
+            {/* Masteriser un fichier, sans projet (lot 4a) */}
+            {onOpenQuickMaster && (
+              <button
+                type="button"
+                onClick={onOpenQuickMaster}
+                data-testid="landing-quick-master"
+                title="Dépose un WAV, MP3 ou FLAC : Nova le masterise tout de suite (style, intensité, référence). Écoute gratuite et illimitée."
+                className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-400/30 rounded-xl hover:border-amber-400/50 hover:bg-amber-400/15 transition-all group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-amber-400/20 flex items-center justify-center group-hover:bg-amber-400/30 transition-all text-xl" aria-hidden="true">🎚️</div>
+                <div className="text-left min-w-0">
+                  <p className="text-sm font-bold text-white">Masteriser un morceau</p>
+                  <p className="text-[11px] text-slate-400">Dépose ton son, choisis un style · écoute gratuite</p>
+                </div>
+              </button>
             )}
 
             {/* Nouveau projet depuis un modèle de session */}
