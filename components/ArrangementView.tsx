@@ -921,7 +921,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const takes = target.clips.filter(c => c.type !== TrackType.MIDI && !c.notes && (c.bufferId || c.buffer));
       if (takes.length) {
         const tx = voiceMenuState(voiceAvail, TRANSCRIBE_TOOLTIP);
-        menuItems.push({ label: takes.length > 1 ? `Transcrire les paroles de la piste (${takes.length} prises)…` : 'Transcrire les paroles de la piste…', icon: 'fa-closed-captioning',
+        menuItems.push({ label: takes.length > 1 ? `Transcrire les paroles de la piste (${takes.length} clips)…` : 'Transcrire les paroles de la piste…', icon: 'fa-closed-captioning',
           title: tx.title, disabled: tx.disabled,
           onClick: () => { setContextMenu(null); openNovaWindow('voice-transcribe', { targets: takes.map(c => ({ trackId, clipId: c.id })) }); } });
       }

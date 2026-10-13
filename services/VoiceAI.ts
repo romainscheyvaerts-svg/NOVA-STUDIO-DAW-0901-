@@ -209,7 +209,7 @@ export function transcriptionSummary(results: TranscribedClip[], seconds: number
 }
 
 /** B7 : la transcription tourne sur le processeur (carte graphique absente, désactivée ou pleine). */
-export const CPU_FALLBACK_NOTE = 'Carte graphique indisponible : calcul sur le processeur, plus lent (environ 1 minute par minute de voix). Vérifie que la carte NVIDIA est activée (mode graphique) pour aller 10 fois plus vite.';
+export const CPU_FALLBACK_NOTE = 'Carte graphique indisponible : calcul sur le processeur, beaucoup plus lent (environ 1 min 30 par minute de voix, contre 3 s sur la carte). Vérifie que la carte NVIDIA est activée (mode graphique), puis relance.';
 
 /** B7 : dosage proposé (mesuré : la queue de la pièce baisse de 13 dB en médiane à 100 %). */
 export const DEFAULT_DEVERB_AMOUNT = 1;

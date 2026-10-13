@@ -6,6 +6,9 @@ dédié %LOCALAPPDATA%\\NovaStudio\\voice\\env (jamais dans le pont lui-même).
     python voice_worker.py transcribe --input voix.wav [--language fr|en|mix|auto] [--model large-v3-turbo] [--device auto|cpu|cuda]
     python voice_worker.py deverb --input voix.wav --output sans_reverbe.wav [--jobs 4]
     python voice_worker.py self-test transcribe|deverb
+    python voice_worker.py serve      (B7 : transcriptions à la suite, modèle chargé une fois ;
+                                       une demande JSON par ligne sur l'entrée standard :
+                                       {"job": "...", "input": "voix.wav", "language": "mix", "model": "...", "device": "auto"})
 
 Sortie standard : une ligne JSON par événement
     {"event": "progress", "pct": 37.5, "message": "..."}
@@ -47,7 +50,13 @@ HALLUCINATIONS = re.compile(
     re.IGNORECASE)
 
 
+# Mode « serve » : chaque événement porte l'identifiant de la demande en cours.
+CURRENT_JOB: str | None = None
+
+
 def emit(event: str, **kw):
+    if CURRENT_JOB is not None:
+        kw.setdefault("job", CURRENT_JOB)
     sys.stdout.write(json.dumps({"event": event, **kw}, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
@@ -131,6 +140,8 @@ def pick_device(wanted: str) -> str:
 
 
 LANGUAGES = {"fr": "fr", "en": "en", "auto": None, "mix": "fr"}
+# Probabilité d'anglais au-delà de laquelle une phrase est transcrite en anglais (mode « Français + anglais »).
+EN_PHRASE_MIN = 0.8
 
 
 def transcribe_audio(model, mono16k, language: str | None, on_progress=None, vad: bool = True):
@@ -184,14 +195,16 @@ def phrase_spans(mono16k, max_s: float = 25.0):
 
 def phrase_language(model, chunk, allowed=("fr", "en")) -> str:
     """Langue d'une phrase : le français d'abord ; l'anglais seulement s'il est nettement plus
-    probable (une phrase française avec « game », « baby », « flow » reste en français)."""
+    probable (une phrase française avec « game », « baby », « flow » reste en français).
+    Seuil mesuré (B7) : les vraies phrases anglaises sortent à 0,99 et plus ; du rap français
+    mâché (« et quitte à se détester ») sortait à 0,51-0,61 et devenait « If you don't see the test »."""
     try:
         _lang, _p, probs = model.detect_language(chunk)
     except Exception:
         return allowed[0]
     p = {k: v for k, v in probs if k in allowed}
     fr, en = p.get("fr", 0.0), p.get("en", 0.0)
-    return "en" if en > 0.5 and en > 3 * fr else "fr"
+    return "en" if en > EN_PHRASE_MIN and en > 3 * fr else "fr"
 
 
 def transcribe_by_phrase(model, mono16k, on_progress=None):
@@ -232,9 +245,18 @@ def transcribe_by_phrase(model, mono16k, on_progress=None):
     return words, segments, langs
 
 
-def run_transcribe(a) -> int:
+def run_transcribe(a, models: dict | None = None) -> int:
+    """`models` (mode serve) : modèles déjà chargés, par (modèle, matériel) ; réutilisés d'un clip à l'autre."""
     import numpy as np
     t0 = time.time()
+    models = {} if models is None else models
+
+    def load(name, dev):
+        key = (name, dev)
+        if key not in models:
+            models[key] = load_whisper(name, dev)
+        return models[key]
+
     emit("progress", pct=1, message="Lecture de la voix")
     audio, sr = read_audio(a.input)
     mono = resample(audio.mean(0), sr, 16000)
@@ -243,15 +265,16 @@ def run_transcribe(a) -> int:
         raise ValueError("Clip trop court pour être transcrit")
     device = pick_device(a.device)
     emit("device", device=device, name=(gpu_name() or "carte graphique") if device == "cuda" else "processeur")
-    emit("progress", pct=3, message="Chargement du modèle " + a.model + (" (première fois sur la carte graphique : jusqu'à une minute)" if device == "cuda" else ""))
+    if (a.model, device) not in models:
+        emit("progress", pct=3, message="Chargement du modèle " + a.model + (" (première fois sur la carte graphique : jusqu'à une minute)" if device == "cuda" else ""))
     try:
-        model = load_whisper(a.model, device)
+        model = load(a.model, device)
     except Exception as e:
         if device != "cuda":
             raise
         emit("fallback", message=f"Carte graphique inutilisable ({str(e)[:120]}) : calcul sur le processeur")
         device = "cpu"
-        model = load_whisper(a.model, device)
+        model = load(a.model, device)
     lang = LANGUAGES.get(a.language, "fr")
 
     def progress(f):
@@ -271,11 +294,45 @@ def run_transcribe(a) -> int:
         if device != "cuda":
             raise
         emit("fallback", message=f"Échec sur la carte graphique ({str(e)[:120]}) : nouvel essai sur le processeur")
+        models.pop((a.model, "cuda"), None)
         device = "cpu"
-        model = load_whisper(a.model, device)
+        model = load(a.model, device)
         words, segments, detected = go(model)
     emit("done", words=words, segments=segments, language=detected or lang or "fr", model=a.model,
          device=device, seconds=round(time.time() - t0, 2), duration=round(duration, 3))
+    return 0
+
+
+def serve() -> int:
+    """B7 : transcriptions à la suite (une piste de 10 prises) sans recharger Whisper à chaque clip
+    (≈ 5 s gagnées par clip sur la carte graphique). Une demande JSON par ligne sur l'entrée
+    standard ; chaque événement porte « job ». Fin : entrée fermée ou {"cmd": "quit"}."""
+    global CURRENT_JOB
+    models: dict = {}
+    emit("ready", pid=os.getpid())
+    for raw in sys.stdin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            req = json.loads(raw)
+        except ValueError:
+            continue
+        if req.get("cmd") == "quit":
+            break
+        CURRENT_JOB = str(req.get("job") or "job")
+        try:
+            a = argparse.Namespace(input=req.get("input"), language=req.get("language") or "fr",
+                                   model=req.get("model") or DEFAULT_MODEL, device=req.get("device") or "auto")
+            if a.language not in LANGUAGES:
+                a.language = "fr"
+            if not a.input:
+                raise ValueError("--input est obligatoire")
+            run_transcribe(a, models)
+        except Exception as e:
+            emit("error", message=f"{type(e).__name__}: {e}")
+        finally:
+            CURRENT_JOB = None
     return 0
 
 
@@ -549,7 +606,7 @@ def main(argv=None) -> int:
             pass
     os.environ.setdefault("HF_HUB_OFFLINE", "1")  # jamais de téléchargement pendant un calcul
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["transcribe", "deverb", "self-test"])
+    ap.add_argument("command", choices=["transcribe", "deverb", "self-test", "serve"])
     ap.add_argument("feature", nargs="?", default="transcribe")
     ap.add_argument("--input")
     ap.add_argument("--output")
@@ -562,6 +619,8 @@ def main(argv=None) -> int:
     try:
         if a.command == "self-test":
             return self_test(a.feature, a.model)
+        if a.command == "serve":
+            return serve()
         if not a.input:
             raise ValueError("--input est obligatoire")
         if a.command == "transcribe":

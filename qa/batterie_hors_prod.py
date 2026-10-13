@@ -34,6 +34,8 @@ BATTERIE = [
     ("frequence_preuve", []), ("collab_artiste", []), ("prise_directe", []), ("commentaires_versions", []), ("lien_ecoute", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
+    # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).
+    ("voix_ia_locale", []),
 ]
 
 

@@ -38,8 +38,9 @@ def transcribe(svc: VoiceService, job_id: str, audio: np.ndarray, sr: int, langu
         src = work / "voix.wav"
         # Whisper n'écoute qu'un canal : la voix est envoyée en mono.
         stems_service.write_wav_float(src, audio.mean(axis=0, keepdims=True).astype(np.float32), sr)
-        done = svc.run_job(job_id, "transcribe", ["transcribe", "--input", src, "--language", language,
-                                                  "--model", model or info.get("model") or "large-v3-turbo"], on_event)
+        # B7 : moteur gardé chargé entre les clips (une piste de 10 prises ne recharge pas Whisper 10 fois).
+        done = svc.run_transcription(job_id, {"input": str(src), "language": language,
+                                              "model": model or info.get("model") or "large-v3-turbo"}, on_event)
         words = [w for w in done.get("words") or [] if isinstance(w, dict) and str(w.get("w", "")).strip()]
         return {"words": words, "segments": done.get("segments") or [], "language": done.get("language") or language,
                 "model": done.get("model"), "device": done.get("device", "cpu"), "seconds": done.get("seconds"),

@@ -30,26 +30,47 @@ ap.add_argument("command")
 ap.add_argument("--input"); ap.add_argument("--output"); ap.add_argument("--language"); ap.add_argument("--model")
 a = ap.parse_args()
 mode = (Path(__file__).parent / "mode.txt").read_text().strip()
+JOB = None
 def emit(**kw):
+    if JOB is not None:
+        kw["job"] = JOB
     print(json.dumps(kw), flush=True)
-emit(event="progress", pct=1, message="Lecture de la voix")
-if mode == "error":
-    emit(event="error", message="RuntimeError: CUDA out of memory"); sys.exit(1)
-if mode == "crash":
-    sys.stderr.write("Traceback: boom\n"); sys.exit(3)
-emit(event="device", device="cuda", name="RTX")
-steps = 300 if mode == "slow" else 3
-for i in range(steps):
-    emit(event="progress", pct=5 + 90 * (i + 1) / steps, message="En cours")
-    time.sleep(0.05 if mode == "slow" else 0)
-if a.command == "deverb":
-    data = Path(a.input).read_bytes()
-    Path(a.output).write_bytes(data)  # « traitement » : copie
-    emit(event="done", path=a.output, device="cpu", seconds=0.1, engine="deepfilternet3")
-else:
-    emit(event="done", words=[{"w": "Silence", "s": 0.1, "e": 0.5, "p": 0.9, "b": True}, {"w": "blanc", "s": 0.6, "e": 0.9, "p": 0.8}, {"w": " ", "s": 1, "e": 1}],
-         segments=[{"s": 0.1, "e": 0.9, "text": "Silence blanc"}], language=a.language if a.language != "mix" else "fr",
-         model=a.model, device="cuda", seconds=0.2, duration=1.0)
+def work(command, language, model, output=None, inp=None):
+    emit(event="progress", pct=1, message="Lecture de la voix")
+    if mode == "error":
+        emit(event="error", message="RuntimeError: CUDA out of memory"); return False
+    if mode == "crash":
+        sys.stderr.write("Traceback: boom\n"); sys.exit(3)
+    emit(event="device", device="cuda", name="RTX")
+    steps = 300 if mode == "slow" else 3
+    for i in range(steps):
+        emit(event="progress", pct=5 + 90 * (i + 1) / steps, message="En cours")
+        time.sleep(0.05 if mode == "slow" else 0)
+    if command == "deverb":
+        Path(output).write_bytes(Path(inp).read_bytes())  # « traitement » : copie
+        emit(event="done", path=output, device="cpu", seconds=0.1, engine="deepfilternet3")
+    else:
+        emit(event="done", words=[{"w": "Silence", "s": 0.1, "e": 0.5, "p": 0.9, "b": True}, {"w": "blanc", "s": 0.6, "e": 0.9, "p": 0.8}, {"w": " ", "s": 1, "e": 1}],
+             segments=[{"s": 0.1, "e": 0.9, "text": "Silence blanc"}], language=language if language != "mix" else "fr",
+             model=model, device="cuda", seconds=0.2, duration=1.0)
+    return True
+if a.command == "serve":
+    # Mode B7 : modèle « chargé » une fois (compté dans loads.txt), demandes à la suite.
+    loads = Path(__file__).parent / "loads.txt"
+    loads.write_text(str(int(loads.read_text() or 0) + 1) if loads.exists() else "1")
+    emit(event="ready", pid=0)
+    for line in sys.stdin:
+        req = json.loads(line)
+        if req.get("cmd") == "quit":
+            break
+        JOB = req["job"]
+        mode = (Path(__file__).parent / "mode.txt").read_text().strip()
+        lang = req.get("language") or "fr"
+        work("transcribe", lang if lang in ("fr", "en", "mix", "auto") else "fr", req.get("model"))
+        JOB = None
+    sys.exit(0)
+ok = work(a.command, a.language, a.model, a.output, a.input)
+sys.exit(0 if ok else 1)
 '''
 
 
@@ -63,6 +84,7 @@ class VoiceServiceTest(unittest.TestCase):
         self.audio = (0.1 * np.sin(2 * np.pi * 220 * np.arange(24000) / 24000)).astype(np.float32)[None]
 
     def tearDown(self):
+        self.svc.stop_server()
         self.tmp.cleanup()
 
     def install_fake(self, mode="ok", features=("transcribe", "deverb")):
@@ -116,6 +138,40 @@ class VoiceServiceTest(unittest.TestCase):
         self.assertTrue(any(e.get("event") == "device" for e in events))
         self.assertGreaterEqual(sum(1 for e in events if e.get("event") == "progress"), 3)
         self.assertFalse((self.home / "work" / "j1").exists())  # fichiers de travail effacés
+
+    def test_transcriptions_share_one_engine(self):
+        """B7 : une piste de plusieurs prises ne recharge pas Whisper à chaque clip."""
+        self.install_fake()
+        for i in range(3):
+            res = transcribe_service.transcribe(self.svc, f"p{i}", self.audio, 24000, "mix")
+            self.assertEqual([w["w"] for w in res["words"]], ["Silence", "blanc"])
+        self.assertEqual((self.home / "loads.txt").read_text(), "1")
+        self.assertIsNotNone(self.svc.server)
+        self.svc.stop_server()
+        self.assertIsNone(self.svc.server)
+        transcribe_service.transcribe(self.svc, "p3", self.audio, 24000)
+        self.assertEqual((self.home / "loads.txt").read_text(), "2")  # relancé au besoin
+
+    def test_idle_engine_is_released(self):
+        self.install_fake()
+        with mock.patch("voice_service.SERVER_IDLE_S", 0.3):
+            transcribe_service.transcribe(self.svc, "i1", self.audio, 24000)
+            proc = self.svc.server
+            for _ in range(60):
+                if self.svc.server is None and proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+        self.assertIsNone(self.svc.server)
+        self.assertIsNotNone(proc.poll())  # mémoire de la carte rendue
+
+    def test_engine_error_then_next_clip(self):
+        self.install_fake("error")
+        with self.assertRaises(VoiceError) as cm:
+            transcribe_service.transcribe(self.svc, "e1", self.audio, 24000)
+        self.assertIn("mémoire", str(cm.exception))
+        (self.home / "mode.txt").write_text("ok")
+        res = transcribe_service.transcribe(self.svc, "e2", self.audio, 24000)  # même moteur, toujours vivant
+        self.assertEqual(len(res["words"]), 2)
 
     def test_deverb_roundtrip_same_shape(self):
         self.install_fake()
@@ -238,6 +294,19 @@ class WorkerChunkingTest(unittest.TestCase):
         self.assertTrue(voice_worker.HALLUCINATIONS.search("Sous-titrage ST' 501"))
         self.assertTrue(voice_worker.HALLUCINATIONS.search("Merci d'avoir regardé cette vidéo"))
         self.assertFalse(voice_worker.HALLUCINATIONS.search("Silence blanc, tu prends toute la place"))
+
+    def test_phrase_language_threshold(self):
+        """B7 : du rap français mâché (anglais à 0,51-0,61) reste en français ; une vraie phrase anglaise (0,99) passe."""
+        class M:
+            def __init__(self, probs):
+                self.probs = probs
+
+            def detect_language(self, chunk):
+                return "en", 0.0, list(self.probs.items())
+
+        self.assertEqual(voice_worker.phrase_language(M({"en": 0.99, "fr": 0.001}), None), "en")
+        self.assertEqual(voice_worker.phrase_language(M({"en": 0.57, "fr": 0.03}), None), "fr")
+        self.assertEqual(voice_worker.phrase_language(M({"en": 0.85, "fr": 0.4}), None), "fr")
 
     def test_languages(self):
         self.assertEqual(voice_worker.LANGUAGES["fr"], "fr")

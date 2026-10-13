@@ -200,6 +200,14 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
   }, [request]);
   useEffect(() => () => { player.current?.close(); }, []);
   useEffect(() => { player.current?.set(amount, after); }, [amount, after]);
+  // Fenêtre fermée, transcription finie : le résumé est déjà parti en notification ; la pastille
+  // s'efface seule (elle cachait l'avis suivant, en bas à droite).
+  useEffect(() => {
+    if (request || !current || current.phase !== 'done') return;
+    const done = current;
+    const t = window.setTimeout(() => { if (job === done) setJob(null); }, 6000);
+    return () => window.clearTimeout(t);
+  }, [request, current]);
 
   useEffect(() => {
     if (!request) return;
@@ -421,8 +429,8 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
         )}
         <ul className="text-[11px] text-nv-muted list-disc pl-4 space-y-0.5">
           <li>Téléchargement d’environ {size || (m === 'deverb' ? '0,3 Go' : '2 Go')}, rangé dans %LOCALAPPDATA%\NovaStudio\voice (supprimable d’un coup).</li>
-          {m === 'transcribe' ? <li>Carte graphique NVIDIA utilisée si elle répond (quelques secondes par minute de voix), sinon le processeur (plus lent).</li>
-            : <li>Calcul sur le processeur : environ 10 à 20 s par minute de voix.</li>}
+          {m === 'transcribe' ? <li>Carte graphique NVIDIA utilisée si elle répond (quelques secondes par minute de voix), sinon le processeur (bien plus lent : environ 1 min 30 par minute de voix).</li>
+            : <li>Calcul sur le processeur : environ 6 à 15 s par minute de voix.</li>}
         </ul>
         {installingOther && <p className="text-[11px] text-amber-500">Une autre installation de la voix par l’IA est en cours : attends qu’elle finisse.</p>}
         {(failed || moduleError) && <p className="text-[11px] text-rose-500" role="alert">{failed ? (failed.event === 'cancelled' ? 'Installation annulée.' : failed.message) : moduleError}</p>}
