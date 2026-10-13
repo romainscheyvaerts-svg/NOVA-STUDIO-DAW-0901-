@@ -1,8 +1,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
-import { paramFr, termHelp } from '../utils/pluginUi';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { termHelp } from '../utils/pluginUi';
+import { Faceplate, HwWindow, Knob, ToggleSwitch } from './hw';
 
 /**
  * MODULE FX_09 : STUDIO FLANGER
@@ -143,87 +143,49 @@ export class FlangerNode {
   }
 }
 
-const FlangerKnob: React.FC<{ 
-  label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number 
-}> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5 }) => {
-  // Safe value for rendering
-  const safeValue = Number.isFinite(value) ? value : defaultValue || 0;
-  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, defaultValue });
-  
-
-  const rotation = (safeValue * 270) - 135;
-
-  return (
-    <div className="flex flex-col items-center space-y-2 select-none touch-none group">
-      <div 
-        {...knob.bind}
-        className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/5 flex items-center justify-center cursor-ns-resize hover:border-blue-500/50 transition-all shadow-xl relative"
-      >
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1.5 h-5 -ml-0.75 -mt-5 origin-bottom rounded-full transition-transform duration-75"
-          style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: '#3b82f6', boxShadow: '0 0 8px #3b82f6' }}
-        />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5">
-          <span className="text-[9px] font-mono font-bold text-blue-400">
-            {Math.round(safeValue * factor)}{suffix}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
+const FLANGER_DEFAULTS: FlangerParams = { rate: 0.5, depth: 0.5, feedback: 0.7, manual: 0.3, mix: 0.5, invertPhase: false, isEnabled: true };
+const FLANGER_ACCENT = '#e879f9';
+const pct = (v: number) => `${Math.round(v * 100)} %`;
 
 export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: FlangerParams, onParamsChange?: (p: FlangerParams) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState(initialParams);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const view: FlangerParams = { ...FLANGER_DEFAULTS, ...Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v !== undefined && !(typeof v === 'number' && !Number.isFinite(v)))) } as FlangerParams;
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
+  // Balayage animé sur le canvas seul (la façade ne se redessine pas à chaque image).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    let frame: number;
-
+    let frame = 0;
     const draw = () => {
-      const w = canvas.width;
-      const h = canvas.height;
+      const w = canvas.width, h = canvas.height;
       ctx.clearRect(0, 0, w, h);
-
-      if (params.isEnabled) {
-        const time = Date.now() * 0.001;
-        const { manual, rate, depth, feedback } = params;
-
+      const time = Date.now() * 0.001;
+      const { manual, rate, depth, feedback } = viewRef.current;
+      ctx.lineWidth = 2;
+      const baseOffset = (manual + Math.sin(time * rate * 2 * Math.PI) * depth * 0.2) * 50;
+      for (let i = 0; i < 15; i++) {
+        const x = (baseOffset + (i * 30)) % w;
+        const alpha = 0.15 + (feedback * 0.6);
+        ctx.strokeStyle = `rgba(240, 171, 252, ${alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(x, 10); ctx.lineTo(x, h - 10);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = `rgba(240, 171, 252, ${alpha * 0.3})`;
+        ctx.beginPath();
+        ctx.moveTo(x + 5, 20); ctx.lineTo(x + 5, h - 20);
+        ctx.stroke();
         ctx.lineWidth = 2;
-        const baseOffset = (manual + Math.sin(time * rate * 2 * Math.PI) * depth * 0.2) * 50;
-
-        for (let i = 0; i < 15; i++) {
-          const x = (baseOffset + (i * 30)) % w;
-          const alpha = 0.1 + (feedback * 0.6);
-          ctx.strokeStyle = `rgba(59, 130, 246, ${alpha})`;
-          
-          ctx.beginPath();
-          ctx.moveTo(x, 10);
-          ctx.lineTo(x, h - 10);
-          ctx.stroke();
-
-          ctx.lineWidth = 1;
-          ctx.strokeStyle = `rgba(59, 130, 246, ${alpha * 0.3})`;
-          ctx.beginPath();
-          ctx.moveTo(x + 5, 20); ctx.lineTo(x + 5, h - 20);
-          ctx.stroke();
-          ctx.lineWidth = 2;
-        }
       }
-
       frame = requestAnimationFrame(draw);
     };
-    draw();
+    frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [params]);
+  }, []);
 
   const handleParamChange = (key: keyof FlangerParams, value: any) => {
     const newParams = { ...params, [key]: value };
@@ -232,55 +194,34 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
     if (onParamsChange) onParamsChange(newParams);
   };
 
+  const K = (key: keyof FlangerParams, label: string, o: Record<string, any>) => (
+    <Knob paramId={key} label={label} size="M" cap="silver" min={0} max={1} step={0.01} value={view[key] as number} defaultValue={FLANGER_DEFAULTS[key] as number}
+      onChange={v => handleParamChange(key, v)} format={pct} hint={termHelp(label) || undefined} ticks={11} {...o} />
+  );
   return (
-    <div className="w-[480px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-5">
-          <div className="w-14 h-14 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shadow-lg shadow-blue-500/5">
-            <i className="fas fa-wind text-2xl"></i>
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight leading-none">Flanger</h2>
-            <p className="text-[11px] text-slate-400 mt-2">Effet « avion » qui balaie le son : à doser léger sur la voix.</p>
+    <HwWindow type="FLANGER" width={560} accent={FLANGER_ACCENT} accentInk="#200524"
+      idleHelp={<>Effet « avion » qui balaie le son : à doser léger sur la voix. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish="plum" model="Flanger" kicker="Balayage à retard court · effet « avion »" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: FLANGER_ACCENT }}>
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: 96 }}>
+            <div className="absolute top-2 left-3 hw-silk" style={{ color: '#94a3b8', zIndex: 1 }}>Balayage</div>
+            <canvas ref={canvasRef} width={480} height={96} className="w-full h-full block" aria-label="Balayage du flanger" />
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-          <button 
-            onClick={() => handleParamChange('invertPhase', !params.invertPhase)}
-            className={`px-3 py-2 rounded-xl text-[8px] font-black uppercase transition-all border ${params.invertPhase ? 'bg-blue-500 text-black' : 'bg-white/5 border-white/10 text-slate-500'}`}
-          >
-            Phase Inv
-          </button>
-          <button data-plugin-power 
-            onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-blue-500 border-blue-400 text-black shadow-lg shadow-blue-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-          >
-            <i className="fas fa-power-off"></i>
-          </button>
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3 mt-3">
+          {K('rate', 'Vitesse', { max: 10, format: (v: number) => `${v.toFixed(2).replace('.', ',')} Hz`, scale: [{ v: 0, label: '0' }, { v: 5, label: '5' }, { v: 10, label: '10' }], hint: termHelp('Vitesse') || 'Vitesse du balayage.' })}
+          {K('depth', 'Profondeur', { size: 'L', scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }], hint: termHelp('Profondeur') || 'Amplitude du balayage.' })}
+          {K('feedback', 'Retour', { size: 'L', scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }], hint: termHelp('Retour') || 'Résonance : plus il monte, plus le « avion » siffle.' })}
+          {K('manual', 'Position', { format: (v: number) => `${(1 + v * 14).toFixed(1).replace('.', ',')} ms`, hint: 'Retard de base (1 à 15 ms) : place la note du balayage, grave ou aiguë.' })}
+          {K('mix', 'Mélange', { scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }], hint: termHelp('Mélange') || "Part de l'effet mélangée au son d'origine." })}
         </div>
-      </div>
-
-      <div className="h-28 bg-black/60 rounded-[28px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group">
-        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Réponse du filtre</div>
-        <canvas ref={canvasRef} width={400} height={112} className="w-full h-full opacity-60" />
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-blue-500/5 pointer-events-none" />
-      </div>
-
-      <div className="grid grid-cols-5 gap-4">
-        <FlangerKnob label="Vitesse" value={params.rate / 10} factor={10} suffix="Hz" onChange={v => handleParamChange('rate', v * 10)} defaultValue={0.05} />
-        <FlangerKnob label="Profondeur" value={params.depth} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.5} />
-        <FlangerKnob label="Retour" value={params.feedback} factor={90} suffix="%" onChange={v => handleParamChange('feedback', v)} defaultValue={0.7} />
-        <FlangerKnob label="Manual" value={params.manual} factor={15} suffix="ms" onChange={v => handleParamChange('manual', v)} defaultValue={0.3} />
-        <FlangerKnob label="Mix" value={params.mix} factor={100} suffix="%" onChange={v => handleParamChange('mix', v)} defaultValue={0.5} />
-      </div>
-
-      <div className="pt-6 border-t border-white/5 flex justify-between items-center text-slate-700">
-        <span className="text-[10px] font-bold text-slate-500">Résonance : {Math.round(params.feedback * 100)} %</span>
-        <div className="flex items-center space-x-2">
-           <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-blue-500 shadow-[0_0_8px_#3b82f6]' : 'bg-slate-800'}`} />
-           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest"></span>
+        <div className="hw-rule" />
+        <div className="flex justify-center">
+          <ToggleSwitch label="Phase" paramId="invertPhase" value={view.invertPhase ? 1 : 0} onChange={v => handleParamChange('invertPhase', v === 1)}
+            hint="Inversée : le balayage creuse le son (plus creux, plus « tuyau ») au lieu de le renforcer."
+            options={[{ v: 0, label: 'Normale' }, { v: 1, label: 'Inversée' }]} />
         </div>
-      </div>
-    </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
