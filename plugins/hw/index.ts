@@ -9,6 +9,7 @@ export { Knob, type KnobProps, type KnobSize, type KnobCap } from './Knob';
 export { VuMeter, vuPos, type VuMeterProps } from './VuMeter';
 export { Led, PushButton, ToggleSwitch } from './Switches';
 export { SegmentMeter, type SegmentMeterProps } from './SegmentMeter';
+export { HwLcdSelect } from './LcdSelect';
 export { Faceplate, HwSection, HwPresets, HwWindow, NovaLogo, type HwFinish } from './Faceplate';
 export { InfoBar, HwHelpProvider, createHwHelpStore, useHwHelp, useHwHelpStore, type HwHelpEntry, type HwHelpStore } from './help';
 export { toNorm, fromNorm, quantize, nudge, angleOf, detentIndex, type KnobRange } from './knobMath';

@@ -506,3 +506,293 @@
 .hw-screen-glass { background-color: #07090c; }
 .hw-push[aria-pressed='true'] .hw-push-cap, .hw-push[aria-checked='true'] .hw-push-cap { background-color: #d6d0c3; }
 .hw-push-dark[aria-pressed='true'] .hw-push-cap, .hw-push-dark[aria-checked='true'] .hw-push-cap { background-color: #1f1f1f; }
+
+/* ══ Vague 2B (ajouts) ═══════════════════════════════════════════════════════
+ * Nouvelles finitions, sélecteur LCD, gros pads, pas de séquenceur et option
+ * « .hw-touch » (cibles de 44 px au téléphone). Rien de ce qui précède ne change.
+ */
+
+/* Finitions (vague 2B) */
+.hw-finish-seafoam {
+  --hw-face-solid: #a9d8cc;
+  --hw-face:
+    radial-gradient(120% 70% at 30% -10%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%),
+    radial-gradient(80% 60% at 100% 110%, rgba(0, 60, 50, 0.12), rgba(0, 0, 0, 0) 60%),
+    linear-gradient(180deg, #b4ddd2 0%, #a9d8cc 55%, #9ccfc2 100%);
+  --hw-ink: #0f241f;
+  --hw-ink-soft: #2b4a42;
+  --hw-accent: #0f766e;
+  --hw-rule: rgba(15, 36, 31, 0.28);
+  --hw-edge-hi: rgba(255, 255, 255, 0.75);
+  --hw-edge-lo: rgba(20, 70, 60, 0.45);
+  --hw-well: rgba(10, 50, 40, 0.1);
+}
+.hw-finish-plum {
+  --hw-face-solid: #3b1f4f;
+  --hw-face:
+    radial-gradient(circle at 20% 30%, rgba(255, 220, 255, 0.05) 0 1px, rgba(0, 0, 0, 0) 1.5px) 0 0 / 7px 7px,
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.04) 0 1px, rgba(0, 0, 0, 0) 1.5px) 0 0 / 11px 11px,
+    radial-gradient(120% 70% at 50% -10%, rgba(230, 170, 255, 0.16), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #442459 0%, #3b1f4f 55%, #2f183f 100%);
+  --hw-ink: #f4eaff;
+  --hw-ink-soft: #c9b4dd;
+  --hw-accent: #e879f9;
+  --hw-rule: rgba(244, 234, 255, 0.2);
+  --hw-edge-hi: rgba(255, 220, 255, 0.2);
+  --hw-well: rgba(0, 0, 0, 0.25);
+}
+.hw-finish-forest {
+  --hw-face-solid: #1f3b2d;
+  --hw-face:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 240, 200, 0.1), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #244333 0%, #1f3b2d 55%, #183024 100%);
+  --hw-ink: #f2ead3;
+  --hw-ink-soft: #c8c09f;
+  --hw-accent: #f2b84b;
+  --hw-rule: rgba(242, 234, 211, 0.22);
+  --hw-well: rgba(0, 0, 0, 0.24);
+}
+.hw-finish-midnight {
+  --hw-face-solid: #111a2c;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(80, 200, 255, 0.12), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #172236 0%, #111a2c 60%, #0c1322 100%);
+  --hw-ink: #e6f0ff;
+  --hw-ink-soft: #9fb3d1;
+  --hw-accent: #22d3ee;
+  --hw-rule: rgba(230, 240, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.3);
+}
+.hw-finish-hammer {
+  --hw-face-solid: #3a474c;
+  --hw-face:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.07) 0 2px, rgba(0, 0, 0, 0) 3px) 0 0 / 9px 9px,
+    radial-gradient(circle at 60% 70%, rgba(0, 0, 0, 0.12) 0 2.5px, rgba(0, 0, 0, 0) 3.5px) 3px 4px / 11px 11px,
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #3f4d52 0%, #3a474c 55%, #323e42 100%);
+  --hw-ink: #f3f6f6;
+  --hw-ink-soft: #d5dee0;
+  --hw-accent: #34d399;
+  --hw-rule: rgba(243, 246, 246, 0.2);
+  --hw-well: rgba(0, 0, 0, 0.24);
+}
+.hw-finish-labgrey {
+  --hw-face-solid: #d4d2cc;
+  --hw-face:
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.025) 0 1px, rgba(0, 0, 0, 0) 1.5px) 0 0 / 4px 4px,
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #dcdad4 0%, #d4d2cc 55%, #c8c6bf 100%);
+  --hw-ink: #1b1c1e;
+  --hw-ink-soft: #45474b;
+  --hw-accent: #0e7490;
+  --hw-rule: rgba(27, 28, 30, 0.25);
+  --hw-edge-hi: rgba(255, 255, 255, 0.8);
+  --hw-edge-lo: rgba(60, 60, 55, 0.5);
+  --hw-well: rgba(30, 30, 25, 0.08);
+}
+.hw-finish-indigo {
+  --hw-face-solid: #1e1b4b;
+  --hw-face:
+    radial-gradient(120% 70% at 50% -10%, rgba(240, 171, 252, 0.14), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
+    linear-gradient(180deg, #24215a 0%, #1e1b4b 55%, #17153c 100%);
+  --hw-ink: #eef0ff;
+  --hw-ink-soft: #b9bdf0;
+  --hw-accent: #f0abfc;
+  --hw-rule: rgba(238, 240, 255, 0.18);
+  --hw-well: rgba(0, 0, 0, 0.28);
+}
+.hw-finish-vermilion {
+  --hw-face-solid: #8a2c1d;
+  --hw-face:
+    radial-gradient(110% 60% at 30% -10%, rgba(255, 210, 190, 0.16), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, #902e1f 0%, #8a2c1d 55%, #79261a 100%);
+  --hw-ink: #fff3e3;
+  --hw-ink-soft: #f6d6bd;
+  --hw-accent: #fde047;
+  --hw-rule: rgba(255, 243, 227, 0.24);
+  --hw-edge-hi: rgba(255, 210, 190, 0.28);
+  --hw-well: rgba(0, 0, 0, 0.2);
+}
+.hw-finish-mustard {
+  --hw-face-solid: #d6a72c;
+  --hw-face:
+    radial-gradient(110% 60% at 30% -10%, rgba(255, 250, 220, 0.5), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, #dcae33 0%, #d6a72c 55%, #c99a24 100%);
+  --hw-ink: #1d1606;
+  --hw-ink-soft: #46360f;
+  --hw-accent: #b91c1c;
+  --hw-rule: rgba(29, 22, 6, 0.3);
+  --hw-edge-hi: rgba(255, 250, 220, 0.75);
+  --hw-edge-lo: rgba(110, 80, 10, 0.5);
+  --hw-well: rgba(60, 40, 0, 0.12);
+}
+.hw-finish-concrete {
+  --hw-face-solid: #c8c5bd;
+  --hw-face:
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.03) 0 1px, rgba(0, 0, 0, 0) 1.5px) 0 0 / 5px 5px,
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #cfccc4 0%, #c8c5bd 55%, #bcb9b0 100%);
+  --hw-ink: #1c1b19;
+  --hw-ink-soft: #47443e;
+  --hw-accent: #ea580c;
+  --hw-rule: rgba(28, 27, 25, 0.26);
+  --hw-edge-hi: rgba(255, 255, 255, 0.75);
+  --hw-edge-lo: rgba(70, 66, 58, 0.5);
+  --hw-well: rgba(40, 36, 30, 0.1);
+}
+.hw-finish-jade {
+  --hw-face-solid: #133f33;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(120, 255, 200, 0.1), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #17483a 0%, #133f33 55%, #0f342a 100%);
+  --hw-ink: #e8fff6;
+  --hw-ink-soft: #a6d6c4;
+  --hw-accent: #4ade80;
+  --hw-rule: rgba(232, 255, 246, 0.18);
+  --hw-well: rgba(0, 0, 0, 0.26);
+}
+.hw-finish-cobalt {
+  --hw-face-solid: #173a7a;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(150, 210, 255, 0.16), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #1a4085 0%, #173a7a 55%, #12306a 100%);
+  --hw-ink: #eef4ff;
+  --hw-ink-soft: #b6c8ee;
+  --hw-accent: #7dd3fc;
+  --hw-rule: rgba(238, 244, 255, 0.2);
+  --hw-well: rgba(0, 0, 0, 0.24);
+}
+.hw-finish-avocado {
+  --hw-face-solid: #42501c;
+  --hw-face:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 245, 200, 0.1), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #45541d 0%, #42501c 55%, #384419 100%);
+  --hw-ink: #fbf3d5;
+  --hw-ink-soft: #ddd6a6;
+  --hw-accent: #bef264;
+  --hw-rule: rgba(251, 243, 213, 0.22);
+  --hw-well: rgba(0, 0, 0, 0.24);
+}
+
+/* Sélecteur LCD : liste native habillée en afficheur (clavier, lecteur d'écran, roue du téléphone) */
+.hw-lcd-select { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.hw-lcd-select-box { position: relative; display: block; width: 100%; min-width: 0; }
+.hw-lcd-select select {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 24px 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #0b1410, #0e1a14);
+  background-color: #0d1712;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.18);
+  color: #9cf0b8;
+  font: 700 12px/1.2 'JetBrains Mono', ui-monospace, monospace;
+  text-shadow: 0 0 6px rgba(120, 255, 170, 0.35);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.hw-lcd-select select option { background: #0e1a14; color: #d9ffe6; text-shadow: none; }
+.hw-lcd-select-amber select { color: #ffcf7a; background: linear-gradient(180deg, #17110a, #1d150b); background-color: #1a130a; text-shadow: 0 0 6px rgba(255, 190, 90, 0.35); }
+.hw-lcd-select-amber select option { background: #1d150b; color: #ffe7bd; }
+.hw-lcd-select-box::after {
+  content: '';
+  position: absolute;
+  right: 9px; top: 50%;
+  width: 6px; height: 6px;
+  margin-top: -5px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  color: #6fbf8c;
+  pointer-events: none;
+}
+.hw-lcd-select-amber .hw-lcd-select-box::after { color: #c99a52; }
+.hw-lcd-select select:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: 2px; }
+.hw-lcd-select select:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 639px) { .hw-lcd-select select { height: 44px; } }
+
+/* Gros pad caoutchouc à LED (déclencheurs : tape stop, half-time…) */
+.hw-pad {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 74px;
+  padding: 10px 8px 9px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #f5f2ea;
+  background: radial-gradient(120% 90% at 50% 0%, #4a4a4a 0%, #2a2a2a 55%, #1c1c1c 100%);
+  background-color: #2a2a2a;
+  box-shadow: 0 3px 0 #0c0c0c, 0 5px 10px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  font: 800 12px/1.15 Inter, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: translateY(0);
+  transition: transform 60ms ease, box-shadow 60ms ease, background 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.hw-pad small { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: none; color: #c9c4b8; }
+.hw-pad[aria-pressed='true'] {
+  transform: translateY(3px);
+  color: #1a1206;
+  background: radial-gradient(120% 90% at 50% 10%, #fff3d6 0%, var(--hw-pad-lit, #ffb347) 45%, color-mix(in srgb, var(--hw-pad-lit, #ffb347) 70%, #000) 100%);
+  background-color: var(--hw-pad-lit, #ffb347);
+  box-shadow: 0 0 0 #0c0c0c, 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 22px color-mix(in srgb, var(--hw-pad-lit, #ffb347) 55%, transparent), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+}
+.hw-pad[aria-pressed='true'] small { color: #3b2a0c; }
+.hw-pad:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: 3px; }
+
+/* Pas d'un séquenceur (boîte à rythmes) : bouton carré, LED de lecture, remplissage = ouverture */
+.hw-step {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  height: 48px;
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  cursor: pointer;
+  background: linear-gradient(180deg, #f2efe8 0%, #d9d4c8 100%);
+  background-color: #e2ddd1;
+  box-shadow: 0 2px 0 #7d776c, 0 3px 5px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  color: #2a2620;
+  font: 800 10px/1 Inter, system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.hw-step-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--hw-step, #ea580c); opacity: 0.92; }
+.hw-step-num { position: relative; }
+.hw-step[aria-pressed='true'] .hw-step-num { color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45); }
+.hw-step-led { position: absolute; top: 5px; left: 50%; margin-left: -3.5px; width: 7px; height: 7px; border-radius: 50%; background: #3a1410; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.hw-step[data-playing='true'] .hw-step-led { background: #ff3b30; box-shadow: 0 0 6px 1px #ff3b30; }
+.hw-step[data-outside='true'] { opacity: 0.35; }
+.hw-step:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: 2px; }
+
+/* Option « .hw-touch » (sur la façade) : au téléphone, cibles d'au moins 44 px */
+@media (max-width: 639px) {
+  .hw-touch .hw-push-cap { height: 44px; min-width: 48px; }
+  .hw-touch .hw-push-sm .hw-push-cap { height: 44px; }
+  .hw-touch .hw-toggle-lever { width: 44px; height: 60px; }
+  .hw-touch .hw-toggle-opts { min-height: 60px; }
+  .hw-touch .hw-toggle-opt { min-height: 28px; }
+  .hw-touch .hw-step { height: 52px; }
+}

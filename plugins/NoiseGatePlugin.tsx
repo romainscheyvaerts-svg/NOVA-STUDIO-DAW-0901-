@@ -1,36 +1,56 @@
 import React from 'react';
 import { DEFAULT_GATE, GATE_PRESETS, GATE_SPECS } from '../engine/v21Params';
-import { V21Presets, V21Shell, V21Slider, useV21Meters, useV21Params } from './v21Ui';
+import { V21Knob, V21Presets, V21Shell, useV21Meter, useV21Params } from './v21Ui';
+import { HwSection, Led } from './hw';
 
 /**
  * Fenêtre « Gate » (R7) : porte de bruit / expandeur. La détection suit le son
  * ou une clé externe (side-chain, choisie dans la barre « Clé » au-dessus) :
  * un pad ou une 808 hachés au rythme du kick ou des charleys. Aucune latence.
+ *
+ * Façade « matériel » (vague 2B) : module de rack vert anodisé, gros voyant
+ * « ouvert », boutons rotatifs du kit plugins/hw.
  */
 const spec = (id: string) => GATE_SPECS.find(s => s.id === id)!;
+const ACCENT = '#4ade80';
+
+/** Voyant de la porte : seul ce petit bloc suit les mesures (la façade ne se redessine pas). */
+const GateState: React.FC<{ node: any }> = ({ node }) => {
+  const open = useV21Meter(node, m => !!m?.open);
+  const keyed = useV21Meter(node, m => !!m?.keyOn);
+  return (
+    <div className="flex items-center gap-2.5 min-w-0" aria-live="polite" title="Ouvert : le son passe. Fermé : il est baissé de la valeur de « Plage ».">
+      <Led on={open} color={ACCENT} large />
+      <span className="hw-lcd" style={{ minWidth: 0 }}>
+        <span data-nova-gate-state={open ? 'open' : 'closed'}>{open ? 'Ouvert' : 'Fermé'}</span>
+        <small>{keyed ? 'clé externe' : 'son de la piste'}</small>
+      </span>
+    </div>
+  );
+};
 
 export const NovaNoiseGateUI: React.FC<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [p, set] = useV21Params(DEFAULT_GATE as Record<string, any>, initialParams || {}, node, onParamsChange);
-  const m = useV21Meters(node);
-  const open = !!m?.open;
-  const keyed = !!m?.keyOn;
+  const d = DEFAULT_GATE as any as Record<string, number>;
   return (
-    <V21Shell type="GATE" title="Gate" accent="text-emerald-400" node={node} gradient="bg-gradient-to-b from-[#0d1a14] to-nv-panel"
-      subtitle="Porte de bruit / expandeur : coupe le son sous le seuil. Avec une clé, il s’ouvre au rythme d’une autre piste (Dyn3 Expander/Gate de Pro Tools, Gate d’Ableton)">
-      <div className="mb-3 flex items-center gap-2" aria-live="polite">
-        <span className={`inline-block w-3 h-3 rounded-full ${open ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-slate-600'}`} />
-        <span className="text-[11px] font-bold text-slate-200" data-nova-gate-state={open ? 'open' : 'closed'}>{open ? 'Ouvert : le son passe' : 'Fermé'}</span>
-        <span className="text-[10px] text-slate-500">· détection sur {keyed ? 'la clé externe' : 'le son de la piste'}</span>
+    <V21Shell type="GATE" title="Gate" node={node} finish="jade" kicker="Porte de bruit · expandeur · clé externe" modelStyle="wide" width={560}
+      uiAccent={ACCENT} uiAccentInk="#04150c" faceStyle={{ ['--hw-accent' as any]: ACCENT }}
+      subtitle="Coupe le son sous le seuil. Avec une clé (barre « Clé » au-dessus), il s’ouvre au rythme d’une autre piste : mets-le sur un pad ou une 808 et choisis le kick ou les charleys, le son ne passe que sur les coups."
+      toolbar={<V21Presets presets={GATE_PRESETS} current={p} onApply={pr => set(pr.params as any)} />}>
+      <div className="mb-3"><GateState node={node} /></div>
+      <div className="flex flex-wrap items-start justify-around gap-x-3 gap-y-3">
+        <V21Knob spec={spec('threshold')} label="Seuil" value={p.threshold} defaultValue={d.threshold} onChange={v => set({ threshold: v })} size="L" cap="silver"
+          scale={[{ v: -80, label: '-80' }, { v: -60, label: '-60' }, { v: -40, label: '-40' }, { v: -20, label: '-20' }, { v: 0, label: '0' }]} />
+        <V21Knob spec={spec('range')} label="Plage" value={p.range} defaultValue={d.range} onChange={v => set({ range: v })} size="M" cap="silver"
+          scale={[{ v: 0, label: '0' }, { v: 40, label: '40' }, { v: 80, label: '80' }]} />
       </div>
-      <V21Presets presets={GATE_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-emerald-400" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-3">
-        <V21Slider spec={spec('threshold')} value={p.threshold} onChange={v => set({ threshold: v })} accent="accent-emerald-400" />
-        <V21Slider spec={spec('range')} value={p.range} onChange={v => set({ range: v })} accent="accent-emerald-400" />
-        <V21Slider spec={spec('attack')} value={p.attack} onChange={v => set({ attack: v })} accent="accent-emerald-400" />
-        <V21Slider spec={spec('hold')} value={p.hold} onChange={v => set({ hold: v })} accent="accent-emerald-400" />
-        <V21Slider spec={spec('release')} value={p.release} onChange={v => set({ release: v })} accent="accent-emerald-400" />
-      </div>
-      <p className="mt-4 text-[10px] text-slate-500">Astuce trap : mets le Gate sur un pad ou une 808, choisis le kick (ou les charleys) comme clé en haut de la fenêtre : le son ne passe que sur les coups. Seuil, plage et temps sont automatisables.</p>
+      <HwSection title="Temps" className="mt-3">
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+          <V21Knob spec={spec('attack')} label="Ouverture" value={p.attack} defaultValue={d.attack} onChange={v => set({ attack: v })} size="M" cap="black" ticks={11} />
+          <V21Knob spec={spec('hold')} label="Maintien" value={p.hold} defaultValue={d.hold} onChange={v => set({ hold: v })} size="M" cap="black" ticks={11} />
+          <V21Knob spec={spec('release')} label="Fermeture" value={p.release} defaultValue={d.release} onChange={v => set({ release: v })} size="M" cap="black" curve="log" ticks={11} />
+        </div>
+      </HwSection>
     </V21Shell>
   );
 };

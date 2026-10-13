@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { V21ParamSpec, V21Preset } from '../engine/v21Params';
 import { panToText } from '../utils/db';
+import { Faceplate, HwPresets, HwWindow, Knob, ToggleSwitch, type HwFinish, type KnobProps } from './hw';
 
 /**
  * Briques communes des fenêtres V21 (Harmoniseur, Voix grave / aiguë, Tape
- * stop & half-time, Filtre DJ, Lo-fi, Gate rythmique) : tout en français, gains en dB,
- * curseurs larges (doigt et souris), préréglages en un clic, infobulles qui
- * citent l'équivalent dans Logic / FL / Live. Pas de bouton marche / arrêt
- * interne : seul celui de la barre de PluginEditor existe (règle de l'audit).
+ * stop & half-time, Filtre DJ, Lo-fi, Gate rythmique, Gate) : tout en français,
+ * gains en dB, préréglages en un clic. Depuis la vague 2B, ces fenêtres sont des
+ * façades « matériel » (kit plugins/hw) : boutons rotatifs (V21Knob), aide dans
+ * l'infobulle et la ligne d'info (le texte de chaque réglage cite l'équivalent
+ * dans les autres DAW). Pas de bouton marche / arrêt interne : seul celui de la
+ * barre de PluginEditor existe (règle de l'audit).
  */
 
 const fr = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
@@ -49,7 +52,11 @@ export function useV21Params<T extends Record<string, any>>(defaults: T, initial
   return [p, set] as const;
 }
 
-/** Mesures du nœud (hauteur, vitesse…), lues ~15 fois par seconde. */
+/**
+ * Mesures du nœud (hauteur, vitesse…), lues ~15 fois par seconde. Redessine le
+ * composant à chaque lecture : à réserver aux petits afficheurs ; pour une
+ * valeur seule, préférer useV21Meter (ne redessine que si elle change).
+ */
 export function useV21Meters(node: any) {
   const [m, setM] = useState<any>({});
   useEffect(() => {
@@ -64,78 +71,84 @@ export function useV21Meters(node: any) {
   return m;
 }
 
-export const V21Slider: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; accent?: string; label?: string; compact?: boolean }> = ({ spec, value, onChange, accent = 'accent-cyan-400', label, compact }) => (
-  <label className="block min-w-0" title={spec.hint} data-nova-param={spec.id}>
-    <div className="flex items-baseline justify-between gap-2 mb-0.5">
-      <span className="text-[11px] font-bold text-slate-200 truncate">{label || spec.label}</span>
-      <span className="shrink-0 text-[12px] font-mono font-black text-white tabular-nums">{formatV21(spec, value)}</span>
-    </div>
-    <input type="range" aria-label={label || spec.label} min={spec.min} max={spec.max} step={spec.step} value={value}
-      onChange={e => onChange(parseFloat(e.target.value))}
-      className={`w-full h-8 cursor-pointer ${accent}`} />
-    {!compact && <p className="text-[10px] text-slate-500 leading-snug">{spec.hint}</p>}
-  </label>
+/**
+ * Une mesure du nœud (nombre, texte, booléen), lue ~15 fois par seconde : le
+ * composant ne se redessine que si la valeur change. À utiliser dans de petits
+ * afficheurs (LED, LCD) pour que la façade entière ne se redessine pas.
+ */
+export function useV21Meter<T extends string | number | boolean | null | undefined>(node: any, pick: (m: any) => T, everyMs = 66): T {
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+  const [v, setV] = useState<T>(() => { try { return pick(node?.getMeters?.() || {}); } catch { return undefined as T; } });
+  useEffect(() => {
+    let raf = 0, lastT = 0;
+    const loop = (t: number) => {
+      if (t - lastT > everyMs) {
+        lastT = t;
+        let nv: T;
+        try { nv = pickRef.current(node?.getMeters?.() || {}); } catch { nv = undefined as T; }
+        setV(prev => (Object.is(prev, nv) ? prev : nv));
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [node, everyMs]);
+  return v;
+}
+
+/**
+ * Bouton rotatif d'un réglage V21 : bornes, pas, aide (infobulle + ligne
+ * d'info) et texte de la valeur tirés de la fiche du réglage. Les options du
+ * kit (taille, capuchon, graduations, courbe log…) passent telles quelles.
+ */
+export const V21Knob: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; defaultValue?: number; label?: string } & Partial<Omit<KnobProps, 'value' | 'onChange' | 'min' | 'max' | 'label' | 'defaultValue'>>> = ({ spec, value, onChange, defaultValue, label, ...rest }) => (
+  <Knob paramId={spec.id} label={label || spec.label} ariaLabel={spec.label} hint={spec.hint} min={spec.min} max={spec.max} step={spec.step}
+    value={Number.isFinite(+value) ? +value : (defaultValue ?? spec.min)} defaultValue={defaultValue} onChange={onChange} format={v => formatV21(spec, v)}
+    bipolar={spec.min < 0 && spec.max > 0} {...rest} />
 );
 
-export const V21Toggle: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; onLabel?: string; offLabel?: string }> = ({ spec, value, onChange, onLabel = 'Oui', offLabel = 'Non' }) => (
-  <div title={spec.hint} data-nova-param={spec.id}>
-    <div className="text-[11px] font-bold text-slate-200 mb-1">{spec.label}</div>
-    <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label={spec.label}>
-      {[1, 0].map(v => (
-        <button key={v} type="button" role="radio" aria-checked={(value >= 0.5 ? 1 : 0) === v} onClick={() => onChange(v)}
-          className={`h-9 rounded-lg text-[11px] font-black border ${(value >= 0.5 ? 1 : 0) === v ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
-          {v ? onLabel : offLabel}
-        </button>
-      ))}
-    </div>
-  </div>
+/** Compatibilité : un ancien « curseur » V21 est désormais un bouton rotatif. */
+export const V21Slider: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; accent?: string; label?: string; compact?: boolean }> = ({ spec, value, onChange, label }) => (
+  <V21Knob spec={spec} value={value} onChange={onChange} label={label} size="M" cap="black" ticks={11} />
+);
+
+/** Interrupteur à levier 2 positions pour un réglage oui / non. */
+export const V21Toggle: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; onLabel?: string; offLabel?: string; label?: string }> = ({ spec, value, onChange, onLabel = 'Oui', offLabel = 'Non', label }) => (
+  <span data-nova-param={spec.id}>
+    <ToggleSwitch label={label || spec.label} hint={spec.hint} value={value >= 0.5 ? 1 : 0} onChange={onChange}
+      options={[{ v: 1, label: onLabel }, { v: 0, label: offLabel }]} />
+  </span>
 );
 
 /**
  * Préréglages : un clic applique. Est surligné le dernier préréglage choisi
- * tant que ses réglages n'ont pas bougé (certains préréglages ne règlent
- * qu'une partie de l'effet : plusieurs pourraient « correspondre » à la fois).
+ * tant que ses réglages n'ont pas bougé. Rangée de la barre d'outils (HwPresets).
  */
-export const V21Presets: React.FC<{ presets: V21Preset[]; current: Record<string, any>; onApply: (p: V21Preset) => void; color?: string }> = ({ presets, current, onApply, color = 'bg-cyan-400' }) => {
-  const matches = (pr: V21Preset) => Object.entries(pr.params).every(([k, v]) => typeof v === 'number' ? Math.abs((+current[k] || 0) - v) < 1e-6 : current[k] === v);
-  const [lastId, setLastId] = useState<string | null>(() => presets.find(matches)?.id || null);
-  return (
-    <div className="mb-4" data-nova-presets>
-      <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1.5">Préréglages</div>
-      <div className="flex flex-wrap gap-1.5">
-        {presets.map(pr => {
-          const active = lastId === pr.id && matches(pr);
-          return (
-            <button key={pr.id} type="button" title={pr.hint} aria-pressed={active} onClick={() => { setLastId(pr.id); onApply(pr); }} data-nova-preset={pr.id}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${active ? `${color} text-black border-transparent` : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'}`}>
-              {pr.name}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+export const V21Presets: React.FC<{ presets: V21Preset[]; current: Record<string, any>; onApply: (p: V21Preset) => void; color?: string }> = ({ presets, current, onApply }) => (
+  <HwPresets presets={presets} current={current} onApply={onApply} />
+);
 
-/** Cadre d'une fenêtre V21 : titre, équivalents, latence, avertissement sans AudioWorklet. */
-export const V21Shell: React.FC<{ type: string; title: string; accent: string; subtitle: string; node: any; gradient: string; children: React.ReactNode }> = ({ type, title, accent, subtitle, node, gradient, children }) => {
+/**
+ * Cadre d'une fenêtre V21 : fenêtre « matériel » (barre d'outils, façade, ligne
+ * d'info avec la latence), avertissement sans AudioWorklet. `subtitle` devient
+ * le texte au repos de la ligne d'info.
+ */
+export const V21Shell: React.FC<{
+  type: string; title: string; subtitle: string; node: any; children: React.ReactNode;
+  /** Anciennes options (classes Tailwind) : ignorées depuis la façade « matériel ». */
+  accent?: string; gradient?: string;
+  finish?: HwFinish; kicker?: string; modelStyle?: 'sans' | 'serif' | 'wide';
+  toolbar?: React.ReactNode; idleHelp?: React.ReactNode; width?: number; uiAccent?: string; uiAccentInk?: string;
+  faceClassName?: string; faceStyle?: React.CSSProperties;
+}> = ({ type, title, subtitle, node, children, finish = 'graphite', kicker, modelStyle, toolbar, idleHelp, width = 600, uiAccent, uiAccentInk, faceClassName, faceStyle }) => {
   const latencyMs = node?.latency ? node.latency * 1000 : 0;
   return (
-    // Tablette / PC : hauteur plafonnée, le contenu défile (la barre du haut — fermer, marche / arrêt — reste visible).
-    // Téléphone : la fenêtre est déjà plein écran et défile d'un bloc. Largeur liée à l'écran (pas « max-w-full ») :
-    // dans FitToWidth (largeur au contenu + zoom), un max-w-full faisait boucler le calcul jusqu'à un zoom ≈ 0 (fenêtre vide).
-    <div data-nova-plugin={type} className={`w-[min(600px,calc(100vw-16px))] ${gradient} p-5 sm:p-6 text-white sm:max-h-[calc(100dvh-8rem)] sm:overflow-y-auto overscroll-contain`}>
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-black tracking-tight">{title} <span className={accent}>· NOVA</span></h2>
-          <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p>
-        </div>
-        <div className="shrink-0 text-right text-[10px] text-slate-500" title="Retard ajouté par l'effet, compensé automatiquement à la lecture et à l'export (PDC)">
-          Latence<br /><b className="text-slate-300 font-mono">{latencyMs ? `${fr(latencyMs)} ms` : 'aucune'}</b>
-        </div>
-      </div>
-      {children}
-      {node?.isFallback?.() && <p className="mt-4 text-[11px] text-red-300">Ce navigateur ne peut pas charger l'effet : il est contourné (aucun traitement).</p>}
-    </div>
+    <HwWindow type={type} width={width} accent={uiAccent} accentInk={uiAccentInk} toolbar={toolbar} latencyMs={latencyMs} fallback={!!node?.isFallback?.()}
+      idleHelp={idleHelp ?? <>{subtitle} <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish={finish} model={title} kicker={kicker} modelStyle={modelStyle} className={`hw-touch${faceClassName ? ` ${faceClassName}` : ''}`} style={faceStyle}>
+        {children}
+      </Faceplate>
+    </HwWindow>
   );
 };
