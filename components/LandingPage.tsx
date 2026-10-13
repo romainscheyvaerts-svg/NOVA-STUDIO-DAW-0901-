@@ -14,6 +14,7 @@ import { ThemeToggleButton } from './ThemeSwitch';
 import CachedImage from './CachedImage';
 import CatalogUnavailable from './CatalogUnavailable';
 import { fetchAudioPreview } from '../utils/audioCache';
+import { useNovaPricing, proMoisTexte } from '../hooks/useNovaPricing';
 import { catalogStatus, isQuotaError } from '../utils/catalogStatus';
 import type { ProjectRate } from '../utils/projectRate';
 import { ProjectRatePicker } from './ProjectRateControls';
@@ -56,6 +57,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   newProjectRate,
   onNewProjectRate,
 }) => {
+  const grille = useNovaPricing();
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -450,7 +452,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Ouvrir Audio <span className="ml-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-black text-violet-200 align-middle">⭐ Nova Pro</span></p>
-                <p className="text-[11px] text-slate-400">Ta propre instru (MP3, WAV…) · 5 €/mois</p>
+                <p className="text-[11px] text-slate-400">Ta propre instru (MP3, WAV…) · Nova Pro{proMoisTexte(grille) ? ` ${proMoisTexte(grille)}` : ''}</p>
               </div>
             </button>
 
@@ -473,7 +475,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               <a
                 href={DESKTOP_APP_DOWNLOAD_URL}
                 download
-                title="Installe Nova Studio sur ton PC : il s'ouvre sans Internet, les ponts ASIO et VST démarrent tout seuls, ta session est sauvegardée à la fermeture. Un compte Make Music gratuit est demandé au premier démarrage ; l'export est inclus avec Nova Pro (sinon 2 € par projet)."
+                title="Installe Nova Studio sur ton PC : il s'ouvre sans Internet, les ponts ASIO et VST démarrent tout seuls, ta session est sauvegardée à la fermeture. Un compte Make Music gratuit est demandé au premier démarrage ; l'export est inclus avec Nova Pro (sinon il se paie à l'unité, par projet)."
                 className="hidden md:flex w-full items-center gap-4 p-4 bg-white/[0.02] border border-white/10 rounded-xl hover:border-sky-400/40 hover:bg-white/[0.05] transition-all group"
               >
                 <div className="w-12 h-12 rounded-xl bg-sky-500/15 flex items-center justify-center group-hover:bg-sky-500/25 transition-all">

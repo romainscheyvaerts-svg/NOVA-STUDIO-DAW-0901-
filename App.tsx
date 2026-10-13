@@ -158,6 +158,7 @@ import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
 import ProGateModal from './components/ProGateModal';
+import CaptureGuard from './components/CaptureGuard';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, uploadParts, signPart, putPart, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore, collabLiveStore, CollabPeerMark } from './utils/collabStore';
@@ -1112,7 +1113,7 @@ function Studio() {
         // Nova Pro refusé : retour à l'accueil plutôt qu'un studio vide.
         if (ok === false) {
           setShowLanding(true);
-          setLandingNotice("Importer ta propre instru fait partie de Nova Pro (5 €/mois). Les instrus et mélodies du catalogue restent gratuites.");
+          setLandingNotice("Importer ta propre instru fait partie de Nova Pro. Les instrus et mélodies du catalogue restent gratuites pour composer.");
         }
         return;
       }
@@ -1301,7 +1302,7 @@ function Studio() {
   const collabTrackGuardRef = useRef<(prev: Track, next: Track) => string | null>(() => null);
   // Modes d'automation Pro Tools (Touch / Latch / Write / Trim) : écriture pendant la lecture.
   useAutomationWrite({ stateRef, setSilently, checkpoint, notify: setAiNotification });
-  // Nova Pro (5 €/mois) : importer ses propres instrus + collaborer. Défini plus bas.
+  // Nova Pro (prix : serveur) : importer ses propres instrus + héberger une collaboration. Défini plus bas.
   const requireProRef = useRef<(reason: string) => Promise<boolean>>(async () => true);
 
   // Nettoyage automatique des blancs après chaque prise (réglable, mémorisé).
@@ -5289,7 +5290,15 @@ function Studio() {
       handleEnterWithProject({ ...project, id: cloudProjectId(info.id) });
       setCloudSession({ id: info.id, secret, version: info.version, name: info.name, syncedAt: Date.now() });
       const when = info.updated_at ? formatAgo(Date.parse(info.updated_at)) : '';
-      setAiNotification(`☁️ Session « ${info.name} » ouverte${info.updated_from ? ` (dernière modification ${when} sur ${info.updated_from})` : ''}. Tes modifications se synchronisent toutes seules.`);
+      // Projet en ligne gratuit (gardé quelques jours) : on prévient avant qu'il soit effacé.
+      const keep = info as typeof info & { expires_at?: string | null; days_left?: number | null; expiry_warning?: boolean };
+      const fin = keep.expires_at ? new Date(keep.expires_at).toLocaleDateString('fr-BE', { day: 'numeric', month: 'long' }) : '';
+      const avert = keep.expires_at
+        ? (keep.expiry_warning
+          ? ` ⚠️ Projet en ligne gratuit : il sera effacé du serveur le ${fin}. Enregistre-le sur ton appareil, ou passe à Nova Pro pour le garder en ligne.`
+          : ` Projet en ligne gratuit, gardé jusqu'au ${fin}.`)
+        : '';
+      setAiNotification(`☁️ Session « ${info.name} » ouverte${info.updated_from ? ` (dernière modification ${when} sur ${info.updated_from})` : ''}. Tes modifications se synchronisent toutes seules.${avert}`);
       try { const u = new URL(window.location.href); u.searchParams.delete('session'); window.history.replaceState(null, '', u.toString()); } catch { /* */ }
     } catch (e: any) {
       setShowLanding(false);
@@ -6868,11 +6877,12 @@ function Studio() {
     setCollabBusy(opts.quiet ? 'Reconnexion à la collaboration…' : 'Mise en ligne de la session…');
     setCollabGate(null);
     try {
-      // Collaboration = compte Make Music + abonnement 5 €/mois (vérifié aussi par le serveur).
+      // Collaboration = compte Make Music ; Nova Pro pour l'HÔTE seulement, les invités ne paient rien
+      // (le serveur le vérifie : il refuse un invité si l'hôte n'a plus Nova Pro, avec un message clair).
       const st = await billingStatus();
       const { data: who } = await catalogSupabase.auth.getUser();
       if (!who?.user) { if (!opts.quiet) setCollabGate('login'); pendingStartRef.current = { role, name, host: opts.host }; return; }
-      if (!hasPlan(st, 'collab')) { if (!opts.quiet) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); } pendingStartRef.current = { role, name, host: opts.host }; return; }
+      if (opts.host && !hasPlan(st, 'collab')) { if (!opts.quiet) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); } pendingStartRef.current = { role, name, host: opts.host }; return; }
       // La personne (même compte sur l'iPad et le PC) ; l'hôte a démarré la session.
       const myKey = `u:${who.user.id}`;
       const host = !!opts.host;
@@ -8179,9 +8189,11 @@ function Studio() {
   }, []);
 
   // --- Mode « Ingé à distance (ses propres VST) » : chacun sa session ---------------------
-  const remoteGate = useCallback(async (interactive: boolean) => {
+  const remoteGate = useCallback(async (interactive: boolean, role?: 'artist' | 'engineer') => {
     const { data: who } = await catalogSupabase.auth.getUser();
     if (!who?.user) { if (interactive) { setCollabGate('login'); setCollabOpen(true); } return false; }
+    // L'artiste héberge le lien (Nova Pro) ; l'ingé invité n'a rien à payer (le serveur vérifie l'hôte).
+    if (role === 'engineer') return true;
     const st = await billingStatus();
     if (!hasPlan(st, 'collab')) { if (interactive) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); setCollabOpen(true); } return false; }
     return true;
@@ -10759,6 +10771,7 @@ function Studio() {
       {/* Sur téléphone, ces pastilles recouvraient le chat Nova, le menu et la barre
           d'ajout de piste : elles passent dans le menu ☰. */}
       {/* Ordinateur / tablette : la pastille « En ligne » est dans le bandeau du bas. */}
+      {!showLanding && <CaptureGuard tracks={state.tracks} owned={ownedInstruments} isPlaying={state.isPlaying} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />}
       <ProGateModal
         open={!!proGate}
         reason={proGate?.reason || ''}

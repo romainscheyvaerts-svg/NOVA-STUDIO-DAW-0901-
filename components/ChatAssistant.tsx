@@ -282,7 +282,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     return {
       numero: 6, icone: 'fa-star',
       titre: 'Ton morceau prend forme',
-      detail: "Refais une prise si besoin (l'ancienne est coupée, pas effacée), essaie un autre style, redemande-moi une écoute. Ctrl+Z annule. Pour exporter : tes pistes seules (2 €, ou offert avec Nova Pro), ou achète l'instru pour le morceau complet."
+      detail: "Refais une prise si besoin (l'ancienne est coupée, pas effacée), essaie un autre style, redemande-moi une écoute. Ctrl+Z annule. Pour exporter : achète l'instru (l'export du morceau est alors offert), ou paie l'export de ce projet / prends Nova Pro (prix dans « Exporter »)."
     };
   }, [projectState, isMobile, sautBacks, mixEcoute]);
 

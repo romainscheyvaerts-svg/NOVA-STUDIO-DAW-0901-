@@ -56,7 +56,7 @@ export class RemoteIngeClient {
 
   /** Crée le lien (côté artiste). */
   static async createLink(artistName: string): Promise<CloudLink> {
-    const c = await createCloudSession(`Lien ingé · ${artistName || 'Artiste'}`.slice(0, 80));
+    const c = await createCloudSession(`Lien ingé · ${artistName || 'Artiste'}`.slice(0, 80), 'collab');
     return { id: c.id, secret: c.secret };
   }
 

@@ -232,8 +232,8 @@ export const setLocalCloudSession = (s: LocalCloudSession | null) => {
 };
 
 /** Crée une session vide (rattachée au compte connecté s'il y en a un). */
-export const createCloudSession = (name: string) =>
-  call<{ id: string; secret: string; version: number; owned?: boolean }>('create', { name, device: deviceLabel() });
+export const createCloudSession = (name: string, purpose?: 'collab') =>
+  call<{ id: string; secret: string; version: number; owned?: boolean; expires_at?: string | null; days_left?: number | null; unlimited?: boolean }>('create', { name, device: deviceLabel(), ...(purpose ? { purpose } : {}) });
 
 /** Identifiant du projet lié à une session en ligne (garde-fou : jamais un autre projet). */
 export const cloudProjectId = (sessionId: string) => `cloud-${sessionId}`;

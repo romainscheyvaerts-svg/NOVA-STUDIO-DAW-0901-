@@ -44,7 +44,8 @@ export interface RemoteIngeOptions {
   setSilently: (fn: (prev: DAWState) => DAWState) => void;
   notify: (msg: string, ms?: number) => void;
   /** Compte + abonnement collaboration (interactive : affiche la connexion / l'abonnement). */
-  gate: (interactive: boolean) => Promise<boolean>;
+  /** role : l'artiste HÉBERGE le lien (Nova Pro), l'ingé est invité (rien à payer ; le serveur vérifie l'hôte). */
+  gate: (interactive: boolean, role?: RemoteRole) => Promise<boolean>;
   /** Sauvegarde de la session (fichier local + en ligne si liée). */
   saveSession: () => Promise<void>;
   releaseBuffer: (id: string) => void;
@@ -270,7 +271,7 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   const start = useCallback(async (role: RemoteRole, name: string, linkRaw?: string, opts: { quiet?: boolean } = {}): Promise<boolean> => {
     setError(null);
     try {
-      if (!(await o.gate(!opts.quiet))) return false;
+      if (!(await o.gate(!opts.quiet, role))) return false;
       const saved = stateRef.current.remoteInge;
       let link: CloudLink | null = null;
       if (role === 'engineer') {

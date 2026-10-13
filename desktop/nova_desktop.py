@@ -69,6 +69,7 @@ RES_DIR = getattr(sys, "_MEIPASS", HERE)
 if not FROZEN:
     sys.path.insert(0, HERE)
 
+import capture_guard  # noqa: E402
 import google_login  # noqa: E402
 import ui_bundle  # noqa: E402
 
@@ -747,6 +748,10 @@ def run_window(url: str, url_mode: bool) -> None:
             core.ProcessFailed += self.on_process_failed
             core.ContextMenuRequested += self.on_context_menu
             core.WebMessageReceived += self.on_web_message
+            # Anti-enregistrement d'écran (capture_guard.py) : fenêtre exclue des captures et
+            # logiciels d'enregistrement signalés au DAW (admins : le DAW coupe la protection).
+            self.capture_protect(True)
+            self.start_recorder_watch()
             try:  # exports (R1) : « Ouvrir le dossier » montre le fichier téléchargé
                 core.DownloadStarting += self.on_download_starting
             except Exception:
@@ -983,10 +988,49 @@ def run_window(url: str, url_mode: bool) -> None:
             except Exception:
                 pass
 
+        # ── anti-enregistrement d'écran ─────────────────────────────────
+        def capture_protect(self, on: bool):
+            try:
+                mode = capture_guard.set_exclude_from_capture(self.form.Handle.ToInt64(), on)
+                log.info(f"protection capture d'écran : {mode}{'' if on else ' (admin)'}")
+            except Exception:
+                log.exception("protection capture d'écran")
+
+        def start_recorder_watch(self):
+            self._recorders = None
+            t = self._recorder_timer = WinForms.Timer()
+            t.Interval = 5000
+
+            def tick(s_, e_):
+                try:
+                    found = capture_guard.running_recorders()
+                except Exception:
+                    return
+                if found != self._recorders:
+                    self._recorders = found
+                    if found:
+                        log.warning(f"logiciel d'enregistrement détecté : {', '.join(found)}")
+                    try:
+                        self.core.ExecuteScriptAsync(capture_guard.guard_script(found))
+                    except Exception:
+                        pass
+
+            t.Tick += tick
+            t.Start()
+            tick(None, None)
+
         def on_web_message(self, sender, args):
             try:
                 msg = str(args.TryGetWebMessageAsString())
             except Exception:
+                return
+            if msg in ("nova-desktop:capture-protect:off", "nova-desktop:capture-protect:on"):
+                # Seulement depuis le DAW (un site tiers ne peut pas couper la protection).
+                if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
+                    self.capture_protect(msg.endswith(":on"))
+                return
+            if msg == "nova-desktop:recorders?":
+                self._recorders = None  # le DAW (re)demande l'état : renvoyé au prochain passage
                 return
             google_msg = google_login.parse_page_message(msg)
             if google_msg is not None:

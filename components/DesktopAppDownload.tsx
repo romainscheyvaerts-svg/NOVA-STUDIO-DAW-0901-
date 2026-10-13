@@ -1,5 +1,6 @@
 import React from 'react';
 import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
+import { useNovaPricing, exportTexte } from '../hooks/useNovaPricing';
 
 /**
  * Proposition de l'application Windows (ponts ASIO et VST intégrés).
@@ -9,6 +10,7 @@ import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
 export const ACCOUNT_NOTE = 'Compte gratuit requis pour démarrer · export inclus avec Nova Pro';
 
 const DesktopAppDownload: React.FC<{ compact?: boolean }> = ({ compact }) => {
+  const grille = useNovaPricing(!isNovaDesktop());
   if (isNovaDesktop()) return null;
   if (compact) {
     return (
@@ -39,7 +41,7 @@ const DesktopAppDownload: React.FC<{ compact?: boolean }> = ({ compact }) => {
           </p>
           <p className="text-[10px] text-slate-300 leading-relaxed mb-3">
             <i className="fas fa-user-check mr-1 text-cyan-300" aria-hidden="true"></i>
-            {ACCOUNT_NOTE} (sinon 2 € par projet). On se connecte une fois, le studio est ensuite libre.
+            {ACCOUNT_NOTE}{exportTexte(grille) ? ` (sinon ${exportTexte(grille)} par projet)` : ' (ou à l\'unité par projet)'}. On se connecte une fois, le studio est ensuite libre.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <a

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { catalogSupabase } from '../services/supabase';
 import { isNovaDesktop } from '../utils/desktopApp';
+import { useNovaPricing, exportTexte } from '../hooks/useNovaPricing';
 import {
   decideGate, friendlyAuthError, isNetworkError, readAccessCache, writeAccessCache,
 } from '../utils/desktopAccess';
@@ -59,6 +60,7 @@ const DesktopAccessGate: React.FC<{ children: React.ReactNode }> = ({ children }
 
 const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [stage, setStage] = useState<Stage>('checking');
+  const grille = useNovaPricing();
   const [mounted, setMounted] = useState(false);
   const [account, setAccount] = useState<{ email: string; offline: boolean } | null>(null);
   const [email, setEmail] = useState('');
@@ -235,7 +237,7 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                   <li className="flex gap-3"><span className="text-cyan-300">●</span>Enregistre, compose et mixe librement</li>
                   <li className="flex gap-3"><span className="text-cyan-300">●</span>Ponts ASIO et VST intégrés, ouverture sans Internet</li>
                   <li className="flex gap-3"><span className="text-cyan-300">●</span>Ta session est sauvegardée à la fermeture</li>
-                  <li className="flex gap-3"><span className="text-violet-300">●</span>Export inclus avec Nova Pro, sinon 2 € par projet</li>
+                  <li className="flex gap-3"><span className="text-violet-300">●</span>Export inclus avec Nova Pro{exportTexte(grille) ? `, sinon ${exportTexte(grille)} par projet` : ', ou à l\'unité par projet'}</li>
                 </ul>
               </div>
               <p className="text-[11px] text-slate-500">Le même compte que sur studiomakemusic.com</p>

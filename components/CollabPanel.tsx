@@ -5,6 +5,7 @@ import type { CollabStatusView } from '../utils/collabStatus';
 import { ARRIVAL_ROLE_HELP, formatInviteCode, formatPosition, MAX_PARTICIPANTS, parseTimeMentions, PeerView, PEER_STATE_TONE, withPosition } from '../utils/collabPeers';
 import { agoShort, type HistoryEntry } from '../utils/collabHistory';
 import { GUEST_RIGHTS_HELP, type GuestRights } from '../utils/guestRights';
+import { useNovaPricing, proMoisTexte } from '../hooks/useNovaPricing';
 
 /**
  * Collaboration à distance : inviter (un lien, un code à 6 caractères ; la
@@ -69,7 +70,7 @@ interface Props {
   onLeave: () => void;
   onSend: (text: string) => void;
   busy?: string | null;
-  /** Il faut d'abord se connecter (compte Make Music) ou s'abonner (5 €/mois). */
+  /** Il faut d'abord se connecter (compte Make Music) ou prendre Nova Pro (pour HÉBERGER : les invités ne paient rien). */
   gate?: 'login' | 'subscribe' | null;
   onSignIn?: (email: string, password: string) => Promise<void>;
   onSubscribe?: () => void;
@@ -184,6 +185,7 @@ const MessageText: React.FC<{ text: string; onSeek?: (s: number) => void }> = ({
 );
 
 const CollabPanel: React.FC<Props> = (p) => {
+  const grille = useNovaPricing(p.gate === 'subscribe');
   const [text, setText] = useState('');
   const remoteIncoming = !!p.remoteLinkFromUrl;
   const [startRole, setStartRole] = useState<CollabRole>(remoteIncoming ? (p.remoteRoleFromUrl || 'engineer') : 'artist');
@@ -273,8 +275,8 @@ const CollabPanel: React.FC<Props> = (p) => {
       )}
       {p.gate === 'subscribe' && p.onSubscribe && (
         <div className="space-y-2 rounded-2xl border border-violet-500/30 bg-violet-500/10 p-3">
-          <p className="text-[12px] font-bold text-white">Abonnement collaboration : 5 € / mois</p>
-          <p className="text-[11px] text-slate-300">Pour chaque compte qui collabore (artiste, ingé son, beatmaker). Sans engagement, résiliable quand tu veux.</p>
+          <p className="text-[12px] font-bold text-white">Héberger une collaboration : Nova Pro{proMoisTexte(grille) ? ` · ${proMoisTexte(grille)}` : ''}</p>
+          <p className="text-[11px] text-slate-300">Seul l'hôte a besoin de Nova Pro : tes invités (artiste, ingé son, beatmaker) n'ont rien à payer. Sans engagement, résiliable quand tu veux.</p>
           <button type="button" disabled={!!p.busy} onClick={p.onSubscribe} className={`${btn} w-full bg-violet-600 text-white`}>{p.busy || "M'abonner (paiement sécurisé Stripe)"}</button>
         </div>
       )}
