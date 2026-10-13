@@ -814,7 +814,11 @@ def run_tel(browser, theme, zpath):
         # Menu ⋯ : copier vers une autre piste.
         mb = page.locator("[data-testid='mobile-send-menu-lead-send-verb']").first
         mb.evaluate("e => e.scrollIntoView({ block: 'center' })"); page.wait_for_timeout(300)
-        mb.tap(); page.wait_for_timeout(400)
+        mb.tap()
+        # PC chargé : on attend le menu (et on retouche une fois s'il n'est pas venu).
+        if not visible(page, "[data-testid=structure-menu]", 3000):
+            mb.tap(); visible(page, "[data-testid=structure-menu]", 3000)
+        page.wait_for_timeout(300)
         labels = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=structure-menu] [role=menuitem]')).map(b => b.innerText.trim())")
         ok("tel_menu_copier", "Copier vers « Backs »" in labels, labels)
         page.screenshot(path=str(OUT / f"tel_{theme}_envoi_menu.png"))
