@@ -28,6 +28,11 @@ export interface TimedWord {
 
 export interface LyricsSection { name: string; start: number; end: number }
 
+/** Sauvegarde d'un projet : les identifiants des sons changent à la réouverture ; on garde
+ *  seulement « la transcription est celle du son du clip » ou « d'un autre son » (caduque). */
+export const TRANSCRIPT_SAME_SOUND = '@meme-son';
+export const TRANSCRIPT_OTHER_SOUND = '@autre-son';
+
 /** Ligne de titre de section (« [Refrain] ») : pas chantée, pas alignée. */
 export const isHeaderLine = (line: string): boolean => /^\s*\[[^\]]*\]\s*$/.test(line);
 
