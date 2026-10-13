@@ -77,6 +77,13 @@ export interface DeesserCore {
   process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null): void;
   takeMeters(): DeesserMeters;
   reset(): void;
+  /**
+   * Au repos (veille des effets) : filtres de bande vides (résidus sous −240 dBFS), enveloppes
+   * et réduction à zéro. catchUp reste exact si on l'appelle plus tôt (tests, sécurité).
+   */
+  atRest(): boolean;
+  /** Rattrapage de K échantillons muets sautés pendant la veille (même calcul que process). */
+  catchUp(K: number): void;
 }
 
 export function createDeesserCore(sampleRate: number): DeesserCore {
@@ -139,8 +146,19 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
 
   setParams({});
 
+  // Seuil linéaire sous lequel la réduction visée est exactement 0 (log10 évité) ; recalculé
+  // quand les réglages changent. Marge relative 1e-9 : seule une comparaison loin de la
+  // frontière évite le calcul exact, le résultat est identique au bit près.
+  var thrKeyRel = '', linRel = 0, thrKeyAbs = '', linAbs = 0;
+
   function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     var right = inR || inL;
+    var kr0 = thrRel + '|' + knee;
+    if (kr0 !== thrKeyRel) { thrKeyRel = kr0; linRel = Math.pow(10, (thrRel - knee / 2) / 10) * (1 - 1e-9); }
+    var ka0 = thrAbs + '|' + knee + '|' + absOffset;
+    if (ka0 !== thrKeyAbs) { thrKeyAbs = ka0; linAbs = Math.pow(10, (thrAbs - knee / 2 - absOffset) / 10) * (1 - 1e-9); }
+    var canSkip = enabled && maxRange > 0;
+    var detLazy = false, lastEB = 0, lastEW = 0;
     var stereo = !!inR;
     var kRight = keyL ? (keyR || keyL) : null;
     var kStereo = !!keyL && !!keyR && keyR !== keyL;
@@ -177,14 +195,22 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
       envW += (pw - envW) * (pw > envW ? cAttE : cRelE);
       // niveau détecté et réduction visée (dB)
       var det: number, over: number, target = 0;
-      if (relative) {
+      // Sous le genou (réduction visée nulle) : le niveau détecté ne sert qu'au vumètre,
+      // calculé une seule fois en fin de bloc.
+      var under = relative
+        ? ((envB <= floorMs && -120 <= thrRel - knee / 2) || (envB > floorMs && (envB + 1e-30) < linRel * (envW + 1e-30)))
+        : (envB + 1e-30) < linAbs;
+      if (under) { detLazy = true; lastEB = envB; lastEW = envW; det = 0; over = -Infinity; }
+      else if (relative) {
+        detLazy = false;
         det = envB > floorMs ? 10 * Math.log10((envB + 1e-30) / (envW + 1e-30)) : -120;
         over = det - thrRel;
       } else {
+        detLazy = false;
         det = 10 * Math.log10(envB + 1e-30) + absOffset;
         over = det - thrAbs;
       }
-      if (enabled && maxRange > 0) {
+      if (canSkip && !under) {
         if (over >= knee / 2) target = ratioK * over;
         else if (over > -knee / 2) target = ratioK * (over + knee / 2) * (over + knee / 2) / (2 * knee);
         if (target > maxRange) target = maxRange;
@@ -192,7 +218,7 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
       gr += (target - gr) * (target > gr ? cAttG : cRelG);
       if (gr < 1e-9) gr = 0;
       if (gr > mGr) mGr = gr;
-      lastDet = det;
+      if (!under) lastDet = det;
       var g = gr > 0 ? Math.pow(10, -gr / 20) : 1;
       var yl: number, yr: number;
       if (!enabled) { yl = xl; yr = xr; }
@@ -202,6 +228,9 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
       outL[i] = yl;
       if (outR) outR[i] = yr;
     }
+    if (detLazy) lastDet = relative
+      ? (lastEB > floorMs ? 10 * Math.log10((lastEB + 1e-30) / (lastEW + 1e-30)) : -120)
+      : 10 * Math.log10(lastEB + 1e-30) + absOffset;
     // anti-dénormaux
     if (envB < 1e-30) envB = 0;
     if (envW < 1e-30) envW = 0;
@@ -216,5 +245,31 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
       return r;
     },
     reset: reset,
+    atRest: function () {
+      for (var i = 0; i < 8; i++) { if (z[i] > 1e-12 || z[i] < -1e-12 || zk[i] > 1e-12 || zk[i] < -1e-12) return false; }
+      // Enveloppes et réduction retombées à zéro : rien à rattraper au réveil (pas de rafale de
+      // calcul quand beaucoup de pistes se réveillent ensemble).
+      return envB === 0 && envW === 0 && gr === 0;
+    },
+    catchUp: function (K: number) {
+      // Entrée muette : bande nulle, pb = pw = 0 (enveloppes en relâchement), réduction visée 0.
+      var blocks = Math.floor(K / 128);
+      for (var b = 0; b < blocks && (envB !== 0 || envW !== 0 || gr !== 0); b++) {
+        if (b < 512) {
+          for (var i = 0; i < 128; i++) {
+            envB += (0 - envB) * (0 > envB ? cAttE : cRelE);
+            envW += (0 - envW) * (0 > envW ? cAttE : cRelE);
+            gr += (0 - gr) * (0 > gr ? cAttG : cRelG);
+            if (gr < 1e-9) gr = 0;
+          }
+        } else {
+          var kE = Math.pow(1 - cRelE, 128), kG = Math.pow(1 - cRelG, 128);
+          envB *= kE; envW *= kE; gr *= kG; if (gr < 1e-9) gr = 0;
+        }
+        if (envB < 1e-30) envB = 0;
+        if (envW < 1e-30) envW = 0;
+      }
+      if (b < blocks) { envB = 0; envW = 0; gr = 0; }
+    },
   };
 }
