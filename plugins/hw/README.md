@@ -47,6 +47,19 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `steel` | bleu acier `#22303c` | blanc bleuté `#e8f0f7`, accent ambre | Nova Limiter |
 | `slate` | peinture gris-bleu `#3d4350` | blanc `#f1f3f6`, accent rouge | De-esser |
 | `bronze` | bronze foncé `#2e2116` | crème `#f6e7cf`, accent orange | Saturation |
+| `seafoam` | émail vert d'eau `#a9d8cc` | vert très foncé `#0f241f`, accent sarcelle | Chorus |
+| `plum` | prune pailletée `#3b1f4f` | lilas clair `#f4eaff`, accent magenta | Flanger |
+| `forest` | vert forêt mat `#1f3b2d` | crème `#f2ead3`, accent ambre | Doubleur |
+| `midnight` | bleu nuit anodisé `#111a2c` | blanc bleuté `#e6f0ff`, accent cyan | (réservé : Stéréo) |
+| `hammer` | gris martelé `#3a474c` | blanc `#f3f6f6`, accent vert | Anti-bruit |
+| `labgrey` | gris laboratoire `#d4d2cc` | quasi-noir `#1b1c1e`, accent pétrole | (réservé : Master) |
+| `indigo` | indigo `#1e1b4b` | blanc lavande `#eef0ff`, accent rose | Harmoniseur |
+| `vermilion` | émail vermillon `#8a2c1d` | crème `#fff3e3`, accent jaune | Voix grave / aiguë |
+| `mustard` | émail jaune `#d6a72c` | brun noir `#1d1606`, accent rouge | Tape stop & half-time |
+| `concrete` | plastique gris clair `#c8c5bd` | quasi-noir `#1c1b19`, accent orange | Gate rythmique |
+| `jade` | vert anodisé `#133f33` | blanc menthe `#e8fff6`, accent vert | Gate |
+| `cobalt` | aluminium bleu `#173a7a` | blanc bleuté `#eef4ff`, accent ciel | Filtre DJ |
+| `avocado` | olive années 70 `#42501c` | crème `#fbf3d5`, accent anis | Lo-fi / téléphone |
 
 L'encre atteint au moins 7:1 de contraste sur sa façade ; `--hw-ink-soft` au moins 4,5:1.
 Les couleurs des façades sont codées dans `hw.css`, pas en classes Tailwind : elles ne
@@ -96,3 +109,20 @@ ne jamais mettre une mesure dans l'état du composant de la façade.
 (chaque réglage), `data-nova-preset`, `h2` (nom du modèle), et ceux propres à
 l'effet (`data-nova-calibrate`, `data-nova-gr-vu`…). Captures : `qa/plugins_hw_captures.py`,
 gestes : `qa/plugins_hw_gestes.py`, banc : `qa/harness/hwPlugins.tsx`.
+
+## Ajouts de la vague 2B (13/10/2026)
+
+Uniquement des ajouts : le comportement par défaut des briques existantes ne change pas.
+
+| Ajout | Rôle |
+|---|---|
+| 13 finitions | `seafoam`, `plum`, `forest`, `midnight`, `hammer`, `labgrey`, `indigo`, `vermilion`, `mustard`, `concrete`, `jade`, `cobalt`, `avocado` (tableau ci-dessus, contraste vérifié ≥ 7:1 pour l'encre). |
+| `HwLcdSelect` (`LcdSelect.tsx`) | Liste native habillée en afficheur LCD vert (ou `amber`), avec sérigraphie et aide dans la ligne d'info. Pour les choix longs (tonique, gamme, intervalle). 44 px de haut au téléphone. |
+| `PushButton role="checkbox"` | Case à cocher (`aria-checked`) : option marche / arrêt d'un module, lisible par `is_checked()` / `uncheck()` de Playwright. |
+| `.hw-pad` | Gros pad caoutchouc qui s'allume (`aria-pressed`), couleur `--hw-pad-lit`. Déclencheurs (Tape stop…). |
+| `.hw-step` (+ `.hw-step-fill`, `.hw-step-led`, `.hw-step-num`) | Touche de pas de séquenceur : remplissage = ouverture, `data-playing` = LED du pas joué (à écrire hors React), `data-outside` = hors du motif, couleur `--hw-step`. |
+| Option `.hw-touch` | À poser sur la `Faceplate` (`className`) : au téléphone, poussoirs, leviers et pas passent à 44 px minimum. |
+
+Côté V21 (`plugins/v21Ui.tsx`) : `V21Knob` (bouton rotatif depuis la fiche d'un réglage), `useV21Meter` (une mesure dans un petit afficheur, sans redessiner la façade), `V21Shell` = `HwWindow` + `Faceplate`.
+
+Captures et contrôles de la vague 2B : `qa/plugins_hw_vague2b.py` (banc `qa/harness/hwPlugins2b.tsx`, ou `--reel` dans le vrai studio).

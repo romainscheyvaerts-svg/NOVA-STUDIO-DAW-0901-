@@ -37,7 +37,7 @@ os.makedirs(OUT, exist_ok=True)
 
 # Recherche dans le menu « Ajouter un effet » (mode --reel).
 RECHERCHE = {
-    "CHORUS": "chorus", "FLANGER": "flanger", "DOUBLER": "doubleur", "STEREOSPREADER": "stéréo", "DENOISER": "anti-bruit",
+    "CHORUS": "chorus", "FLANGER": "flanger", "DOUBLER": "doubleur", "STEREOSPREADER": "stéréo", "DENOISER": "bruit",
     "MASTERSYNC": "master", "HARMONIZER": "harmoniseur", "VOICESHIFT": "voix grave", "TIMEFX": "tape stop",
     "GATEFX": "gate rythmique", "GATE": "gate", "DJFILTER": "filtre dj", "LOFI": "lo-fi",
 }
@@ -208,6 +208,10 @@ def reel():
                         pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x, y - 40, steps=4); pg.mouse.up()
                         pg.wait_for_timeout(200)
                     after = k.get_attribute("aria-valuenow")
+                    if bx and before == after:  # déjà en butée haute : on tourne vers le bas
+                        pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x, y + 40, steps=4); pg.mouse.up()
+                        pg.wait_for_timeout(200)
+                        after = k.get_attribute("aria-valuenow")
                     e["bouton_tourne"] = before != after
                     e["valeurs"] = [before, after]
                     e["taille_min_px"] = round(min(bx["width"], bx["height"])) if bx else None
