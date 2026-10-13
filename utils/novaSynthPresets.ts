@@ -8,7 +8,7 @@ import { NovaSynthSettings, SynthOsc, OscWave, defaultSynth, defaultOsc, normali
 
 export const PRESET_CATEGORIES = [
   'Pianos & Rhodes', 'Nappes', 'Plucks', 'Leads', 'Cloches & mallets', 'Cordes',
-  'Flûtes & vents', 'Chœurs', 'Basses', 'Arpèges', 'Basiques',
+  'Flûtes & vents', 'Chœurs', 'Basses', 'Arpèges', 'Afro & Amapiano', 'Rage & Hyperpop', 'Basiques',
 ] as const;
 export type PresetCategory = typeof PRESET_CATEGORIES[number];
 
@@ -22,6 +22,10 @@ export interface SynthPreset {
   /** Usage typique, affiché au survol. */
   tip: string;
   over: Over;
+  /** Ajouté le 14/10/2026 (pastille « Nouveau » et filtre « Nouveautés »). */
+  isNew?: boolean;
+  /** Notes de l'aperçu, quand celles de la catégorie ne conviennent pas. */
+  preview?: number[];
 }
 
 const O = (wave: OscWave, over: Partial<SynthOsc> = {}): SynthOsc => defaultOsc({ on: true, wave, level: 0.8, ...over });
@@ -30,6 +34,9 @@ const osc = (...list: SynthOsc[]): SynthOsc[] => [0, 1, 2].map(i => list[i] ?? d
 const env = (a: number, d: number, s: number, r: number) => ({ a, d, s, r });
 
 const P = (id: string, name: string, cat: PresetCategory, tip: string, over: Over): SynthPreset => ({ id, name, cat, tip, over });
+/** Préréglage ajouté le 14/10/2026 (sons 2026 : afro, rage, drill, jersey, future bass…). */
+const N = (id: string, name: string, cat: PresetCategory, tip: string, over: Over, preview?: number[]): SynthPreset =>
+  ({ id, name, cat, tip, over, isNew: true, ...(preview ? { preview } : {}) });
 
 export const SYNTH_PRESETS: SynthPreset[] = [
   // --- Pianos & Rhodes
@@ -63,6 +70,11 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     filter: { cutoff: 6000, keytrack: 0, envAmount: 0, velAmount: 0 }, ampEnv: env(0.005, 0.1, 1, 0.08),
     lfo: { dest: 'amp', rate: 6.5, amount: 0.18, wave: 'sine' }, fx: { chorus: { mix: 0.3, rate: 5, depth: 0.3 } }, velToAmp: 0.2, level: 0.6,
   }),
+  N('orgue-house', 'Orgue house', 'Pianos & Rhodes', 'L\'orgue percussif des classiques house des années 90 : accords courts et brillants (house, amapiano)', {
+    osc: osc(O('square', { level: 0.55 }), O('sine', { octave: 1, level: 0.6 }), O('sine', { octave: 2, semi: 7, level: 0.25 })),
+    filter: { cutoff: 2600, keytrack: 0.5, envAmount: 1.5, velAmount: 0.8 }, ampEnv: env(0.001, 0.45, 0.45, 0.12), filterEnv: env(0.001, 0.15, 0.3, 0.1),
+    fx: { chorus: { mix: 0.2 } }, velToAmp: 0.5, level: 0.7,
+  }),
 
   // --- Nappes
   P('nappe-chaude', 'Nappe chaude', 'Nappes', 'Tapis d\'accords large et chaud sous un couplet', {
@@ -95,6 +107,26 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     filter: { cutoff: 600, reso: 3, envAmount: 0 }, ampEnv: env(1, 1, 1, 2.5),
     lfo: { dest: 'filter', rate: 0.12, amount: 0.35, wave: 'triangle' }, fx: { chorus: { mix: 0.3 } }, velToAmp: 0.3, level: 0.85,
   }),
+  N('nappe-drill-sombre', 'Nappe drill sombre', 'Nappes', 'Nappe glaciale et menaçante qui ondule lentement, pour la drill UK et FR', {
+    osc: osc(O('sawtooth', { unison: 5, detune: 22, spread: 0.9 }), O('triangle', { octave: -1, level: 0.6 }), O('sine', { octave: 1, level: 0.12 })),
+    filter: { cutoff: 480, reso: 4, steep: true, keytrack: 0.3, envAmount: 0, velAmount: 0.3 }, ampEnv: env(0.9, 1, 1, 2.2),
+    lfo: { dest: 'filter', rate: 0.15, amount: 0.2, wave: 'triangle' }, fx: { chorus: { mix: 0.35, depth: 0.6 }, delay: { mix: 0.22, time: 0.5, feedback: 0.45 } }, velToAmp: 0.3, level: 0.8,
+  }),
+  N('nappe-synthwave', 'Nappe synthwave', 'Nappes', 'Nappe années 80 chorusée qui s\'ouvre doucement, pour les prods rétro et nocturnes', {
+    osc: osc(O('sawtooth', { unison: 3, detune: 14, spread: 0.8 }), O('square', { octave: -1, level: 0.4 })),
+    filter: { cutoff: 900, reso: 2, keytrack: 0.3, envAmount: 1.6, velAmount: 0.5 }, ampEnv: env(0.25, 1, 0.9, 1.6), filterEnv: env(0.8, 2.5, 0.4, 1.5),
+    fx: { chorus: { mix: 0.7, rate: 0.5, depth: 0.6 }, delay: { mix: 0.2, time: 0.5, feedback: 0.45 } }, velToAmp: 0.3, level: 0.75,
+  }),
+  N('nappe-vinyle', 'Nappe vinyle', 'Nappes', 'Nappe douce et usée, avec du souffle et une hauteur qui flotte comme un vieux disque', {
+    osc: osc(O('triangle', { unison: 3, detune: 10, spread: 0.6 }), O('sine', { octave: 1, level: 0.25 })), noise: { level: 0.1 },
+    filter: { cutoff: 1500, keytrack: 0.2, envAmount: 0, velAmount: 0.3 }, ampEnv: env(0.4, 1, 1, 1.8),
+    lfo: { dest: 'pitch', rate: 0.45, amount: 0.07, wave: 'sine' }, fx: { chorus: { mix: 0.5, depth: 0.7 } }, velToAmp: 0.3, level: 0.8,
+  }),
+  N('accords-future-bass', 'Accords future bass', 'Nappes', 'Accords larges qui « pompent » (sidechain simulé par le LFO sur le volume, calé sur 150 BPM) : refrains future bass et trap mélodique', {
+    osc: osc(O('sawtooth', { unison: 7, detune: 40, spread: 1 }), O('sawtooth', { octave: 1, unison: 3, detune: 25, spread: 1, level: 0.35 }), O('square', { octave: -1, level: 0.3 })),
+    filter: { cutoff: 3200, keytrack: 0.2, envAmount: 0.8, velAmount: 0.5 }, ampEnv: env(0.005, 0.3, 1, 0.35), filterEnv: env(0.01, 0.4, 0.6, 0.3),
+    lfo: { dest: 'amp', rate: 2.5, amount: 0.7, wave: 'sine' }, fx: { chorus: { mix: 0.25 } }, velToAmp: 0.3, level: 0.6,
+  }),
 
   // --- Plucks
   P('pluck-trap', 'Pluck trap', 'Plucks', 'Le pluck des mélodies trap, avec un petit écho', {
@@ -120,6 +152,11 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     osc: osc(O('triangle'), O('sawtooth', { octave: 1, level: 0.2 })),
     filter: { cutoff: 2000, keytrack: 0.5, envAmount: 2 }, ampEnv: env(0.002, 2, 0, 1.2), filterEnv: env(0.001, 0.3, 0, 0.5),
     fx: { chorus: { mix: 0.2 }, delay: { mix: 0.15, time: 0.375, feedback: 0.3 } }, velToAmp: 0.8, level: 0.85,
+  }),
+  N('pluck-lofi', 'Pluck lo-fi détendu', 'Plucks', 'Pluck feutré qui « pleure » un peu, comme une vieille cassette : boucles lo-fi et chill', {
+    osc: osc(O('triangle'), O('sine', { octave: 1, level: 0.25 })), noise: { level: 0.04 },
+    filter: { cutoff: 700, keytrack: 0.4, envAmount: 2.2, velAmount: 1 }, ampEnv: env(0.003, 0.9, 0.1, 0.4), filterEnv: env(0.002, 0.25, 0.1, 0.25),
+    lfo: { dest: 'pitch', rate: 0.7, amount: 0.06, wave: 'sine' }, fx: { chorus: { mix: 0.45, depth: 0.7 }, delay: { mix: 0.15, time: 0.375, feedback: 0.3 } }, velToAmp: 0.6, level: 0.85,
   }),
 
   // --- Leads
@@ -156,6 +193,23 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     filter: { cutoff: 450, reso: 12, steep: true, keytrack: 0.3, envAmount: 4, velAmount: 1.5 }, ampEnv: env(0.003, 0.3, 1, 0.1), filterEnv: env(0.002, 0.25, 0.1, 0.15),
     mono: true, glide: 0.06, velToAmp: 0.3, level: 0.6,
   }),
+  N('lead-jersey', 'Lead jersey club', 'Leads', 'Lead rebondissant, attaque claquée et maintien court : rythmes jersey club et drill sautillante', {
+    osc: osc(O('square'), O('sawtooth', { fine: -8, level: 0.6 })),
+    filter: { cutoff: 1600, reso: 3, keytrack: 0.4, envAmount: 2.8 }, ampEnv: env(0.001, 0.22, 0.45, 0.1), filterEnv: env(0.001, 0.12, 0.25, 0.1),
+    fx: { delay: { mix: 0.15, time: 0.125, feedback: 0.25 } }, velToAmp: 0.5, level: 0.7,
+  }),
+  N('lead-gfunk', 'Lead G-funk', 'Leads', 'Le sifflement sinus qui glisse des prods West Coast : portamento lent et vibrato', {
+    osc: osc(O('sine'), O('triangle', { level: 0.15 })),
+    filter: { cutoff: 5000, keytrack: 0, envAmount: 0, velAmount: 0 }, ampEnv: env(0.03, 0.3, 1, 0.25),
+    lfo: { dest: 'pitch', rate: 5.5, amount: 0.12, wave: 'sine' }, mono: true, legato: true, glide: 0.2,
+    fx: { chorus: { mix: 0.15 }, delay: { mix: 0.2, time: 0.375, feedback: 0.3 } }, velToAmp: 0.3, level: 0.8,
+  }),
+  N('lead-voix', 'Lead voix synthé', 'Leads', 'Lead qui « chante » comme une voix (formant), mono et glissé : réponses de mélodie trap', {
+    osc: osc(O('sawtooth'), O('sawtooth', { fine: 10, level: 0.6 }), O('square', { octave: 1, level: 0.3 })),
+    filter: { type: 'bandpass', cutoff: 800, reso: 1.4, keytrack: 0.6, envAmount: 0.4, velAmount: 0.5 }, ampEnv: env(0.02, 0.3, 0.95, 0.25), filterEnv: env(0.05, 0.4, 0.5, 0.3),
+    lfo: { dest: 'pitch', rate: 5.2, amount: 0.09, wave: 'sine' }, mono: true, glide: 0.09,
+    fx: { chorus: { mix: 0.2 }, delay: { mix: 0.25, time: 0.375, feedback: 0.35 } }, velToAmp: 0.4, level: 0.8,
+  }),
 
   // --- Cloches & mallets
   P('cloche-trap', 'Cloche trap', 'Cloches & mallets', 'La cloche brillante des mélodies trap (façon Metro / Southside)', {
@@ -181,6 +235,11 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     osc: osc(O('triangle', { octave: 1 }), O('sine', { octave: 2, semi: 7, level: 0.25 })),
     filter: { cutoff: 6000, envAmount: 0 }, ampEnv: env(0.001, 0.8, 0, 1),
     fx: { delay: { mix: 0.15, time: 0.25, feedback: 0.3 } }, velToAmp: 0.7, level: 0.8,
+  }),
+  N('cloche-noel', 'Cloche de Noël trap', 'Cloches & mallets', 'Clochettes scintillantes façon conte d\'hiver : la mélodie de cloche des beats trap de Noël', {
+    osc: osc(O('sine', { octave: 1 }), O('sine', { octave: 2, semi: 5, fine: 50, level: 0.45 }), O('sine', { octave: 3, semi: 4, fine: 80, level: 0.18 })),
+    filter: { cutoff: 12000, keytrack: 0, envAmount: 0, velAmount: 0 }, ampEnv: env(0.001, 1.6, 0, 1.6),
+    lfo: { dest: 'amp', rate: 7, amount: 0.2, wave: 'sine' }, fx: { chorus: { mix: 0.3, rate: 1.2, depth: 0.3 }, delay: { mix: 0.25, time: 0.25, feedback: 0.4 } }, velToAmp: 0.7, level: 0.8,
   }),
 
   // --- Cordes
@@ -222,6 +281,11 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     filter: { cutoff: 900, keytrack: 0.4, envAmount: 2.5, velAmount: 1.5 }, ampEnv: env(0.05, 0.4, 0.9, 0.2), filterEnv: env(0.08, 0.4, 0.5, 0.2),
     velToAmp: 0.6, level: 0.65,
   }),
+  N('cuivres-trap', 'Cuivres trap', 'Flûtes & vents', 'Section de cuivres épaisse et sombre qui gonfle : intros épiques et refrains', {
+    osc: osc(O('sawtooth', { unison: 5, detune: 18, spread: 0.7 }), O('sawtooth', { octave: -1, level: 0.5 }), O('square', { level: 0.2 })),
+    filter: { cutoff: 600, reso: 1.5, keytrack: 0.5, envAmount: 2.2, velAmount: 1.5 }, ampEnv: env(0.06, 0.5, 0.9, 0.25), filterEnv: env(0.12, 0.5, 0.45, 0.25),
+    lfo: { dest: 'pitch', rate: 5, amount: 0.03, wave: 'sine' }, velToAmp: 0.6, level: 0.65,
+  }),
 
   // --- Chœurs
   P('choeur-ah', 'Chœur « Ah »', 'Chœurs', 'Chœur synthétique ouvert, pour les refrains épiques', {
@@ -238,6 +302,11 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     osc: osc(O('sawtooth', { unison: 7, detune: 20, spread: 1 })), noise: { level: 0.05 },
     filter: { type: 'bandpass', cutoff: 1500, reso: 2, envAmount: 0 }, ampEnv: env(1, 1, 1, 2.5),
     fx: { chorus: { mix: 0.6 }, delay: { mix: 0.3, time: 0.5, feedback: 0.4 } }, velToAmp: 0.3, level: 1,
+  }),
+  N('choeur-sombre', 'Chœur sombre', 'Chœurs', 'Chœur grave et inquiétant (« Oh »), pour les ambiances drill et les intros sombres', {
+    osc: osc(O('sawtooth', { unison: 5, detune: 18, spread: 0.8 }), O('sawtooth', { octave: -1, unison: 3, detune: 12, spread: 0.5, level: 0.6 })),
+    filter: { type: 'bandpass', cutoff: 550, reso: 3, keytrack: 0.2, envAmount: 0, velAmount: 0 }, ampEnv: env(0.5, 0.8, 1, 1.6),
+    lfo: { dest: 'pitch', rate: 4.5, amount: 0.03, wave: 'sine' }, fx: { chorus: { mix: 0.6 }, delay: { mix: 0.15, time: 0.5, feedback: 0.4 } }, velToAmp: 0.3, level: 1,
   }),
 
   // --- Basses (la 808 a son propre moteur)
@@ -261,6 +330,16 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     filter: { cutoff: 300, keytrack: 0.3, envAmount: 3 }, ampEnv: env(0.002, 0.4, 0.2, 0.1), filterEnv: env(0.001, 0.15, 0.05, 0.1),
     mono: true, velToAmp: 0.6, level: 0.85,
   }),
+  N('basse-funk', 'Basse funk', 'Basses', 'Basse synthé ronde et claquante façon funk / G-funk, avec un petit glissé', {
+    osc: osc(O('square', { octave: -1, level: 0.7 }), O('sawtooth', { octave: -1, fine: 5, level: 0.5 })),
+    filter: { cutoff: 380, reso: 4, keytrack: 0.4, envAmount: 2.6, velAmount: 1.2 }, ampEnv: env(0.003, 0.5, 0.6, 0.08), filterEnv: env(0.004, 0.18, 0.15, 0.12),
+    mono: true, glide: 0.04, velToAmp: 0.6, level: 0.8,
+  }),
+  N('reese-drill', 'Reese drill', 'Basses', 'Reese grave qui grogne et glisse, pour les basses drill UK / FR (à doubler avec une 808)', {
+    osc: osc(O('sawtooth', { octave: -1, unison: 3, detune: 28, spread: 0.5 }), O('sawtooth', { octave: -1, fine: -15, level: 0.7 }), O('sine', { octave: -1, level: 0.5 })),
+    filter: { cutoff: 650, reso: 2, steep: true, keytrack: 0.3, envAmount: 0.6, velAmount: 0.5 }, ampEnv: env(0.004, 0.3, 1, 0.12), filterEnv: env(0.01, 0.6, 0.4, 0.2),
+    lfo: { dest: 'filter', rate: 0.6, amount: 0.12, wave: 'sine' }, mono: true, glide: 0.08, velToAmp: 0.3, level: 0.7,
+  }),
 
   // --- Arpèges (sons courts faits pour arpéger)
   P('arp-cristal', 'Arpège cristal', 'Arpèges', 'Notes courtes et brillantes avec écho, pour arpéger des accords', {
@@ -282,6 +361,52 @@ export const SYNTH_PRESETS: SynthPreset[] = [
     osc: osc(O('triangle'), O('sawtooth', { octave: 1, level: 0.3 })),
     filter: { cutoff: 1500, envAmount: 2 }, ampEnv: env(0.002, 0.5, 0, 0.5), filterEnv: env(0.001, 0.2, 0, 0.3),
     fx: { chorus: { mix: 0.3 }, delay: { mix: 0.4, time: 0.5, feedback: 0.5 } }, velToAmp: 0.6, level: 0.85,
+  }),
+  N('arp-ambient', 'Arpège ambient', 'Arpèges', 'Notes douces noyées dans un long écho : à arpéger lentement pour une intro planante', {
+    osc: osc(O('sine'), O('triangle', { octave: 1, level: 0.3 }), O('sine', { octave: 2, semi: 7, level: 0.08 })),
+    filter: { cutoff: 2200, keytrack: 0.3, envAmount: 1.2 }, ampEnv: env(0.004, 0.9, 0, 0.9), filterEnv: env(0.002, 0.3, 0.1, 0.4),
+    fx: { chorus: { mix: 0.4 }, delay: { mix: 0.45, time: 0.5, feedback: 0.6 } }, velToAmp: 0.6, level: 0.85,
+  }),
+
+  // --- Afro & Amapiano
+  N('log-drum', 'Log drum amapiano', 'Afro & Amapiano', 'La basse percussive de l\'amapiano : un « tok » boisé qui gronde et glisse, à jouer en notes courtes', {
+    osc: osc(O('sine', { octave: -1, level: 0.9 }), O('triangle', { level: 0.35 }), O('square', { semi: 7, level: 0.08 })), noise: { level: 0.05 },
+    filter: { cutoff: 280, reso: 6, keytrack: 0.6, envAmount: 3.2, velAmount: 1.2 }, ampEnv: env(0.001, 0.55, 0, 0.18), filterEnv: env(0.001, 0.09, 0, 0.08),
+    mono: true, legato: false, glide: 0.035, velToAmp: 0.6, level: 0.8,
+  }, [43]),
+  N('pluck-afro', 'Pluck afro', 'Afro & Amapiano', 'Pluck boisé et rebondissant des mélodies afrobeats, avec un écho court', {
+    osc: osc(O('triangle'), O('sine', { octave: 2, level: 0.18 }), O('square', { octave: 1, level: 0.1 })),
+    filter: { cutoff: 1400, keytrack: 0.5, envAmount: 2.5, velAmount: 1 }, ampEnv: env(0.001, 0.38, 0, 0.22), filterEnv: env(0.001, 0.12, 0, 0.12),
+    fx: { delay: { mix: 0.22, time: 0.1875, feedback: 0.3 } }, velToAmp: 0.7, level: 0.85,
+  }, [60, 67, 70, 74]),
+  N('accords-amapiano', 'Accords amapiano', 'Afro & Amapiano', 'Accords de piano house feutrés et jazzy, typiques de l\'amapiano', {
+    osc: osc(O('sine', { level: 0.85 }), O('triangle', { octave: 1, level: 0.3 }), O('sawtooth', { level: 0.12, fine: 6 })),
+    filter: { cutoff: 1800, keytrack: 0.5, envAmount: 1.2, velAmount: 1.5 }, ampEnv: env(0.002, 0.9, 0.35, 0.35), filterEnv: env(0.002, 0.35, 0.2, 0.3),
+    fx: { chorus: { mix: 0.3 } }, velToAmp: 0.8, level: 0.8,
+  }),
+  N('flute-afro', 'Flûte afro', 'Afro & Amapiano', 'Flûte souple et soufflée, vibrato lent : mélodies afro et amapiano', {
+    osc: osc(O('sine'), O('triangle', { octave: 1, level: 0.12 })), noise: { level: 0.1 },
+    filter: { cutoff: 3500, keytrack: 0.3, envAmount: 0, velAmount: 0.5 }, ampEnv: env(0.05, 0.3, 0.9, 0.3),
+    lfo: { dest: 'pitch', rate: 4.2, amount: 0.08, wave: 'sine' }, mono: true, glide: 0.07,
+    fx: { chorus: { mix: 0.25 }, delay: { mix: 0.25, time: 0.375, feedback: 0.35 } }, velToAmp: 0.4, level: 0.8,
+  }),
+
+  // --- Rage & Hyperpop
+  N('lead-rage', 'Lead rage désaccordé', 'Rage & Hyperpop', 'Lead énorme, désaccordé et agressif des prods rage : à jouer en notes tenues', {
+    osc: osc(O('sawtooth', { unison: 7, detune: 55, spread: 1 }), O('square', { unison: 3, detune: 30, spread: 0.7, level: 0.55 }), O('sawtooth', { octave: -1, level: 0.45 })),
+    filter: { cutoff: 5200, reso: 2.5, keytrack: 0.2, envAmount: 0.8 }, ampEnv: env(0.004, 0.3, 0.95, 0.22), filterEnv: env(0.003, 0.25, 0.6, 0.2),
+    lfo: { dest: 'pitch', rate: 6, amount: 0.04, wave: 'sine' }, fx: { chorus: { mix: 0.25 }, delay: { mix: 0.18, time: 0.375, feedback: 0.3 } }, velToAmp: 0.3, level: 0.6,
+  }),
+  N('pluck-rage', 'Pluck rage', 'Rage & Hyperpop', 'Pluck brillant et large pour les boucles rage et pluggnb', {
+    osc: osc(O('sawtooth', { unison: 5, detune: 35, spread: 0.9 }), O('square', { octave: 1, level: 0.25 })),
+    filter: { cutoff: 1000, keytrack: 0.4, envAmount: 3.2, velAmount: 1 }, ampEnv: env(0.002, 0.8, 0, 0.3), filterEnv: env(0.004, 0.2, 0.08, 0.15),
+    fx: { chorus: { mix: 0.2 }, delay: { mix: 0.25, time: 0.25, feedback: 0.35 } }, velToAmp: 0.45, level: 0.8,
+  }, [60, 67, 70, 74]),
+  N('lead-hyperpop', 'Lead hyperpop aigu', 'Rage & Hyperpop', 'Lead perçant une octave au-dessus, vibrato rapide et glissés : hyperpop et digicore', {
+    osc: osc(O('square', { octave: 1, level: 0.8 }), O('sawtooth', { octave: 1, fine: 9, level: 0.5 }), O('sine', { octave: 2, level: 0.2 })),
+    filter: { cutoff: 7000, keytrack: 0, envAmount: 0, velAmount: 0 }, ampEnv: env(0.003, 0.2, 0.85, 0.12),
+    lfo: { dest: 'pitch', rate: 7.5, amount: 0.14, wave: 'sine' }, mono: true, glide: 0.05,
+    fx: { delay: { mix: 0.22, time: 0.1875, feedback: 0.3 } }, velToAmp: 0.3, level: 0.6,
   }),
 
   // --- Basiques
@@ -349,7 +474,33 @@ const CALIBRATED_LEVEL: Record<string, number> = {
   'arp-nuit': 0.61,
   'nova-saw-classique': 0.474,
   'init': 0.235,
+  // Nouveaux sons (14/10/2026) : calibrés par qa/synthe_sons.py --calibrer.
+  'orgue-house': 0.234,
+  'nappe-drill-sombre': 0.213,
+  'nappe-synthwave': 0.263,
+  'nappe-vinyle': 0.213,
+  'accords-future-bass': 0.33,
+  'pluck-lofi': 0.402,
+  'lead-jersey': 0.207,
+  'lead-gfunk': 0.281,
+  'cloche-noel': 0.274,
+  'cuivres-trap': 0.22,
+  'choeur-sombre': 0.785,
+  'basse-funk': 0.349,
+  'reese-drill': 0.234,
+  'arp-ambient': 0.407,
+  'log-drum': 0.58,
+  'pluck-afro': 0.555,
+  'accords-amapiano': 0.304,
+  'flute-afro': 0.37,
+  'lead-rage': 0.218,
+  'lead-hyperpop': 0.287,
+  'lead-voix': 1.0,
+  'pluck-rage': 0.42,
 };
+
+/** Volume calibré d'un son (undefined : pas encore mesuré). */
+export const calibratedLevel = (id: string): number | undefined => CALIBRATED_LEVEL[id];
 
 const byId = new Map(SYNTH_PRESETS.map(p => [p.id, p]));
 export const presetById = (id: string) => byId.get(id);
@@ -374,6 +525,7 @@ export function presetSettings(id: string): NovaSynthSettings {
 export function previewNotesFor(id: string): number[] {
   const p = byId.get(id);
   if (!p) return [48, 55, 58, 62, 65];
+  if (p.preview) return [...p.preview];
   if (p.cat === 'Basses') return [36];
   if (p.over.mono) return [67];
   if (p.cat === 'Cloches & mallets' || p.cat === 'Arpèges' || p.cat === 'Plucks') return [60, 67, 70, 74];
