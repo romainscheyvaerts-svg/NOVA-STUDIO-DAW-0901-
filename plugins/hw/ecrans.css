@@ -1,0 +1,199 @@
+/*
+ * Kit « matériel » — ajouts de la vague 2A (gros effets à écran : Égaliseur,
+ * Réverbe, Écho, Nova Tune). Fichier séparé de hw.css : rien n'y change le
+ * comportement par défaut des briques existantes.
+ *
+ * Finitions supplémentaires : on garde `finish` (base) et on ajoute la classe
+ * de la finition sur la façade, ex. <Faceplate finish="black" className="hw-finish-midnight">.
+ * Sélecteur à deux classes (.hw-face.hw-finish-x) : il l'emporte sur la base.
+ */
+
+/* ── Finitions ─────────────────────────────────────────────────────────── */
+/* Égaliseur : bleu nuit, verre fumé, accent cyan. */
+.hw-face.hw-finish-midnight {
+  --hw-face-solid: #161c28;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(120, 170, 255, 0.1), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #1d2433 0%, #161c28 55%, #11161f 100%);
+  --hw-ink: #e8eef8;
+  --hw-ink-soft: #a3b3ca;
+  --hw-accent: #7dd3fc;
+  --hw-rule: rgba(232, 238, 248, 0.14);
+  --hw-edge-hi: rgba(170, 200, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.3);
+}
+/* Réverbe : aubergine profond, accent lilas. */
+.hw-face.hw-finish-violet {
+  --hw-face-solid: #251c38;
+  --hw-face:
+    radial-gradient(120% 80% at 20% -10%, rgba(196, 160, 255, 0.16), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(90% 70% at 100% 110%, rgba(90, 200, 255, 0.07), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #2c2242 0%, #251c38 55%, #1c152b 100%);
+  --hw-ink: #f3eefc;
+  --hw-ink-soft: #c5b8de;
+  --hw-accent: #c4b5fd;
+  --hw-rule: rgba(243, 238, 252, 0.16);
+  --hw-edge-hi: rgba(220, 200, 255, 0.18);
+  --hw-well: rgba(0, 0, 0, 0.26);
+}
+/* Écho : émail bleu-vert façon écho à bande, sérigraphie crème, accent orange. */
+.hw-face.hw-finish-sea {
+  --hw-face-solid: #18403f;
+  --hw-face:
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
+    linear-gradient(180deg, #1f4c4b 0%, #18403f 60%, #133433 100%);
+  --hw-ink: #f6edd6;
+  --hw-ink-soft: #cfdccd;
+  --hw-accent: #ffa24c;
+  --hw-rule: rgba(246, 237, 214, 0.22);
+  --hw-edge-hi: rgba(220, 255, 245, 0.18);
+  --hw-well: rgba(0, 0, 0, 0.24);
+}
+/* Nova Tune : carbone noir, accent vert anis. */
+.hw-face.hw-finish-carbon {
+  --hw-face-solid: #15181d;
+  --hw-face:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.022) 0 2px, rgba(0, 0, 0, 0) 2px 4px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.18) 0 2px, rgba(0, 0, 0, 0) 2px 4px),
+    linear-gradient(180deg, #1c2026 0%, #15181d 60%, #101216 100%);
+  --hw-ink: #eef2f6;
+  --hw-ink-soft: #a9b2be;
+  --hw-accent: #c6f432;
+  --hw-rule: rgba(238, 242, 246, 0.14);
+  --hw-well: rgba(0, 0, 0, 0.34);
+}
+
+/* ── Sélecteur de préréglages (barre d'outils) ─────────────────────────── */
+.hw-select {
+  height: 30px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 28px 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #1c1f25;
+  background-image: linear-gradient(45deg, transparent 50%, #9aa3b2 50%), linear-gradient(135deg, #9aa3b2 50%, transparent 50%);
+  background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: #e5e7eb;
+  font: 700 11.5px/1 Inter, system-ui, sans-serif;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.hw-select:hover { border-color: rgba(255, 255, 255, 0.22); }
+.hw-select:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: 1px; }
+.hw-select option { background: #16181d; color: #e5e7eb; }
+@media (max-width: 639px) { .hw-select { height: 40px; font-size: 13px; } }
+
+/* ── Écran agrandi : étiquettes posées sur la vitre ───────────────────── */
+.hw-screen-label {
+  position: absolute;
+  z-index: 2;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #e2e8f0;
+  font: 700 11px/1.3 Inter, system-ui, sans-serif;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hw-screen-label b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; color: #fff; }
+.hw-screen-canvas { display: block; width: 100%; height: 100%; }
+
+/* ── Bandes de l'égaliseur (sélecteur numéroté à LED) ──────────────────── */
+.hw-bands { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; }
+@media (max-width: 639px) { .hw-bands { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.hw-band {
+  --band: #7dd3fc;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #262c38, #1a1f29);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.55);
+  color: #c9d3e2;
+  cursor: pointer;
+  font: 800 11px/1 'JetBrains Mono', ui-monospace, monospace;
+  -webkit-tap-highlight-color: transparent;
+}
+.hw-band:hover { background: linear-gradient(180deg, #2d3442, #1e2430); color: #fff; }
+.hw-band small { font: 700 8.5px/1 Inter, system-ui, sans-serif; letter-spacing: 0.04em; color: #9aa7ba; white-space: nowrap; }
+.hw-band[aria-pressed='true'] {
+  background: linear-gradient(180deg, #313a4b, #232a37);
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--band), 0 0 10px -2px var(--band);
+}
+.hw-band[aria-pressed='true'] small { color: #dbe4f0; }
+.hw-band[data-off='true'] { color: #7c8698; }
+.hw-band:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: 1px; }
+.hw-band { background-color: #1f2430; }
+
+/* Pastille d'icône (forme du filtre) sur un bouton-poussoir */
+.hw-push-cap svg { display: block; }
+.hw-push-icon .hw-push-cap { gap: 5px; min-width: 52px; }
+
+/* ── Mini-clavier (tonalité) ──────────────────────────────────────────── */
+.hw-piano { position: relative; height: 88px; width: 100%; max-width: 420px; margin: 0 auto; touch-action: manipulation; }
+.hw-piano-key {
+  position: absolute;
+  top: 0;
+  border: 0;
+  padding: 0 0 7px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  font: 800 10px/1 Inter, system-ui, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hw-piano-white {
+  height: 100%;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, #e9ecef 0%, #fafbfc 70%, #d9dde2 100%);
+  background-color: #f1f3f5;
+  box-shadow: inset 0 -3px 0 #b9bfc7, inset -1px 0 0 #9aa1aa, 0 2px 3px rgba(0, 0, 0, 0.5);
+  color: #3b4250;
+}
+.hw-piano-black {
+  z-index: 2;
+  height: 58%;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(180deg, #2b2f36 0%, #111317 85%, #3a3f47 100%);
+  background-color: #17191d;
+  box-shadow: inset 0 -3px 0 #000, 0 3px 4px rgba(0, 0, 0, 0.6);
+  color: #c9ced6;
+  font-size: 8.5px;
+  padding-bottom: 5px;
+}
+/* Note de la gamme : point vert ; tonique : touche allumée. */
+.hw-piano-key[data-in='true']::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: var(--hw-accent, #c6f432);
+  box-shadow: 0 0 6px var(--hw-accent, #c6f432);
+}
+.hw-piano-black[data-in='true']::before { bottom: 18px; width: 6px; height: 6px; margin-left: -3px; }
+.hw-piano-white[aria-checked='true'] { background: linear-gradient(180deg, #e9f8b8 0%, #f6fde0 70%, #cfe28a 100%); background-color: #eef9c9; color: #1b2205; }
+.hw-piano-black[aria-checked='true'] { background: linear-gradient(180deg, #6d8a12 0%, #44570a 85%, #7f9c1f 100%); background-color: #55700c; color: #f4ffd6; }
+.hw-piano-key:focus-visible { outline: 2px solid var(--hw-ui-accent, #38bdf8); outline-offset: -2px; z-index: 3; }
+
+/* ── Voyant clignotant (tempo de l'écho) ──────────────────────────────── */
+@keyframes hw-blink { 0%, 12% { opacity: 1; } 18%, 100% { opacity: 0.18; } }
+.hw-led-blink[data-on='true'] { animation: hw-blink var(--hw-blink, 0.5s) linear infinite; }
+@media (prefers-reduced-motion: reduce) { .hw-led-blink[data-on='true'] { animation: none; } }

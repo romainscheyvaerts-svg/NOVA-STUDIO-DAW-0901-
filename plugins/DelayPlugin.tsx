@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { Faceplate, HwSection, HwWindow, Knob, PushButton, useHwHelp, type KnobProps } from './hw';
+import { hwCtx, useHwCanvas } from './hw/screens';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
@@ -511,288 +512,207 @@ export class SyncDelayNode {
   public getParams() { return { ...this.params }; }
 }
 
-export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayParams, onParamsChange?: (p: DelayParams) => void }> = ({ node, initialParams, onParamsChange }) => {
-  const [params, setParams] = useState(initialParams);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const dlNum = (v: number, def: number) => (Number.isFinite(v) ? v : def);
+// ── Fenêtre ─────────────────────────────────────────────────────────────────
 
-  const handleParamChange = useCallback((key: keyof DelayParams, value: any) => {
-    const newParams = { ...params, [key]: value };
-    setParams(newParams);
-    node.updateParams(newParams);
-    if (onParamsChange) onParamsChange(newParams);
-  }, [params, node, onParamsChange]);
+const DL_ACCENT = '#ffa24c';
+/** Valeurs du moteur quand le projet n'en donne pas (affichage seulement). */
+const DL_DEFAULTS: Partial<DelayParams> = {
+  division: '1/4', divisionR: '1/4', feedback: 0.4, feedbackHP: 80, feedbackLP: 8000, mix: 0.3, stereoWidth: 1, pingPong: false, ducking: 0,
+  saturation: 0.3, modRate: 0.3, modDepth: 0.05, mode: 'DIGITAL', freeze: false, multiTap: false, tap2Level: 0.5, tap3Level: 0.35, tap4Level: 0.2, bpm: 120,
+};
+const DL_MODES: { id: DelayMode; label: string; hint: string }[] = [
+  { id: 'DIGITAL', label: 'Numérique', hint: 'Répétitions propres et nettes, sans couleur.' },
+  { id: 'TAPE', label: 'Bande', hint: 'Écho à bande : répétitions chaudes qui s’usent, léger pleurage.' },
+  { id: 'ANALOG', label: 'Analogique', hint: 'Écho analogique : plus sombre et rond, chaque répétition se salit.' },
+  { id: 'DIFFUSE', label: 'Diffus', hint: 'Répétitions adoucies qui se fondent dans une nappe.' },
+];
+/** Temps proposés (du plus long au plus court). D = pointée, T = triolet. */
+const DL_DIVS: DelayDivision[] = ['1/4', '1/4D', '1/8', '1/8D', '1/8T', '1/16', '1/16D', '1/32'];
+const divName = (d: DelayDivision) => {
+  const base = d.replace(/[DT]$/, '');
+  const note: Record<string, string> = { '1/1': 'ronde', '1/2': 'blanche', '1/4': 'noire', '1/8': 'croche', '1/16': 'double croche', '1/32': 'triple croche' };
+  return `${d} (${note[base] || base}${d.endsWith('D') ? ' pointée' : d.endsWith('T') ? ' en triolet' : ''})`;
+};
+const dlPct = (v: number) => `${Math.round((v || 0) * 100)} %`;
+const dlHz = (hz: number) => (hz >= 1000 ? `${(hz / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} kHz` : `${Math.round(hz)} Hz`);
+const dlMs = (s: number) => `${Math.round(s * 1000)} ms`;
 
-  // Visualization
+/**
+ * Écran de l'écho : les répétitions dans le temps (hauteur = niveau), gauche
+ * au-dessus, droite en dessous, calées sur la grille du tempo. Dessiné quand
+ * un réglage change seulement.
+ */
+const DelayScreen: React.FC<{ p: DelayParams; tL: number; tR: number }> = ({ p, tL, tR }) => {
+  const { wrapRef, canvasRef, size } = useHwCanvas();
+  const help = useHwHelp('dl-screen', 'Répétitions', 'Chaque barre est une répétition : en haut le côté gauche, en bas le côté droit. Elles baissent selon « Répétitions » ; la grille montre les temps du morceau.', undefined);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    let frameId = 0;
-
-    const draw = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-
-      // Grid
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-      ctx.lineWidth = 1;
-      for (let i = 1; i < 8; i++) {
-        const x = (w / 8) * i;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-
-      const beatDuration = 60 / params.bpm;
-      const delayTimeL = beatDuration * DIVISION_FACTORS[params.division] * 1000;
-      const delayTimeR = beatDuration * DIVISION_FACTORS[params.divisionR || params.division] * 1000;
-      const progress = (Date.now() % delayTimeL) / delayTimeL;
-
-      // Animated pulse
-      if (params.isEnabled) {
-        ctx.beginPath();
-        ctx.strokeStyle = `rgba(0, 242, 255, ${(1 - progress) * 0.5})`;
-        ctx.lineWidth = 3;
-        ctx.arc(60, h / 2, 20 + progress * 25, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      // Center dot
-      ctx.beginPath();
-      ctx.fillStyle = params.isEnabled ? '#00f2ff' : '#334155';
-      ctx.arc(60, h / 2, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Delay taps visualization
-      const numTaps = params.multiTap ? 6 : (params.pingPong ? 6 : 4);
-      const startX = 120;
-      const spacing = (w - 160) / numTaps;
-
-      for (let i = 1; i <= numTaps; i++) {
-        const x = startX + (i - 1) * spacing;
-        const feedbackDecay = Math.pow(params.feedback, i);
-        const flicker = params.mode === 'TAPE' ? (0.9 + Math.random() * 0.2) : 1;
-        const height = feedbackDecay * (h - 40) * flicker;
-        
-        // Pan indicator for ping-pong
-        let color = '#00f2ff';
-        if (params.pingPong) {
-          color = i % 2 === 0 ? '#ff6b6b' : '#00f2ff';
-        }
-        
-        // Gradient bar
-        const gradient = ctx.createLinearGradient(x, h/2 - height/2, x, h/2 + height/2);
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(0.5, `${color}99`);
-        gradient.addColorStop(1, color);
-        
-        ctx.fillStyle = gradient;
-        ctx.globalAlpha = feedbackDecay * 0.6;
-        ctx.fillRect(x - 3, h/2 - height/2, 6, height);
-        ctx.globalAlpha = 1;
-        
-        // Tap number
-        ctx.fillStyle = '#334155';
-        ctx.font = '8px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${i}`, x, h - 8);
-      }
-
-      // Mode indicator
-      ctx.fillStyle = '#334155';
-      ctx.font = 'bold 9px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`${params.mode}`, 10, 15);
-      
-      // BPM and timing
-      ctx.textAlign = 'right';
-      ctx.fillText(`${params.bpm} BPM`, w - 10, 15);
-      ctx.fillText(`${params.division}`, w - 10, h - 8);
-
-      frameId = requestAnimationFrame(draw);
+    const c = hwCtx(canvasRef.current, size);
+    if (!c) return;
+    const { w, h } = size;
+    c.clearRect(0, 0, w, h);
+    const mid = h / 2, pad = 16;
+    const beat = 60 / Math.max(20, Math.min(400, Number(p.bpm) || 120));
+    const fb = p.freeze ? 0.985 : Math.max(0, Math.min(0.95, Number.isFinite(p.feedback) ? p.feedback : 0.4));
+    const T = Math.max(beat * 2, Math.min(8, Math.max(tL, tR) * 8.5));
+    const xOf = (t: number) => 8 + (t / T) * (w - 16);
+    // Grille des temps
+    c.font = '600 9px Inter, system-ui, sans-serif'; c.textAlign = 'center';
+    for (let k = 0; k * beat <= T + 1e-6; k++) {
+      const x = Math.round(xOf(k * beat)) + 0.5;
+      c.strokeStyle = k % 4 === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)';
+      c.beginPath(); c.moveTo(x, 6); c.lineTo(x, h - 6); c.stroke();
+    }
+    c.strokeStyle = 'rgba(255,255,255,0.2)'; c.beginPath(); c.moveTo(0, mid + 0.5); c.lineTo(w, mid + 0.5); c.stroke();
+    // Son d'origine
+    c.fillStyle = '#f6edd6'; c.fillRect(xOf(0) - 1.5, pad, 3, h - 2 * pad);
+    const bar = (t: number, lvl: number, up: boolean, col: string) => {
+      if (t > T || lvl < 0.01) return;
+      const hh = Math.min(1, lvl) * (mid - pad);
+      const x = xOf(t);
+      c.fillStyle = col; c.globalAlpha = 0.35 + 0.65 * Math.min(1, lvl);
+      c.fillRect(x - 2.5, up ? mid - hh : mid, 5, hh);
+      c.globalAlpha = 1;
     };
-    
-    frameId = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frameId);
-  }, [params]);
-
+    const L = '#ffa24c', R = '#7dd3fc';
+    let tp = 0;
+    for (let n = 1; n <= 40; n++) {
+      const lvl = Math.pow(fb, n - 1);
+      if (p.pingPong) {
+        // Ping-pong : première frappe à gauche, puis chaque répétition change de côté (temps G puis D).
+        tp += n % 2 === 1 ? tL : tR;
+        bar(tp, lvl, n % 2 === 1, n % 2 === 1 ? L : R);
+      } else {
+        bar(n * tL, lvl, true, L);
+        bar(n * tR, lvl, false, R);
+      }
+    }
+    if (p.multiTap) {
+      const taps: [number, number][] = [[0.25, dlNum(p.tap4Level, 0.2)], [0.5, dlNum(p.tap2Level, 0.5)], [0.75, dlNum(p.tap3Level, 0.35)]];
+      for (const [f, lv] of taps) { bar(tL * f, lv, true, '#fde68a'); bar(tL * f, lv, false, '#fde68a'); }
+    }
+    c.fillStyle = 'rgba(246,237,214,0.8)'; c.textAlign = 'left';
+    c.fillText('G', 4, 13); c.fillText('D', 4, h - 5);
+  }, [p.bpm, p.feedback, p.freeze, p.pingPong, p.multiTap, p.tap2Level, p.tap3Level, p.tap4Level, tL, tR, size]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="w-[620px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
-            <i className="fas fa-history text-xl"></i>
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight leading-none">Écho (delay)</h2>
-            <p className="text-[11px] text-slate-400 mt-1">Répète la fin des mots en rythme avec le beat.</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          <button 
-            onClick={() => handleParamChange('freeze', !params.freeze)}
-            className={`px-3 h-8 rounded-xl text-[8px] font-black uppercase transition-all border ${params.freeze ? 'bg-purple-500 border-purple-400 text-white shadow-lg shadow-purple-500/20' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            <i className="fas fa-snowflake mr-1"></i>Freeze
-          </button>
-          <button 
-            onClick={() => handleParamChange('pingPong', !params.pingPong)}
-            className={`px-3 h-8 rounded-xl text-[8px] font-black uppercase transition-all border ${params.pingPong ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/20' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            Ping-Pong
-          </button>
-          <button 
-            onClick={() => handleParamChange('multiTap', !params.multiTap)}
-            className={`px-3 h-8 rounded-xl text-[8px] font-black uppercase transition-all border ${params.multiTap ? 'bg-amber-500 border-amber-400 text-black shadow-lg shadow-amber-500/20' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            Multi-Tap
-          </button>
-          <button data-plugin-power 
-            onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-          >
-            <i className="fas fa-power-off text-sm"></i>
-          </button>
-        </div>
-      </div>
-
-      {/* Mode Selector */}
-      <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-        {(['DIGITAL', 'TAPE', 'ANALOG', 'DIFFUSE'] as DelayMode[]).map(m => (
-          <button 
-            key={m}
-            onClick={() => handleParamChange('mode', m)}
-            className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase transition-all ${params.mode === m ? 'bg-cyan-500 text-black shadow-lg' : 'text-slate-500 hover:text-white'}`}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {/* Visualization */}
-      <div className="h-28 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden shadow-inner">
-        <canvas ref={canvasRef} width={580} height={112} className="w-full h-full" />
-      </div>
-
-      {/* Time Division */}
-      <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 justify-between">
-        {(['1/4', '1/4D', '1/8', '1/8D', '1/8T', '1/16', '1/16D', '1/32'] as DelayDivision[]).map(d => (
-          <button 
-            key={d}
-            onClick={() => handleParamChange('division', d)}
-            className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase transition-all ${params.division === d ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-white'}`}
-          >
-            {d}
-          </button>
-        ))}
-      </div>
-
-      {/* Main Controls */}
-      <div className="grid grid-cols-5 gap-4">
-        <DelayKnob label="Retour" value={params.feedback} min={0} max={0.95} factor={100} suffix="%" color="#00f2ff" onChange={v => handleParamChange('feedback', v)} />
-        <DelayKnob label="Tone LP" value={params.feedbackLP || 8000} min={1000} max={20000} log suffix="Hz" color="#00f2ff" onChange={v => handleParamChange('feedbackLP', v)} />
-        <DelayKnob label="Saturation" value={params.saturation || 0.3} min={0} max={1} factor={100} suffix="%" color="#f59e0b" onChange={v => handleParamChange('saturation', v)} />
-        <DelayKnob label="Largeur" value={params.stereoWidth || 1} min={0} max={1} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('stereoWidth', v)} />
-        <DelayKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#fff" onChange={v => handleParamChange('mix', v)} />
-      </div>
-
-      {/* Advanced Toggle */}
-      <button 
-        onClick={() => setShowAdvanced(!showAdvanced)}
-        className="flex items-center justify-center space-x-2 py-2 text-[8px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
-      >
-        <span>{showAdvanced ? 'Hide' : 'Show'} Advanced</span>
-        <i className={`fas fa-chevron-${showAdvanced ? 'up' : 'down'} text-[6px]`}></i>
-      </button>
-
-      {/* Advanced Controls */}
-      {showAdvanced && (
-        <div className="grid grid-cols-5 gap-4 pt-4 border-t border-white/5">
-          <DelayKnob label="Tone HP" value={params.feedbackHP || 80} min={20} max={2000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('feedbackHP', v)} />
-          <DelayKnob label="Mod Rate" value={params.modRate || 0.5} min={0} max={5} suffix="Hz" color="#8b5cf6" onChange={v => handleParamChange('modRate', v)} />
-          <DelayKnob label="Mod Depth" value={params.modDepth || 0.15} min={0} max={1} factor={100} suffix="%" color="#8b5cf6" onChange={v => handleParamChange('modDepth', v)} />
-          <DelayKnob label="Ducking" value={params.ducking || 0} min={0} max={1} factor={100} suffix="%" color="#10b981" onChange={v => handleParamChange('ducking', v)} />
-          <div className="flex flex-col items-center justify-center">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">Temps D</span>
-            <select 
-              value={params.divisionR || params.division}
-              onChange={(e) => handleParamChange('divisionR', e.target.value as DelayDivision)}
-              className="bg-nv-surface border border-white/10 rounded-lg px-2 py-1 text-[9px] font-black text-white w-full cursor-pointer hover:border-cyan-500/50 transition-all"
-            >
-              {(['1/4', '1/4D', '1/8', '1/8D', '1/16'] as DelayDivision[]).map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="pt-4 border-t border-white/5 flex justify-between items-center text-slate-700">
-        <div className="flex items-center space-x-4">
-          <div className="flex flex-col">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Moteur</span>
-            <span className="text-[9px] font-black text-slate-400">{params.mode} DSP</span>
-          </div>
-          {params.multiTap && (
-            <div className="flex flex-col">
-              <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Répétitions</span>
-              <span className="text-[9px] font-black text-amber-400">4 actives</span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-cyan-500 shadow-[0_0_10px_#00f2ff] animate-pulse' : 'bg-slate-800'}`} />
-          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">
-            {params.freeze ? 'FROZEN' : (params.pingPong ? 'STEREO' : 'MONO')}
-          </span>
-        </div>
-      </div>
+    <div ref={wrapRef} className="relative h-full w-full" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave}>
+      <canvas ref={canvasRef} className="hw-screen-canvas" aria-label="Répétitions de l’écho dans le temps, côté gauche en haut et côté droit en bas" />
+      {p.freeze && <span className="hw-screen-label" style={{ right: 8, top: 6, color: '#7dd3fc' }}>Figé : les répétitions tournent sans fin</span>}
     </div>
   );
 };
 
-const DelayKnob: React.FC<{ 
-  label: string, value: number, min: number, max: number, 
-  onChange: (v: number) => void, suffix: string, color: string, 
-  log?: boolean, factor?: number 
-}> = ({ label, value, min, max, onChange, suffix, color, log, factor = 1 }) => {
-  const safeValue = Number.isFinite(value) ? value : min;
-  const knob = useKnobInteraction(safeValue, onChange, { min, max, log });
-  const norm = log 
-    ? (Math.log10(safeValue / min) / Math.log10(max / min)) 
-    : (safeValue - min) / (max - min);
+export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayParams, onParamsChange?: (p: DelayParams) => void }> = ({ node, initialParams, onParamsChange }) => {
+  const [params, setParams] = useState(initialParams);
+  const paramsRef = useRef(params);
+  const base = useRef<Partial<DelayParams>>((() => { try { return node?.getParams?.() || {}; } catch { return {}; } })());
+  const v = { ...DL_DEFAULTS, ...base.current, ...params } as DelayParams;
+
+  const apply = useCallback((patch: Partial<DelayParams>) => {
+    const next = { ...paramsRef.current, ...patch } as DelayParams;
+    paramsRef.current = next;
+    setParams(next);
+    node.updateParams(next);
+    onParamsChange?.(next);
+  }, [node, onParamsChange]);
+
+  const bpm = Math.max(20, Math.min(400, Number(v.bpm) || 120));
+  const beat = 60 / bpm;
+  const tL = Math.min(3.99, beat * (DIVISION_FACTORS[v.division] ?? 1));
+  const divR = (v.divisionR || v.division) as DelayDivision;
+  const tR = Math.min(3.99, beat * (DIVISION_FACTORS[divR] ?? 1));
+  const divs = (cur: DelayDivision) => (DL_DIVS.includes(cur) ? DL_DIVS : [...DL_DIVS, cur].sort((a, b) => (DIVISION_FACTORS[b] ?? 0) - (DIVISION_FACTORS[a] ?? 0)));
+  const listL = divs(v.division), listR = divs(divR);
+  const modOn = v.mode === 'TAPE' || v.mode === 'ANALOG';
+  const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
+  const K = (id: keyof DelayParams, o: Partial<KnobProps> & { min: number; max: number; def: number }) => {
+    const { def, ...rest } = o;
+    const raw = Number((v as any)[id]);
+    return (
+      <Knob key={id as string} paramId={id as string} size="S" cap="cream" arc={DL_ACCENT} ticks={11} defaultValue={def}
+        value={Number.isFinite(raw) ? raw : def} onChange={x => apply({ [id]: x } as any)} {...rest} />
+    );
+  };
+  const toggle = (id: 'pingPong' | 'multiTap' | 'freeze', text: string, hint: string) => (
+    <PushButton key={id} active={!!v[id]} onClick={() => apply({ [id]: !v[id] } as any)} text={text} led={DL_ACCENT} hint={hint}
+      valueText={v[id] ? 'enfoncé' : 'relevé'} dataAttrs={{ 'data-nova-param': id }} />
+  );
 
   return (
-    <div className="flex flex-col items-center space-y-3 select-none touch-none">
-      <div 
-        {...knob.bind}
-        className="relative w-14 h-14 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl"
-      >
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75"
-          style={{ 
-            backgroundColor: color,
-            boxShadow: `0 0 12px ${color}44`,
-            transform: `rotate(${(norm * 270) - 135}deg) translateY(2px)` 
-          }}
-        />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[50px]">
-          <span className="text-[9px] font-mono font-bold text-white">
-            {Math.round(safeValue * factor * 10) / 10}{suffix}
-          </span>
+    <HwWindow type="DELAY" width={740} accent={DL_ACCENT} accentInk="#1f0f02"
+      idleHelp={<>Écho calé sur le tempo du morceau : répète la fin des mots en rythme avec le beat. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="black" className="hw-finish-sea" model="Écho" kicker="Delay calé sur le tempo · bande, analogique, numérique" modelStyle="serif" style={{ ['--hw-accent' as any]: DL_ACCENT }}>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="hw-led hw-led-lg hw-led-blink" data-on={v.isEnabled !== false ? 'true' : 'false'} style={{ ['--led' as any]: DL_ACCENT, ['--hw-blink' as any]: `${tL}s` }}
+              title="Voyant de tempo : clignote à chaque répétition" aria-hidden="true" />
+            <span className="hw-lcd hw-lcd-amber" data-nova-delay-time>{v.division} <small>{dlMs(tL)}{divR !== v.division ? ` · D ${divR} ${dlMs(tR)}` : ''} · {Math.round(bpm)} BPM</small></span>
+          </div>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Type d’écho">
+            {DL_MODES.map(m => (
+              <PushButton key={m.id} role="radio" active={v.mode === m.id} onClick={() => apply({ mode: m.id })} text={m.label} led={DL_ACCENT} hint={m.hint}
+                valueText={v.mode === m.id ? 'choisi' : undefined} dataAttrs={{ 'data-nova-mode': m.id }} />
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
+
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: 120 }}><DelayScreen p={v} tL={tL} tR={tR} /></div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+          <Knob paramId="division" label="Temps" ariaLabel="Temps de l’écho (gauche)" size="L" cap="cream" value={listL.indexOf(v.division)} min={0} max={listL.length - 1}
+            detents={listL.map((d, i) => ({ v: i, label: d.replace('D', '.') }))} defaultValue={0}
+            onChange={i => apply({ division: listL[Math.round(i)] })} format={i => divName(listL[Math.round(i)] || v.division)}
+            hint="Écart entre le mot et sa répétition, en notes du tempo (D / « . » = pointée, T = triolet)." />
+          <Knob paramId="divisionR" label="Temps D" ariaLabel="Temps de l’écho (droite)" size="M" cap="cream" value={listR.indexOf(divR)} min={0} max={listR.length - 1}
+            detents={listR.map((d, i) => ({ v: i, label: d.replace('D', '.') }))} defaultValue={0}
+            onChange={i => apply({ divisionR: listR[Math.round(i)] })} format={i => divName(listR[Math.round(i)] || divR)}
+            hint="Temps du côté droit (stéréo décalée). Sans effet en ping-pong, où les répétitions alternent." />
+          <Knob paramId="feedback" label="Répétitions" size="L" cap="cream" arc={DL_ACCENT} min={0} max={0.95} step={0.01} value={dlNum(v.feedback, 0.4)} defaultValue={0.4}
+            onChange={x => apply({ feedback: x })} format={dlPct} scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 0.95, label: '95' }]}
+            hint={help('Répétitions', 'Nombre de répétitions : bas = un seul écho, haut = de longues traînes.')} />
+          <Knob paramId="mix" label="Mélange" size="L" cap="cream" arc={DL_ACCENT} min={0} max={1} step={0.01} value={dlNum(v.mix, 0.3)} defaultValue={0.3}
+            onChange={x => apply({ mix: x })} format={dlPct} scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]}
+            hint={help('Mélange', 'Part d’écho. En départ (bus de retour), mets 100 %.')} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-start justify-center gap-x-4 gap-y-2">
+          {toggle('pingPong', 'Ping-pong', 'Les répétitions sautent de gauche à droite.')}
+          {toggle('multiTap', 'Multi-répétitions', 'Ajoute trois répétitions entre deux temps (¼, ½ et ¾ du temps).')}
+          {toggle('freeze', 'Figer', 'Les répétitions tournent sans fin (transitions). Relâche pour revenir.')}
+        </div>
+
+        <div className="hw-rule" style={{ margin: '12px 0 10px' }} />
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <HwSection title="Couleur des répétitions" className="flex-[3_1_220px] min-w-0">
+            <div className="flex flex-wrap items-start justify-around gap-x-1 gap-y-2">
+              {K('feedbackHP', { label: 'Coupe-bas', min: 20, max: 2000, def: 80, curve: 'log', step: 1, format: dlHz, hint: help('Coupe-bas', 'Retire les graves des répétitions (plus clair, moins de boue).') })}
+              {K('feedbackLP', { label: 'Coupe-haut', min: 1000, max: 20000, def: 8000, curve: 'log', step: 10, format: dlHz, hint: help('Coupe-haut', 'Retire les aigus : chaque répétition est plus sombre que la précédente.') })}
+              {K('saturation', { label: 'Saturation', min: 0, max: 1, def: 0.3, step: 0.01, format: dlPct, hint: 'Grain des répétitions fortes (modes Bande et Analogique).' })}
+            </div>
+          </HwSection>
+          <HwSection title="Mouvement et espace" className="flex-[4_1_300px] min-w-0">
+            <div className="flex flex-wrap items-start justify-around gap-x-1 gap-y-2">
+              {K('modRate', { label: 'Pleurage', ariaLabel: 'Vitesse du pleurage', min: 0, max: 5, def: 0.3, step: 0.01, format: x => `${x.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} Hz`,
+                hint: `Vitesse de l’ondulation de la bande.${modOn ? '' : ' Actif en modes Bande et Analogique seulement.'}` })}
+              {K('modDepth', { label: 'Profondeur', ariaLabel: 'Profondeur du pleurage', min: 0, max: 1, def: 0.05, step: 0.01, format: dlPct,
+                hint: `Intensité de l’ondulation.${modOn ? '' : ' Actif en modes Bande et Analogique seulement.'}` })}
+              {K('stereoWidth', { label: 'Largeur', ariaLabel: 'Largeur stéréo', min: 0, max: 1, def: 1, step: 0.01, format: dlPct, hint: help('Largeur stéréo', '0 % = répétitions au centre, 100 % = gauche et droite séparées.') })}
+              {K('ducking', { label: 'Retrait', ariaLabel: 'Retrait sous la voix', min: 0, max: 1, def: 0, step: 0.01, format: dlPct, hint: help('Retrait sous la voix', 'Les échos se retirent quand tu chantes et reviennent entre les phrases.') })}
+            </div>
+          </HwSection>
+        </div>
+        {v.multiTap && (
+          <HwSection title="Multi-répétitions" className="mt-2">
+            <div className="flex flex-wrap items-start justify-around gap-x-1 gap-y-2">
+              {K('tap4Level', { label: '¼ du temps', ariaLabel: 'Niveau de la répétition à ¼', min: 0, max: 1, def: 0.2, step: 0.01, format: dlPct, hint: 'Niveau de la répétition placée au quart du temps.' })}
+              {K('tap2Level', { label: '½ du temps', ariaLabel: 'Niveau de la répétition à ½', min: 0, max: 1, def: 0.5, step: 0.01, format: dlPct, hint: 'Niveau de la répétition placée à la moitié du temps.' })}
+              {K('tap3Level', { label: '¾ du temps', ariaLabel: 'Niveau de la répétition à ¾', min: 0, max: 1, def: 0.35, step: 0.01, format: dlPct, hint: 'Niveau de la répétition placée aux trois quarts du temps.' })}
+            </div>
+          </HwSection>
+        )}
+      </Faceplate>
+    </HwWindow>
   );
 };

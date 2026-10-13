@@ -2,7 +2,7 @@
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { Faceplate, HwSection, HwWindow, Knob, PushButton, useHwHelp } from './hw';
 import { retireWorkletNode } from '../engine/workletGuard';
 
 // Export constants for use in other plugins (MasterSync)
@@ -689,277 +689,167 @@ interface AutoTuneUIProps {
   onParamsChange?: (p: AutoTuneParams) => void;
 }
 
-export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onParamsChange }) => {
-  const [params, setParams] = useState<AutoTuneParams>(initialParams);
-  const paramsRef = useRef<AutoTuneParams>(initialParams); // Ref to hold latest params for event listeners
-  const [vizData, setVizData] = useState({ detectedFreq: 0, targetFreq: 0, correctionCents: 0 });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isDragging = useRef(false);
-  const activeParam = useRef<keyof AutoTuneParams | null>(null);
+// ── Fenêtre ─────────────────────────────────────────────────────────────────
 
-  // Sync ref with state
-  useEffect(() => {
-    paramsRef.current = params;
-  }, [params]);
+const AT_ACCENT = '#c6f432';
+/** Notes de chaque gamme (mêmes masques que le worklet). */
+const AT_SCALE_NOTES: Record<string, number[]> = {
+  CHROMATIC: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], MAJOR: [0, 2, 4, 5, 7, 9, 11], MINOR: [0, 2, 3, 5, 7, 8, 10],
+  MINOR_HARMONIC: [0, 2, 3, 5, 7, 8, 11], PENTATONIC: [0, 3, 5, 7, 10],
+};
+const AT_SCALE_SHORT: Record<string, string> = { CHROMATIC: 'Chromatique', MAJOR: 'Majeure', MINOR: 'Mineure', MINOR_HARMONIC: 'Min. harmonique', PENTATONIC: 'Pentatonique' };
+const AT_SCALE_HINT: Record<string, string> = {
+  CHROMATIC: 'Toutes les notes : la voix est ramenée au demi-ton le plus proche (sûr si tu ne connais pas la tonalité).',
+  MAJOR: 'Gamme majeure de la tonalité choisie.', MINOR: 'Gamme mineure naturelle de la tonalité choisie (la plus courante en rap).',
+  MINOR_HARMONIC: 'Mineure harmonique : comme la mineure, avec la 7e relevée (couleur orientale).',
+  PENTATONIC: 'Pentatonique mineure : 5 notes seulement, correction très marquée et « sûre ».',
+};
+const NOTE_FR = ['Do', 'Do#', 'Ré', 'Ré#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si'];
+const noteOf = (freq: number) => (freq > 0 ? ((Math.round(69 + 12 * Math.log2(freq / 440)) % 12) + 12) % 12 : -1);
+const speedText = (v: number) => (v < 0.05 ? 'Robot' : `${Math.round(300 * v * v)} ms`);
 
+/**
+ * Écran de Nova Tune : note visée en grand, note chantée, et aiguille de la
+ * correction (± 100 cents). Les messages du moteur (~45 par seconde) sont lus
+ * dans une boucle d'image qui écrit directement dans l'écran : la façade ne se
+ * redessine pas.
+ */
+const TuneScreen: React.FC<{ node: AutoTuneNode; enabled: boolean }> = ({ node, enabled }) => {
+  const data = useRef({ detectedFreq: 0, targetFreq: 0, correctionCents: 0, at: 0 });
+  const needle = useRef<SVGGElement | null>(null);
+  const target = useRef<HTMLSpanElement | null>(null);
+  const sung = useRef<HTMLSpanElement | null>(null);
+  const cents = useRef<HTMLSpanElement | null>(null);
+  const help = useHwHelp('at-screen', 'Écran de justesse', 'En grand : la note visée. Dessous : la note chantée. L’aiguille montre la correction appliquée, en cents (100 cents = un demi-ton).', undefined);
   useEffect(() => {
-    node.setStatusCallback((data) => {
-      setVizData(data);
-    });
-    return () => node.setStatusCallback(() => {});
+    node?.setStatusCallback?.((d: any) => { data.current = { ...data.current, ...(d || {}), at: performance.now() }; });
+    let raf = 0;
+    let shown = { ang: 999, t: '', s: '', c: '' };
+    const loop = (t: number) => {
+      raf = requestAnimationFrame(loop);
+      const d = data.current;
+      const live = t - d.at < 400 && d.detectedFreq > 50;
+      const c = live ? Math.max(-100, Math.min(100, d.correctionCents || 0)) : 0;
+      const ang = Math.round(c * 0.6 * 10) / 10;
+      const tn = live && d.targetFreq > 0 ? NOTES[noteOf(d.targetFreq)] : '--';
+      const sn = live ? `Chantée : ${NOTES[noteOf(d.detectedFreq)]} (${NOTE_FR[noteOf(d.detectedFreq)]})` : 'En attente de voix…';
+      const ct = live ? `${c > 0 ? '+' : c < 0 ? '−' : ''}${Math.abs(Math.round(c))} cents` : '';
+      if (ang !== shown.ang && needle.current) needle.current.setAttribute('transform', `rotate(${ang} 100 104)`);
+      if (tn !== shown.t && target.current) target.current.textContent = tn;
+      if (sn !== shown.s && sung.current) sung.current.textContent = sn;
+      if (ct !== shown.c && cents.current) cents.current.textContent = ct;
+      shown = { ang, t: tn, s: sn, c: ct };
+    };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); node?.setStatusCallback?.(() => {}); };
   }, [node]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    let frameId: number;
-
-    const draw = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.beginPath();
-      ctx.moveTo(w/2, 0); ctx.lineTo(w/2, h); 
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(0, 242, 255, 0.05)';
-      ctx.fillRect(w/2 - 20, 0, 40, h);
-
-      if (vizData.detectedFreq > 50) {
-        const offset = Math.max(-100, Math.min(100, vizData.correctionCents));
-        const x = (w / 2) + (offset / 100) * (w / 2 * 0.8); 
-
-        ctx.strokeStyle = '#00f2ff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(w/2, h/2 - 20); ctx.lineTo(w/2, h/2 + 20);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(x, h/2, 8, 0, Math.PI * 2);
-        ctx.fillStyle = paramsRef.current.isEnabled ? '#ffffff' : '#555';
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(x, h/2);
-        ctx.lineTo(w/2, h/2);
-        ctx.strokeStyle = `rgba(0, 242, 255, ${Math.abs(offset) / 100})`;
-        ctx.stroke();
-      }
-
-      frameId = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(frameId);
-  }, [vizData]);
-
-  const updateParam = (key: keyof AutoTuneParams, value: any) => {
-    const newParams = { ...params, [key]: value };
-    setParams(newParams);
-    node.updateParams(newParams);
-    if (onParamsChange) onParamsChange(newParams);
-  };
-
-  const lastTouchY = useRef<number>(0);
-
-  const handleMouseDown = (param: keyof AutoTuneParams, e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    activeParam.current = param;
-    document.body.style.cursor = 'ns-resize';
-  };
-
-  const handleTouchStart = (param: keyof AutoTuneParams, e: React.TouchEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    activeParam.current = param;
-    lastTouchY.current = e.touches[0].clientY;
-  };
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging.current || !activeParam.current) return;
-    const delta = -e.movementY / 150;
-    
-    // FIX #310: Use ref to get current state, do not use functional update for side effects
-    const currentParams = paramsRef.current;
-    const currentVal = currentParams[activeParam.current!];
-    
-    if (typeof currentVal !== 'number') return;
-    
-    const newVal = Math.max(0, Math.min(1, currentVal + delta));
-    const newParams = { ...currentParams, [activeParam.current!]: newVal };
-    
-    setParams(newParams);
-    node.updateParams(newParams);
-    
-    if (onParamsChange) {
-        // We call this directly, assuming parent handles it efficiently or debounces if needed.
-        // The issue #310 comes from calling this inside setParams(prev => ... here ...).
-        onParamsChange(newParams);
-    }
-  }, [node, onParamsChange]);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!isDragging.current || !activeParam.current || e.touches.length === 0) return;
-    e.preventDefault();
-
-    const currentY = e.touches[0].clientY;
-    const delta = -(currentY - lastTouchY.current) / 150;
-    lastTouchY.current = currentY;
-
-    const currentParams = paramsRef.current;
-    const currentVal = currentParams[activeParam.current!];
-
-    if (typeof currentVal !== 'number') return;
-
-    const newVal = Math.max(0, Math.min(1, currentVal + delta));
-    const newParams = { ...currentParams, [activeParam.current!]: newVal };
-
-    setParams(newParams);
-    node.updateParams(newParams);
-
-    if (onParamsChange) {
-        onParamsChange(newParams);
-    }
-  }, [node, onParamsChange]);
-
-  const handleMouseUp = useCallback(() => {
-    isDragging.current = false;
-    activeParam.current = null;
-    document.body.style.cursor = 'default';
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    isDragging.current = false;
-    activeParam.current = null;
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
-    window.addEventListener('touchcancel', handleTouchEnd);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
-
-  const getNoteName = (freq: number) => {
-    if (freq <= 0) return '--';
-    const midi = Math.round(69 + 12 * Math.log2(freq / 440));
-    return NOTES[midi % 12] || '--';
-  };
-
+  const ticks = [];
+  for (let k = -100; k <= 100; k += 10) {
+    const a = ((k * 0.6 - 90) * Math.PI) / 180;
+    const r0 = k % 50 === 0 ? 74 : 80;
+    ticks.push(<line key={k} x1={100 + Math.cos(a) * r0} y1={104 + Math.sin(a) * r0} x2={100 + Math.cos(a) * 88} y2={104 + Math.sin(a) * 88}
+      stroke={k === 0 ? AT_ACCENT : 'rgba(226,232,240,0.6)'} strokeWidth={k % 50 === 0 ? 2 : 1} />);
+  }
   return (
-    <div className="w-[480px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-10 animate-in fade-in zoom-in duration-300 select-none">
-      <div className="flex justify-between items-start">
-        <div className="flex items-center space-x-5">
-          <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
-            <i className="fas fa-microphone-alt text-2xl"></i>
-          </div>
-          <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Nova <span className="text-cyan-400">Tune</span></h2>
-            <p className="text-[9px] font-bold text-slate-500 tracking-wide mt-2">Correction de justesse en temps réel</p>
-          </div>
-        </div>
-        <button data-plugin-power 
-          onClick={() => updateParam('isEnabled', !params.isEnabled)}
-          title={params.isEnabled ? 'Autotune actif : clic pour le couper' : 'Autotune coupé : clic pour le réactiver'}
-          aria-label={params.isEnabled ? "Couper l'autotune" : "Activer l'autotune"}
-          aria-pressed={params.isEnabled}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-        >
-          <i className="fas fa-power-off"></i>
-        </button>
-      </div>
-
-      <div className="h-44 bg-black/60 rounded-[32px] border border-white/5 relative flex flex-col items-center justify-center overflow-hidden shadow-inner group">
-        <canvas ref={canvasRef} width={400} height={176} className="absolute inset-0 opacity-60" />
-        <div className="relative text-center z-10 pointer-events-none">
-           <span className="block text-[9px] font-black text-cyan-500/50 uppercase tracking-[0.3em] mb-2">Note visée</span>
-           <span className="text-7xl font-black text-white font-mono tracking-tighter leading-none text-shadow-glow">
-             {vizData.targetFreq > 0 ? getNoteName(vizData.targetFreq) : '--'}
-           </span>
-           <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">
-             Chantée : {getNoteName(vizData.detectedFreq)}
-           </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-6 bg-white/[0.02] p-6 rounded-[24px] border border-white/5">
-        <div className="space-y-3">
-          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Tonalité</label>
-          <select 
-            value={params.rootKey} 
-            onChange={(e) => updateParam('rootKey', parseInt(e.target.value))}
-            className="w-full bg-nv-surface border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
-          >
-            {NOTES.map((n, i) => <option key={n} value={i}>{n}</option>)}
-          </select>
-        </div>
-        <div className="space-y-3">
-          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Gamme</label>
-          <select 
-            value={params.scale} 
-            onChange={(e) => updateParam('scale', e.target.value as any)}
-            className="w-full bg-nv-surface border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
-          >
-            {SCALES.map(s => <option key={s} value={s}>{SCALE_LABELS[s] || s}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-8 pt-2">
-        <TuneKnob label="Vitesse" value={params.speed} defaultValue={0.1} onChange={(v) => updateParam('speed', v)} factor={100} suffix="%" inverseLabel={true} />
-        <TuneKnob label="Naturel" value={params.humanize} defaultValue={0.2} onChange={(v) => updateParam('humanize', v)} factor={100} suffix="%" />
-        <TuneKnob label="Dosage" value={params.mix} defaultValue={1} onChange={(v) => updateParam('mix', v)} factor={100} suffix="%" />
+    <div className="relative h-full w-full flex flex-col items-center justify-start pt-1.5" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave}
+      style={{ opacity: enabled ? 1 : 0.5 }} data-nova-tune-screen>
+      <svg viewBox="0 0 200 112" style={{ width: 'min(100%, 230px)', flex: 'none' }} aria-hidden="true">
+        <path d="M 22 104 A 78 78 0 0 1 178 104" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="14" />
+        <path d="M 87 27 A 78 78 0 0 1 113 27" fill="none" stroke={AT_ACCENT} strokeOpacity="0.35" strokeWidth="14" />
+        {ticks}
+        <text x="22" y="100" fill="rgba(226,232,240,0.75)" fontSize="8" fontWeight="700" textAnchor="middle">−100</text>
+        <text x="178" y="100" fill="rgba(226,232,240,0.75)" fontSize="8" fontWeight="700" textAnchor="middle">+100</text>
+        <g ref={needle} transform="rotate(0 100 104)">
+          <line x1="100" y1="104" x2="100" y2="20" stroke="#f8fafc" strokeWidth="2" strokeLinecap="round" />
+        </g>
+        <circle cx="100" cy="104" r="4" fill="#f8fafc" />
+      </svg>
+      <div className="relative z-10 -mt-1 flex flex-col items-center pointer-events-none">
+        <span className="hw-silk" style={{ color: AT_ACCENT, fontSize: 9 }}>Note visée</span>
+        <span ref={target} className="font-mono font-black leading-none" style={{ fontSize: 40, color: '#f8fafc', textShadow: `0 0 18px ${AT_ACCENT}55` }}>--</span>
+        <span ref={sung} className="mt-1 text-[11px] font-bold" style={{ color: '#cbd5e1' }}>En attente de voix…</span>
+        <span ref={cents} className="text-[10px] font-mono font-bold" style={{ color: AT_ACCENT, minHeight: 13 }} />
       </div>
     </div>
   );
 };
 
-const TuneKnob: React.FC<{
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  defaultValue?: number;
-  factor: number;
-  suffix: string;
-  inverseLabel?: boolean
-}> = ({ label, value, onChange, defaultValue, factor, suffix, inverseLabel }) => {
-  const knob = useKnobInteraction(value, onChange, { min: 0, max: 1, sensitivity: 150, defaultValue });
-  const rotation = (value * 270) - 135;
-  let displayValue = `${Math.round(value * factor)}${suffix}`;
-  if (inverseLabel) {
-      // Meme courbe que le worklet : constante de temps = 300 ms x vitesse^2.
-      // L'ancien affichage etait inverse (plus lent affichait moins de ms).
-      if (value < 0.05) displayValue = "ROBOT";
-      else displayValue = `${Math.round(300 * value * value)}ms`;
-  }
+/** Clavier d'une octave : clic = tonalité ; point vert = note de la gamme. */
+const KeyPiano: React.FC<{ root: number; scale: string; onPick: (n: number) => void }> = ({ root, scale, onPick }) => {
+  const inScale = new Set((AT_SCALE_NOTES[scale] || AT_SCALE_NOTES.CHROMATIC).map(i => (i + root) % 12));
+  const whites = [0, 2, 4, 5, 7, 9, 11];
+  const blacks: [number, number][] = [[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]; // note, position après la n-ième touche blanche
+  const help = useHwHelp('at-key', 'Tonalité', 'Touche la note de base du morceau. Les points verts montrent les notes de la gamme vers lesquelles la voix est ramenée.', `${NOTES[root]} (${NOTE_FR[root]})`);
+  const key = (n: number, style: React.CSSProperties, black: boolean) => (
+    <button key={n} type="button" role="radio" aria-checked={root === n} aria-label={`${NOTES[n]} (${NOTE_FR[n]})`} data-in={inScale.has(n) ? 'true' : 'false'}
+      className={`hw-piano-key ${black ? 'hw-piano-black' : 'hw-piano-white'}`} style={style} onClick={() => onPick(n)} title={`Tonalité : ${NOTES[n]} (${NOTE_FR[n]})`}
+      tabIndex={root === n ? 0 : -1}
+      onKeyDown={e => {
+        const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+        if (!d) return;
+        e.preventDefault(); e.stopPropagation();
+        onPick((root + d + 12) % 12);
+      }}>
+      {NOTES[n]}
+    </button>
+  );
+  const ww = 100 / 7;
+  return (
+    <div className="hw-piano" role="radiogroup" aria-label="Tonalité" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave} onFocus={help.onFocus} onBlur={help.onBlur} data-nova-param="rootKey">
+      {whites.map((n, i) => key(n, { left: `calc(${i * ww}% + 1px)`, width: `calc(${ww}% - 2px)` }, false))}
+      {blacks.map(([n, pos]) => key(n, { left: `calc(${pos * ww}% - ${ww * 0.3}%)`, width: `${ww * 0.6}%` }, true))}
+    </div>
+  );
+};
+
+export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onParamsChange }) => {
+  const [params, setParams] = useState<AutoTuneParams>(initialParams);
+  const paramsRef = useRef<AutoTuneParams>(initialParams);
+
+  const updateParam = useCallback((key: keyof AutoTuneParams, value: any) => {
+    const next = { ...paramsRef.current, [key]: value };
+    paramsRef.current = next;
+    setParams(next);
+    node.updateParams(next);
+    onParamsChange?.(next);
+  }, [node, onParamsChange]);
+
+  const num = (v: any, def: number) => (Number.isFinite(+v) ? +v : def);
+  const scale = SCALES.includes(params.scale) ? params.scale : 'CHROMATIC';
+  const root = Math.max(0, Math.min(11, Math.round(num(params.rootKey, 0))));
 
   return (
-    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize touch-none" {...knob.bind}>
-      <div className="relative w-16 h-16 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div
-          className="absolute w-1.5 h-6 bg-current rounded-full origin-bottom bottom-1/2 transition-transform duration-75"
-          style={{ transform: `rotate(${rotation}deg)`, color: '#00f2ff', boxShadow: `0 0 10px #00f2ff` }}
-        />
-      </div>
-      <div className="text-center">
-        <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[50px]">
-          <span className="text-[9px] font-mono font-bold text-white">{displayValue}</span>
+    <HwWindow type="AUTOTUNE" width={620} accent={AT_ACCENT} accentInk="#152003"
+      idleHelp={<>Ramène la voix sur les notes justes. Choisis la tonalité et la gamme du morceau, puis la vitesse : rapide = effet robot, lente = correction naturelle. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="black" className="hw-finish-carbon" model="Nova Tune" kicker="Correction de justesse en temps réel" modelStyle="wide" style={{ ['--hw-accent' as any]: AT_ACCENT }}>
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: 222 }}><TuneScreen node={node} enabled={params.isEnabled !== false} /></div>
         </div>
-      </div>
-    </div>
+
+        <HwSection title={`Tonalité · ${NOTES[root]} ${AT_SCALE_SHORT[scale].toLowerCase()}`} className="mt-3">
+          <KeyPiano root={root} scale={scale} onPick={n => updateParam('rootKey', n)} />
+          <div className="mt-3 grid grid-cols-3 sm:grid-cols-5 gap-1.5" role="radiogroup" aria-label="Gamme">
+            {SCALES.map(s => (
+              <PushButton key={s} role="radio" active={scale === s} onClick={() => updateParam('scale', s)} text={AT_SCALE_SHORT[s]} led={AT_ACCENT} dark
+                hint={AT_SCALE_HINT[s]} ariaLabel={SCALE_LABELS[s] || s} valueText={scale === s ? 'choisie' : undefined} dataAttrs={{ 'data-nova-scale': s }} />
+            ))}
+          </div>
+        </HwSection>
+
+        <div className="hw-rule" style={{ margin: '12px 0 8px' }} />
+        <div className="flex flex-wrap items-center justify-around gap-x-2 gap-y-2">
+          <Knob paramId="humanize" label="Naturel" ariaLabel="Naturel (humanisation)" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.01}
+            value={num(params.humanize, 0.2)} defaultValue={0.2} onChange={v => updateParam('humanize', v)} format={v => `${Math.round(v * 100)} %`} ticks={11}
+            hint="Laisse vivre les notes tenues (vibrato) en corrigeant plus doucement quand la note dure." />
+          <Knob paramId="speed" label="Vitesse" ariaLabel="Vitesse de correction" size="XL" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.005}
+            value={num(params.speed, 0.1)} defaultValue={0.1} onChange={v => updateParam('speed', v)} format={speedText} sub="Temps de correction (ms)"
+            scale={[{ v: 0, label: '0' }, { v: Math.sqrt(25 / 300), label: '25' }, { v: 0.5, label: '75' }, { v: Math.sqrt(150 / 300), label: '150' }, { v: 1, label: '300' }]}
+            hint="À gauche (0 ms) : effet robot, la note saute d’un coup. À droite : correction lente et naturelle." />
+          <Knob paramId="mix" label="Dosage" ariaLabel="Dosage de la correction" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.01}
+            value={num(params.mix, 1)} defaultValue={1} onChange={v => updateParam('mix', v)} format={v => `${Math.round(v * 100)} %`} ticks={11}
+            hint="Force de la correction : 100 % = note juste, 50 % = à mi-chemin, 0 % = voix d’origine." />
+        </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
