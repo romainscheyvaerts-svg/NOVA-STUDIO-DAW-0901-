@@ -4,6 +4,7 @@ import { loadWorkletModule } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { createDeesserCore } from '../engine/deesserCore';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { Faceplate, HwWindow, Knob, SegmentMeter, ToggleSwitch } from './hw';
 
 /**
  * DE-ESSER NOVA (v3, mesuré au labo : D:\1 WORK\CONTENU\nova-labo\deesser)
@@ -336,20 +337,97 @@ export function deesserResponseDb(f: number, p: Pick<DeEsserParams, 'mode' | 'fr
   return 10 * Math.log10(yr * yr + yi * yi + 1e-30);
 }
 
+
 interface VocalDeEsserUIProps {
   node: DeEsserNode;
   initialParams: DeEsserParams;
   onParamsChange?: (p: DeEsserParams) => void;
 }
 
+const DS_ACCENT = '#f87171';
+
+/**
+ * Écran de la courbe : réduction maximale (pointillés) et réduction en cours
+ * (pleine). Redessiné par sa propre boucle (mesure du nœud) : la façade, elle,
+ * ne se redessine pas à chaque image.
+ */
+const DeEsserScreen: React.FC<{ node: DeEsserNode; params: DeEsserParams }> = ({ node, params }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const lastRef = useRef({ gr: -1, key: '' });
+  useEffect(() => {
+    let raf = 0;
+    const draw = (gr: number) => {
+      const cv = canvasRef.current;
+      const ctx = cv?.getContext('2d');
+      if (!cv || !ctx) return;
+      const p = paramsRef.current;
+      const w = cv.width, h = cv.height;
+      ctx.clearRect(0, 0, w, h);
+      const fmin = 1000, fmax = 20000, top = 26, dbMax = 20;
+      const xOf = (f: number) => (Math.log(f / fmin) / Math.log(fmax / fmin)) * w;
+      const yOf = (db: number) => top + (-db / dbMax) * (h - top - 16);
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgba(203,213,225,0.75)';
+      ctx.font = '10px system-ui, sans-serif';
+      for (const f of [2000, 4000, 8000, 16000]) {
+        const x = xOf(f);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h - 14); ctx.stroke();
+        ctx.fillText(f >= 1000 ? `${f / 1000}k` : String(f), x + 2, h - 3);
+      }
+      for (const d of [-6, -12, -18]) {
+        const y = yOf(d);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        ctx.fillText(`${d} dB`, 2, y - 2);
+      }
+      const curve = (g: number, style: string, dash: number[], width: number) => {
+        ctx.strokeStyle = style; ctx.lineWidth = width; ctx.setLineDash(dash);
+        ctx.beginPath();
+        for (let i = 0; i <= w; i += 2) {
+          const f = fmin * Math.pow(fmax / fmin, i / w);
+          const y = yOf(deesserResponseDb(f, p, g));
+          if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      };
+      curve(deesserMaxRangeDb(p.reduction), 'rgba(248,113,113,0.55)', [4, 4], 1.5);
+      curve(gr, '#f87171', [], 2.5);
+      const xf = xOf(p.frequency);
+      ctx.fillStyle = '#fca5a5';
+      ctx.beginPath(); ctx.arc(xf, yOf(0), 4, 0, Math.PI * 2); ctx.fill();
+    };
+    const loop = () => {
+      const m = node?.getMeters ? node.getMeters() : { grNowDb: -(node?.getReduction?.() || 0), grDb: 0 };
+      const gr = Math.max(0, m.grNowDb || 0);
+      const p = paramsRef.current;
+      const key = `${p.mode}|${p.frequency}|${p.q}|${p.reduction}`;
+      if (Math.abs(gr - lastRef.current.gr) > 0.05 || key !== lastRef.current.key) {
+        lastRef.current = { gr, key };
+        draw(gr);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [node]);
+  return (
+    <div className="hw-screen">
+      <div className="hw-screen-glass h-32">
+        <canvas ref={canvasRef} width={480} height={128} className="w-full h-full block" aria-label="Courbe de réduction : pointillés = réduction maximale, trait plein = réduction en cours" />
+        <span className="absolute top-1.5 left-3 text-[11px] font-bold px-1.5 rounded" style={{ color: '#e2e8f0', background: 'rgba(0,0,0,.5)' }}>Zone des « s » : {fmtHz(params.frequency)}</span>
+      </div>
+    </div>
+  );
+};
+
 export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<DeEsserParams>(() => ({
     ...DEESSER_DEFAULTS, threshold: -25, detection: 'ABSOLUTE', ...(initialParams || {}),
   } as DeEsserParams));
   const paramsRef = useRef(params);
-  const [meter, setMeter] = useState({ now: 0, hold: 0 });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const holdRef = useRef({ v: 0, at: 0 });
 
   useEffect(() => { paramsRef.current = params; }, [params]);
 
@@ -361,153 +439,62 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
     onParamsChange?.(next);
   }, [node, onParamsChange]);
 
-  // VU de réduction (~30 i/s) avec maximum tenu 2 s
-  useEffect(() => {
-    let raf = 0;
-    const loop = (t: number) => {
-      const m = node?.getMeters ? node.getMeters() : { grNowDb: -(node?.getReduction?.() || 0), grDb: 0 };
-      const now = Math.max(0, m.grNowDb || 0, m.grDb || 0);
-      const h = holdRef.current;
-      if (now >= h.v || t - h.at > 2000) { h.v = now; h.at = t; }
-      setMeter(prev => (Math.abs(prev.now - now) > 0.05 || Math.abs(prev.hold - h.v) > 0.05 ? { now, hold: h.v } : prev));
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [node]);
-
-  // Courbe : réduction maximale (pointillés) et réduction en cours (pleine)
-  useEffect(() => {
-    const cv = canvasRef.current;
-    if (!cv) return;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-    const w = cv.width, h = cv.height;
-    ctx.clearRect(0, 0, w, h);
-    const fmin = 1000, fmax = 20000, top = 26, dbMax = 20;
-    const xOf = (f: number) => (Math.log(f / fmin) / Math.log(fmax / fmin)) * w;
-    const yOf = (db: number) => top + (-db / dbMax) * (h - top - 16);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = 'rgba(203,213,225,0.75)';
-    ctx.font = '10px system-ui, sans-serif';
-    for (const f of [2000, 4000, 8000, 16000]) {
-      const x = xOf(f);
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h - 14); ctx.stroke();
-      ctx.fillText(f >= 1000 ? `${f / 1000}k` : String(f), x + 2, h - 3);
-    }
-    for (const d of [-6, -12, -18]) {
-      const y = yOf(d);
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      ctx.fillText(`${d} dB`, 2, y - 2);
-    }
-    const draw = (gr: number, style: string, dash: number[], width: number) => {
-      ctx.strokeStyle = style; ctx.lineWidth = width; ctx.setLineDash(dash);
-      ctx.beginPath();
-      for (let i = 0; i <= w; i += 2) {
-        const f = fmin * Math.pow(fmax / fmin, i / w);
-        const y = yOf(deesserResponseDb(f, params, gr));
-        if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-    };
-    draw(deesserMaxRangeDb(params.reduction), 'rgba(248,113,113,0.55)', [4, 4], 1.5);
-    draw(meter.now, '#f87171', [], 2.5);
-    const xf = xOf(params.frequency);
-    ctx.fillStyle = '#fca5a5';
-    ctx.beginPath(); ctx.arc(xf, yOf(0), 4, 0, Math.PI * 2); ctx.fill();
-  }, [params, meter.now]);
-
   const relative = params.detection !== 'ABSOLUTE';
   const listen = Math.round(params.listen || 0);
-  const pct = (x: number) => `${Math.min(100, (x / 20) * 100)}%`;
+  const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
+  const readGr = () => {
+    const m = node?.getMeters ? node.getMeters() : { grNowDb: -(node?.getReduction?.() || 0), grDb: 0 };
+    return Math.max(0, m.grNowDb || 0);
+  };
 
   return (
-    <div data-nova-plugin="DEESSER" className="w-[min(540px,calc(100vw-16px))] bg-nv-bg border border-white/10 rounded-[28px] p-5 sm:p-7 shadow-2xl flex flex-col gap-5 select-none text-white">
-      <div className="flex justify-between items-start gap-3">
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="w-12 h-12 shrink-0 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-300 border border-red-500/25">
-            <i className="fas fa-scissors text-xl" aria-hidden="true"></i>
+    <HwWindow type="DEESSER" width={560} accent={DS_ACCENT} accentInk="#200606" fallback={!!node?.isFallback?.()}
+      idleHelp={<>Adoucit les « s » et les « ch » qui sifflent : seule leur zone est baissée, le reste de la voix est intact. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish="slate" model="De-esser" kicker="Atténuateur de sifflantes" modelStyle="wide" style={{ ['--hw-accent' as any]: DS_ACCENT }}>
+        <div className="flex items-start gap-4 mb-3">
+          <div className="flex-1 min-w-0" data-nova-gr>
+            <SegmentMeter label="Réduction des « s »" max={20} segments={30} holdMs={2000}
+              read={readGr} colorAt={v => (v > 12 ? '#ef4444' : v > 6 ? '#fb923c' : '#facc15')} hint="Réduction appliquée à la zone des « s », en dB (maximum tenu 2 s)"
+              scale={[{ v: 0, label: '0' }, { v: 5, label: '5' }, { v: 10, label: '10' }, { v: 15, label: '15' }, { v: 20, label: '20 dB' }]}
+              format={(v, h) => `${v > 0.05 ? `−${fr(v)}` : '0,0'} dB · max ${h > 0.05 ? `−${fr(h)}` : '0,0'} dB`} />
           </div>
-          <div className="min-w-0">
-            <h2 className="text-lg font-black tracking-tight leading-none">De-esser <span className="text-red-300">· NOVA</span></h2>
-            <p className="text-[12px] text-slate-300 mt-1.5 leading-snug">Adoucit les « s » et les « ch » qui sifflent : seule leur zone est baissée, le reste de la voix est intact.</p>
-          </div>
+          {/* Pas d'interrupteur interne : la barre de la fenêtre (bypass) est le seul marche / arrêt. */}
         </div>
-        <button data-plugin-power type="button" onClick={() => apply({ isEnabled: !params.isEnabled })} aria-pressed={params.isEnabled}
-          aria-label={params.isEnabled ? 'Désactiver le de-esser' : 'Activer le de-esser'}
-          className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-red-400 border-red-300 text-black shadow-lg shadow-red-500/30' : 'bg-white/5 border-white/15 text-slate-400 hover:text-white'}`}>
-          <i className="fas fa-power-off" aria-hidden="true"></i>
-        </button>
-      </div>
 
-      <div data-nova-gr title="Réduction appliquée à la zone des « s », en dB (maximum tenu 2 s)">
-        <div className="flex items-baseline justify-between text-[12px] mb-1">
-          <span className="font-bold text-slate-200">Réduction des « s »</span>
-          <span className="font-mono font-black tabular-nums">{meter.now > 0.05 ? `−${fr(meter.now)}` : '0,0'} dB <span className="text-slate-400 font-normal">· max {meter.hold > 0.05 ? `−${fr(meter.hold)}` : '0,0'} dB</span></span>
+        <DeEsserScreen node={node} params={params} />
+
+        <div className="mt-3 flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+          <Knob paramId="frequency" label="Fréquence" size="L" cap="silver" arc={DS_ACCENT} min={2000} max={16000} curve="log" step={10} value={params.frequency} defaultValue={8000}
+            onChange={v => apply({ frequency: v })} format={fmtHz} hint={help('Fréquence', 'Centre de la zone des « s » (8 kHz par défaut). Astuce : « Écoute : la bande » pour la placer.')}
+            scale={[{ v: 2000, label: '2k' }, { v: 4000, label: '4k' }, { v: 8000, label: '8k' }, { v: 16000, label: '16k' }]} />
+          <Knob paramId="q" label="Largeur" size="M" cap="silver" arc={DS_ACCENT} min={0.3} max={6} step={0.05} value={params.mode === 'SHELF' ? 1 : params.q} defaultValue={1}
+            disabled={params.mode === 'SHELF'} onChange={v => apply({ q: v })} format={v => (params.mode === 'SHELF' ? '—' : `Q ${fr(v)}`)}
+            hint={help('Largeur', 'Plus la valeur est haute, plus la zone traitée est étroite.')} ticks={11} />
+          {relative ? (
+            <Knob key="rel" paramId="relThreshold" label="Sensibilité" size="M" cap="silver" arc={DS_ACCENT} min={-6} max={30} step={0.5} value={-(params.relThreshold ?? -6)} defaultValue={6}
+              onChange={v => apply({ relThreshold: -v })} format={v => `${fr(v, 0)} dB`} ticks={11}
+              hint={help('Sensibilité', 'Seuil relatif : plus la valeur est haute, plus le de-esser attrape de « s » (6 dB conseillé).')} />
+          ) : (
+            <Knob key="abs" paramId="threshold" label="Seuil" size="M" cap="silver" arc={DS_ACCENT} min={-60} max={0} step={0.5} value={params.threshold} defaultValue={-25}
+              onChange={v => apply({ threshold: v })} format={v => `${fr(v, 0)} dB`} ticks={11}
+              hint={help('Seuil', 'Niveau de la zone des « s » au-delà duquel le de-esser agit.')} />
+          )}
+          <Knob paramId="reduction" label="Réduction" size="M" cap="silver" arc={DS_ACCENT} min={0} max={1} step={0.01} value={params.reduction} defaultValue={0.6}
+            onChange={v => apply({ reduction: v })} format={v => `${Math.round(v * 100)} % · ${fr(deesserMaxRangeDb(v), 0)} dB max`} ticks={11}
+            hint={help('Réduction', 'Force et réduction maximale appliquée aux « s ».')} />
         </div>
-        <div className="relative h-3.5 rounded-full bg-white/10 overflow-hidden">
-          <div className="absolute inset-y-0 left-0 bg-red-400 rounded-full" style={{ width: pct(meter.now) }} />
-          <div className="absolute inset-y-0 w-0.5 bg-white/80" style={{ left: pct(meter.hold) }} />
+
+        <div className="hw-rule" style={{ margin: '10px 0' }} />
+        <div className="flex flex-wrap items-start justify-around gap-x-3 gap-y-3">
+          <ToggleSwitch label="Détection" paramId="detection" value={relative ? 0 : 1} onChange={v => apply({ detection: v ? 'ABSOLUTE' : 'RELATIVE' })}
+            options={[{ v: 0, label: 'Relative', hint: DETECTION_LABELS.RELATIVE.help }, { v: 1, label: 'Absolue', hint: DETECTION_LABELS.ABSOLUTE.help }]} />
+          <ToggleSwitch label="Zone traitée" paramId="mode" value={params.mode === 'SHELF' ? 1 : 0} onChange={v => apply({ mode: v ? 'SHELF' : 'BELL' })}
+            options={[{ v: 0, label: 'Ciblée', hint: MODE_LABELS.BELL.help }, { v: 1, label: 'Tous aigus', hint: MODE_LABELS.SHELF.help }]} />
+          <ToggleSwitch label="Écoute" paramId="listen" value={listen} onChange={v => apply({ listen: v })}
+            options={LISTEN_LABELS.map((l, i) => ({ v: i, label: i === 2 ? 'Retiré' : l.label, hint: l.help }))} />
         </div>
-        <div className="flex justify-between text-[10px] text-slate-400 mt-0.5 font-mono"><span>0</span><span>5</span><span>10</span><span>15</span><span>20 dB</span></div>
-      </div>
-
-      <div className="h-32 bg-black/50 rounded-2xl border border-white/10 relative overflow-hidden">
-        <canvas ref={canvasRef} width={480} height={128} className="w-full h-full" aria-label="Courbe de réduction : pointillés = réduction maximale, trait plein = réduction en cours" />
-        <span className="absolute top-1.5 left-3 text-[11px] font-bold text-slate-200 bg-black/50 px-1.5 rounded">Zone des « s » : {fmtHz(params.frequency)}</span>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <DeEsserKnob label="Fréquence" value={params.frequency} min={2000} max={16000} log defaultValue={8000} onChange={v => apply({ frequency: v })} display={fmtHz(params.frequency)} help="Centre de la zone des « s » (8 kHz par défaut). Astuce : « Écoute : la bande » pour la placer." />
-        <DeEsserKnob label="Largeur" value={params.mode === 'SHELF' ? 1 : params.q} min={0.3} max={6} defaultValue={1} disabled={params.mode === 'SHELF'} onChange={v => apply({ q: v })} display={params.mode === 'SHELF' ? '—' : `Q ${fr(params.q)}`} help="Plus la valeur est haute, plus la zone traitée est étroite." />
-        {relative ? (
-          <DeEsserKnob key="rel" label="Sensibilité" value={-(params.relThreshold ?? -6)} min={-6} max={30} defaultValue={6} onChange={v => apply({ relThreshold: -v })} display={`${fr(-(params.relThreshold ?? -6), 0)} dB`} help="Seuil relatif : plus la valeur est haute, plus le de-esser attrape de « s » (6 dB conseillé)." />
-        ) : (
-          <DeEsserKnob key="abs" label="Seuil" value={params.threshold} min={-60} max={0} defaultValue={-25} onChange={v => apply({ threshold: v })} display={`${fr(params.threshold, 0)} dB`} help="Niveau de la zone des « s » au-delà duquel le de-esser agit." />
-        )}
-        <DeEsserKnob label="Réduction" value={params.reduction} min={0} max={1} defaultValue={0.6} onChange={v => apply({ reduction: v })} display={`${Math.round(params.reduction * 100)} % · ${fr(deesserMaxRangeDb(params.reduction), 0)} dB max`} help="Force et réduction maximale appliquée aux « s »." />
-      </div>
-
-      <Segmented label="Détection" options={(['RELATIVE', 'ABSOLUTE'] as DeEsserDetection[]).map(d => ({ v: d, ...DETECTION_LABELS[d] }))} value={relative ? 'RELATIVE' : 'ABSOLUTE'} onChange={v => apply({ detection: v as DeEsserDetection })} />
-      <Segmented label="Zone traitée" options={(['BELL', 'SHELF'] as DeEsserMode[]).map(m => ({ v: m, ...MODE_LABELS[m] }))} value={params.mode} onChange={v => apply({ mode: v as DeEsserMode })} />
-      <Segmented label="Écoute" options={LISTEN_LABELS.map((l, i) => ({ v: String(i), ...l }))} value={String(listen)} onChange={v => apply({ listen: Number(v) })} />
-      {listen > 0 && <p className="-mt-3 text-[11px] text-amber-300" role="status">Écoute de contrôle active : repasse sur « Normal » avant d’exporter.</p>}
-      {node?.isFallback?.() && <p className="text-[11px] text-red-300">Ce navigateur ne peut pas charger l’effet : il est contourné (aucun traitement).</p>}
-    </div>
-  );
-};
-
-const Segmented: React.FC<{ label: string; options: { v: string; label: string; help: string }[]; value: string; onChange: (v: string) => void }> = ({ label, options, value, onChange }) => (
-  <div>
-    <div className="text-[11px] font-bold text-slate-300 mb-1">{label}</div>
-    <div className="flex bg-black/40 p-1 rounded-xl border border-white/10" role="radiogroup" aria-label={label}>
-      {options.map(o => (
-        <button key={o.v} type="button" role="radio" aria-checked={value === o.v} onClick={() => onChange(o.v)} title={o.help}
-          className={`flex-1 min-h-9 px-1 py-1.5 rounded-lg text-[11px] leading-tight font-bold transition-all ${value === o.v ? 'bg-red-400 text-black shadow' : 'text-slate-300 hover:text-white hover:bg-white/5'}`}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
-const DeEsserKnob: React.FC<{ label: string; value: number; onChange: (v: number) => void; defaultValue?: number; min: number; max: number; display: string; help?: string; log?: boolean; disabled?: boolean }> = ({ label, value, onChange, defaultValue, min, max, display, help, log, disabled }) => {
-  const knob = useKnobInteraction(value, onChange, { min, max, defaultValue, log, disabled });
-  const norm = log ? Math.log(value / min) / Math.log(max / min) : (value - min) / (max - min);
-  const rotation = Math.max(0, Math.min(1, norm)) * 270 - 135;
-  return (
-    <div className={`flex flex-col items-center gap-2 ${disabled ? 'opacity-40' : ''}`} title={[help, termHelp(label)].filter(Boolean).join(' · ') || undefined}>
-      <div {...knob.bind} role="slider" aria-label={label} aria-valuetext={display} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
-        className="w-12 h-12 rounded-full bg-nv-surface border-2 border-white/15 flex items-center justify-center cursor-ns-resize hover:border-red-400/60 transition-all shadow-xl relative">
-        <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
-        <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full bg-red-400" style={{ transform: `rotate(${rotation}deg) translateY(2px)` }} />
-      </div>
-      <div className="text-center">
-        <span className="block text-[11px] font-bold text-slate-200 mb-1 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/10"><span className="text-[11px] font-mono font-bold text-white whitespace-nowrap">{display}</span></div>
-      </div>
-    </div>
+        {listen > 0 && <p className="mt-2 text-center text-[11px] font-bold" style={{ color: '#fcd34d' }} role="status">Écoute de contrôle active : repasse sur « Normal » avant d’exporter.</p>}
+      </Faceplate>
+    </HwWindow>
   );
 };

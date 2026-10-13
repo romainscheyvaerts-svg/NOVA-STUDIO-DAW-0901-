@@ -51,6 +51,17 @@ const isTypingTarget = (el: EventTarget | null) => {
   return tag === 'textarea' || tag === 'select' || node.isContentEditable;
 };
 
+/**
+ * Bouton rotatif ou curseur qui a le focus (fenêtres d'effets) : les flèches,
+ * Page, Début et Fin le règlent, au lieu de changer de piste ou de déplacer le curseur.
+ */
+const sliderOwnsKey = (e: KeyboardEvent) => {
+  if (!/^(Arrow|Page|Home$|End$)/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey) return false;
+  const node = e.target as HTMLElement | null;
+  if (!node || !node.tagName) return false;
+  return node.getAttribute?.('role') === 'slider' || (node.tagName === 'INPUT' && (node as HTMLInputElement).type === 'range');
+};
+
 /** Tab (Tab to Transient) : focus nulle part, ou dans l'arrangement. */
 const tabBelongsToTimeline = (el: EventTarget | null) => {
   const node = el as HTMLElement | null;
@@ -176,7 +187,7 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || isTypingTarget(e.target) || sliderOwnsKey(e)) return;
       // Piano roll / batterie ouverts : leurs propres touches (flèches = transposer…).
       if (document.querySelector('[data-nova-transport]')) return;
       if (modalOpen()) return;
