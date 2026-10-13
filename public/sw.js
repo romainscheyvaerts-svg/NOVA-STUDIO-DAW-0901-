@@ -5,6 +5,9 @@
  * - /assets/ (fichiers versionnés par Vite), polices, icônes, worklets, sons
  *   de batterie (/drums/, noms = empreinte du fichier) :
  *   cache d'abord, ils ne changent jamais sous le même nom.
+ * - Sons des kits NOVA (/drums/kits/, ~2 000 fichiers brouillés) : pas ici. La page les met
+ *   elle-même en cache à la demande (Cache API « nova-kits-v1 », utils/drumKitLibrary.ts), aussi
+ *   dans l'appli Windows qui n'a pas de service worker ; ce cache n'est jamais vidé ici.
  * - Tout le reste (API, Supabase, audio des beats) : réseau direct, pas de cache.
  */
 const CACHE = 'nova-static-v1';
@@ -13,7 +16,8 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
+    // Ne garder que la version courante… sauf le cache des kits (sons déjà écoutés, hors ligne).
+    await Promise.all(keys.filter(k => k !== CACHE && !k.startsWith('nova-kits-')).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -24,6 +28,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/drums/kits/')) return; // cache géré par la page (voir plus haut)
 
   if (req.mode === 'navigate') {
     e.respondWith((async () => {

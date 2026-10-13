@@ -1,6 +1,6 @@
 import type { Track } from '../types';
 import { canCommit } from './commit';
-import { canBakeTrack } from './freeze';
+import { bakeRefusalShort, canBakeTrack } from './freeze';
 
 /**
  * Commit / gel de plusieurs pistes d'un coup (Pro Tools : sélectionner les
@@ -30,7 +30,7 @@ export function batchBlocker(t: Track, kind: BatchKind): string | null {
   if (kind === 'unfreeze') return t.isFrozen ? null : 'déjà en direct';
   if (t.isFrozen) return 'déjà gelée';
   if (t.vstInstrument) return 'instrument VST (rendu déjà automatique)';
-  if (!canBakeTrack(t)) return 'beat sous licence';
+  if (!canBakeTrack(t)) return bakeRefusalShort(t);
   if (!hasContent(t)) return 'piste vide';
   return null;
 }

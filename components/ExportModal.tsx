@@ -114,7 +114,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     setAccesMix(null); setAccesVoix(null); setAccesTick(t => t + 1);
   }, [projectKey]);
   React.useEffect(() => {
-    if (!isOpen || !projectKey) return;
+    if (!isOpen) return;
+    if (!projectKey) {
+      // Projet sans clé d'export (id local commun, pas encore enregistré) : rien n'est débloqué.
+      const sans: ExportAccess = { unlocked: false, via: null, reason: 'erreur', missing: [], login_required: false, kits: usesKits, pro: null, legacy: false,
+        message: "Ce projet n'a pas encore sa clé d'export : enregistre-le, puis rouvre « Exporter »." };
+      setAccesMix(sans); setAccesVoix(sans);
+      return;
+    }
     let live = true;
     void loadPricing().then(g => { if (live) setGrille(g); });
     void billingStatus().then(st => { if (live) setCompte(st); });

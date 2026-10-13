@@ -41,6 +41,10 @@ BATTERIE = [
     ("plugins_hw_reel", ["D:/1 WORK/CONTENU/nova-plugins-design/batterie_reel"]),
     ("plugins_hw_vague2b", ["--reel", "D:/1 WORK/CONTENU/nova-plugins-design/batterie_vague2b"]),
     ("v21_fenetres", []), ("harmoniseur_fenetre", []),
+    # 13/10/2026 : kits NOVA (sons à la demande, brouillés, jamais exportés gratuitement), PC + téléphone, sombre + clair.
+    ("kits_batterie", []),
+    # 14/10/2026 : synthé NOVA en un clic (« 🎹 Synthé NOVA »), sons, façade, mini-clavier (bureau et téléphone, sombre et clair).
+    ("synthe", []),
     # 14/10/2026 : tarifs Nova (nova-billing simulé) : gratuit sans export, 1,99 €, Pro, instru → export offert + 1 mois,
     # mélodie → 7 jours, instru non achetée refusée, ancienne grille ; bureau et téléphone.
     ("tarifs", []),

@@ -39,6 +39,11 @@ const PRODUITS_ABO: Record<string, { plan: string; interval: "month" | "year"; c
 };
 const PRODUITS_EXPORT = ["export_project", "export_voices"];
 const PROJECT_RE = /^[A-Za-z0-9_.:-]{6,80}$/;
+/** Id local par défaut, commun à tous les projets non enregistrés : jamais une clé d'export
+ *  (un seul paiement sur cette clé débloquait l'export de tout le monde). Le DAW envoie la clé
+ *  d'export du projet (exportKey, utils/exportRights.ts). */
+const SHARED_PROJECT_ID = "proj-1";
+const validProjectKey = (k: string) => PROJECT_RE.test(k) && k !== SHARED_PROJECT_ID;
 const CATALOG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const ALLOWED_RETURN = [
@@ -115,10 +120,13 @@ async function ownedCatalog(userId: string): Promise<Set<string>> {
 }
 
 async function projectPaid(projectKey: string, userId: string | null): Promise<boolean> {
-  const { data } = await supabase.from("nova_purchases").select("checkout_session_id, user_id").eq("project_key", projectKey).limit(5);
-  // Achat rattaché au compte, ou achat sans compte (paiement invité de l'ancienne version).
-  if ((data || []).some((r: any) => !r.user_id || r.user_id === userId)) return true;
-  // Ancien crédit Nova Pro (10 exports / mois) déjà utilisé sur ce projet.
+  if (!validProjectKey(projectKey)) return false;
+  // Le déblocage appartient à celui qui a payé : son compte, ou (sans compte) un achat invité.
+  let q = supabase.from("nova_purchases").select("checkout_session_id").eq("project_key", projectKey);
+  q = userId ? q.eq("user_id", userId) : q.is("user_id", null);
+  const { data } = await q.limit(1);
+  if (data?.length) return true;
+  // Ancien crédit Nova Pro (10 exports / mois) déjà utilisé sur ce projet, par ce compte.
   if (userId) {
     const { data: uses } = await supabase.from("nova_export_uses").select("id").eq("project_key", projectKey).eq("user_id", userId).limit(1);
     if (uses?.length) return true;
@@ -179,7 +187,7 @@ async function handle(body: any, user: User | null) {
     }
     if (PRODUITS_EXPORT.includes(product)) {
       const projectKey = String(body?.project_key || "").slice(0, 80);
-      if (!PROJECT_RE.test(projectKey)) throw new HttpError(400, "Projet inconnu");
+      if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
       // Interdit si le projet contient une instru / mélodie du catalogue non achetée (mix complet).
       const catalog = cleanCatalog(body?.catalog_ids);
       if (catalog.length && body?.scope !== "voix") {
@@ -257,7 +265,7 @@ async function handle(body: any, user: User | null) {
     // LA décision d'export. Le DAW envoie : project_key, catalog_ids (instrus / mélodies du
     // catalogue présentes dans le projet), kits (sons des kits NOVA), scope (mix | voix).
     const projectKey = String(body?.project_key || "");
-    if (!PROJECT_RE.test(projectKey)) throw new HttpError(400, "Projet inconnu");
+    if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
     const ids = cleanCatalog(body?.catalog_ids);
     const portee = body?.scope === "voix" ? "voix" : "mix";
     const kits = body?.kits === true;
@@ -304,7 +312,7 @@ async function handle(body: any, user: User | null) {
   if (action === "export_unlocked") {
     if (user && await isAdmin(user.id)) return { unlocked: true, admin: true };
     const projectKey = String(body?.project_key || "");
-    if (!PROJECT_RE.test(projectKey)) return { unlocked: false };
+    if (!validProjectKey(projectKey)) return { unlocked: false };
     if (await projectPaid(projectKey, user?.id || null)) return { unlocked: true };
     if (user && (await statutPro(supabase, user.id, user.email)).active) return { unlocked: true };
     return { unlocked: false };
@@ -314,7 +322,7 @@ async function handle(body: any, user: User | null) {
     // Nova Pro : exports illimités (l'ancien DAW demandait un crédit par projet).
     if (!user) return { unlocked: false, remaining: 0, reason: "login" };
     const projectKey = String(body?.project_key || "");
-    if (!PROJECT_RE.test(projectKey)) throw new HttpError(400, "Projet inconnu");
+    if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
     const st = await statutPro(supabase, user.id, user.email);
     if (!st.active) return { unlocked: false, remaining: 0, reason: "not_pro" };
     return { unlocked: true, remaining: 999, ...(st.admin ? { admin: true } : {}) };

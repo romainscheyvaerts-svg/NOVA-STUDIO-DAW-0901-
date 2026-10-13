@@ -69,6 +69,7 @@ import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
+import { presetSettings as synthPresetSettings, DEFAULT_PRESET_ID as SYNTH_DEFAULT_PRESET, SYNTH_PRESETS } from './utils/novaSynthPresets';
 import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
@@ -216,6 +217,7 @@ import CommentsPanel, { CommentPins } from './components/CommentsPanel';
 import { useTimelineComments } from './hooks/useTimelineComments';
 import { commentCounts } from './utils/timelineComments';
 import { renderMixBounce } from './services/mixBounce';
+import { exportKeyOf, mixNeedsTag, newExportKey, SHARED_PROJECT_ID } from './utils/exportRights';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 // Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
@@ -229,7 +231,7 @@ import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
 import { liveVstNodes } from './engine/VSTPluginNode';
 import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, hasArtistVst, LIVE_PREVIEW_KINDS, PREVIEW_TAIL, PreviewScheduler, PreviewState, PreviewTracker, previewView, previewWindowOf } from './services/LivePreview';
-import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
+import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment, isExportVoicesUnlocked } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
@@ -264,7 +266,8 @@ const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then
 import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
-import { DrumMachine, makeDrumMachineLib, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { DrumMachine, makeDrumMachineLib, makeDrumMachine, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { KIT_BAKE_REFUSAL, KIT_SOUND_DROP_EVENT, kitIndexIfLoaded, loadKitIndex, setPadKitSound, usesKitSounds } from './utils/drumKitLibrary';
 import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils/drumPatterns';
 import { padLoadKey } from './utils/drumSamples';
 import { loadPadBuffer } from './utils/padBuffers';
@@ -1591,7 +1594,8 @@ function Studio() {
     try {
       const copyName = `${n} (Copy)`;
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
-      const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName };
+      // Une copie est un autre projet : elle n'hérite pas du déblocage de l'export payant.
+      const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName, exportKey: newExportKey() };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
       await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
         setSaveState(s => ({ ...s, progress: Math.max(50, percent), message }));
@@ -3546,7 +3550,7 @@ function Studio() {
     }
 
     if (!canBakeTrack(track)) {
-      notify("Le beat ne peut pas être gelé (licence).");
+      notify(usesKitSounds(track) ? KIT_BAKE_REFUSAL : "Le beat ne peut pas être gelé (licence).");
       return;
     }
     if ((track.clips || []).length === 0) {
@@ -3786,8 +3790,12 @@ function Studio() {
   }, [armedTrackId]);
 
   /** Cree un clip MIDI vide sur une piste instrument et ouvre le piano roll. */
-  /** Mode instru : nouvelle piste MIDI (synthé) avec un motif de 4 mesures, piano roll ouvert. */
-  const handleNewMidiTrack = useCallback(() => {
+  /**
+   * Mode instru : nouvelle piste MIDI jouée par le synthé NOVA (son « Keys R&B »), motif de
+   * 4 mesures, piano roll ouvert. chooseSound : l'écran du synthé s'ouvre par-dessus pour
+   * choisir le son ; en le fermant, on retrouve le piano roll (bouton « 🎹 Synthé NOVA »).
+   */
+  const handleNewMidiTrack = useCallback((chooseSound = false) => {
     const st = stateRef.current;
     const trackId = `track-midi-${Date.now().toString(36)}`;
     const clipId = `clip-midi-${Date.now().toString(36)}`;
@@ -3799,6 +3807,7 @@ function Studio() {
       const track: Track = {
         id: trackId, name: `SYNTHÉ ${n}`, type: TrackType.MIDI, color, isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
         volume: 0.8, pan: 0, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0,
+        novaSynth: synthPresetSettings(SYNTH_DEFAULT_PRESET),
         clips: [{ id: clipId, start, duration: bar * 4, offset: 0, fadeIn: 0, fadeOut: 0, name: 'Motif', color, type: TrackType.MIDI, notes: [], isMuted: false, gain: 1 }],
       };
       // Sous la mélodie et la batterie, au-dessus des voix.
@@ -3806,8 +3815,12 @@ function Studio() {
       draft.tracks.splice(at >= 0 ? at : draft.tracks.length, 0, track);
     }));
     setTimeout(() => setMidiEditorOpen({ trackId, clipId }), 50);
-    setAiNotification('🎹 Piste MIDI créée : dessine tes notes dans le piano roll (clic pour poser, glisser pour allonger).');
+    // Écran des sons : il s'explique lui-même (pas de bulle, qui couvrait le clavier d'essai).
+    if (chooseSound) setTimeout(() => openSynthPanel(trackId), 80);
+    else setAiNotification('🎹 Piste MIDI créée (synthé NOVA) : dessine tes notes dans le piano roll (clic pour poser, glisser pour allonger).');
   }, [setState]);
+  /** « 🎹 Synthé NOVA » : piste synthé en un clic, écran des sons ouvert. */
+  const handleNewSynthTrack = useCallback(() => handleNewMidiTrack(true), [handleNewMidiTrack]);
 
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => {
     const track = stateRef.current.tracks.find(t => t.id === trackId);
@@ -4791,6 +4804,9 @@ function Studio() {
 
   // ===== Batterie Make Music (piste PERCUSSIONS) =====
   const [drumsOpen, setDrumsOpen] = useState(false);
+  // Kits NOVA : ouverture du navigateur depuis l'extérieur du panneau (bouton « Kits »).
+  const [kitsSignal, setKitsSignal] = useState(0);
+  const openKits = useCallback(() => { setDrumsOpen(true); setKitsSignal(n => n + 1); }, []);
   const DRUM_TRACK_ID = 'track-drums';
 
   /** Fin de la boucle de batterie : fin du beat / de la mélodie, au moins 8 mesures. */
@@ -4838,6 +4854,33 @@ function Studio() {
     }));
   }, [setState]);
   applyDrumMachineRef.current = applyDrumMachine;
+
+  // Export payant : un projet sans clé (id local partagé « proj-1 ») en reçoit une à lui.
+  useEffect(() => {
+    if (!state.exportKey && (!state.id || state.id === SHARED_PROJECT_ID)) {
+      setSilently(s => (s.exportKey || (s.id && s.id !== SHARED_PROJECT_ID) ? s : { ...s, exportKey: newExportKey() }));
+    }
+  }, [state.id, state.exportKey, setSilently]);
+
+  // Kits NOVA : un son lâché sur la timeline va sur un nouveau pad de la boîte à rythmes.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      void ensureAudioEngine().then(async () => {
+        const ix = kitIndexIfLoaded() || await loadKitIndex().catch(() => null);
+        const cur = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined) || makeDrumMachine('empty');
+        const r = setPadKitSound(cur, id, null, ix);
+        if (!r) { setAiNotification('30 pads au plus : pose ce son sur un pad existant (bouton « Kits » de la batterie).'); return; }
+        applyDrumMachineRef.current?.(r.dm);
+        setDrumsOpen(true);
+        setAiNotification(`🥁 « ${r.dm.rows[r.rowIndex].name} » ajouté sur un nouveau pad de la batterie : allume ses pas dans la grille.`);
+      });
+    };
+    window.addEventListener(KIT_SOUND_DROP_EVENT, on);
+    return () => window.removeEventListener(KIT_SOUND_DROP_EVENT, on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSetDrumKit = useCallback((kitId?: string) => {
     const st = stateRef.current;
@@ -5701,7 +5744,9 @@ function Studio() {
     bounce: async (step) => {
       const c = collabRef.current;
       if (!c) return null;
-      const r = await renderMixBounce(stateRef.current.tracks, stateRef.current.name || 'Mix', t => step(`rendu du mix… ${t}`));
+      const tag = await mixNeedsTag(stateRef.current, ownedRef.current, { isAdmin: async () => !!(await billingStatus()).admin, isExportPaid: isExportVoicesUnlocked });
+      const r = await renderMixBounce(stateRef.current.tracks, stateRef.current.name || 'Mix', t => step(`rendu du mix… ${t}`), { tag });
+      if (tag) step('version avec le tag Make Music (export du projet pas encore payé)…');
       const id = `mixv-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       audioBufferRegistry.register(r.buffer, id);
       step('envoi du son…');
@@ -8524,6 +8569,8 @@ function Studio() {
   const handleStartMelodyProject = async (inst: any) => {
     track('melody_tried', { melody_id: String(inst?.id ?? ''), title: String(inst?.title || '') });
     setState(produce((draft: DAWState) => {
+      // Nouveau projet « instru sur mélodie » : sa propre clé d'export payant.
+      if (!draft.id || draft.id === SHARED_PROJECT_ID) draft.exportKey = newExportKey();
       draft.projectMode = 'BEATMAKING';
       draft.name = `Instru · ${String(inst.title || 'Mélodie').slice(0, 40)}`;
     }));
@@ -10017,6 +10064,7 @@ function Studio() {
       // Beat
       a('Beat', 'pal.drums', 'Batterie (boîte à rythmes, pas à pas)', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
       a('Beat', 'pal.808', 'Basse 808 (piano roll accordé)', () => handleOpen808(), { keywords: '808 basse bass' }),
+      a('Beat', 'pal.synth', `🎹 Synthé NOVA : nouvelle piste et choix du son (${SYNTH_PRESETS.length} sons)`, () => handleNewSynthTrack(), { pt: 'New Instrument Track', keywords: 'synthé synth synthétiseur instrument clavier son preset pad nappe lead pluck basse piano rhodes cloche afro amapiano rage drill' }),
       a('Beat', 'pal.midi', 'Nouvelle piste MIDI et son piano roll', () => handleNewMidiTrack(), { pt: 'New Instrument Track', keywords: 'midi piano roll synthé instrument' }),
       a('Beat', 'pal.sampler', 'Nouvelle piste Sampler', () => requestSampler({ kind: 'new' }), { keywords: 'sampler sample chop' }),
       // Réglages
@@ -10133,7 +10181,9 @@ function Studio() {
           onAddVoiceTrack={handleAddVoiceTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
           onOpenDrums={() => setDrumsOpen(true)}
+          onOpenKits={openKits}
           onNewMidiTrack={handleNewMidiTrack}
+          onNewSynthTrack={handleNewSynthTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
           onOpenLyrics={() => setLyricsOpen(o => !o)}
@@ -10273,7 +10323,9 @@ function Studio() {
                   onAddVoiceTrack={handleAddVoiceTrack}
                   beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
                   onOpenDrums={() => setDrumsOpen(true)}
+                  onOpenKits={openKits}
                   onNewMidiTrack={handleNewMidiTrack}
+                  onNewSynthTrack={handleNewSynthTrack}
                   onOpen808={handleOpen808}
                   onOpenVocalTools={() => setVocalToolsOpen(true)}
                   onOpenLyrics={() => setLyricsOpen(o => !o)}
@@ -10424,7 +10476,7 @@ function Studio() {
             </PanelBoundary>
           )}
         </main>
-        <AafHost getState={() => stateRef.current} />
+        <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>
             <Suspense fallback={null}>
@@ -10670,7 +10722,7 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
+      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={exportKeyOf(state)} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} /></PanelBoundary>}
       {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
       {metronomeDialogOpen && (
@@ -10729,9 +10781,11 @@ function Studio() {
         has808={state.tracks.some(t => t.id === BASS808_TRACK_ID)}
         loopEnd={drumsOpen ? drumLoopEnd(state) : 0}
         markers={state.markers}
-        sessionClips={drumsOpen ? state.tracks.filter(t => t.type === TrackType.AUDIO).flatMap(t => t.clips.filter(c => c.bufferId).map(c => ({ ...c, trackName: t.name }))) : []}
+        sessionClips={drumsOpen ? state.tracks.filter(t => t.type === TrackType.AUDIO && canBakeTrack(t)).flatMap(t => t.clips.filter(c => c.bufferId).map(c => ({ ...c, trackName: t.name }))) : []}
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
+        projectKey={typeof state.projectKey === 'number' ? state.projectKey : null}
+        kitsSignal={kitsSignal}
       />
       </MountWhenOpened>
       </PanelBoundary>
@@ -11138,7 +11192,7 @@ function Studio() {
                      )}
                      {!t.vstInstrument && !t.melodicSampler && (
                        <button type="button" onClick={() => openSynthPanel(t.id)} data-testid="open-synth-panel"
-                         title="Ouvrir le synthé NOVA : 48 sons (pianos, nappes, plucks, cloches…) et tous les réglages"
+                         title={`Ouvrir le synthé NOVA : ${SYNTH_PRESETS.length} sons (pianos, nappes, plucks, cloches, afro, rage…) et tous les réglages`}
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-cyan-500/15 border-cyan-400/50 text-cyan-100 hover:bg-cyan-500/25 shrink-0">
                          <i className="fas fa-sliders-h mr-1" />{t.novaSynth?.name || 'Synthé'}
                        </button>

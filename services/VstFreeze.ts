@@ -5,7 +5,7 @@ import { isAraInsert } from '../utils/araInsert';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { novaBridge } from './NovaBridge';
 import {
-  anchorClipsToRender, canBakeTrack, feedLevel, freezeIndex, freezeSignature, hasVst, isFreezeStale, isTrackFrozen, isVst, lastVstIndex,
+  anchorClipsToRender, bakeRefusal, canBakeTrack, feedLevel, freezeIndex, freezeSignature, hasVst, isFreezeStale, isTrackFrozen, isVst, lastVstIndex,
   needsRerender, pluginsSignature, SEND_RENDER_TAIL,
 } from '../utils/freeze';
 import { makeFreezeBase, PRE_VOLUME } from '../utils/preFxEdits';
@@ -223,7 +223,7 @@ export async function renderThroughChain(input: AudioBuffer, plugins: PluginInst
  * sinon il reste appliqué à la lecture (il s'édite sur la tablette).
  */
 export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (msg: string) => void, opts: { withPreVolume?: boolean; allTracks?: Track[] } = {}): Promise<FreezeResult> {
-  if (!canBakeTrack(track)) throw new Error("Le beat n'est jamais rendu dans un fichier (licence).");
+  if (!canBakeTrack(track)) throw new Error(bakeRefusal(track)!);
   await audioEngine.init();
   const ctx = audioEngine.ctx!;
   // Fréquence du contexte (44,1 ou 48 kHz selon l'appareil) : jamais figée.
@@ -268,7 +268,7 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
 export async function renderTrackPreview(
   track: Track, win: { from: number; to: number }, tail: number, onStep?: (msg: string) => void,
 ): Promise<{ clip: Clip; upTo: number }> {
-  if (!canBakeTrack(track)) throw new Error("Le beat n'est jamais rendu dans un fichier (licence).");
+  if (!canBakeTrack(track)) throw new Error(bakeRefusal(track)!);
   const upTo = lastVstIndex(track);
   if (upTo < 0) throw new Error('Aucun VST sur cette piste.');
   if (!novaBridge.isConnected()) throw new Error("Le pont VST n'est pas connecté sur ce PC.");

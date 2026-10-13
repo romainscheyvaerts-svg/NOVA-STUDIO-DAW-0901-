@@ -84,6 +84,7 @@ with sync_playwright() as p:
     # 1. Piste MIDI (mélodie) + outil accords
     pg.locator("button[title^='Nouvelle piste MIDI']").first.click()
     pg.wait_for_timeout(1200)
+    if pg.locator("[data-testid=synth-panel]").count(): pg.get_by_role("button", name="Fermer le synthé").click(); pg.wait_for_timeout(300)  # 14/10 : le bouton « Synthé NOVA » ouvre aussi l'écran des sons
     pg.locator("[data-nova-pianoroll]").first.wait_for(timeout=10000)
     # Tonalité : La mineur (si le beat n'en a pas, on la choisit dans le menu)
     pg.locator("[data-nova-roll='gamme']").first.click(); pg.wait_for_timeout(300)

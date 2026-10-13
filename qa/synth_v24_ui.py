@@ -112,7 +112,10 @@ def run(vp, res):
             r["favoris_affiches"] = page.locator("[data-testid=synth-presets] [data-preset]").count()
             shot(page, f"ui_{vp}_3_favoris")
             # Réglages
-            page.locator("[data-testid=synth-tab-reglages]").click(); page.wait_for_timeout(400)
+            # Bureau (≥ 1024 px) : sons et façade côte à côte, pas d'onglets (14/10/2026).
+            tab = page.locator("[data-testid=synth-tab-reglages]")
+            if tab.is_visible(): tab.click()
+            page.wait_for_timeout(400)
             shot(page, f"ui_{vp}_4_ecran_reglages")
             r["mesures_reglages"] = panel_metrics(page)
             page.wait_for_timeout(400)  # sort de l'anti-rebond de l'historique

@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { KIT_DRAG_TYPE, KIT_SOUND_DROP_EVENT } from '../utils/drumKitLibrary';
 import { requestSampler } from '../utils/samplerPanelStore';
 import { breathGainAt } from '../utils/breathEnvelope';
 import { requestBreaths } from '../utils/breathBus';
@@ -740,6 +741,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     e.stopPropagation();
     if (e.dataTransfer.types.includes('audio-url') || 
         e.dataTransfer.types.includes('Files') ||
+        e.dataTransfer.types.includes(KIT_DRAG_TYPE) ||
         e.dataTransfer.types.includes('application/x-nova-clip')) {
         e.dataTransfer.dropEffect = 'copy';
     }
@@ -748,6 +750,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const handleDrop = (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      // Son des kits NOVA (navigateur de kits) : il va sur un pad de la boîte à rythmes, jamais en
+      // clip audio (le son resterait sinon dans la sauvegarde du projet).
+      const kitSound = e.dataTransfer.getData(KIT_DRAG_TYPE);
+      if (kitSound) { window.dispatchEvent(new CustomEvent(KIT_SOUND_DROP_EVENT, { detail: { id: kitSound } })); return; }
       
       console.log('[ArrangementView Drop] Drop détecté');
       

@@ -1,0 +1,2 @@
+# Sons des kits NOVA (conteneur chiffré) : toujours binaires, jamais de conversion de fins de ligne.
+*.nks binary

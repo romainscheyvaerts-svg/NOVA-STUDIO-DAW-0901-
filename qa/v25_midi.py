@@ -185,6 +185,7 @@ def scenario_pc(pg, errs):
     # --- 3. Piano roll : note → chop 1/16 → swing MPC 58 % ---
     pg.locator("button[title^='Nouvelle piste MIDI']").first.click()
     pg.wait_for_timeout(1200)
+    if pg.locator("[data-testid=synth-panel]").count(): pg.get_by_role("button", name="Fermer le synthé").click(); pg.wait_for_timeout(300)  # 14/10 : le bouton « Synthé NOVA » ouvre aussi l'écran des sons
     pg.locator("[data-nova-pianoroll]").first.wait_for(timeout=10000)
     tid = pg.evaluate("() => { const t = window.__novaMidi.tracks(); return t.filter(x => /SYNTH/.test(x.name)).pop().id; }")
     # Une note d'une mesure sur la ligne Fa#3 (hi-hat) : clic + glisser.
@@ -360,6 +361,7 @@ def scenario_mobile(pg, errs, vp):
         btn = pg.locator("button[title^='Nouvelle piste MIDI']")
         if btn.count():
             btn.first.click(); pg.wait_for_timeout(1200)
+            if pg.locator("[data-testid=synth-panel]").count(): pg.get_by_role("button", name="Fermer le synthé").click(); pg.wait_for_timeout(300)  # 14/10 : le bouton « Synthé NOVA » ouvre aussi l'écran des sons
             if pg.locator("[data-nova-roll='outils']").count():
                 pg.locator("[data-nova-roll='outils']").first.tap(); pg.wait_for_timeout(400)
                 shot(pg, f"v25_{vp}_06_outils_doigt")

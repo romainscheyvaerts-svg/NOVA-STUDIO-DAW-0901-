@@ -139,6 +139,7 @@ def new_midi_track(pg):
     before = {t["id"] for t in tracks(pg)}
     pg.locator("button[title^='Nouvelle piste MIDI']").first.click()
     pg.wait_for_timeout(1200)
+    if pg.locator("[data-testid=synth-panel]").count(): pg.get_by_role("button", name="Fermer le synthé").click(); pg.wait_for_timeout(300)  # 14/10 : le bouton « Synthé NOVA » ouvre aussi l'écran des sons
     tid = next(t["id"] for t in tracks(pg) if t["id"] not in before)
     return tid
 
@@ -248,7 +249,8 @@ def run_pc(b, theme="dark"):
       const tr = all.find(t => t.id === tid);
       const SR = 48000;
       const P = await window.__novaAppModule('/utils/novaSynthPresets.ts');
-      let synthOver = {};
+      // Ancien synthé simple d'abord (les pistes MIDI neuves jouent le synthé NOVA depuis le 14/10/2026).
+      let synthOver = { novaSynth: undefined };
       const one = (clips) => [{ ...tr, ...synthOver, outputTrackId: undefined, volume: 1, pan: 0, isMuted: false, isSolo: false, sends: [], plugins: [], clips }];
       const render = async (clips) => audioEngine.renderProject(one(clips), 2.2, at - 0.2, SR);
       const strip = (c) => ({ ...c, cc: undefined });

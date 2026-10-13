@@ -1,4 +1,5 @@
 import type { Track } from '../types';
+import { usesKitSounds } from './drumKitLibrary';
 
 /**
  * Ce que le serveur doit savoir d'un projet pour décider de l'export (nova-billing,
@@ -19,15 +20,9 @@ export function catalogIdsOf(tracks: Pick<Track, 'instrumentId'>[]): string[] {
 
 /**
  * Le projet joue-t-il des sons des kits NOVA (boîte à rythmes, sampler chargé depuis un pad) ?
- * Même règle que usesKitSounds (utils/drumKitLibrary, chantier des kits) : une référence de kit
- * commence par « kit: ». Les projets avec des kits ne s'exportent JAMAIS gratuitement.
+ * Règle UNIQUE du chantier des kits (usesKitSounds, utils/drumKitLibrary) : les projets avec des
+ * kits ne s'exportent JAMAIS gratuitement (le serveur refuse la voie « licence » quand kits = true).
  */
-export function projectUsesKits(tracks: Pick<Track, 'drumMachine' | 'melodicSampler'>[]): boolean {
-  const isKit = (ref: unknown) => typeof ref === 'string' && ref.startsWith('kit:');
-  return tracks.some(t => {
-    const ms = t.melodicSampler as { kitRef?: unknown } | undefined;
-    if (ms && isKit(ms.kitRef)) return true;
-    const rows = (t.drumMachine as { rows?: { sound?: unknown }[] } | undefined)?.rows || [];
-    return rows.some(r => isKit(r?.sound));
-  });
+export function projectUsesKits(tracks: Parameters<typeof usesKitSounds>[0][]): boolean {
+  return tracks.some(t => usesKitSounds(t));
 }

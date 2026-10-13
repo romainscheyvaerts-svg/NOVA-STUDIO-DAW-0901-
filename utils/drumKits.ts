@@ -2,6 +2,7 @@ import { DRUM_LIBRARY, DRUM_LIBRARY_STYLES, LibCategory, libUrl } from './drumLi
 import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
 import { rowStepsPerBar } from './drumPatterns';
+import { isKitRef, kitSoundLabel } from './drumKitLibrary';
 
 /**
  * Boîte à rythmes Make Music : 7 rangées de pads, un motif de 16 pas par
@@ -389,6 +390,7 @@ export function makeDrumMachineLib(kitId: string): DrumMachine {
 
 /** Nom lisible d'un son de la bibliothèque (« Kick 3 · Trap »). */
 export function libSoundLabel(ref: string): string | null {
+  if (isKitRef(ref)) return kitSoundLabel(ref);
   const m = /\/drums\/lib\/([a-z]+-[0-9a-f]{8})\.wav$/.exec(ref);
   if (!m) return null;
   for (const [style, cats] of Object.entries(DRUM_LIBRARY)) {

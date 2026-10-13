@@ -6,6 +6,7 @@ import type { AafImportReport } from '../utils/aaf/aafToNova';
 import type { AafZip } from '../utils/aaf/aafApp';
 import { buildProToolsZip, importAafIntoProject, isAafFile, isAudioFile, missingMedia, openAaf, planProjectExport } from '../utils/aaf/aafApp';
 import { saveBlob } from '../utils/saveBlob';
+import { exportKeyOf } from '../utils/exportRights';
 import { MEDIA_FOLDER } from '../utils/aaf/aafWrite';
 import { useExportGate } from '../hooks/useExportGate';
 import ExportPaywall from './ExportPaywall';
@@ -174,7 +175,7 @@ export const AafImportDialog: React.FC<{ getState: () => DAWState; initialFiles?
 };
 
 // ── Export ───────────────────────────────────────────────────────────────────────────────
-export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () => void }> = ({ getState, onClose }) => {
+export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () => void; getOwned?: () => (string | number)[] }> = ({ getState, onClose, getOwned }) => {
   const [embed, setEmbed] = useState(false);
   const [volPan, setVolPan] = useState(true);
   const [muted, setMuted] = useState(false);
@@ -182,10 +183,17 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<AafZip | null>(null);
   const state = getState();
-  const plan = useMemo(() => planProjectExport(state, { embed, trackVolumePan: volPan, includeMuted: muted }), [state, embed, volPan, muted]);
-  // La séance contient les sons du projet (instru comprise) : même verrou que l'export, décidé
-  // par le serveur (licence achetée, projet payé, Nova Pro, admin).
-  const gate = useExportGate(true, state.id, state.tracks);
+  // UN verrou, deux étages :
+  //  1. le CONTENU : le beat / la mélodie sans licence et les pistes des kits NOVA ne sont jamais écrits
+  //     en BWF (planProjectExport, owned) ; admin : tout ;
+  //  2. la SORTIE : la séance contient les sons du projet, elle se débloque comme l'export de « mes
+  //     pistes » (sans l'instru non achetée), décidé par le serveur : licence, projet payé, Nova Pro, admin.
+  const ownedIds = (getOwned?.() || []).map(String);
+  const gate = useExportGate(true, exportKeyOf(state), state.tracks, ownedIds, 'voix');
+  const owned: (string | number)[] | 'all' = gate.admin ? 'all' : ownedIds;
+  const plan = useMemo(() => planProjectExport(state, { embed, trackVolumePan: volPan, includeMuted: muted, owned }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, embed, volPan, muted, gate.admin, ownedIds.join(',')]);
   const clips = plan.input.tracks.reduce((n, t) => n + t.clips.length, 0);
   const files = plan.input.media.reduce((n, m) => n + Math.min(2, m.channels.length), 0);
 
@@ -194,7 +202,7 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
     setBusy('Fabrication de la séance…'); setError(null);
     try {
       await new Promise(r => setTimeout(r, 30));
-      const z = await buildProToolsZip(getState(), { embed, trackVolumePan: volPan, includeMuted: muted });
+      const z = await buildProToolsZip(getState(), { embed, trackVolumePan: volPan, includeMuted: muted, owned });
       await saveBlob(z.blob, z.fileName);
       setDone(z);
       (window as any).__novaAafLastExport = { fileName: z.fileName, size: z.blob.size, stats: z.result.stats };

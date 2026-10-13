@@ -196,8 +196,26 @@ describe('nova-billing', () => {
     const v = await call(novaBilling, { action: 'verify', session_id: c.json.session_id });
     expect(v.json).toMatchObject({ paid: true, kind: 'export_project', project_key: 'projet-123' });
     expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(true);
-    // Un autre compte qui connaît la clé du projet ne profite pas de l'achat.
+    // Le déblocage appartient à celui qui a payé : ni un autre compte, ni un appel sans compte.
     expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.inge.ok' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_access', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json).toMatchObject({ unlocked: true, via: 'achat' });
+    expect((await call(novaBilling, { action: 'export_access', project_key: 'projet-123' }, { token: 'jwt.inge.ok' })).json).toMatchObject({ unlocked: false, reason: 'paiement' });
+  });
+
+  it('export : l’id local commun « proj-1 » n’est jamais débloqué (même payé) ni payable', async () => {
+    db.tables.nova_purchases = [{ checkout_session_id: 'cs_test_x', kind: 'export_voices', project_key: 'proj-1', user_id: 'u-artiste' }];
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'proj-1' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'proj-1' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_access', project_key: 'proj-1' }, { token: 'jwt.artiste.ok' })).status).toBe(400);
+    expect((await call(novaBilling, { action: 'checkout', product: 'export_project', project_key: 'proj-1', return_url: ret }, { token: 'jwt.artiste.ok' })).status).toBe(400);
+  });
+
+  it('export : achat sans compte (invité) débloque seulement les appels sans compte', async () => {
+    db.tables.nova_purchases = [{ checkout_session_id: 'cs_test_y', kind: 'export_voices', project_key: 'exp-invite-1', user_id: null }];
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'exp-invite-1' })).json.unlocked).toBe(true);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'exp-invite-1' }, { token: 'jwt.inge.ok' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_access', project_key: 'exp-invite-1' })).json).toMatchObject({ unlocked: true, via: 'achat' });
   });
 
   it('abonnement : anciens noms (collab, beatmaker) → Nova Pro 9,99 €/mois ; abonnés existants inchangés (prix chez Stripe)', async () => {

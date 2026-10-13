@@ -5,6 +5,8 @@ import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { clipRegionChannels } from '../utils/drumSamples';
 import { loadPadBuffer } from '../utils/padBuffers';
+import { isKitRef } from '../utils/drumKitLibrary';
+import { bakeRefusal, canBakeTrack } from '../utils/freeze';
 import type { DrumMachine } from '../utils/drumKits';
 import { DEFAULT_SAMPLER, MelodicSamplerSettings, newSamplerSampleId, normalizeSampler, noteName, samplerBufferKey } from '../utils/melodicSampler';
 import { detectRoot } from '../utils/samplerRoot';
@@ -127,6 +129,8 @@ const SamplerHost: React.FC<Props> = ({ tracks, bpm, isMobile, setState, getStat
         const c = t?.clips.find(x => x.id === r.clipId);
         const src = c?.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined;
         if (!t || !c || !src) { notify('Ce clip n’a pas de son chargé : attends la fin du chargement, puis réessaie.'); return; }
+        // Le beat sous licence ne devient jamais un sample (il partirait dans la sauvegarde).
+        if (!canBakeTrack(t)) { notify(bakeRefusal(t)!); return; }
         const chans = clipRegionChannels(channelsOf(src), src.sampleRate, c);
         const b = ctx.createBuffer(chans.length, Math.max(1, chans[0].length), src.sampleRate);
         chans.forEach((ch, i) => b.getChannelData(i).set(ch));
@@ -151,13 +155,21 @@ const SamplerHost: React.FC<Props> = ({ tracks, bpm, isMobile, setState, getStat
         const root = typeof st.projectKey === 'number' ? st.projectKey : 0;
         const b = await loadPadBuffer(row, ctx, root);
         const sound = registerSamplerSound(b, row.name);
-        const settings = normalizeSampler({ ...DEFAULT_SAMPLER, ...sound });
+        // Son des kits NOVA : le sampler garde seulement la référence (jamais l'audio dans la sauvegarde).
+        const kit = isKitRef(row.sound)
+          ? { kitRef: row.sound, kitRoot: root, kitRegion: { start: row.start, end: row.end, fadeIn: row.fadeIn, fadeOut: row.fadeOut, reverse: row.reverse } }
+          : {};
+        const settings = normalizeSampler({ ...DEFAULT_SAMPLER, ...sound, ...kit });
         const { trackId } = createSamplerTrack({ name: `Sampler ${row.name}`, settings, afterTrackId: DRUM_TRACK_ID });
         openSamplerPanel(trackId);
         notify(`🎛️ Le son du pad « ${row.name} » est dans un sampler : il se joue sur tout le clavier (808 mélodique, perc accordée…).`);
         return;
       }
-      if (r.kind === 'chop-clip') setChop({ trackId: r.trackId, clipId: r.clipId });
+      if (r.kind === 'chop-clip') {
+        const t = getState().tracks.find(x => x.id === r.trackId);
+        if (t && !canBakeTrack(t)) { notify(bakeRefusal(t)!); return; }
+        setChop({ trackId: r.trackId, clipId: r.clipId });
+      }
     } catch (e) {
       notify(`Impossible de préparer le sampler : ${e instanceof Error ? e.message : 'son illisible'}.`);
     } finally {

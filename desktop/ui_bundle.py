@@ -47,6 +47,16 @@ EXTERNAL_CSS_HOSTS = ("cdnjs.cloudflare.com",)
 # Jamais dans l'interface embarquée : installateurs (68 Mo), service worker (désactivé
 # dans l'application : WebView2 sert déjà tout en local).
 EXCLUDED_TOP = ("downloads",)
+# Ni les sons des kits NOVA (~80 Mo, ~2 000 fichiers brouillés) : l'installateur aurait presque
+# triplé (42 -> ~120 Mo). Absents de l'interface embarquée, ils sont demandés au site (même
+# adresse, voir on_resource dans nova_desktop.py) un par un quand on les écoute, puis gardés
+# dans le cache disque du profil WebView2 (Cache API « nova-kits-v1 »).
+EXCLUDED_PREFIXES = ("drums/kits/",)
+
+
+def is_excluded(rel: str) -> bool:
+    """Fichier du site jamais copié dans l'interface embarquée (ni téléchargé en mise à jour)."""
+    return rel.split("/")[0] in EXCLUDED_TOP or rel.startswith(EXCLUDED_PREFIXES)
 MAX_FILE_BYTES = 64 * 1024 * 1024
 
 MIME = {
@@ -471,7 +481,7 @@ def download_version(origin: str, cache_dir: str, bundled: "UiVersion | None", m
             todo.extend(sorted(_refs_in(rel, data) - seen))
         # 2. fichiers publics non versionnés (worklets, polices, icônes, ir, manifest…) : toujours frais
         for rel in mutable_files:
-            if rel == "index.html" or is_immutable(rel) or rel.split("/")[0] in EXCLUDED_TOP:
+            if rel == "index.html" or is_immutable(rel) or is_excluded(rel):
                 continue
             try:
                 data, ctype = http_get(f"{origin}/{urllib.parse.quote(rel)}", ua)
