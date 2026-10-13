@@ -13,6 +13,9 @@ const SAT_MODES: Record<string, { label: string; help: string }> = {
 };
 import { loadWorkletModule, setParamSmooth } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { Faceplate, HwWindow, Knob, Led, PushButton } from './hw';
+
+const SAT_ACCENT = '#f0a243';
 
 /**
  * MODULE FX_03 : VOCAL SATURATOR (ANALOG COLORATION v2.0)
@@ -457,106 +460,6 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     ctx.shadowBlur = 0;
   }, [params]);
 
-  useEffect(() => {
-    let animFrame = 0;
-    const update = () => {
-      draw();
-      animFrame = requestAnimationFrame(update);
-    };
-    animFrame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(animFrame);
-  }, [draw]);
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging.current || !activeParam.current) return;
-    
-    const delta = -e.movementY / 150;
-    setParams(prev => {
-      const current = prev[activeParam.current!];
-      if (typeof current !== 'number') return prev;
-
-      let min = 0, max = 1;
-      // Drive sur 0-100 comme les reglages enregistres (l'ancien 1-10 ramenait
-      // d'un coup un drive de preset 25 a 10 des qu'on touchait le bouton).
-      if (activeParam.current === 'drive') { min = 0; max = 100; }
-      if (activeParam.current === 'tone') { min = -1; max = 1; }
-      if (activeParam.current === 'outputGain') { min = 0; max = 2; }
-      if (['eqLow', 'eqMid', 'eqHigh'].includes(activeParam.current)) { min = -12; max = 12; }
-
-      const newVal = Math.max(min, Math.min(max, current + delta * (max - min)));
-      const newParams = { ...prev, [activeParam.current!]: newVal };
-      node.updateParams(newParams);
-      return newParams;
-    });
-  }, [node]);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!isDragging.current || !activeParam.current || e.touches.length === 0) return;
-    e.preventDefault();
-
-    const currentY = e.touches[0].clientY;
-    const delta = -(currentY - lastTouchY.current) / 150;
-    lastTouchY.current = currentY;
-
-    setParams(prev => {
-      const current = prev[activeParam.current!];
-      if (typeof current !== 'number') return prev;
-
-      let min = 0, max = 1;
-      // Drive sur 0-100 comme les reglages enregistres (l'ancien 1-10 ramenait
-      // d'un coup un drive de preset 25 a 10 des qu'on touchait le bouton).
-      if (activeParam.current === 'drive') { min = 0; max = 100; }
-      if (activeParam.current === 'tone') { min = -1; max = 1; }
-      if (activeParam.current === 'outputGain') { min = 0; max = 2; }
-      if (['eqLow', 'eqMid', 'eqHigh'].includes(activeParam.current)) { min = -12; max = 12; }
-
-      const newVal = Math.max(min, Math.min(max, current + delta * (max - min)));
-      const newParams = { ...prev, [activeParam.current!]: newVal };
-      node.updateParams(newParams);
-      return newParams;
-    });
-  }, [node]);
-
-  const handleMouseUp = useCallback(() => {
-    isDragging.current = false;
-    activeParam.current = null;
-    document.body.style.cursor = 'default';
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    isDragging.current = false;
-    activeParam.current = null;
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
-    window.addEventListener('touchcancel', handleTouchEnd);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
-
-  const handleMouseDown = (param: keyof SaturatorParams, e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    activeParam.current = param;
-    document.body.style.cursor = 'ns-resize';
-  };
-
-  const handleTouchStart = (param: keyof SaturatorParams, e: React.TouchEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    activeParam.current = param;
-    lastTouchY.current = e.touches[0].clientY;
-  };
-
   const setParam = (key: keyof SaturatorParams, value: number) => {
     setParams(prev => {
       const newParams = { ...prev, [key]: value };
@@ -571,88 +474,54 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     node.updateParams(newParams);
   };
 
-  const togglePower = () => {
-    const isEnabled = !params.isEnabled;
-    const newParams = { ...params, isEnabled };
-    setParams(newParams);
-    node.updateParams(newParams);
-  };
 
+  // Courbe redessinée quand les réglages changent (plus de boucle à chaque image).
+  useEffect(() => { draw(); }, [draw]);
+
+  const drive = Number.isFinite(params.drive) ? params.drive : 20;
+  const modeHelp = (SAT_MODES[params.mode] || { help: '' }).help;
   return (
-    <div className="w-[520px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-10 animate-in fade-in zoom-in duration-300 select-none text-white">
-      <div className="flex justify-between items-start">
-        <div className="flex items-center space-x-5">
-          <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 flex items-center justify-center text-yellow-400 border border-yellow-500/20 shadow-lg shadow-yellow-500/5">
-            <i className="fas fa-fire text-2xl"></i>
-          </div>
-          <div>
-            <h2 className="text-2xl font-black tracking-tight leading-none">Saturation</h2>
-            <p className="text-[12px] text-slate-400 mt-2">Ajoute de la chaleur et du grain : la voix sonne plus pleine et plus proche.</p>
+    <HwWindow type="VOCALSATURATOR" width={540} accent={SAT_ACCENT} accentInk="#1d1003"
+      idleHelp={<>Ajoute de la chaleur et du grain : la voix sonne plus pleine et plus proche. <span style={{ color: '#cbd2dc' }}>{modeHelp}</span></>}>
+      <Faceplate finish="bronze" model="Saturation" kicker="Couleur analogique · bande, lampe, transistor" modelStyle="serif" style={{ ['--hw-accent' as any]: SAT_ACCENT }}>
+        {/* Pas d'interrupteur interne : la barre de la fenêtre (bypass) est le seul marche / arrêt. */}
+        <div className="flex items-center gap-2 mb-3" title="Lampe : elle chauffe plus quand la chaleur monte">
+          <Led on={drive > 0.5} color={drive > 60 ? '#ff6a1a' : '#ffb347'} large />
+          <span className="hw-silk hw-silk-soft">Lampe</span>
+        </div>
+
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: 136 }}>
+            <div className="absolute top-2 left-3 hw-silk" style={{ color: '#94a3b8', zIndex: 1 }}>Courbe de saturation</div>
+            <canvas ref={canvasRef} width={440} height={144} className="w-full h-full block" aria-label="Courbe de saturation (entrée → sortie)" />
           </div>
         </div>
-        <button data-plugin-power
-          onClick={togglePower}
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border-2 ${params.isEnabled ? 'bg-yellow-500 border-yellow-400 text-black shadow-lg shadow-yellow-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-        >
-          <i className="fas fa-power-off text-lg"></i>
-        </button>
-      </div>
 
-      <div className="h-36 bg-black/60 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner">
-        <div className="absolute top-4 left-8 text-[8px] font-black text-slate-600 uppercase tracking-widest z-10">Courbe de saturation</div>
-        <canvas ref={canvasRef} width={440} height={144} className="w-full h-full opacity-80" />
-        <div className="absolute inset-0 bg-gradient-to-t from-yellow-500/5 to-transparent pointer-events-none" />
-      </div>
+        <div className="mt-3 flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="Type de saturation" data-nova-param="mode">
+          {(['TAPE', 'TUBE', 'TRANSISTOR', 'SOFT_CLIP'] as SaturationMode[]).map(mode => (
+            <PushButton key={mode} role="radio" active={params.mode === mode} onClick={() => setMode(mode)} text={SAT_MODES[mode].label}
+              led={SAT_ACCENT} hint={SAT_MODES[mode].help} ariaLabel={SAT_MODES[mode].label} />
+          ))}
+        </div>
 
-      <div className="flex justify-center space-x-3">
-        {(['TAPE', 'TUBE', 'TRANSISTOR', 'SOFT_CLIP'] as SaturationMode[]).map(mode => (
-          <button
-            key={mode}
-            onClick={() => setMode(mode)}
-            title={SAT_MODES[mode].help}
-            aria-pressed={params.mode === mode}
-            className={`px-4 py-2 rounded-xl text-[11px] font-bold transition-all ${params.mode === mode ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-          >
-            {SAT_MODES[mode].label}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-4 gap-4">
-        <SatKnob label="Chaleur" value={(Number.isFinite(params.drive) ? params.drive : 20) / 100} defaultValue={0.2} onChange={(v) => setParam('drive', v * 100)} color="#facc15" suffix="" displayVal={Math.round(Number.isFinite(params.drive) ? params.drive : 20)} />
-        <SatKnob label="Couleur" value={(params.tone + 1) / 2} defaultValue={0.5} onChange={(v) => setParam('tone', v * 2 - 1)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
-        <SatKnob label="Mélange" value={params.mix} defaultValue={0.5} onChange={(v) => setParam('mix', v)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
-        <SatKnob label="Sortie" value={params.outputGain / 2} defaultValue={0.5} onChange={(v) => setParam('outputGain', v * 2)} color="#facc15" suffix="" displayVal={gainDbFr(params.outputGain)} />
-      </div>
-
-      <p className="pt-4 border-t border-white/5 text-[11px] text-slate-400">{(SAT_MODES[params.mode] || { help: '' }).help}</p>
-    </div>
+        <div className="hw-rule" style={{ margin: '12px 0' }} />
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+          <Knob paramId="drive" label="Chaleur" size="L" cap="cream" min={0} max={100} step={0.5} value={drive} defaultValue={20}
+            onChange={v => setParam('drive', v)} format={v => `${Math.round(v)}`} hint={[termHelp('Chaleur'), 'Quantité de saturation (le niveau reste à peu près constant).'].filter(Boolean).join(' · ')}
+            scale={[{ v: 0, label: '0' }, { v: 25, label: '25' }, { v: 50, label: '50' }, { v: 75, label: '75' }, { v: 100, label: '100' }]} />
+          <Knob paramId="tone" label="Couleur" size="M" cap="cream" min={-1} max={1} step={0.01} value={params.tone} defaultValue={0} bipolar
+            onChange={v => setParam('tone', v)} format={v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(Math.round(v * 100))}`}
+            hint={[termHelp('Couleur'), 'Vers la gauche : plus sombre ; vers la droite : plus brillant.'].filter(Boolean).join(' · ')}
+            scale={[{ v: -1, label: 'Sombre' }, { v: 0, label: '0' }, { v: 1, label: 'Clair' }]} />
+          <Knob paramId="mix" label="Mélange" size="M" cap="cream" min={0} max={1} step={0.01} value={params.mix} defaultValue={0.5}
+            onChange={v => setParam('mix', v)} format={v => `${Math.round(v * 100)} %`} hint={[termHelp('Mélange'), 'Part du son saturé mélangée au son d’origine.'].filter(Boolean).join(' · ')}
+            scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]} />
+          <Knob paramId="outputGain" label="Sortie" size="M" cap="cream" min={0} max={2} step={0.01} value={params.outputGain} defaultValue={1}
+            onChange={v => setParam('outputGain', v)} format={v => String(gainDbFr(v))} hint={[termHelp('Sortie'), 'Volume en sortie de la saturation.'].filter(Boolean).join(' · ')}
+            ticks={11} />
+        </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
 
-const SatKnob: React.FC<{
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  defaultValue?: number;
-  color: string;
-  suffix: string;
-  displayVal: number | string;
-}> = ({ label, value, onChange, defaultValue, color, suffix, displayVal }) => {
-  const safeValue = Number.isFinite(value) ? value : 0;
-  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, sensitivity: 150, defaultValue });
-  const rotation = (safeValue * 270) - 135;
-  return (
-    <div className="flex flex-col items-center space-y-3 group touch-none" title={termHelp(label) || undefined}>
-      <div {...knob.bind} className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1.5 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[45px]"><span className="text-[9px] font-mono font-bold text-white">{displayVal}{suffix}</span></div>
-      </div>
-    </div>
-  );
-};
