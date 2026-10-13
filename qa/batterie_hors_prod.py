@@ -32,6 +32,8 @@ BATTERIE = [
     ("seance_inge", []), ("restes_pro3", []), ("console_telephone", []),
     # 1.4.6-1.4.7 : fréquence par projet, artiste invité, collaboration (prise en direct, commentaires, lien d'écoute).
     ("frequence_preuve", []), ("collab_artiste", []), ("prise_directe", []), ("commentaires_versions", []), ("lien_ecoute", []),
+    # 13/10/2026 : thème clair (aucun écran resté sombre, textes lisibles, DAW intégré au site qui suit son thème).
+    ("theme_clair", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
 ]
