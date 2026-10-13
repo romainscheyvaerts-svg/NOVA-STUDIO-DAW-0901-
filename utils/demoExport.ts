@@ -106,6 +106,25 @@ export function clipWindow(st: DAWState, length = 30): { start: number; duration
 }
 
 export async function renderTagged(st: DAWState, start: number, duration: number, onProgress?: (p: number) => void): Promise<AudioBuffer> {
+  const mix = await renderMix(st, start, duration, onProgress);
+  await applyTag(mix);
+  // Crête vraie sous le plafond MP3 (le tag et l'encodeur ajoutent de la crête).
+  capTruePeak(mix, MP3_TRUE_PEAK_CEILING);
+  return mix;
+}
+
+/**
+ * Lot 2a · Son du clip vertical avec les paroles : le mix rendu comme l'export (effets,
+ * master), normalisé, crête vraie plafonnée. JAMAIS de tag audio (décision de Romain) :
+ * les limites de l'extrait (30 s, passage avec la voix) sont appliquées par la fenêtre du clip.
+ */
+export async function renderClipMix(st: DAWState, start: number, duration: number, onProgress?: (p: number) => void): Promise<AudioBuffer> {
+  const mix = await renderMix(st, start, duration, onProgress);
+  capTruePeak(mix, MP3_TRUE_PEAK_CEILING);
+  return mix;
+}
+
+async function renderMix(st: DAWState, start: number, duration: number, onProgress?: (p: number) => void): Promise<AudioBuffer> {
   // Effets VST3 du PC : rendus par le pont ou rendu de la sauvegarde (sinon sons secs).
   const prep = await prepareTracksForOffline(st.tracks);
   let mix: AudioBuffer;
@@ -119,9 +138,6 @@ export async function renderTagged(st: DAWState, start: number, duration: number
     prep.cleanup();
   }
   AudioEncoder.normalizeBuffer(mix, -1);
-  await applyTag(mix);
-  // Crête vraie sous le plafond MP3 (le tag et l'encodeur ajoutent de la crête).
-  capTruePeak(mix, MP3_TRUE_PEAK_CEILING);
   return mix;
 }
 
@@ -135,7 +151,7 @@ export function fileBaseName(st: DAWState): string {
   return `${beat.replace(/[\\/:*?"<>|]+/g, '').trim()} - Nova Studio (Make Music)`;
 }
 
-async function loadCover(st: DAWState): Promise<HTMLImageElement | null> {
+export async function loadCover(st: DAWState): Promise<HTMLImageElement | null> {
   const beat = getCatalogBeat(st.tracks);
   if (!beat) return null;
   try {

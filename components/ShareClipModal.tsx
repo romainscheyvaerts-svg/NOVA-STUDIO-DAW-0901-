@@ -12,6 +12,8 @@ interface ShareClipModalProps {
   /** Lancer tout de suite un fichier (« Démo gratuite du morceau complet » de la fenêtre Exporter) :
    *  sans ça, l'artiste devait choisir une 2e fois la même chose ici. */
   autoRun?: 'demo' | 'audio' | null;
+  /** Lot 2a : « 🎬 Clip pour TikTok / Reels » (vidéo verticale avec les paroles synchronisées). */
+  onOpenLyricClip?: () => void;
 }
 
 /**
@@ -19,7 +21,7 @@ interface ShareClipModalProps {
  * complète en MP3, avec le tag « Make Music ». La version propre (WAV sans
  * tag) reste liée à l'achat de la licence.
  */
-const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, onBuyBeat, autoRun }) => {
+const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, onBuyBeat, autoRun, onOpenLyricClip }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState<string | null>(null);
@@ -74,9 +76,15 @@ const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, o
           <p className="mt-5 text-sm text-slate-300">Enregistre d'abord une prise : ici tu pourras la partager.</p>
         ) : (
           <div className="mt-5 space-y-2.5">
+            {onOpenLyricClip && (
+              <button type="button" disabled={!!busy} onClick={onOpenLyricClip} data-testid="share-lyric-clip" className={`${btn} border-violet-400/50 bg-gradient-to-r from-cyan-500/15 to-violet-500/15`}>
+                <span className="block text-[14px] font-bold text-white">🎬 Clip pour TikTok / Reels</span>
+                <span className="block text-[12px] text-slate-300 mt-0.5">Vidéo verticale avec tes paroles en karaoké, 4 styles, ton titre. Sans tag audio.</span>
+              </button>
+            )}
             {canMakeVideo() && (
               <button type="button" disabled={!!busy} onClick={() => run('video')} className={`${btn} border-cyan-400/40 bg-cyan-500/10`}>
-                <span className="block text-[14px] font-bold text-white">🎬 Vidéo 30 s pour Insta / TikTok</span>
+                <span className="block text-[14px] font-bold text-white">📼 Vidéo rapide 30 s (spectre)</span>
                 <span className="block text-[12px] text-slate-300 mt-0.5">Format vertical, pochette du beat, spectre animé. Création en ~30 s.</span>
               </button>
             )}
