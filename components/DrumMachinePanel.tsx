@@ -13,6 +13,8 @@ import ChopPanel from './ChopPanel';
 import { libUrl } from '../utils/drumLibrary';
 import { DRUM_SOUNDS, DrumCategory } from '../utils/drumSounds';
 import { audioEngine } from '../engine/AudioEngine';
+import DrumKitBrowser from './DrumKitBrowser';
+import { applyKitDef, isKitRef, KIT_DRAG_TYPE, kitIndexIfLoaded, KitDef, KitIndex, loadKitIndex, setPadKitSound } from '../utils/drumKitLibrary';
 
 interface DrumMachinePanelProps {
   open: boolean;
@@ -37,6 +39,10 @@ interface DrumMachinePanelProps {
   sessionClips?: SessionClipRef[];
   ensureEngine?: () => Promise<unknown>;
   notify?: (msg: string) => void;
+  /** Tonique du morceau (0-11) : les 808 des kits y sont réaccordées. */
+  projectKey?: number | null;
+  /** Change de valeur pour ouvrir le navigateur des kits (bouton « Kits » hors du panneau). */
+  kitsSignal?: number;
 }
 
 const CAT_OF: Record<string, DrumCategory[]> = {
@@ -59,6 +65,14 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches);
   const [page, setPage] = useState(0);
   const [selPad, setSelPad] = useState(0);
+  // Kits NOVA : navigateur ouvert, pad visé par « Poser » (null = nouveau pad).
+  const [kitsOpen, setKitsOpen] = useState(false);
+  const [kitTarget, setKitTarget] = useState<number | null>(null);
+  const [, setKitIxTick] = useState(0);
+  useEffect(() => { if (p.kitsSignal) setKitsOpen(true); }, [p.kitsSignal]);
+  // Noms des pads « kit:… » (« Kick 12 ») : l'index est chargé dès qu'un pad en utilise un.
+  const usesKit = !!p.dm?.rows.some(r => isKitRef(r.sound));
+  useEffect(() => { if (usesKit && !kitIndexIfLoaded()) loadKitIndex().then(() => setKitIxTick(n => n + 1)).catch(() => {}); }, [usesKit]);
   useEffect(() => {
     const mq = window.matchMedia?.('(max-width: 639px)');
     if (!mq) return;
@@ -188,12 +202,29 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       p.notify?.('Ce fichier ne se lit pas : essaie un WAV, MP3, AIFF ou FLAC.');
     }
   };
+  /** Kits NOVA : son posé sur un pad (ou un nouveau pad). Une seule étape d'annulation. */
+  const pickKitSound = (id: string, rowIndex: number | null, ix: KitIndex | null) => {
+    const r = setPadKitSound(p.dm || makeDrumMachine('empty'), id, rowIndex, ix);
+    if (!r) { p.notify?.(`${MAX_PADS} pads au plus : choisis un pad existant dans « Poser sur ».`); return; }
+    p.onChange(r.dm);
+    setSelPad(r.rowIndex);
+    window.setTimeout(() => p.onAudition(r.rowIndex), 120);
+    p.notify?.(`🥁 « ${r.dm.rows[r.rowIndex].name} » posé sur ${rowIndex === null ? 'un nouveau pad' : 'le pad'} : allume ses pas dans la grille. Annuler (Ctrl+Z) pour revenir.`);
+  };
+  const applyNovaKit = (kit: KitDef, ix: KitIndex) => {
+    const next = applyKitDef(p.dm || makeDrumMachine('empty'), kit, ix);
+    p.onChange(next);
+    setSelPad(0); setKitTarget(null);
+    p.notify?.(`🥁 Kit « ${kit.name} » chargé sur ${next.rows.length} pads${p.dm?.rows.some(r => r.steps.some(v => v > 0)) ? ' (tes pas sont gardés)' : ''}${typeof p.projectKey === 'number' ? ', 808 accordée sur la tonique' : ''}. Annuler (Ctrl+Z) pour revenir.`);
+  };
   const onDropFiles = (e: React.DragEvent, rowIndex: number | null) => {
+    const kitId = e.dataTransfer?.getData(KIT_DRAG_TYPE);
+    if (kitId) { e.preventDefault(); e.stopPropagation(); pickKitSound(kitId, rowIndex, kitIndexIfLoaded()); return; }
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault(); e.stopPropagation();
     void importFiles(Array.from(e.dataTransfer.files), rowIndex);
   };
-  const allowDrop = (e: React.DragEvent) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) e.preventDefault(); };
+  const allowDrop = (e: React.DragEvent) => { const t = Array.from(e.dataTransfer?.types || []); if (t.includes('Files') || t.includes(KIT_DRAG_TYPE)) e.preventDefault(); };
   const sliceCount = dm ? dm.rows.filter(r => r.slice).length : 0;
   const keyOf = (ri: number) => {
     if (!dm || !keysOn) return '';
@@ -252,6 +283,14 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
         {/* En-tête */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
           <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>
+          {/* Ordinateur : bouton dans l'en-tête. Téléphone : grand bouton en haut du panneau (en-tête trop étroit). */}
+          {!narrow && (
+            <button type="button" onClick={() => setKitsOpen(v => !v)} aria-expanded={kitsOpen} data-testid="open-kits"
+              title="Kits NOVA : des kits prêts à jouer et ~2 000 sons (kicks, snares, 808, percus…) à écouter puis poser sur les pads"
+              className={`h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black ${kitsOpen ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
+              <i className={`fas fa-layer-group ${kitsOpen ? '' : 'text-cyan-400'} mr-1.5`} aria-hidden />Kits
+            </button>
+          )}
           {p.onOpen808 && (
             <button type="button" onClick={p.onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
               className="h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black bg-white/[0.06] text-slate-200 hover:bg-white/10">
@@ -288,6 +327,23 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               </button>
             ))}
           </div>
+
+          {narrow && !kitsOpen && (
+            <button type="button" onClick={() => setKitsOpen(true)} aria-expanded={false} data-testid="open-kits"
+              className="w-full h-12 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 text-left px-4 flex items-center gap-3">
+              <i className="fas fa-layer-group text-cyan-300" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-black text-white">Kits NOVA</span>
+                <span className="block text-[11px] text-slate-300 truncate">Kits prêts à jouer et ~2 000 sons à écouter</span>
+              </span>
+              <i className="fas fa-chevron-right text-slate-400" aria-hidden />
+            </button>
+          )}
+          {kitsOpen && (
+            <DrumKitBrowser dm={dm} targetPad={kitTarget} onTargetPad={setKitTarget} bpm={p.bpm} projectKey={p.projectKey}
+              onApplyKit={applyNovaKit} onPickSound={pickKitSound} onClose={() => setKitsOpen(false)}
+              ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />
+          )}
 
           <KitBar dm={dm} onChange={p.onChange} ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />
 

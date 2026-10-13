@@ -171,11 +171,26 @@ describe('nova-billing', () => {
     expect(stripeState.created[0].success_url).toBe(`${ret}?nova_paid={CHECKOUT_SESSION_ID}`);
     expect((await call(novaBilling, { action: 'verify', session_id: 'pas-un-id' })).status).toBe(400);
     expect((await call(novaBilling, { action: 'verify', session_id: c.json.session_id })).json.paid).toBe(false);
-    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(false);
     Object.assign(stripeState.sessions[c.json.session_id], { payment_status: 'paid', amount_total: 200, customer_details: { email: 'artiste@example.com' } });
     const v = await call(novaBilling, { action: 'verify', session_id: c.json.session_id });
     expect(v.json).toMatchObject({ paid: true, kind: 'export_voices', project_key: 'projet-123' });
-    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(true);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(true);
+    // Le déblocage appartient à celui qui a payé : ni un autre compte, ni un appel sans compte.
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.inge.ok' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(false);
+  });
+
+  it('export des pistes : l’id local commun « proj-1 » n’est jamais débloqué (même payé)', async () => {
+    db.tables.nova_purchases = [{ checkout_session_id: 'cs_test_x', kind: 'export_voices', project_key: 'proj-1', user_id: 'u-artiste' }];
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'proj-1' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(false);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'proj-1' })).json.unlocked).toBe(false);
+  });
+
+  it('export des pistes : achat sans compte (invité) débloque seulement les appels sans compte', async () => {
+    db.tables.nova_purchases = [{ checkout_session_id: 'cs_test_y', kind: 'export_voices', project_key: 'exp-invite-1', user_id: null }];
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'exp-invite-1' })).json.unlocked).toBe(true);
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'exp-invite-1' }, { token: 'jwt.inge.ok' })).json.unlocked).toBe(false);
   });
 
   it('abonnement : 5 €/mois et 10 €/mois (prix inchangés)', async () => {

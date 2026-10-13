@@ -185,9 +185,16 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     // Le studio (admins) teste tout gratuitement.
     if (user && await isAdmin(user.id)) return { unlocked: true, admin: true };
     const projectKey = String(body?.project_key || "");
-    const { data } = await supabase.from("nova_purchases").select("checkout_session_id").eq("project_key", projectKey).limit(1);
+    // « proj-1 » = id local commun à tous les projets non enregistrés : jamais débloqué (avant, un
+    // seul paiement sur cette clé débloquait l'export de tout le monde).
+    if (!/^[A-Za-z0-9_.:-]{6,80}$/.test(projectKey) || projectKey === "proj-1") return { unlocked: false };
+    // Le déblocage appartient à celui qui a payé : son compte, ou un achat sans compte (invité).
+    let q = supabase.from("nova_purchases").select("checkout_session_id").eq("project_key", projectKey);
+    q = user ? q.eq("user_id", user.id) : q.is("user_id", null);
+    const { data } = await q.limit(1);
     if (data?.length) return { unlocked: true };
-    const { data: uses } = await supabase.from("nova_export_uses").select("id").eq("project_key", projectKey).limit(1);
+    if (!user) return { unlocked: false };
+    const { data: uses } = await supabase.from("nova_export_uses").select("id").eq("project_key", projectKey).eq("user_id", user.id).limit(1);
     return { unlocked: !!uses?.length };
   }
 

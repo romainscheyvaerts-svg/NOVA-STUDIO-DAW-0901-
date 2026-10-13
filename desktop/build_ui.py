@@ -111,6 +111,8 @@ def finalize(built: str, source: dict) -> dict:
     shutil.copytree(built, OUT, ignore=shutil.ignore_patterns("downloads", "sw.js"))
     for top in ui_bundle.EXCLUDED_TOP:
         shutil.rmtree(os.path.join(OUT, top), ignore_errors=True)
+    for pre in ui_bundle.EXCLUDED_PREFIXES:  # sons des kits : servis par le site, à la demande
+        shutil.rmtree(os.path.join(OUT, *pre.strip("/").split("/")), ignore_errors=True)
     if not os.path.isfile(os.path.join(OUT, "index.html")):
         sys.exit("index.html absent du build")
     with open(os.path.join(OUT, "index.html"), "rb") as f:
@@ -132,7 +134,7 @@ def public_files() -> "list[str]":
     for dirpath, _, files in os.walk(pub):
         for fn in files:
             rel = os.path.relpath(os.path.join(dirpath, fn), pub).replace("\\", "/")
-            if rel.split("/")[0] not in ui_bundle.EXCLUDED_TOP and rel != "sw.js":
+            if not ui_bundle.is_excluded(rel) and rel != "sw.js":
                 out.append(rel)
     return sorted(out)
 

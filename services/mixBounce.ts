@@ -10,7 +10,7 @@ import { prepareTracksForOffline } from './VstFreeze';
  * (l'artiste entend le mix tel qu'il est). Rien n'est téléchargé : le son est
  * décodé puis envoyé par le canal audio de la collaboration (services/Collab).
  */
-export async function renderMixBounce(tracks: Track[], title: string, onStep: (text: string) => void = () => {}): Promise<{ buffer: AudioBuffer; missingVst: string[] }> {
+export async function renderMixBounce(tracks: Track[], title: string, onStep: (text: string) => void = () => {}, opts: { tag?: boolean } = {}): Promise<{ buffer: AudioBuffer; missingVst: string[]; tagged: boolean }> {
   const end = Math.max(0.05, ...tracks.filter(t => !t.isGuide).flatMap(t => t.clips.map(c => c.start + c.duration)));
   const settings: ExportSettings = {
     source: 'MASTER', start: 0, end, tail: { mode: 'auto', seconds: 2 },
@@ -26,6 +26,9 @@ export async function renderMixBounce(tracks: Track[], title: string, onStep: (t
     const ctx = audioEngine.ctx;
     if (!ctx) throw new Error('moteur audio indisponible');
     const buffer = await ctx.decodeAudioData(await file.blob.arrayBuffer());
-    return { buffer, missingVst: prep.missingVst };
+    // Beat sans licence ou sons des kits NOVA dans un projet non payé : tag sonore, comme la démo
+    // gratuite (sinon cette version serait un export propre gratuit, lisible sur la page d'écoute).
+    if (opts.tag) { const { applyTag } = await import('../utils/demoExport'); await applyTag(buffer); }
+    return { buffer, missingVst: prep.missingVst, tagged: !!opts.tag };
   } finally { prep.cleanup(); }
 }

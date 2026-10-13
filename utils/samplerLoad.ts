@@ -2,6 +2,8 @@ import { audioBufferRegistry } from './audioBufferRegistry';
 import { MelodicSamplerSettings, samplerBufferKey, sampleZones, SamplerZone } from './melodicSampler';
 import { instrumentBaseUrl, loadInstrumentManifest } from './instrumentPresets';
 import type { LoadedZone } from '../engine/MelodicSamplerNode';
+import type { DrumRow } from './drumKits';
+import { loadPadBuffer } from './padBuffers';
 
 /**
  * Côté navigateur : sons prêts à jouer d'un sampler (R18) ou d'un instrument
@@ -42,7 +44,14 @@ export async function loadSamplerZones(s: MelodicSamplerSettings, ctx: BaseAudio
     return zones.filter(Boolean) as LoadedZone[];
   }
   if (s.sampleId) {
-    const buffer = audioBufferRegistry.get(samplerBufferKey(s.sampleId));
+    let buffer = audioBufferRegistry.get(samplerBufferKey(s.sampleId));
+    if (!buffer && s.kitRef) {
+      // Son des kits NOVA (jamais sauvé en audio) : rechargé depuis la bibliothèque, à l'identique.
+      try {
+        buffer = await loadPadBuffer({ sound: s.kitRef, ...(s.kitRegion || {}) } as DrumRow, ctx, s.kitRoot ?? 0);
+        audioBufferRegistry.register(buffer, samplerBufferKey(s.sampleId));
+      } catch { return []; }
+    }
     if (!buffer) return [];
     return sampleZones(s, buffer.duration).map(z => ({ ...z, buffer }));
   }

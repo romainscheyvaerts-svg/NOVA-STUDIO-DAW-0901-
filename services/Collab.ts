@@ -724,7 +724,8 @@ export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
   // restaient muets chez l'autre (motifs et réglages arrivaient, pas le son).
   ...Object.keys((t as any).drumMachine?.samples || {}).map(padSampleKey),
   // Sampler mélodique (R18) : son perso (les instruments R20 sont sur le site, rien à envoyer).
-  t.melodicSampler?.sampleId ? samplerBufferKey(t.melodicSampler.sampleId) : undefined,
+  // Son des kits NOVA : jamais envoyé, l'autre poste le charge depuis sa propre bibliothèque.
+  t.melodicSampler?.sampleId && !t.melodicSampler.kitRef ? samplerBufferKey(t.melodicSampler.sampleId) : undefined,
 ].filter(Boolean) as string[]));
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,

@@ -1,5 +1,5 @@
 import { PluginInstance, Track, TrackType } from '../types';
-import { canBakeTrack, isTrackFrozen, postFreezePlugins } from './freeze';
+import { bakeRefusalShort, canBakeTrack, isTrackFrozen, postFreezePlugins } from './freeze';
 
 /**
  * Charge processeur estimée des pistes (module pur, sans audio).
@@ -109,7 +109,7 @@ export function safeToAutoFreeze(t: Track | undefined, ctx: SafetyContext): Safe
   if (t.isFrozen || isTrackFrozen(t)) return { ok: false, reason: 'déjà gelée' };
   if (t.isInactive) return { ok: false, reason: 'piste inactive' };
   if (isReturnOrBus(t)) return { ok: false, reason: 'bus, retour d\'effet ou master' };
-  if (!canBakeTrack(t)) return { ok: false, reason: 'beat sous licence' };
+  if (!canBakeTrack(t)) return { ok: false, reason: bakeRefusalShort(t) };
   if (!(t.clips || []).length) return { ok: false, reason: 'rien à geler' };
   if (t.vstInstrument) return { ok: false, reason: 'instrument VST (rendu déjà automatique)' };
   if ((t.plugins || []).some(p => p.type === 'VST3' && !p.isInactive) && !ctx.bridgeConnected) return { ok: false, reason: 'effets VST sans pont' };

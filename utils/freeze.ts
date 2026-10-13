@@ -2,6 +2,7 @@ import { BreathEdit, Clip, FreezeRef, PluginInstance, Track, TrackType } from '.
 import { breathSig } from './breathEnvelope';
 import { envelopeDbAt, gainPointsSig, sortGainPoints } from './clipGain';
 import { vstAutomationSig } from './vstAutomation';
+import { KIT_BAKE_REFUSAL, usesKitSounds } from './drumKitLibrary';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -324,7 +325,16 @@ export const lastVstIndex = (t: Track): number => {
  * fichier : sa licence l'interdit, et un rendu gele serait sauvegarde avec le projet.
  */
 export const canBakeTrack = (t: Track): boolean =>
-  t.id !== 'instrumental' && (t.instrumentId === undefined || t.instrumentId === null || t.instrumentId === '');
+  t.id !== 'instrumental' && (t.instrumentId === undefined || t.instrumentId === null || t.instrumentId === '')
+  // Sons des kits NOVA : jamais en fichier audio non plus (ils resteraient dans la sauvegarde).
+  && !usesKitSounds(t);
+
+/** Pourquoi la piste ne peut pas être rendue en fichier (null = elle peut). */
+export const bakeRefusal = (t: Track): string | null =>
+  canBakeTrack(t) ? null : usesKitSounds(t) ? KIT_BAKE_REFUSAL : "Le beat n'est jamais rendu dans un fichier (licence).";
+
+/** Raison courte (listes de rendu par lot, charge DSP). */
+export const bakeRefusalShort = (t: Track): string => (usesKitSounds(t) ? 'sons des kits NOVA' : 'beat sous licence');
 
 /** Effets VST3 compris dans le rendu (affiches « Rendu (VST du PC) » sans pont). */
 export const isPluginBaked = (t: Track, pluginIndex: number): boolean =>

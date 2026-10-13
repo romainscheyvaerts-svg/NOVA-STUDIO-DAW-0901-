@@ -16,6 +16,7 @@
  */
 import { Clip, CrossfadeCurve, DAWState, Track, TrackType } from '../../types';
 import type { AafExportClip, AafExportInput, AafExportMedia, AafExportTrack } from './aafWrite';
+import { usesKitSounds } from '../drumKitLibrary';
 
 export interface AudioData { channels: Float32Array[]; sampleRate: number }
 
@@ -24,6 +25,11 @@ export interface NovaExportOptions {
   trackVolumePan: boolean;
   /** Clips coupés (muets) : exportés quand même (true) ou laissés de côté. */
   includeMuted?: boolean;
+  /**
+   * Beats / mélodies du catalogue achetés (ids). Un beat du catalogue sans licence n'est jamais
+   * écrit en BWF. `'all'` : admin (export libre). Absent : aucun achat connu.
+   */
+  owned?: (string | number)[] | 'all';
 }
 
 export interface NovaExportPlan {
@@ -59,8 +65,19 @@ export function planNovaExport(state: DAWState, getAudio: (bufferId: string) => 
     return m;
   };
 
+  const owned = opts.owned === 'all' ? null : (opts.owned || []).map(String);
   for (const t of state.tracks) {
     if (t.id === 'master') continue;
+    // Sons des kits NOVA : jamais en fichiers séparés (ils ne sortent du DAW que par l'export payant).
+    if (usesKitSounds(t)) {
+      skipped.push(`${label(t)} (${kindLabel(t)}) : sons des kits NOVA, jamais exportés en fichiers séparés. Exporte le morceau ou les stems (fenêtre Exporter) pour les avoir en audio.`);
+      continue;
+    }
+    // Beat / mélodie du catalogue sans licence : jamais en BWF (comme l'export du mix).
+    if (owned && t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '' && !owned.includes(String(t.instrumentId))) {
+      skipped.push(`${label(t)} : beat du catalogue sans licence, non exporté. Achète sa licence sur le site pour l'exporter.`);
+      continue;
+    }
     const isInstrument = t.type !== TrackType.AUDIO || t.clips.some(c => c.notes);
     let sources: Clip[] = t.clips.filter(isAudioClip);
     if (isInstrument) {
