@@ -24,7 +24,7 @@ def med(xs):
 def load():
     rows = {}
     for f in AB.glob("paliers_*.json"):
-        m = re.match(r"paliers_(base|new2|new)_(realiste|dense)_(\d+)_r(\w+)\.json", f.name)
+        m = re.match(r"paliers_(base|new2|new|fin)_(realiste|dense)_(\d+)_([rsf]\w+)\.json", f.name)
         if not m:
             continue
         ver, prof, n, rep = m.group(1), m.group(2), int(m.group(3)), m.group(4)
@@ -48,8 +48,8 @@ def load():
 
 def main():
     rows = load()
-    vers = [v for v in ("base", "new", "new2") if any(k[2] == v for k in rows)]
-    names = {"base": "avant", "new": "étape 1", "new2": "après"}
+    vers = [v for v in ("base", "new", "new2", "fin") if any(k[2] == v for k in rows)]
+    names = {"base": "avant", "new": "étape 1", "new2": "étape 2", "fin": "final"}
     hdr = " → ".join(names[v] for v in vers)
     out = [f"| Profil | Pistes | Fil audio moyen ({hdr}) | Fil audio max | Sous-régimes / min | Pistes en veille (moy.) | Pire image en édition, ms | Mesures |",
            "|---|---|---|---|---|---|---|---|"]
