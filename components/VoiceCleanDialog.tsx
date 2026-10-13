@@ -200,7 +200,7 @@ const VoiceCleanDialog: React.FC<Props> = ({ request, tracks, setState, onClose 
     audioBufferRegistry.register(buf, id);
     const patch = cleanPatch(r.clip, { newBufferId: id, from: ready.from, options: ready.options });
     setState(prev => ({ ...prev, tracks: prev.tracks.map(t => (t.id === ready.trackId ? { ...t, clips: t.clips.map(c => (c.id === ready.clipId ? patchClip(c, patch) : c)) } : t)) }));
-    notify(`✨ Voix nettoyée (${STRENGTHS[ready.options.strength].label}) sur « ${ready.clipName} » : ${cleanSummary(ready.out.stats, ready.options).toLowerCase()}. L’original est gardé : menu du clip → « Revenir à l’original ». Ctrl+Z pour annuler.`);
+    notify(`✨ Voix nettoyée (${STRENGTHS[ready.options.strength].label}) sur « ${ready.clipName} » : ${(s => s.charAt(0).toLowerCase() + s.slice(1))(cleanSummary(ready.out.stats, ready.options))}. L’original est gardé : menu du clip → « Revenir à l’original ». Ctrl+Z pour annuler.`);
     onClose();
   };
 

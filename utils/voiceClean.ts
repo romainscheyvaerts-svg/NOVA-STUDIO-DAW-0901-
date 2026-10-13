@@ -60,8 +60,8 @@ export interface StrengthPreset {
 }
 
 export const STRENGTHS: Record<CleanStrength, StrengthPreset> = {
-  light: { label: 'Léger', hint: 'Le bruit baisse, la voix garde un peu d’air et d’ambiance.', mix: 0.85, silenceDb: 0, level: 0.3 },
-  medium: { label: 'Moyen', hint: 'Conseillé : bruit de fond retiré, voix naturelle.', mix: 1, silenceDb: 10, level: 0.5 },
+  light: { label: 'Léger', hint: 'Le bruit baisse, la voix garde un peu d’air et d’ambiance.', mix: 0.85, silenceDb: 8, level: 0.3 },
+  medium: { label: 'Moyen', hint: 'Conseillé : bruit de fond retiré, voix naturelle.', mix: 1, silenceDb: 12, level: 0.5 },
   strong: { label: 'Fort', hint: 'Pièce très bruyante (ventilo, rue) : silences muets, voix bien en avant.', mix: 1, silenceDb: 24, level: 0.7 },
 };
 
@@ -439,7 +439,7 @@ export function cleanSummary(stats: CleanStats, o: CleanOptions): string {
 
 /** Temps de calcul annoncé (s), d'après les mesures du lot 1 (RAPPORT.md). */
 export function estimateCleanSeconds(durationS: number, engine: CleanEngineId, sampleRate = 48000): number {
-  const perSecond = engine === 'deepfilter' ? 0.12 : (sampleRate === RNNOISE_SAMPLE_RATE ? 0.1 : 0.16);
+  const perSecond = engine === 'deepfilter' ? 0.2 : (sampleRate === RNNOISE_SAMPLE_RATE ? 0.1 : 0.16);
   return Math.max(1, Math.round(durationS * perSecond));
 }
 
