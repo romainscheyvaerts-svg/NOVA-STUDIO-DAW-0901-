@@ -35,6 +35,8 @@ interface Props {
 interface Ready {
   trackId: string; clipId: string; clipName: string; from: number; sampleRate: number;
   orig: Float32Array[]; out: CleanJobOutput; options: CleanOptions; key: string;
+  /** Temps réel du calcul (s), envoi au PC compris. */
+  wallSeconds: number;
 }
 
 const PREF_KEY = 'nova_voice_clean_options';
@@ -153,11 +155,13 @@ const VoiceCleanDialog: React.FC<Props> = ({ request, tracks, setState, onClose 
     setError(null);
     if (reuse) setRestrength(true); else { setPhase('running'); setPct(0); setMessage('Préparation…'); setStartedAt(Date.now()); }
     const key = reuse?.key || `${r.clip.id}|${r.clip.bufferId || ''}|${reg.from.toFixed(4)}|${reg.to.toFixed(4)}`;
+    const t0 = Date.now();
     try {
       const out = await runVoiceClean({ key, channels: orig, sampleRate: r.buffer.sampleRate, options: { ...opts, reverb: opts.reverb && reverbAvailable }, engine },
         (p, m) => { if (runId.current === id && !reuse) { setPct(p); setMessage(m); } });
       if (runId.current !== id) return;
-      setReady({ trackId: r.track.id, clipId: r.clip.id, clipName: r.clip.name, from: reg.from, sampleRate: r.buffer.sampleRate, orig, out, options: opts, key });
+      setReady({ trackId: r.track.id, clipId: r.clip.id, clipName: r.clip.name, from: reg.from, sampleRate: r.buffer.sampleRate, orig, out, options: opts, key,
+        wallSeconds: reuse ? reuse.wallSeconds : (Date.now() - t0) / 1000 });
       setPhase('ready');
     } catch (e) {
       if (runId.current !== id) return;
@@ -256,7 +260,7 @@ const VoiceCleanDialog: React.FC<Props> = ({ request, tracks, setState, onClose 
     body = (
       <div className="space-y-3" data-testid="voice-clean-ready">
         <p className="text-[12px] text-emerald-500" role="status" data-testid="voice-clean-summary">
-          ✅ {cleanSummary(st, ready.options)}. Calcul : {Math.max(1, Math.round((st.seconds || 0)))} s ({st.engine === 'deepfilter' ? 'DeepFilterNet 3 sur ton PC' : 'RNNoise dans ton navigateur'}).
+          ✅ {cleanSummary(st, ready.options)}. Calcul : {Math.max(1, Math.round(ready.wallSeconds))} s ({st.engine === 'deepfilter' ? 'DeepFilterNet 3 sur ton PC' : 'RNNoise dans ton navigateur'}).
         </p>
         {ready.out.fellBack && <p className="text-[11px] text-amber-500" role="status">⚠️ {ready.out.fellBack}</p>}
         {strengthPicker}

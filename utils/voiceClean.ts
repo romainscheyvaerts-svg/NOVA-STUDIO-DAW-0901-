@@ -423,7 +423,7 @@ export function cleanVoice(req: { channels: Float32Array[]; sampleRate: number; 
 
 const fr1 = (v: number) => (Math.round(v * 10) / 10).toFixed(1).replace('.', ',').replace(',0', '');
 
-/** Résumé après le calcul : « Bruit de fond −24 dB · réverbe de la pièce (≈ 0,6 s) retirée · niveau +3 dB ». */
+/** Résumé après le calcul : « Bruit de fond −24 dB · réverbe de la pièce retirée · niveau +3 dB ». */
 export function cleanSummary(stats: CleanStats, o: CleanOptions): string {
   const parts: string[] = [];
   if (o.noise) {
@@ -431,7 +431,8 @@ export function cleanSummary(stats: CleanStats, o: CleanOptions): string {
     // Au-delà de 40 dB, le plancher mesuré n'est plus que le silence numérique : on ne fait pas mousser le chiffre.
     parts.push(r <= -40 ? 'bruit de fond retiré (plus de 40 dB en moins)' : r < -0.5 ? `bruit de fond ${fr1(r).replace('-', '−')} dB` : 'peu de bruit de fond trouvé');
   }
-  if (stats.reverb) parts.push(stats.rt60 ? `réverbe de la pièce (≈ ${fr1(stats.rt60)} s) retirée` : 'réverbe de la pièce retirée');
+  // Durée de réverbération du pont non affichée : sur une prise bruitée, le bruit allonge les descentes lues.
+  if (stats.reverb) parts.push('réverbe de la pièce retirée');
   if (o.level && stats.levelGainDb !== null) parts.push(`niveau ${stats.levelGainDb >= 0 ? '+' : '−'}${fr1(Math.abs(stats.levelGainDb))} dB`);
   const s = parts.join(' · ');
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Voix traitée';

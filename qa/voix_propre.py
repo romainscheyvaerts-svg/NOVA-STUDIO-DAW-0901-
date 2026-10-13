@@ -3,7 +3,7 @@
 (qa_hors_prod via qalib) : jamais la production.
 
 Usage (serveur NOVA lancé : npx vite --port 3450 --strictPort) :
-  NOVA_URL=http://127.0.0.1:3450/ python qa/voix_propre.py [A B C D]
+  NOVA_URL=http://127.0.0.1:3450/ python qa/voix_propre.py [A B C D E]
 
   A. bureau 1600 × 900, thème sombre :
      menu du clip → « ✨ Nettoyer la voix… » ; réverbe grisée sur le site avec la raison
@@ -17,6 +17,10 @@ Usage (serveur NOVA lancé : npx vite --port 3450 --strictPort) :
   C. téléphone 390 × 844, thème sombre : bouton NETTOYER de la barre du clip, fenêtre en
      bas d'écran, calcul, Appliquer ; aucun débordement horizontal.
   D. téléphone, thème clair : fenêtre (réglages, résultat).
+  E. appli Windows (bureau, sombre) avec le VRAI pont du worktree (port de test 8805) et le
+     VRAI module voix de ce PC (dossier NovaStudio/voice de LOCALAPPDATA) : moteur DeepFilterNet 3
+     annoncé, réverbe cochable, calcul sur le PC, résumé, Appliquer. Sauté (et signalé) si
+     le module n'est pas installé.
 
 Matériel : 12 s d'une vraie prise rap sèche du studio (REC_224) + bruit de ventilation à
 −30 dBFS (qa/mesure_voix_propre.make_noise), voix à −20 dBFS efficaces.
@@ -37,7 +41,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3450/")
 from qalib import *  # noqa
 from qalib import OUT, run_one, shot, overflow_report  # noqa
 from gel_pre_effet import open_project_file, save_zip  # noqa
-from stems_separation import prepare, dismiss_popups  # noqa
+from stems_separation import prepare, dismiss_popups, start_bridge, stop_bridge  # noqa
 from voix_ia_locale import clip_menu, menu_item, header_y  # noqa
 import mesure_voix_propre as mv  # noqa
 
@@ -312,6 +316,44 @@ def scenario_phone(page, log, res, vp):
 
 
 APPLY_ON_PHONE = True
+BRIDGE_PORT = int(os.environ.get("QA_VOIX_PROPRE_PORT", "8805"))
+VOICE_HOME = Path(os.environ.get("LOCALAPPDATA", "")) / "NovaStudio" / "voice"
+
+
+# ─── E. appli Windows + vrai pont ──────────────────────────────────────────────
+
+def scenario_windows(page, log, res, vp):
+    prepare(page, port=BRIDGE_PORT, desktop=True)
+    open_project_file(page, PROJECT, res, f"{PFX}00_projet")
+    dismiss_popups(page, 6000)
+    open_from_clip_menu(page)
+    page.wait_for_function("() => /DeepFilterNet/.test(document.querySelector('[data-testid=voice-clean-engine]')?.textContent || '')", timeout=20000)
+    res["moteur_annonce"] = page.get_by_test_id("voice-clean-engine").inner_text()
+    rv = page.get_by_test_id("voice-clean-reverb")
+    res["reverbe_cochable"] = not rv.is_disabled()
+    if res["reverbe_cochable"] and not rv.is_checked():
+        rv.check()
+    shot(page, f"{PFX}02_fenetre_reglages_appli")
+    run_clean(page, res, "03")
+    shot(page, f"{PFX}04_resultat_appli")
+    t = time.time()
+    page.get_by_test_id("voice-clean-strength-strong").click()
+    page.wait_for_function("() => { const b = document.querySelector('[data-testid=voice-clean-apply]'); return b && !b.disabled && /Fort/.test(b.textContent); }", timeout=60000)
+    res["changement_force_s"] = round(time.time() - t, 2)
+    res["resume_fort"] = page.get_by_test_id("voice-clean-summary").inner_text()
+    page.get_by_test_id("voice-clean-apply").click()
+    page.get_by_test_id("voice-clean-dialog").wait_for(state="detached", timeout=10000)
+    page.wait_for_timeout(1000)
+    shot(page, f"{PFX}05_applique_appli")
+    data, _ = save_zip(page, OUT / "E_apres_nettoyage.zip")
+    c = data["tracks"][0]["clips"][0]
+    y, sr = clip_audio(OUT / "E_apres_nettoyage.zip", c)
+    y = to48(y, sr)
+    n = min(len(y), len(CLEAN))
+    res["bruit_silences_db"], res["trames_silence"] = mv.noise_reduction_db(NOISY[:n], y[:n], CLEAN[:n])
+    res["etapes"] = [s_.get("name") for s_ in (c.get("audioSuite") or {}).get("steps", [])]
+    txt = (OUT / f"pont-{BRIDGE_PORT}.log").read_text(encoding="utf-8", errors="replace") if (OUT / f"pont-{BRIDGE_PORT}.log").is_file() else ""
+    res["pont_reverbe_retiree"] = len(re.findall(r"Réverbe retirée", txt))
 
 
 if __name__ == "__main__":
@@ -335,9 +377,19 @@ if __name__ == "__main__":
     if want("D"):
         theme("light"); PFX = "D"; APPLY_ON_PHONE = False
         report["D_telephone_clair"] = run_one(scenario_phone, "tel390", "D_telephone_clair")
+    if want("E"):
+        if (VOICE_HOME / "tools" / "deep-filter.exe").is_file():
+            theme("dark"); PFX = "E"
+            br = start_bridge(BRIDGE_PORT)
+            try:
+                report["E_appli_windows"] = run_one(scenario_windows, "pc", "E_appli_windows")
+            finally:
+                stop_bridge(br)
+        else:
+            report["E_appli_windows_saute"] = "module voix (DeepFilterNet 3) absent de ce PC"
 
     checks = {}
-    A, B, C, D = (report.get(k) or {} for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair"))
+    A, B, C, D, E = (report.get(k) or {} for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair", "E_appli_windows"))
     if A:
         checks["A · site : réverbe grisée avec le lien Nova Studio, moteur annoncé, Moyen par défaut"] = A.get("ok") and A.get("reverbe_grisee_sur_le_site") and A.get("lien_nova_studio") \
             and "RNNoise" in (A.get("moteur_annonce") or "") and A.get("force_par_defaut") == "Moyen"
@@ -360,12 +412,15 @@ if __name__ == "__main__":
             checks[f"{k} · téléphone : bouton NETTOYER, fenêtre sans débordement, cibles ≥ 40 px, résultat"] = R.get("ok") and not R.get("debordement_reglages") \
                 and not R.get("debordement_resultat") and not R.get("boutons_trop_petits") and "Bruit de fond" in (R.get("resume") or "") \
                 and (R.get("bouton") or {}).get("hauteur", 0) >= 44
+    if E:
+        checks["E · appli Windows : DeepFilterNet 3 annoncé, réverbe cochable, calcul sur le PC"] = E.get("ok") and "DeepFilterNet" in (E.get("moteur_annonce") or "")             and E.get("reverbe_cochable") and "DeepFilterNet 3 sur ton PC" in (E.get("resume") or "") and "réverbe de la pièce" in (E.get("resume") or "")
+        checks["E · appli Windows : Fort sans relancer le PC, bruit des silences ≥ 15 dB, une seule passe du pont"] = (E.get("changement_force_s") or 99) < 8             and (E.get("bruit_silences_db") or 0) <= -15 and E.get("pont_reverbe_retiree") == 1 and E.get("etapes") == ["Voix nettoyée (Fort)"]
     report["verifications"] = checks
-    report["ok"] = bool(checks) and all(checks.values()) and all((report.get(k) or {"ok": True}).get("ok", True) for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair"))
+    report["ok"] = bool(checks) and all(checks.values()) and all((report.get(k) or {"ok": True}).get("ok", True) for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair", "E_appli_windows"))
     (OUT / f"qa_voix_propre{'_' + ''.join(sorted(only)) if only else ''}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     for k, v in checks.items():
         print(("OK   " if v else "ÉCHEC"), k)
-    for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair"):
+    for k in ("A_bureau_sombre", "B_bureau_clair", "C_telephone_sombre", "D_telephone_clair", "E_appli_windows"):
         if report.get(k) and (report[k].get("notes") or report[k].get("errors")):
             print(k, report[k].get("notes"), report[k].get("errors")[:5])
     print("OK" if report["ok"] else "ÉCHEC")

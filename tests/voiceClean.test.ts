@@ -223,7 +223,7 @@ describe('lot 1 · nettoyer la voix : textes', () => {
   it('résumé lisible', () => {
     const st = { engine: 'rnnoise' as const, noiseBeforeDb: -50, noiseAfterDb: -74.3, noiseReductionDb: -24.3, reverb: false, rt60: null, levelGainDb: 3.2, seconds: 1.2, duration: 10 };
     expect(cleanSummary(st, DEFAULT_CLEAN_OPTIONS)).toBe('Bruit de fond −24,3 dB · niveau +3,2 dB');
-    expect(cleanSummary({ ...st, engine: 'deepfilter', reverb: true, rt60: 0.6, levelGainDb: -2 }, DEFAULT_CLEAN_OPTIONS)).toBe('Bruit de fond −24,3 dB · réverbe de la pièce (≈ 0,6 s) retirée · niveau −2 dB');
+    expect(cleanSummary({ ...st, engine: 'deepfilter', reverb: true, rt60: 0.6, levelGainDb: -2 }, DEFAULT_CLEAN_OPTIONS)).toBe('Bruit de fond −24,3 dB · réverbe de la pièce retirée · niveau −2 dB');
     expect(cleanSummary({ ...st, noiseReductionDb: 0 }, { ...DEFAULT_CLEAN_OPTIONS, level: false })).toBe('Peu de bruit de fond trouvé');
     expect(cleanSummary({ ...st, noiseReductionDb: -64.1 }, { ...DEFAULT_CLEAN_OPTIONS, level: false })).toBe('Bruit de fond retiré (plus de 40 dB en moins)');
   });
