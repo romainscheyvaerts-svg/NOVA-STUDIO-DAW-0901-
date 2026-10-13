@@ -17,6 +17,7 @@ import { DenoiserNode } from '../plugins/DenoiserPlugin';
 import { ProEQ12Node } from '../plugins/ProEQ12Plugin';
 import { VocalSaturatorNode } from '../plugins/VocalSaturatorPlugin';
 import { MasterSyncNode } from '../plugins/MasterSyncPlugin';
+import { EffectSleepManager, SLEEP_SAFE, type SleepStats } from './effectSleep';
 import { Synthesizer } from './Synthesizer';
 import { NovaSynthNode } from './NovaSynthNode';
 
@@ -105,6 +106,8 @@ interface TrackDSP {
   inputAnalyzer?: AnalyserNode;
   /** Source muette (0) branchée en permanence sur l'entrée : la chaîne d'effets reste « active » (comme à l'export). */
   keepAlive?: ConstantSourceNode;
+  /** Chaîne d'effets câblée (tête -> 1er nœud ... dernier nœud -> chainOut) : veille des effets (engine/effectSleep). */
+  sleepChain?: { start: AudioNode; first: AudioNode; end: AudioNode };
   /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
   pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
@@ -212,8 +215,10 @@ interface ScheduledSource {
   source: AudioBufferSourceNode;
   gain: GainNode;
   clipId: string;
-  /** Piste du clip (attente du transport, C6). */
+  /** Piste du clip (attente du transport C6, veille des effets engine/effectSleep). */
   trackId?: string;
+  /** Fin prévue (horloge du contexte) : veille des effets. */
+  end?: number;
 }
 
 export class AudioEngine {
@@ -233,6 +238,12 @@ export class AudioEngine {
   /** Buffers inverses mis en cache (clip.isReversed). */
   private reversedBufferCache: Map<string, AudioBuffer> = new Map();
   private activeSources: Map<string, ScheduledSource> = new Map();
+  /** Veille des effets silencieux (chantier 13, engine/effectSleep) et fin de la dernière source de chaque piste. */
+  private effectSleep: EffectSleepManager | null = null;
+  private lastSourceEnd = new Map<string, number>();
+  /** Source muette (0) partagée par toutes les pistes, voir ensureTrackDSP. */
+  private sharedKeepAlive: ConstantSourceNode | null = null;
+  private sleepRoutingCache: { tracks: Track[] | null; targets: Set<string> } = { tracks: null, targets: new Set() };
   /** Pistes à jour pendant la lecture (les modifications s'entendent tout de suite). */
   private liveTracks: Track[] | null = null;
   private clipSigs: Map<string, string> = new Map();
@@ -464,6 +475,7 @@ export class AudioEngine {
     setCurrentRate(this.ctx.sampleRate);
     this.latency = this.ctx.baseLatency;
     this.hookAutoResume();
+    this.setupEffectSleep();
 
     this.masterOutput = this.ctx.createGain();
     this.masterLimiter = this.ctx.createDynamicsCompressor();
@@ -588,6 +600,9 @@ export class AudioEngine {
     this.masterLimiter = null; this.masterAnalyzer = null; this.masterSplitter = null;
     this.masterAnalyzerL = this.masterAnalyzerR = null;
     this.activeSources.clear();
+    // Horloge du nouveau contexte repartie de 0 : les fins de sources de l'ancien n'ont plus de sens (veille).
+    this.lastSourceEnd.clear();
+    this.sharedKeepAlive = null;
     this.scrubbingSources.clear();
     this.reversedBufferCache.clear();
     this.clipSigs.clear();
@@ -766,6 +781,8 @@ export class AudioEngine {
       activeMidiNotes: this.activeMidiNotes.size,
       pluginAutoParams: this.pluginAutoParams.size,
       isPlaying: this.isPlaying,
+      // Veille des effets (engine/effectSleep) : pistes en veille, éligibles, compteurs.
+      sleep: this.getSleepStats(),
     };
   }
 
@@ -785,6 +802,82 @@ export class AudioEngine {
   public getActiveInputDevice() { return this.currentInputDeviceId; }
   public getActiveOutputDevice() { return this.currentOutputDeviceId; }
   
+  // --- Veille des effets silencieux (chantier 13, engine/effectSleep) ---------------
+  private setupEffectSleep() {
+    if (this.effectSleep || !this.ctx) return;
+    this.effectSleep = new EffectSleepManager({
+      ctx: () => this.ctx,
+      trackIds: () => Array.from(this.tracksDSP.keys()),
+      chainOf: (id) => {
+        const dsp = this.tracksDSP.get(id);
+        const sc = dsp?.sleepChain;
+        if (!dsp || !sc || !dsp.chainOut) return null;
+        const track = this.liveTracks?.find(t => t.id === id);
+        if (!track) return null;
+        const instances = track.plugins.filter(p => !p.isInactive && p.isEnabled)
+          .map(p => dsp.pluginChain.get(p.id)?.instance).filter(Boolean);
+        return { start: sc.start, first: sc.first, end: sc.end, out: dsp.chainOut, instances, latency: dsp.pluginLatency || 0 };
+      },
+      eligible: (id) => this.sleepEligible(id),
+      inputBusyUntil: (id) => {
+        for (const s of this.activeSources.values()) if (s.trackId === id) return Infinity;
+        return this.lastSourceEnd.get(id) ?? -Infinity;
+      },
+      nextActivityIn: (id) => this.nextClipIn(id),
+    });
+    this.effectSleep.start();
+  }
+
+  /** Piste dont la chaîne d'effets peut dormir (voir engine/effectSleep). */
+  private sleepEligible(id: string): boolean {
+    const tracks = this.liveTracks;
+    if (!tracks) return false;
+    const t = tracks.find(x => x.id === id);
+    if (!t || t.type !== TrackType.AUDIO || t.id === 'master') return false;
+    if (t.isTrackArmed || isTrackFrozen(t) || t.isGuide) return false;
+    if (this.lowLatencyTracks.has(id) || this.monitoringTrackId === id || this.armedIds().includes(id)) return false;
+    const plugins = (t.plugins || []).filter(p => !p.isInactive);
+    if (!plugins.some(p => p.isEnabled)) return false;
+    if (!plugins.every(p => SLEEP_SAFE.has(p.type) && !p.sidechainSourceId)) return false;
+    if ((t.automationLanes || []).some(l => l.points?.length && String(l.parameterName).startsWith('plugin::'))) return false;
+    // Piste qui reçoit le son d'une autre (sortie, envoi, pad de batterie) : jamais en veille.
+    if (this.sleepRoutingCache.tracks !== tracks) {
+      const targets = new Set<string>();
+      for (const o of tracks) {
+        if (o.outputTrackId) targets.add(o.outputTrackId);
+        (o.sends || []).forEach(sd => targets.add(sd.id));
+        if (o.drumMachine) { try { JSON.stringify(o.drumMachine, (_k, v) => { if (typeof v === 'string') targets.add(v); return v; }); } catch { /* */ } }
+      }
+      this.sleepRoutingCache = { tracks, targets };
+    }
+    return !this.sleepRoutingCache.targets.has(id);
+  }
+
+  /** Délai (s) avant le prochain clip de la piste en lecture (boucle comprise) ; Infinity à l'arrêt. */
+  private nextClipIn(id: string): number {
+    if (!this.isPlaying || !this.ctx) return Infinity;
+    const t = this.liveTracks?.find(x => x.id === id);
+    if (!t) return Infinity;
+    const pos = this.getCurrentTime();
+    const loop = this.isLoopActive && this.loopEnd > this.loopStart;
+    let best = Infinity;
+    for (const c of t.clips || []) {
+      if (c.isMuted) continue;
+      const end = c.start + c.duration;
+      if (c.start <= pos && end > pos) return 0;
+      if (c.start > pos && (!loop || c.start < this.loopEnd)) best = Math.min(best, c.start - pos);
+      if (loop && c.start < this.loopEnd && end > this.loopStart) best = Math.min(best, (this.loopEnd - pos) + Math.max(0, c.start - this.loopStart));
+    }
+    return best;
+  }
+
+  /** Active / coupe la veille des effets (QA, réglage). Coupée : toutes les chaînes sont rebranchées. */
+  public setEffectSleep(on: boolean) { this.effectSleep?.setEnabled(on); }
+  /** Pistes en veille, éligibles, compteurs (QA, indicateur de charge). */
+  public getSleepStats(): SleepStats | null { return this.effectSleep ? this.effectSleep.stats() : null; }
+  public isTrackAsleep(trackId: string): boolean { return !!this.effectSleep?.isAsleep(trackId); }
+  public getSleepDebug() { return this.effectSleep ? this.effectSleep.debug() : null; }
+
   public setLatencyMode(mode: 'low' | 'balanced' | 'high') {
       if (mode === 'low') { this.LOOKAHEAD_MS = 15.0; this.SCHEDULE_AHEAD_SEC = 0.04; } 
       else if (mode === 'balanced') { this.LOOKAHEAD_MS = 25.0; this.SCHEDULE_AHEAD_SEC = 0.1; } 
@@ -1296,6 +1389,7 @@ export class AudioEngine {
     const renderCtx = offlineCtx as unknown as AudioContext;
 
     const masterGain = offlineCtx.createGain();
+    let offlineKeepAlive: ConstantSourceNode | null = null;
     masterGain.connect(offlineCtx.destination);
 
     // Meme regle de solo qu'en lecture live (source unique de verite).
@@ -1356,10 +1450,13 @@ export class AudioEngine {
       // « active ». Sinon Chrome arrête les filtres (EQ, de-esser…) dès que le
       // dernier clip de la piste est fini et coupe net leur résonance : un léger
       // clic, et un rendu (bounce, commit) ne retombait plus sur l'export.
-      const keepAlive = offlineCtx.createConstantSource();
-      keepAlive.offset.value = 0;
-      keepAlive.connect(input);
-      keepAlive.start(0);
+      // (une seule source muette pour tout le rendu : même signal, un nœud au lieu d'un par piste)
+      if (!offlineKeepAlive) {
+        offlineKeepAlive = offlineCtx.createConstantSource();
+        offlineKeepAlive.offset.value = 0;
+        offlineKeepAlive.start(0);
+      }
+      offlineKeepAlive.connect(input);
       const gain = offlineCtx.createGain();
       const panner = offlineCtx.createStereoPanner();
       const output = offlineCtx.createGain();
@@ -1777,6 +1874,8 @@ export class AudioEngine {
     try {
       await this.ensureInputSource(trackId);
       const spec = this.armedSpecs.get(trackId) ?? null;
+      // Chaîne en veille : rebranchée avant que le micro n'arrive (retour casque avec effets).
+      this.effectSleep?.wake(trackId);
       const tap = this.inputRouter!.arm(trackId, spec, dsp.input, dsp.inputAnalyzer, this.monitorGainFor());
       this.monitoringTrackId = trackId;
       void this.attachFlashback(trackId);
@@ -1985,6 +2084,7 @@ export class AudioEngine {
    */
   private setTrackLowLatency(trackId: string, on: boolean) {
     if (on) this.lowLatencyTracks.add(trackId); else this.lowLatencyTracks.delete(trackId);
+    if (on) this.effectSleep?.wake(trackId);
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     let total = 0;
@@ -2958,7 +3058,12 @@ export class AudioEngine {
     if (!this.scrubber) {
       this.scrubber = new Scrubber({
         ctx: this.ctx,
-        input: (id) => this.tracksDSP.get(id)?.input || null,
+        input: (id) => {
+          // Grain de scrub : la chaîne se réveille et la piste reste « occupée » un moment.
+          this.effectSleep?.wake(id);
+          if (this.ctx) this.lastSourceEnd.set(id, Math.max(this.lastSourceEnd.get(id) ?? -Infinity, this.ctx.currentTime + 0.5));
+          return this.tracksDSP.get(id)?.input || null;
+        },
         silenced: (id) => this.soloSilencedIds.has(id),
         reversed: (key, buf) => this.reversedOf(key, buf),
       });
@@ -3956,6 +4061,8 @@ export class AudioEngine {
         source.connect(gainNode);
         // Clip gele : il contient deja les effets rendus, il entre apres eux.
         const isFrozenRender = !!dsp.frozenClipId && (clip.id === dsp.frozenClipId || !!clip.isFreezeSlice) && !!dsp.frozenInput;
+        // Chaîne d'effets en veille : rebranchée AVANT que la source n'arrive (état de repos, sans clic).
+        this.effectSleep?.wake(trackId);
         gainNode.connect(isFrozenRender ? dsp.frozenInput! : dsp.input);
         
         // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune
@@ -3988,7 +4095,9 @@ export class AudioEngine {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
             source.start(when, offsetIntoClip, actualDuration);
             
-            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId });
+            const endAt = when + actualDuration;
+            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId, end: endAt });
+            if (endAt > (this.lastSourceEnd.get(trackId) ?? -Infinity)) this.lastSourceEnd.set(trackId, endAt);
             
             source.onended = () => {
                 // Apres un bouclage la meme cle peut deja pointer vers une NOUVELLE
@@ -4112,12 +4221,17 @@ export class AudioEngine {
     // (fin du dernier clip) et coupe sa résonance sous un seuil : la queue des filtres juste
     // après la fin d'un clip s'arrêtait net en lecture et pas à l'export (6 LSB 16 bits,
     // −74 dBFS, mesuré aux trois fréquences), et l'état gelé du filtre ressortait à l'écoute suivante.
+    // Une seule source muette pour toutes les pistes (chantier 13) : même signal (des zéros),
+    // un nœud calculé par bloc au lieu d'un par piste.
     try {
-      const ka = this.ctx.createConstantSource();
-      ka.offset.value = 0;
-      ka.connect(dsp.input);
-      ka.start();
-      dsp.keepAlive = ka;
+      if (!this.sharedKeepAlive || this.sharedKeepAlive.context !== this.ctx) {
+        const ka = this.ctx.createConstantSource();
+        ka.offset.value = 0;
+        ka.start();
+        this.sharedKeepAlive = ka;
+      }
+      this.sharedKeepAlive.connect(dsp.input);
+      dsp.keepAlive = this.sharedKeepAlive;
     } catch (e) { /* contexte sans ConstantSource : ancien comportement */ }
 
     this.tracksDSP.set(track.id, dsp);
@@ -4163,13 +4277,15 @@ export class AudioEngine {
   public disposeTrack(trackId: string) {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
+    this.effectSleep?.detach(trackId, dsp.chainOut);
 
     try { dsp.synth?.releaseAll(); } catch (e) {}
     try { dsp.bass808?.stopAll(); } catch (e) {}
     try { dsp.sampler?.stopAll(); } catch (e) {}
     try { dsp.drumSampler?.stop(); } catch (e) {}
     try { dsp.melodicSampler?.stopAll(); } catch (e) {}
-    try { dsp.keepAlive?.stop(); dsp.keepAlive?.disconnect(); } catch (e) {}
+    // Source muette partagée : seul le lien vers cette piste est coupé.
+    try { dsp.keepAlive?.disconnect(dsp.input); } catch (e) {}
     dsp.keepAlive = undefined;
 
     dsp.pluginChain.forEach(entry => {
@@ -4329,6 +4445,9 @@ export class AudioEngine {
       return;
     }
     dsp.graphSignature = signature;
+    // Recâblage : une chaîne en veille est d'abord rebranchée telle qu'elle était.
+    this.effectSleep?.wake(track.id);
+    dsp.sleepChain = undefined;
 
     // Fade out to prevent clicks/pops before rebuilding the audio graph
     const now = this.ctx.currentTime;
@@ -4368,7 +4487,10 @@ export class AudioEngine {
       }
       if (entry.bypassDelay) { try { entry.bypassDelay.disconnect(); } catch (e) {} }
     });
+    const chainStart = head;
+    let chainFirst: AudioNode | null = null;
     const link = (from: AudioNode, to: AudioNode) => {
+      if (from === chainStart && !chainFirst) chainFirst = to;
       from.connect(to);
       dsp!.pluginChain.forEach(entry => { if (entry.output === from) entry.connectedTo = to; });
     };
@@ -4485,6 +4607,7 @@ export class AudioEngine {
     // chainOut (sortie de la chaîne, clé de side-chain) -> preFaderTap (mute automatisé) -> fader.
     if (!dsp.preFaderTap) dsp.preFaderTap = this.ctx.createGain();
     if (!dsp.chainOut) { dsp.chainOut = this.ctx.createGain(); dsp.chainOut.connect(dsp.preFaderTap); }
+    dsp.sleepChain = head !== chainStart && chainFirst ? { start: chainStart, first: chainFirst, end: head } : undefined;
     link(head, dsp.chainOut);
     dsp.preFaderTap.connect(dsp.gain);
     this.resetMuteGain(track, dsp);

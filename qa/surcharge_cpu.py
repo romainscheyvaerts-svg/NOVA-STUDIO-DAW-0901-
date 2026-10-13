@@ -9,6 +9,15 @@ Session lourde de l'endurance (40 pistes, 3 effets par piste) lue en boucle :
 
 Usage : NOVA_URL=http://127.0.0.1:3442/ PYTHONIOENCODING=utf-8 python qa/surcharge_cpu.py
 Sortie : D:\\1 WORK\\CONTENU\\nova-stabilite\\surcharge_cpu.json + captures.
+
+Grosses séances (chantier 13, « 96 pistes × 4 effets ») : --paliers 32,64,96,128
+  Session de banc par palier (qa/grosses_seances.py) : N pistes audio × (EQ 12 bandes,
+  compresseur, de-esser ou saturation, envoi reverb), profil « realiste » et/ou « dense ».
+  Mesures : charge du fil audio (trace Chromium), sous-régimes (playbackStats), pistes en
+  veille, images pendant le défilement / zoom / déplacement d'un clip, coût de chaque effet.
+  NOVA_URL=http://127.0.0.1:3435/ PYTHONIOENCODING=utf-8 python qa/surcharge_cpu.py --paliers 32,64,96,128 \\
+      --profils realiste,dense --secondes 30 --secondes-96 60 --label avant
+  Sortie : D:\\1 WORK\\CONTENU\\nova-128-pistes\\paliers_<label>.json
 """
 import json, os, sys, time
 from pathlib import Path
@@ -155,5 +164,52 @@ def run():
     return res
 
 
+def run_paliers(args):
+    import grosses_seances as G
+    out_dir = Path(os.environ.get("QA_OUT_PALIERS", r"D:\1 WORK\CONTENU\nova-128-pistes"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paliers = [int(x) for x in args.paliers.split(",") if x]
+    profils = [x for x in args.profils.split(",") if x]
+    res = {"label": args.label, "url": G.BASE, "machine": "PC de Romain (RTX 5090 Laptop, 64 Go), Chromium headless (pas Nova Studio)",
+           "date": time.strftime("%Y-%m-%d %H:%M"), "paliers": [], "couts_effets": None}
+    path = out_dir / f"paliers_{args.label}.json"
+    with sync_playwright() as p:
+        if not args.sans_couts:
+            res["couts_effets"] = G.offline_costs(p)
+            print("coûts des effets (ms de calcul / s de son / instance) :", json.dumps(res["couts_effets"], ensure_ascii=False), flush=True)
+        for prof in profils:
+            for n in paliers:
+                proj = out_dir / f"banc_{n}_{prof}.novaproj.zip"
+                info = G.make_bench_project(proj, n, prof)
+                secs = args.secondes_96 if n == 96 else args.secondes
+                r = G.run_palier(p, proj, n, secs, trace_nodes=(n == 96 and not args.sans_noeuds),
+                                 gestures=(prof == "realiste" and not args.sans_images), log_name=f"palier_{n}_{prof}")
+                r.update({"profil": prof, "activite": info})
+                res["paliers"].append(r)
+                c = r.get("charge") or {}
+                sr = r.get("sous_regimes") or {}
+                im = {k: v.get("pire_image_ms") for k, v in (r.get("images_edition") or {}).items() if isinstance(v, dict)}
+                print(f"{prof:9s} {n:4d} pistes : fil audio moy {c.get('charge_cpu_moy_pct')} % / max {c.get('charge_cpu_max_pct')} %"
+                      f" | sous-régimes {sr.get('evenements')} en {sr.get('duree_mesure_s')} s | veille {r.get('veille')}"
+                      f" | pire image {im} {r.get('exception', '')}", flush=True)
+                path.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("écrit :", path)
+    return res
+
+
 if __name__ == "__main__":
-    run()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--paliers", default="")
+    ap.add_argument("--profils", default="realiste,dense")
+    ap.add_argument("--secondes", type=int, default=30)
+    ap.add_argument("--secondes-96", dest="secondes_96", type=int, default=60)
+    ap.add_argument("--label", default="mesure")
+    ap.add_argument("--sans-couts", dest="sans_couts", action="store_true")
+    ap.add_argument("--sans-noeuds", dest="sans_noeuds", action="store_true")
+    ap.add_argument("--sans-images", dest="sans_images", action="store_true")
+    a = ap.parse_args()
+    if a.paliers:
+        run_paliers(a)
+    else:
+        run()

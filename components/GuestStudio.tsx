@@ -88,6 +88,8 @@ export interface GuestStudioProps {
   takeSend?: React.ReactNode;
   /** B3 : test de connexion en un bouton (verdict, temps d'arrivée d'une prise). */
   netTest?: React.ReactNode;
+  /** Chantier 17 : télécommande de cabine permise par l'ingé (components/CabinRemote). */
+  cabin?: { onOpen: () => void } | null;
 }
 
 const fmt = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
@@ -221,6 +223,15 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-32 pt-2">
         <div className="mx-auto grid w-full max-w-5xl gap-3 md:grid-cols-2">
+          {/* Au studio, en cabine : le téléphone devient la télécommande (droit donné par l'ingé) */}
+          {p.cabin && (
+            <section className="rounded-3xl border border-red-400/40 bg-red-500/10 p-4 space-y-3 md:col-span-2" data-testid="guest-cabin" aria-labelledby="guest-cabin-t">
+              <h2 id="guest-cabin-t" className="text-[15px] font-black">🎛️ Tu es en cabine au studio ?</h2>
+              <p className="text-[14px] text-slate-200">Ton téléphone devient la télécommande : <b>REC</b>, lecture, retour au début, et tes paroles en grand. C'est le micro du studio qui enregistre, chez {eng}.</p>
+              <button type="button" data-testid="guest-cabin-open" onClick={p.cabin.onOpen} className={`${big} w-full bg-red-500 text-white`}>Passer en mode cabine</button>
+            </section>
+          )}
+
           {/* 2. Casque et micro */}
           <section className={card} data-testid="guest-setup" data-open={setupExpanded ? '1' : '0'} aria-labelledby="guest-setup-t">
             <div className="flex items-center justify-between gap-2">

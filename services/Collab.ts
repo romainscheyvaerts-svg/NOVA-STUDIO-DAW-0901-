@@ -61,8 +61,9 @@ export interface PresenceMeta {
 }
 
 /** Messages éphémères (direct seulement, jamais dans le journal). */
-export type EphemeralEvent = 'tp' | 'ping' | 'pong' | 'fp' | 'rtc';
-const EPHEMERAL_EVENTS: EphemeralEvent[] = ['tp', 'ping', 'pong', 'fp', 'rtc'];
+/** rc / rca / rcs / rcq : télécommande de cabine (utils/cabinRemote) : commande, accusé, état du transport, demande d'état. */
+export type EphemeralEvent = 'tp' | 'ping' | 'pong' | 'fp' | 'rtc' | 'rc' | 'rca' | 'rcs' | 'rcq';
+const EPHEMERAL_EVENTS: EphemeralEvent[] = ['tp', 'ping', 'pong', 'fp', 'rtc', 'rc', 'rca', 'rcs', 'rcq'];
 export type AudioRefs = Record<string, { parts: string[]; size: number }>;
 
 export const collabDeviceId = (): string => {
