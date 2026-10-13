@@ -1,22 +1,50 @@
-// Facturation Nova (Stripe) :
-//  - abonnement « collaboration » 5 €/mois (chaque compte qui collabore),
-//  - abonnement « beatmaker » 10 €/mois (mettre ses instrus dans la bibliothèque),
-//  - export des voix seules d'un projet : 2 € (paiement unique, par projet).
-// Le paiement se fait sur Stripe Checkout (nouvel onglet) ; le studio vérifie
-// ensuite la session Checkout ici (aucun webhook nécessaire) et enregistre
-// l'achat / l'abonnement. L'export avec l'instru passe par l'achat de la
-// licence de l'instru ou de la mélodie (boutique du site).
+// Facturation Nova (Stripe) — grille du 14/10/2026, prix dans ../_shared/novaTarifs.ts :
+//  - Gratuit : tout le studio, PAS d'export (seulement l'extrait de 30 s à partager) ;
+//  - export à l'unité : 1,99 € par projet (exports illimités de ce projet ensuite) ;
+//  - Nova Pro : 9,99 €/mois ou 89 €/an (exports illimités, projets en ligne, collaboration
+//    en hôte, import de ses instrus, 1 mélodie offerte par mois) ;
+//  - instru achetée sur la boutique : export du projet offert + 1 mois de Nova Pro ;
+//    mélodie : 7 jours (Melody Exclusive : 1 mois) ; séance au studio : 30 jours.
+//    Les cadeaux se cumulent ; ils sont DÉDUITS des achats (aucune écriture à l'achat).
+//
+// Le serveur est la SEULE autorité qui débloque un export (action « export_access ») :
+// le DAW lui envoie le projet (identifiants du catalogue utilisés, kits ou non) et le serveur
+// relit lui-même les achats du compte.
+//
+// Le paiement se fait sur Stripe Checkout (nouvel onglet) ; le studio vérifie ensuite la
+// session Checkout ici (aucun webhook nécessaire) et enregistre l'achat / l'abonnement.
+// Les prix sont créés à la volée (price_data) : rien à créer dans le tableau de bord Stripe.
+// Les abonnés existants gardent le prix de leur abonnement (Stripe ne le change jamais).
+//
+// Compatibilité : les anciens noms de produits (« collab », « export_voices ») et les
+// anciennes actions (« export_unlocked », « use_export_credit ») marchent toujours.
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  TARIFS, PLAN_PRO, METHODE_MELODIE_OFFERTE, GRILLE_VERSION,
+  grillePublique, decisionExport, statutPro, isAdmin as estAdmin, debutDuMois, droitMelodieOfferte,
+  type ElementCatalogue,
+} from "../_shared/novaTarifs.ts";
 
-const PLANS = {
-  collab: { amount: 500, name: "Nova Pro · tes instrus + collaboration + 10 exports / mois" },
-  beatmaker: { amount: 1000, name: "Nova Studio · Beatmaker (tes instrus dans la bibliothèque)" },
-} as const;
-const EXPORT_VOICES_CENTS = 200;
-const PRO_FREE_EXPORTS = 10; // par période d'abonnement
+/** Produits vendus (et anciens noms toujours acceptés). */
+const PRODUITS_ABO: Record<string, { plan: string; interval: "month" | "year"; cents: number; name: string }> = {
+  pro_month: { plan: PLAN_PRO, interval: "month", cents: TARIFS.pro_mois_cents, name: "Nova Pro · mensuel" },
+  pro_year: { plan: PLAN_PRO, interval: "year", cents: TARIFS.pro_an_cents, name: "Nova Pro · annuel" },
+  // Anciens noms : Nova Pro mensuel au prix de la grille actuelle.
+  collab: { plan: PLAN_PRO, interval: "month", cents: TARIFS.pro_mois_cents, name: "Nova Pro · mensuel" },
+  // L'offre beatmaker est remplacée par Nova Pro pour les nouveaux clients.
+  beatmaker: { plan: PLAN_PRO, interval: "month", cents: TARIFS.pro_mois_cents, name: "Nova Pro · mensuel (beatmaker)" },
+};
+const PRODUITS_EXPORT = ["export_project", "export_voices"];
+const PROJECT_RE = /^[A-Za-z0-9_.:-]{6,80}$/;
+/** Id local par défaut, commun à tous les projets non enregistrés : jamais une clé d'export
+ *  (un seul paiement sur cette clé débloquait l'export de tout le monde). Le DAW envoie la clé
+ *  d'export du projet (exportKey, utils/exportRights.ts). */
+const SHARED_PROJECT_ID = "proj-1";
+const validProjectKey = (k: string) => PROJECT_RE.test(k) && k !== SHARED_PROJECT_ID;
+const CATALOG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const ALLOWED_RETURN = [
   /^https:\/\/nova-studio-daw-0901-9kzo\.vercel\.app\//,
@@ -35,19 +63,18 @@ const cors = (origin: string | null): Record<string, string> => ({
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", { apiVersion: "2025-08-27.basil" });
 
-class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
+class HttpError extends Error { constructor(public status: number, msg: string, public extra?: Record<string, unknown>) { super(msg); } }
 
-async function callerOf(req: Request): Promise<{ id: string; email?: string } | null> {
+type User = { id: string; email?: string };
+
+async function callerOf(req: Request): Promise<User | null> {
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token || token.split(".").length !== 3) return null;
   const { data } = await supabase.auth.getUser(token);
   return data?.user ? { id: data.user.id, email: data.user.email || undefined } : null;
 }
 
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-  return (data || []).some((r: any) => ["admin", "superadmin"].includes(String(r.role)));
-}
+const isAdmin = (userId: string) => estAdmin(supabase, userId);
 
 async function customerFor(email: string): Promise<string> {
   const list = await stripe.customers.list({ email, limit: 1 });
@@ -62,72 +89,117 @@ const okReturn = (u: unknown): string => {
 };
 
 async function saveSubscription(sub: Stripe.Subscription, userId: string, plan: string) {
-  const end = (sub as any).current_period_end ?? (sub.items?.data?.[0] as any)?.current_period_end;
+  const item = sub.items?.data?.[0] as any;
+  const end = (sub as any).current_period_end ?? item?.current_period_end;
+  const interval = item?.price?.recurring?.interval || item?.plan?.interval || (sub.metadata as any)?.nova_interval || null;
   await supabase.from("nova_subscriptions").upsert({
     stripe_subscription_id: sub.id, user_id: userId, plan, stripe_customer_id: String(sub.customer),
-    status: sub.status, current_period_end: end ? new Date(end * 1000).toISOString() : null, updated_at: new Date().toISOString(),
+    status: sub.status, current_period_end: end ? new Date(end * 1000).toISOString() : null,
+    interval: interval === "year" ? "year" : "month", updated_at: new Date().toISOString(),
   });
 }
 
-async function activePlans(userId: string): Promise<{ plan: string; status: string; current_period_end: string | null }[]> {
+/** Abonnements (rafraîchis chez Stripe si l'info a plus d'une heure : renouvellement, résiliation). */
+async function activePlans(userId: string): Promise<{ plan: string; status: string; current_period_end: string | null; interval: string | null }[]> {
   const { data } = await supabase.from("nova_subscriptions").select("*").eq("user_id", userId);
-  const out: { plan: string; status: string; current_period_end: string | null }[] = [];
+  const out: { plan: string; status: string; current_period_end: string | null; interval: string | null }[] = [];
   for (const row of data || []) {
-    // Rafraîchi chez Stripe si l'info a plus d'une heure (renouvellement, résiliation).
     let r = row;
     if (Date.now() - Date.parse(row.updated_at) > 3600_000) {
       try { const sub = await stripe.subscriptions.retrieve(row.stripe_subscription_id); await saveSubscription(sub, userId, row.plan); r = { ...row, status: sub.status }; } catch { /* garde l'état connu */ }
     }
-    if (["active", "trialing", "past_due"].includes(r.status)) out.push({ plan: r.plan, status: r.status, current_period_end: r.current_period_end });
+    if (["active", "trialing", "past_due"].includes(r.status)) out.push({ plan: r.plan, status: r.status, current_period_end: r.current_period_end, interval: r.interval || "month" });
   }
   return out;
 }
 
-/** Exports gratuits restants sur la période d'abonnement en cours. */
-async function creditsOf(userId: string): Promise<{ pro: boolean; remaining: number }> {
-  const plans = await activePlans(userId);
-  const pro = plans.find(p => p.plan === "collab");
-  if (!pro && !(await isAdmin(userId))) return { pro: false, remaining: 0 };
-  // Début de période : fin de période - 1 mois (sinon le 1er du mois).
-  const end = pro?.current_period_end ? new Date(pro.current_period_end) : null;
-  const start = end ? new Date(end.getTime()) : new Date();
-  if (end) start.setMonth(start.getMonth() - 1); else start.setDate(1);
-  if (!end) start.setHours(0, 0, 0, 0);
-  const { count } = await supabase.from("nova_export_uses").select("id", { count: "exact", head: true })
-    .eq("user_id", userId).gte("created_at", start.toISOString());
-  return { pro: true, remaining: Math.max(0, PRO_FREE_EXPORTS - (count || 0)) };
+/** Instrus / mélodies du catalogue achetées par le compte (licence, offerte ou payée). */
+async function ownedCatalog(userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from("instrumental_purchases").select("instrumental_id").eq("user_id", userId);
+  return new Set((data || []).map((r: any) => String(r.instrumental_id)));
 }
 
-async function handle(body: any, user: { id: string; email?: string } | null) {
+async function projectPaid(projectKey: string, userId: string | null): Promise<boolean> {
+  if (!validProjectKey(projectKey)) return false;
+  // Le déblocage appartient à celui qui a payé : son compte, ou (sans compte) un achat invité.
+  let q = supabase.from("nova_purchases").select("checkout_session_id").eq("project_key", projectKey);
+  q = userId ? q.eq("user_id", userId) : q.is("user_id", null);
+  const { data } = await q.limit(1);
+  if (data?.length) return true;
+  // Ancien crédit Nova Pro (10 exports / mois) déjà utilisé sur ce projet, par ce compte.
+  if (userId) {
+    const { data: uses } = await supabase.from("nova_export_uses").select("id").eq("project_key", projectKey).eq("user_id", userId).limit(1);
+    if (uses?.length) return true;
+  }
+  return false;
+}
+
+async function melodiesOffertesUtilisees(userId: string): Promise<number> {
+  const { count } = await supabase.from("instrumental_purchases").select("id", { count: "exact", head: true })
+    .eq("user_id", userId).eq("payment_method", METHODE_MELODIE_OFFERTE).gte("created_at", debutDuMois());
+  return count || 0;
+}
+
+/** Retrouve chez Stripe un abonnement payé dont le retour n'a jamais été vérifié (pas de webhook). */
+async function recoverSubscriptions(user: User) {
+  if (!user.email) return;
+  const { data: known } = await supabase.from("nova_subscriptions").select("stripe_subscription_id").eq("user_id", user.id).limit(1);
+  if (known?.length) return;
+  try {
+    const customers = await stripe.customers.list({ email: user.email, limit: 3 });
+    for (const c of customers.data) {
+      const subs = await stripe.subscriptions.list({ customer: c.id, status: "all", limit: 10 });
+      for (const sub of subs.data) {
+        const md = (sub.metadata || {}) as Record<string, string>;
+        if (md.nova_plan && md.user_id === user.id) await saveSubscription(sub, user.id, md.nova_plan);
+      }
+    }
+  } catch { /* Stripe indisponible : état connu */ }
+}
+
+async function handle(body: any, user: User | null) {
   const action = body?.action;
+
+  if (action === "pricing") {
+    // Public : la grille affichée par le DAW et le site (aucun prix en dur chez eux).
+    return grillePublique();
+  }
 
   if (action === "checkout") {
     const product = String(body?.product || "");
     const returnUrl = okReturn(body?.return_url);
     const sep = returnUrl.includes("?") ? "&" : "?";
     const success_url = `${returnUrl}${sep}nova_paid={CHECKOUT_SESSION_ID}`;
-    if (product === "collab" || product === "beatmaker") {
+    const abo = PRODUITS_ABO[product];
+    if (abo) {
       if (!user?.email) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour t'abonner");
-      const plan = PLANS[product];
+      const md = { nova_plan: abo.plan, nova_interval: abo.interval, nova_grille: GRILLE_VERSION, user_id: user.id };
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: await customerFor(user.email),
-        line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: plan.amount, recurring: { interval: "month" }, product_data: { name: plan.name } } }],
-        metadata: { nova_plan: product, user_id: user.id },
-        subscription_data: { metadata: { nova_plan: product, user_id: user.id } },
+        line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: abo.cents, recurring: { interval: abo.interval }, product_data: { name: abo.name } } }],
+        metadata: md,
+        subscription_data: { metadata: md },
         success_url, cancel_url: returnUrl,
         allow_promotion_codes: true,
       });
       return { url: session.url, session_id: session.id };
     }
-    if (product === "export_voices") {
+    if (PRODUITS_EXPORT.includes(product)) {
       const projectKey = String(body?.project_key || "").slice(0, 80);
-      if (!/^[A-Za-z0-9_.:-]{6,80}$/.test(projectKey)) throw new HttpError(400, "Projet inconnu");
+      if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
+      // Interdit si le projet contient une instru / mélodie du catalogue non achetée (mix complet).
+      const catalog = cleanCatalog(body?.catalog_ids);
+      if (catalog.length && body?.scope !== "voix") {
+        const owned = user ? await ownedCatalog(user.id) : new Set<string>();
+        const missing = catalog.filter(id => !owned.has(id));
+        if (missing.length) throw new HttpError(409, "Achète d'abord la licence de l'instru ou de la mélodie : l'export à l'unité ne la remplace pas", { reason: "catalogue_non_achete", missing });
+      }
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         ...(user?.email ? { customer: await customerFor(user.email) } : {}),
-        line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: EXPORT_VOICES_CENTS, product_data: { name: "Nova Studio · Export de mes pistes (voix, batterie)" } } }],
-        metadata: { nova_purchase: "export_voices", project_key: projectKey, user_id: user?.id || "" },
+        line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: TARIFS.export_cents, product_data: { name: "Nova · Export d'un projet (exports illimités de ce projet)" } } }],
+        metadata: { nova_purchase: "export_project", project_key: projectKey, user_id: user?.id || "", nova_grille: GRILLE_VERSION },
         success_url, cancel_url: returnUrl,
       });
       return { url: session.url, session_id: session.id };
@@ -144,74 +216,116 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
       if (s.status !== "complete" || !s.subscription) return { paid: false };
       const sub = await stripe.subscriptions.retrieve(String(s.subscription));
       if (md.user_id) await saveSubscription(sub, md.user_id, md.nova_plan);
-      return { paid: ["active", "trialing"].includes(sub.status), kind: md.nova_plan };
+      return { paid: ["active", "trialing"].includes(sub.status), kind: md.nova_plan, interval: md.nova_interval || "month" };
     }
     if (s.payment_status !== "paid") return { paid: false };
-    if (md.nova_purchase === "export_voices") {
+    if (md.nova_purchase === "export_project" || md.nova_purchase === "export_voices") {
       await supabase.from("nova_purchases").upsert({
-        checkout_session_id: s.id, kind: "export_voices", project_key: md.project_key, user_id: md.user_id || null,
-        email: s.customer_details?.email || null, amount_cents: s.amount_total || EXPORT_VOICES_CENTS,
+        checkout_session_id: s.id, kind: md.nova_purchase, project_key: md.project_key, user_id: md.user_id || null,
+        email: s.customer_details?.email || null, amount_cents: s.amount_total || TARIFS.export_cents,
       });
-      return { paid: true, kind: "export_voices", project_key: md.project_key };
+      return { paid: true, kind: md.nova_purchase, project_key: md.project_key };
     }
     return { paid: false };
   }
 
   if (action === "status") {
-    if (!user) return { plans: [], admin: false };
-    // Pas de webhook : si l'abonné a fermé l'attente avant le retour de Stripe,
-    // l'abonnement n'était jamais enregistré. On le retrouve chez Stripe.
-    if (user.email) {
-      const { data: known } = await supabase.from("nova_subscriptions").select("stripe_subscription_id").eq("user_id", user.id).limit(1);
-      if (!known?.length) {
-        try {
-          const customers = await stripe.customers.list({ email: user.email, limit: 3 });
-          for (const c of customers.data) {
-            const subs = await stripe.subscriptions.list({ customer: c.id, status: "all", limit: 10 });
-            for (const sub of subs.data) {
-              const md = (sub.metadata || {}) as Record<string, string>;
-              if (md.nova_plan && md.user_id === user.id) await saveSubscription(sub, user.id, md.nova_plan);
-            }
-          }
-        } catch { /* Stripe indisponible : état connu */ }
-      }
-    }
-    const admin = await isAdmin(user.id);
-    const credit = await creditsOf(user.id);
-    return { plans: await activePlans(user.id), admin, free_exports_left: admin ? 999 : credit.remaining, free_exports_total: PRO_FREE_EXPORTS };
+    if (!user) return { plans: [], admin: false, grille: GRILLE_VERSION, pro: null };
+    await recoverSubscriptions(user);
+    const plans = await activePlans(user.id);
+    const st = await statutPro(supabase, user.id, user.email);
+    const melodiesPrises = await melodiesOffertesUtilisees(user.id);
+    const droitMelodie = droitMelodieOfferte(st);
+    return {
+      grille: GRILLE_VERSION,
+      plans,
+      admin: st.admin,
+      pro: {
+        active: st.active, source: st.source, paid: st.paid, interval: st.interval, until: st.until,
+        cadeau: { active: st.cadeau.active, until: st.cadeau.until, days_left: st.cadeau.days_left, total_days: st.cadeau.total_days,
+          sources: st.cadeau.en_cours.map(c => ({ source: c.source, days: c.days, label: c.label || null })) },
+      },
+      features: {
+        exports_illimites: st.active,
+        collab_hote: st.active,
+        import_instrus: st.active || st.beatmaker,
+      },
+      melodie_offerte: {
+        droit: droitMelodie,
+        restantes: droitMelodie ? Math.max(0, TARIFS.melodies_offertes_par_mois - melodiesPrises) : 0,
+        par_mois: TARIFS.melodies_offertes_par_mois,
+      },
+      // Ancien DAW : il lisait le nombre d'exports gratuits Nova Pro (désormais illimités).
+      free_exports_left: st.active ? 999 : 0,
+      free_exports_total: st.active ? 999 : 0,
+    };
   }
 
+  if (action === "export_access") {
+    // LA décision d'export. Le DAW envoie : project_key, catalog_ids (instrus / mélodies du
+    // catalogue présentes dans le projet), kits (sons des kits NOVA), scope (mix | voix).
+    const projectKey = String(body?.project_key || "");
+    if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
+    const ids = cleanCatalog(body?.catalog_ids);
+    const portee = body?.scope === "voix" ? "voix" : "mix";
+    const kits = body?.kits === true;
+    const admin = !!user && await isAdmin(user.id);
+    const st = user && !admin ? await statutPro(supabase, user.id, user.email) : null;
+    const owned = user ? await ownedCatalog(user.id) : new Set<string>();
+    let titles = new Map<string, { title?: string; kind?: string }>();
+    if (ids.length) {
+      const { data } = await supabase.from("instrumentals").select("id, title, kind").in("id", ids);
+      titles = new Map((data || []).map((x: any) => [String(x.id), { title: x.title, kind: x.kind }]));
+    }
+    const catalogue: ElementCatalogue[] = ids.map(id => ({ id, owned: owned.has(id), ...(titles.get(id) || {}) }));
+    const paye = await projectPaid(projectKey, user?.id || null);
+    const d = decisionExport({ admin, pro: !!st?.active, projetPaye: paye, catalogue, kits, portee });
+    return {
+      grille: GRILLE_VERSION,
+      unlocked: d.unlocked,
+      via: d.via || null,
+      reason: d.reason || null,
+      login_required: !user && !d.unlocked,
+      missing: d.missing.map(m => ({ id: m.id, title: m.title || null, kind: m.kind || "beat" })),
+      items: catalogue.map(m => ({ id: m.id, title: m.title || null, kind: m.kind || "beat", owned: m.owned })),
+      kits,
+      offers: d.unlocked ? null : {
+        export_cents: d.reason === "paiement" ? TARIFS.export_cents : null,
+        pro_mois_cents: d.reason === "paiement" ? TARIFS.pro_mois_cents : null,
+        pro_an_cents: d.reason === "paiement" ? TARIFS.pro_an_cents : null,
+      },
+      pro: st ? { active: st.active, source: st.source, days_left: st.cadeau.days_left, total_days: st.cadeau.total_days, until: st.until } : null,
+    };
+  }
+
+  if (action === "melody_perk") {
+    // Appelée par deliver-instrumental (site), avec le jeton du client : peut-il prendre sa
+    // mélodie offerte du mois ? (Le décompte = les achats « nova_pro_monthly » du mois.)
+    if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music");
+    const st = await statutPro(supabase, user.id, user.email);
+    const droit = droitMelodieOfferte(st);
+    const left = droit ? Math.max(0, TARIFS.melodies_offertes_par_mois - await melodiesOffertesUtilisees(user.id)) : 0;
+    return { allowed: droit && left > 0, droit, restantes: left, method: METHODE_MELODIE_OFFERTE };
+  }
+
+  // --- Anciennes actions (DAW pas encore mis à jour) -----------------------------------
   if (action === "export_unlocked") {
-    // Le studio (admins) teste tout gratuitement.
     if (user && await isAdmin(user.id)) return { unlocked: true, admin: true };
     const projectKey = String(body?.project_key || "");
-    // « proj-1 » = id local commun à tous les projets non enregistrés : jamais débloqué (avant, un
-    // seul paiement sur cette clé débloquait l'export de tout le monde).
-    if (!/^[A-Za-z0-9_.:-]{6,80}$/.test(projectKey) || projectKey === "proj-1") return { unlocked: false };
-    // Le déblocage appartient à celui qui a payé : son compte, ou un achat sans compte (invité).
-    let q = supabase.from("nova_purchases").select("checkout_session_id").eq("project_key", projectKey);
-    q = user ? q.eq("user_id", user.id) : q.is("user_id", null);
-    const { data } = await q.limit(1);
-    if (data?.length) return { unlocked: true };
-    if (!user) return { unlocked: false };
-    const { data: uses } = await supabase.from("nova_export_uses").select("id").eq("project_key", projectKey).eq("user_id", user.id).limit(1);
-    return { unlocked: !!uses?.length };
+    if (!validProjectKey(projectKey)) return { unlocked: false };
+    if (await projectPaid(projectKey, user?.id || null)) return { unlocked: true };
+    if (user && (await statutPro(supabase, user.id, user.email)).active) return { unlocked: true };
+    return { unlocked: false };
   }
 
   if (action === "use_export_credit") {
-    // Nova Pro : un des 10 exports gratuits de la période débloque ce projet.
+    // Nova Pro : exports illimités (l'ancien DAW demandait un crédit par projet).
     if (!user) return { unlocked: false, remaining: 0, reason: "login" };
-    if (await isAdmin(user.id)) return { unlocked: true, remaining: 999, admin: true }; // admins : sans limite, rien n'est décompté
     const projectKey = String(body?.project_key || "");
-    if (!/^[A-Za-z0-9_.:-]{6,80}$/.test(projectKey)) throw new HttpError(400, "Projet inconnu");
-    const { data: already } = await supabase.from("nova_export_uses").select("id").eq("user_id", user.id).eq("project_key", projectKey).limit(1);
-    const credit = await creditsOf(user.id);
-    if (already?.length) return { unlocked: true, remaining: credit.remaining };
-    if (!credit.pro) return { unlocked: false, remaining: 0, reason: "not_pro" };
-    if (credit.remaining <= 0) return { unlocked: false, remaining: 0, reason: "quota" };
-    const { error } = await supabase.from("nova_export_uses").insert({ user_id: user.id, project_key: projectKey });
-    if (error && !/duplicate/i.test(error.message)) throw new HttpError(500, error.message);
-    return { unlocked: true, remaining: credit.remaining - 1 };
+    if (!validProjectKey(projectKey)) throw new HttpError(400, "Projet inconnu : enregistre-le d'abord (il reçoit sa propre clé d'export)");
+    const st = await statutPro(supabase, user.id, user.email);
+    if (!st.active) return { unlocked: false, remaining: 0, reason: "not_pro" };
+    return { unlocked: true, remaining: 999, ...(st.admin ? { admin: true } : {}) };
   }
 
   if (action === "portal") {
@@ -225,6 +339,11 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   throw new HttpError(400, "Action inconnue");
 }
 
+function cleanCatalog(v: unknown): string[] {
+  const list = Array.isArray(v) ? v : [];
+  return [...new Set(list.map(x => String(x ?? "").trim()).filter(x => CATALOG_ID_RE.test(x)))].slice(0, 50);
+}
+
 serve(async (req) => {
   const headers = { ...cors(req.headers.get("origin")), "Content-Type": "application/json" };
   if (req.method === "OPTIONS") return new Response(null, { headers });
@@ -234,7 +353,8 @@ serve(async (req) => {
     return new Response(JSON.stringify(await handle(body, user)), { headers });
   } catch (e) {
     const status = e instanceof HttpError ? e.status : 500;
+    const extra = e instanceof HttpError ? e.extra : undefined;
     console.error("[nova-billing]", (e as Error).message);
-    return new Response(JSON.stringify({ error: (e as Error).message }), { status, headers });
+    return new Response(JSON.stringify({ error: (e as Error).message, ...(extra || {}) }), { status, headers });
   }
 });

@@ -49,7 +49,9 @@ async function call(h: Handler, body: unknown, opts: { token?: string; origin?: 
 const INGE = { token: 'jwt.inge.ok' };
 
 async function newSession(name = 'Séance de Nina') {
-  const c = await call(dawSession, { action: 'create', name }, { token: 'jwt.autre.ok' }); // séance de l'artiste (propriétaire), l'ingé a le lien
+  // Séance de l'artiste (propriétaire, Nova Pro : plusieurs projets en ligne ; grille du 14/10), l'ingé a le lien.
+  if (!(db.tables.nova_subscriptions || []).some((r: any) => r.user_id === 'u-autre')) (db.tables.nova_subscriptions ||= []).push({ stripe_subscription_id: 'sub_autre', user_id: 'u-autre', plan: 'collab', status: 'active', current_period_end: null, updated_at: new Date().toISOString() });
+  const c = await call(dawSession, { action: 'create', name }, { token: 'jwt.autre.ok' });
   expect(c.status).toBe(200);
   return c.json as { id: string; secret: string };
 }

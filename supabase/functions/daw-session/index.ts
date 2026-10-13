@@ -11,9 +11,17 @@
 // un propriétaire. Il la retrouve dans son espace (list_mine renvoie le lien),
 // l'ouvre sans le lien, peut la supprimer. Le client rattache une session
 // reçue (claim, avec le lien) ; le studio (admin) l'attribue par e-mail (assign).
+//
+// Tarifs (grille du 14/10/2026, ../_shared/novaTarifs.ts) — colonne expires_at :
+//  - propriétaire Nova Pro (payé ou offert) / admin : jamais d'expiration ;
+//  - gratuit : 1 projet en ligne, gardé 7 jours (avertissement 2 jours avant) ; au-delà
+//    l'envoi est refusé (410) et le ménage (daw-session-purge, PAS programmé) l'efface ;
+//  - session donnée par le studio (assign) : 30 jours + 30 jours de Nova Pro offerts ;
+//  - collaboration : l'HÔTE (propriétaire de la séance) a Nova Pro, les invités ne paient rien.
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { TARIFS, isAdmin as estAdmin, statutPro, jours, JOUR_MS } from "../_shared/novaTarifs.ts";
 
 const BUCKET = "daw-sessions";
 const MAX_SESSION_BYTES = 1500 * 1024 * 1024; // 1,5 Go par session
@@ -64,7 +72,7 @@ const safeEqual = (a: string, b: string) => {
   return r === 0;
 };
 
-type Row = { id: string; secret_hash: string; secret: string | null; owner_id: string | null; name: string; version: number; manifest: any; total_bytes: number; updated_at: string; updated_from: string | null };
+type Row = { id: string; secret_hash: string; secret: string | null; owner_id: string | null; name: string; version: number; manifest: any; total_bytes: number; updated_at: string; updated_from: string | null; expires_at?: string | null; studio_gift?: boolean | null };
 
 /** Utilisateur connecté (jeton du compte Make Music), ou null (clé anonyme). */
 async function callerOf(req: Request): Promise<{ id: string; email?: string } | null> {
@@ -74,9 +82,31 @@ async function callerOf(req: Request): Promise<{ id: string; email?: string } | 
   return data?.user ? { id: data.user.id, email: data.user.email || undefined } : null;
 }
 
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-  return (data || []).some((r: any) => ["admin", "superadmin"].includes(String(r.role)));
+const isAdmin = (userId: string) => estAdmin(supabase, userId);
+
+// Mémo le temps d'UNE requête (remis à zéro à chaque appel : un abonnement tout juste payé compte aussitôt).
+let proMemo = new Map<string, boolean>();
+/** Nova Pro (payé, offert) ou admin. E-mail : les séances payées au studio comptent aussi. */
+async function isPro(userId: string | null | undefined, email?: string | null): Promise<boolean> {
+  if (!userId) return false;
+  const c = proMemo.get(userId);
+  if (c !== undefined) return c;
+  const ok = (await statutPro(supabase, userId, email)).active;
+  proMemo.set(userId, ok);
+  return ok;
+}
+
+/** Conservation renvoyée au DAW : expires_at null = gardée sans limite (Nova Pro / admin). */
+async function keepInfo(row: Pick<Row, "owner_id" | "expires_at" | "studio_gift">, user: { id: string; email?: string } | null) {
+  const ownerEmail = user && row.owner_id === user.id ? user.email : null;
+  const unlimited = !row.expires_at || await isPro(row.owner_id, ownerEmail);
+  const exp = unlimited ? null : row.expires_at!;
+  const left = exp ? Math.max(0, Math.ceil((Date.parse(exp) - Date.now()) / JOUR_MS)) : null;
+  return {
+    expires_at: exp, days_left: left, unlimited, studio_gift: !!row.studio_gift,
+    expired: !!exp && Date.parse(exp) <= Date.now(),
+    expiry_warning: left !== null && left <= TARIFS.avertir_avant_jours,
+  };
 }
 
 class HttpError extends Error { constructor(public status: number, msg: string, public extra?: Record<string, unknown>) { super(msg); } }
@@ -111,12 +141,18 @@ async function touchActivity(row: Pick<Row, "id" | "updated_at">) {
   if (error) console.warn("[daw-session] activité", row.id, error.message);
 }
 
-/** Collaboration : abonnement 5 €/mois pour chaque compte qui collabore (le studio en est dispensé). */
-async function requireCollabPlan(userId: string) {
-  if (await isAdmin(userId)) return;
-  const { data: subs } = await supabase.from("nova_subscriptions").select("status, current_period_end")
-    .eq("user_id", userId).eq("plan", "collab").in("status", ["active", "trialing", "past_due"]);
-  if (!subs?.length) throw new HttpError(402, "Abonnement collaboration requis (5 €/mois)");
+/**
+ * Collaboration : l'HÔTE (propriétaire de la séance) a Nova Pro ; les invités n'ont rien à payer.
+ * Séance sans propriétaire (ancienne version) : la personne qui rejoint doit avoir Nova Pro.
+ */
+async function requireCollabHost(user: { id: string; email?: string }, ownerId: string | null) {
+  if (await isPro(user.id, user.email)) return;
+  if (ownerId && ownerId !== user.id && await isPro(ownerId)) return;
+  const prix = `${(TARIFS.pro_mois_cents / 100).toFixed(2).replace(".", ",")} €/mois`;
+  if (!ownerId || ownerId === user.id) {
+    throw new HttpError(402, `Héberger une collaboration fait partie de Nova Pro (${prix}). Tes invités n'ont rien à payer.`, { reason: "host_pro" });
+  }
+  throw new HttpError(402, `L'hôte de cette séance n'a plus Nova Pro : demande-lui de le réactiver (${prix}). En invité, tu n'as rien à payer.`, { reason: "host_not_pro" });
 }
 
 /** Morceaux référencés par un manifeste : { files: { chemin: { parts: [sha1…] } } }. */
@@ -150,25 +186,29 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   if (action === "list_mine") {
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music");
     const { data, error } = await supabase.from("daw_sessions")
-      .select("id, secret, name, version, total_bytes, updated_at, updated_from, created_at")
+      .select("id, secret, name, version, total_bytes, updated_at, updated_from, created_at, expires_at, studio_gift")
       .eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100);
     if (error) throw new HttpError(500, error.message);
-    return { sessions: (data || []).map((r: any) => ({ id: r.id, link: linkOf(r), name: r.name, version: r.version, total_bytes: r.total_bytes, updated_at: r.updated_at, updated_from: r.updated_from, created_at: r.created_at })) };
+    const sessions = [];
+    for (const r of (data || []) as any[]) {
+      sessions.push({ id: r.id, link: linkOf(r), name: r.name, version: r.version, total_bytes: r.total_bytes, updated_at: r.updated_at, updated_from: r.updated_from, created_at: r.created_at, ...(await keepInfo({ ...r, owner_id: user.id }, user)) });
+    }
+    return { sessions };
   }
 
   if (action === "resolve_code") {
     // Code d'invitation (6 caractères) → lien de la session. Compte connecté ET abonné
     // (comme pour rejoindre) : un code deviné ne suffit pas à ouvrir une session.
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
-    await requireCollabPlan(user.id);
     const code = String(body?.code || "").toUpperCase().replace(/[\s\-_.]/g, "");
     const fail = async () => { await new Promise(r => setTimeout(r, 400)); throw new HttpError(404, "Code introuvable ou expiré"); };
     if (!INVITE_RE.test(code)) return await fail();
     const { data: inv } = await supabase.from("daw_session_invites").select("session_id, expires_at").eq("code", code).maybeSingle();
     if (!inv || Date.parse(inv.expires_at) < Date.now()) return await fail();
-    const { data: s } = await supabase.from("daw_sessions").select("id, secret, name").eq("id", inv.session_id).maybeSingle();
+    const { data: s } = await supabase.from("daw_sessions").select("id, secret, name, owner_id").eq("id", inv.session_id).maybeSingle();
     const link = s ? linkOf(s as Pick<Row, "id" | "secret">) : null;
     if (!link) return await fail();
+    await requireCollabHost(user, (s as any).owner_id || null);
     return { link, name: (s as any).name };
   }
 
@@ -181,12 +221,28 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     const id = randomToken(12);
     const secret = randomToken(32, "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789");
     const name = String(body?.name || "Session").slice(0, 80);
+    // Gratuit : 1 projet en ligne à la fois, gardé 7 jours. Nova Pro / admin : sans limite.
+    // Séance de collaboration (purpose « collab ») : hors limite, l'hôte doit de toute façon avoir Nova Pro.
+    const unlimited = await isPro(user?.id, user?.email);
+    const collabOnly = body?.purpose === "collab";
+    if (user && !unlimited && !collabOnly) {
+      const { data: mine } = await supabase.from("daw_sessions").select("id, name, expires_at")
+        .eq("owner_id", user.id).gt("expires_at", new Date().toISOString()).limit(10);
+      const actifs = (mine || []) as any[];
+      if (actifs.length >= TARIFS.projets_gratuits_en_ligne) {
+        const p = actifs[0];
+        const fin = new Date(p.expires_at).toLocaleDateString("fr-BE", { day: "numeric", month: "long" });
+        throw new HttpError(402, `En gratuit, 1 projet en ligne à la fois : « ${p.name} » y est déjà (gardé jusqu'au ${fin}). Supprime-le dans « Mes sessions en ligne », ou passe à Nova Pro pour des projets en ligne illimités. Ton projet reste enregistré sur cet appareil.`,
+          { reason: "free_project_limit", project: { id: p.id, name: p.name, expires_at: p.expires_at } });
+      }
+    }
+    const expires_at = unlimited ? null : new Date(Date.now() + jours(TARIFS.projet_gratuit_jours)).toISOString();
     const { error } = await supabase.from("daw_sessions").insert({
       id, secret, secret_hash: await sha256(secret), name, owner_id: user?.id || null,
-      updated_from: String(body?.device || "").slice(0, 60) || null,
+      updated_from: String(body?.device || "").slice(0, 60) || null, expires_at,
     });
     if (error) throw new HttpError(500, error.message);
-    return { id, secret, version: 0, owned: !!user };
+    return { id, secret, version: 0, owned: !!user, expires_at, unlimited, days_left: unlimited ? null : TARIFS.projet_gratuit_jours };
   }
 
   const row = await authorize(body?.id, body?.secret, user);
@@ -208,9 +264,20 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     const { data: uid, error: e1 } = await supabase.rpc("mm_user_id_by_email", { p_email: email });
     if (e1) throw new HttpError(500, e1.message);
     if (!uid) throw new HttpError(404, "Aucun compte Make Music avec cet e-mail : le client doit d'abord créer son compte sur studiomakemusic.com");
-    const { error } = await supabase.from("daw_sessions").update({ owner_id: uid }).eq("id", row.id);
+    // Séance au studio : la session est gardée 30 jours (ou plus si déjà prévu) ET le client
+    // reçoit 30 jours de Nova Pro (un cadeau par jour de séance, cumulable avec les autres).
+    const offert = Date.now() + jours(TARIFS.cadeau_studio_jours);
+    const expires_at = new Date(Math.max(offert, row.expires_at ? Date.parse(row.expires_at) : 0)).toISOString();
+    const { error } = await supabase.from("daw_sessions").update({ owner_id: uid, studio_gift: true, expires_at }).eq("id", row.id);
     if (error) throw new HttpError(500, error.message);
-    return { ok: true };
+    const jour = new Date().toISOString().slice(0, 10);
+    const { error: e2 } = await supabase.from("nova_pro_gifts").upsert({
+      id: `studio-${uid}-${jour}`, user_id: uid, source: "studio", days: TARIFS.cadeau_studio_jours,
+      starts_at: new Date().toISOString(), note: `Séance au studio (${row.name})`.slice(0, 120),
+    });
+    if (e2) console.warn("[daw-session] cadeau studio", e2.message);
+    proMemo.delete(String(uid));
+    return { ok: true, expires_at, studio_gift: true, pro_days: TARIFS.cadeau_studio_jours };
   }
 
   if (action === "delete") {
@@ -240,6 +307,9 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     const manifest = body?.manifest;
     if (!manifest || typeof manifest !== "object" || !manifest.project) throw new HttpError(400, "Manifeste manquant");
     if (JSON.stringify(manifest).length > MAX_MANIFEST_CHARS) throw new HttpError(413, "Projet trop gros");
+    if (row.expires_at && Date.parse(row.expires_at) <= Date.now() && !(await isPro(row.owner_id, row.owner_id === user?.id ? user?.email : null))) {
+      throw new HttpError(410, `Ce projet en ligne gratuit a expiré (gardé ${TARIFS.projet_gratuit_jours} jours). Il reste enregistré sur cet appareil ; passe à Nova Pro pour le remettre en ligne sans limite.`, { reason: "expired", expires_at: row.expires_at });
+    }
     if (!body?.force && Number(body?.baseVersion) !== row.version) {
       throw new HttpError(409, "La session a été modifiée ailleurs", { version: row.version, updated_at: row.updated_at, updated_from: row.updated_from });
     }
@@ -275,7 +345,7 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
       if (error) throw new HttpError(500, error.message);
       (data || []).forEach((d, k) => { if (d.signedUrl) urls[slice[k]] = d.signedUrl; });
     }
-    return { id: row.id, link: linkOf(row), owned: !!user && row.owner_id === user.id, has_owner: !!row.owner_id, name: row.name, version: row.version, updated_at: row.updated_at, updated_from: row.updated_from, manifest: row.manifest, urls };
+    return { id: row.id, link: linkOf(row), owned: !!user && row.owner_id === user.id, has_owner: !!row.owner_id, name: row.name, version: row.version, updated_at: row.updated_at, updated_from: row.updated_from, manifest: row.manifest, urls, ...(await keepInfo(row, user)) };
   }
 
   // --- Collaboration (artiste / ingé son / beatmaker) -------------------------
@@ -293,9 +363,9 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   if (action === "join") {
     const role = String(body?.role || "");
     if (!ROLES.includes(role)) throw new HttpError(400, "Rôle inconnu");
-    // Collaboration = abonnement 5 €/mois pour chaque compte qui collabore (le studio en est dispensé).
+    // Collaboration : l'hôte a Nova Pro, les invités n'ont rien à payer (le studio en est dispensé).
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
-    await requireCollabPlan(user.id);
+    await requireCollabHost(user, row.owner_id);
     const key = memberKeyOf();
     if (key === "d:") throw new HttpError(400, "Appareil inconnu");
     const name = String(body?.name || user?.email?.split("@")[0] || "Invité").slice(0, 40);
@@ -383,7 +453,7 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   }
 
   if (action === "info") {
-    return { id: row.id, link: linkOf(row), owned: !!user && row.owner_id === user.id, has_owner: !!row.owner_id, name: row.name, version: row.version, updated_at: row.updated_at, updated_from: row.updated_from, total_bytes: row.total_bytes };
+    return { id: row.id, link: linkOf(row), owned: !!user && row.owner_id === user.id, has_owner: !!row.owner_id, name: row.name, version: row.version, updated_at: row.updated_at, updated_from: row.updated_from, total_bytes: row.total_bytes, ...(await keepInfo(row, user)) };
   }
 
   throw new HttpError(400, "Action inconnue");
@@ -394,6 +464,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers });
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "POST uniquement" }), { status: 405, headers });
   try {
+    proMemo = new Map();
     const body = await req.json();
     const user = await callerOf(req);
     return new Response(JSON.stringify(await handle(body, user)), { headers });

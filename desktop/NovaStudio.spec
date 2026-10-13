@@ -28,6 +28,8 @@ hiddenimports += collect_submodules('websockets')
 # Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe à côté du pont, avec ses licences
 # (sans JUCE : VST3 SDK sous MIT + ARA SDK sous Apache 2.0, voir nova-ara-host/LICENCES.md).
 # Inclus par défaut ; NOVA_EXCLUDE_ARA=1 pour l'exclure.
+# Anti-enregistrement d'écran (importé par nova_desktop.py, listé par sûreté).
+hiddenimports += ['capture_guard']
 hiddenimports += ['ara_host', 'ara_service']
 _ara = '../nova-ara-host/build/NovaARAHost_artefacts/Release/NovaARAHost.exe'
 if os.environ.get('NOVA_EXCLUDE_ARA') != '1' and os.path.isfile(_ara):

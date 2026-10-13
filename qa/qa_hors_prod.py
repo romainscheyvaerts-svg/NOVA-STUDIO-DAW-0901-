@@ -574,6 +574,11 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
             except Exception: action = None
             if action == "status":
                 return Resp(200, cors, {"plans": [], "admin": False})
+            # Comme la fonction EN LIGNE aujourd'hui (avant la grille du 14/10) : les nouvelles
+            # actions sont inconnues → le DAW se replie sur l'ancienne grille (qa/tarifs.py simule
+            # la nouvelle grille avec ses propres routes).
+            if action in ("pricing", "export_access", "melody_perk"):
+                return Resp(400, cors, {"error": "Action inconnue"})
             return Resp(401, cors, {"error": "Connecte-toi pour continuer (QA hors production)."})
         if fn == "daw-session":
             return Resp(401, cors, {"error": "Connecte-toi pour collaborer (QA hors production)."})

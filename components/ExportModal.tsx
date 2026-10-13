@@ -1,5 +1,7 @@
 
-import { openCheckout, waitPaid, isExportVoicesUnlocked, markExportVoicesUnlocked, spendExportCredit, billingStatus } from '../services/Billing';
+import { waitPaid, billingStatus, loadPricing, exportAccess, forgetExportAccess, startExportPayment, euros, type ExportAccess, type Grille, type BillingStatus } from '../services/Billing';
+import { catalogIdsOf, projectUsesKits } from '../utils/exportProject';
+import ExportPaywall from './ExportPaywall';
 import React, { useState, useEffect } from 'react';
 import { DAWState, Track } from '../types';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
@@ -94,18 +96,53 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const admin = isAdmin === true;
   const adminPending = isAdmin === null;
 
-  // Verrou de licence. Le DAW sert a essayer les instrumentaux : on ne peut
-  // sortir un fichier audio que si le beat du catalogue present dans le projet
-  // a ete achete. Ce controle n'existait pas du tout, l'export rendait le mix
-  // complet sans rien verifier.
+  // Verrou de licence et paiement de l'export : décidés par le SERVEUR (nova-billing,
+  // « export_access »), jamais dans le navigateur. Le DAW lui dit seulement ce que le projet
+  // contient (instrus / mélodies du catalogue, kits de batterie NOVA). Grille du 14/10 :
+  // gratuit = pas d'export ; 1 export payé = ce projet ; Nova Pro = illimité ; licence
+  // achetée = export offert ; jamais une instru du catalogue non achetée dans le mix.
   const possedes = React.useMemo(() => ownedInstrumentIds.map(id => String(id)), [ownedInstrumentIds]);
+  const catalogIds = React.useMemo(() => catalogIdsOf(projectState.tracks), [projectState.tracks]);
+  const usesKits = React.useMemo(() => projectUsesKits(projectState.tracks), [projectState.tracks]);
+  const [grille, setGrille] = useState<Grille | null>(null);
+  const [compte, setCompte] = useState<BillingStatus | null>(null);
+  const [accesMix, setAccesMix] = useState<ExportAccess | null>(null);
+  const [accesVoix, setAccesVoix] = useState<ExportAccess | null>(null);
+  const [accesTick, setAccesTick] = useState(0);
+  const recheckAccess = React.useCallback(() => {
+    if (projectKey) forgetExportAccess(projectKey);
+    setAccesMix(null); setAccesVoix(null); setAccesTick(t => t + 1);
+  }, [projectKey]);
+  React.useEffect(() => {
+    if (!isOpen) return;
+    if (!projectKey) {
+      // Projet sans clé d'export (id local commun, pas encore enregistré) : rien n'est débloqué.
+      const sans: ExportAccess = { unlocked: false, via: null, reason: 'erreur', missing: [], login_required: false, kits: usesKits, pro: null, legacy: false,
+        message: "Ce projet n'a pas encore sa clé d'export : enregistre-le, puis rouvre « Exporter »." };
+      setAccesMix(sans); setAccesVoix(sans);
+      return;
+    }
+    let live = true;
+    void loadPricing().then(g => { if (live) setGrille(g); });
+    void billingStatus().then(st => { if (live) setCompte(st); });
+    const q = { projectKey, catalogIds, kits: usesKits, owned: possedes };
+    void exportAccess({ ...q, scope: 'mix' }).then(a => {
+      if (!live) return;
+      setAccesMix(a);
+      // Instru pas achetée : « mes pistes seules » (sans l'instru) a sa propre réponse.
+      if (a.reason === 'catalogue_non_achete') void exportAccess({ ...q, scope: 'voix' }).then(v => { if (live) setAccesVoix(v); });
+      else setAccesVoix(a);
+    });
+    return () => { live = false; };
+  }, [isOpen, projectKey, catalogIds, usesKits, possedes, accesTick]);
+  // Noms affichés : les manques vus par le serveur (sinon ce que le DAW sait de ses achats).
+  const manquants = React.useMemo(() => new Set((accesMix?.missing || []).map(m => m.id)), [accesMix]);
   const beatsNonAchetes = React.useMemo(
-    () => projectState.tracks.filter(
-      t => t.instrumentId !== undefined && !possedes.includes(String(t.instrumentId))
-    ),
-    [projectState.tracks, possedes]
+    () => projectState.tracks.filter(t => t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== ''
+      && (accesMix ? manquants.has(String(t.instrumentId)) : !possedes.includes(String(t.instrumentId)))),
+    [projectState.tracks, possedes, accesMix, manquants]
   );
-  const exportVerrouille = !admin && beatsNonAchetes.length > 0;
+  const exportVerrouille = !admin && (accesMix ? accesMix.reason === 'catalogue_non_achete' : beatsNonAchetes.length > 0);
   // --- STATE ---
   const [filename, setFilename] = useState(projectState.name || 'Master');
   
@@ -135,54 +172,48 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   useEffect(() => {
     if (admin && !sourceTouched.current) setSource('MASTER');
   }, [admin]);
+  // Le serveur reconnaît la licence (achat fait ailleurs, compte d'un autre appareil) : mix complet proposé.
+  useEffect(() => {
+    if (!sourceTouched.current && accesMix && accesMix.reason !== 'catalogue_non_achete' && source === 'VOCALS') setSource('MASTER');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accesMix]);
   const bloque = exportVerrouille && source !== 'VOCALS';
-  // Mes pistes seules sans avoir acheté le beat / la mélodie : 2 € par projet.
-  const [voicesUnlocked, setVoicesUnlocked] = useState<boolean | null>(null);
+  // Réponse du serveur pour ce qu'on exporte (mes pistes seules quand l'instru n'est pas achetée).
+  const acces = !admin && exportVerrouille && source === 'VOCALS' ? accesVoix : accesMix;
+  const voicesUnlocked: boolean | null = (exportVerrouille ? accesVoix : accesMix)?.unlocked ?? null;
   const [payWait, setPayWait] = useState(false);
   const payCancelled = React.useRef(false);
-  // Export payant (2 €, ou un des 10 exports gratuits de Nova Pro) : mes pistes
-  // seules sans le beat acheté, ou tout projet sans instru du catalogue (instru importée).
-  const hasCatalogBeat = projectState.tracks.some(t => t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
-  const paidExport = !admin && ((source === 'VOCALS' && exportVerrouille) || !hasCatalogBeat);
-  const needsVoicesPayment = paidExport && voicesUnlocked !== true;
-  const [freeLeft, setFreeLeft] = useState<number | null>(null);
-  React.useEffect(() => {
-    if (!isOpen || !projectKey || !paidExport) return;
-    let live = true;
-    void isExportVoicesUnlocked(projectKey).then(u => { if (live) setVoicesUnlocked(u); });
-    void billingStatus().then(st => { if (live && (st.plans.some(p => p.plan === 'collab') || st.admin)) setFreeLeft(st.free_exports_left ?? 0); });
-    return () => { live = false; payCancelled.current = true; };
-  }, [isOpen, projectKey, paidExport]);
+  React.useEffect(() => () => { payCancelled.current = true; }, []);
+  const accesPending = !admin && (!acces || acces.reason === 'erreur');
+  const paidExport = !admin && !!acces && (acces.via === 'achat' || acces.reason === 'paiement');
+  const needsVoicesPayment = !admin && !!acces && !acces.unlocked && acces.reason === 'paiement';
+  const prixExport = grille && !grille.unavailable ? euros(grille.export.cents) : '…';
   const payVoices = async () => {
-    if (!projectKey) return;
+    if (!projectKey || !grille) return;
     payCancelled.current = false;
     setStatusText('');
-    // Abonné Nova Pro : un export gratuit du mois d'abord.
-    if (freeLeft !== null && freeLeft > 0) {
-      const r = await spendExportCredit(projectKey);
-      if (r.unlocked) {
-        markExportVoicesUnlocked(projectKey);
-        setVoicesUnlocked(true);
-        setFreeLeft(r.remaining);
-        setLoudnessReport(`⭐ Export gratuit Nova Pro utilisé (il t'en reste ${r.remaining} ce mois-ci).`);
-        setTimeout(() => { void handleExportRef.current?.(); }, 300);
+    const q = { projectKey, catalogIds, kits: usesKits, owned: possedes, scope: (source === 'VOCALS' && exportVerrouille ? 'voix' : 'mix') as 'mix' | 'voix' };
+    try {
+      const r = await startExportPayment(q, grille);
+      if (r.credit) {
+        setLoudnessReport('⭐ Export Nova Pro utilisé pour ce projet.');
+        recheckAccess();
+        setTimeout(() => { void handleExportRef.current?.(); }, 600);
         return;
       }
-    }
-    try {
-      const sid = await openCheckout('export_voices', { project_key: projectKey });
       setPayWait(true);
-      const ok = await waitPaid(sid, () => payCancelled.current);
+      const ok = await waitPaid(r.sessionId!, () => payCancelled.current);
       setPayWait(false);
       if (ok) {
-        markExportVoicesUnlocked(projectKey);
-        setVoicesUnlocked(true);
-        setLoudnessReport('✅ Paiement reçu : tes pistes s\'exportent.');
-        setTimeout(() => { void handleExportRef.current?.(); }, 300);
+        recheckAccess();
+        setLoudnessReport("✅ Paiement reçu : ce projet s'exporte (et se réexporte autant que tu veux).");
+        setTimeout(() => { void handleExportRef.current?.(); }, 900);
+      } else if (!payCancelled.current) {
+        setLoudnessReport("Paiement pas encore reçu. S'il est fait, rouvre « Exporter » : il sera reconnu.");
       }
     } catch (e: any) {
       setPayWait(false);
-      setLoudnessReport(`⚠️ Paiement impossible : ${e?.message || 'erreur'}`);
+      setLoudnessReport(`⚠️ Paiement impossible : ${e?.message || 'erreur'}. Vérifie ta connexion puis réessaie.`);
     }
   };
   const handleExportRef = React.useRef<((queueOnly?: boolean) => Promise<void>) | null>(null);
@@ -325,6 +356,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   // --- EXPORT (par la file : un ou plusieurs exports à la suite) ---
 
   const handleExport = async (queueOnly = false) => {
+    if (accesPending) {
+      setStatusText(acces?.message || "Vérification de l'export de ce projet… réessaie dans un instant.");
+      if (acces?.reason === 'erreur') recheckAccess();
+      return;
+    }
     if (needsVoicesPayment) { void payVoices(); return; }
     if (bloque) {
       setStatusText("Achète l'instrumental pour exporter ton morceau (les voix seules restent exportables).");
@@ -440,15 +476,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     setRangeMode('FULL');
     setTimeout(() => { void handleExportRef.current?.(); }, 50);
   };
-  // Vue simple, instru pas achetée : mes voix seules (sans le beat), 2 € par
+  // Vue simple, instru pas achetée : mes voix seules (sans le beat), payées comme un export (prix du serveur) par
   // projet ou un export Nova Pro offert — même paiement que la vue avancée.
   const exportVoix = () => {
     sourceTouched.current = true;
     setSource('VOCALS');
     setTimeout(() => { void handleExportRef.current?.(); }, 50);
   };
-  // Prix du morceau complet (instru importée : 2 €, ou export Nova Pro offert).
-  const completPaye = !admin && !hasCatalogBeat && voicesUnlocked !== true;
+  // Morceau complet à payer (1,99 € ce projet, ou Nova Pro) : prix lu sur le serveur.
+  const completPaye = !admin && accesMix?.reason === 'paiement';
   const choix = 'w-full flex items-center gap-3 rounded-2xl border p-4 text-left transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed';
   const statusBlock = (
     <>
@@ -490,6 +526,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         </div>
 
         <div className={`${advanced ? 'p-8' : 'p-6'} flex flex-col space-y-6`}>
+
+            {!admin && !adminPending && (
+              <ExportPaywall access={accesMix?.reason === 'catalogue_non_achete' ? accesMix : acces} voix={accesMix?.reason === 'catalogue_non_achete' ? accesVoix : null}
+                grille={grille} status={compte} paying={payWait}
+                onPayExport={() => { void payVoices(); }} onCancelPay={() => { payCancelled.current = true; setPayWait(false); }}
+                onBuyLicence={() => openBuyBeat(projectState.tracks)} onRetry={recheckAccess}
+                onProActive={() => { void billingStatus().then(setCompte); recheckAccess(); setLoudnessReport('⭐ Nova Pro actif : exports illimités.'); }} />
+            )}
 
             {!advanced && (
               <div className="space-y-3" data-export-vue="simple">
@@ -559,8 +603,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                       <span className="font-black text-emerald-300">
                         {payWait ? '· En attente du paiement…'
                           : voicesUnlocked === true ? '· Exporter'
-                          : freeLeft !== null && freeLeft > 0 ? `· Exporter (gratuit Nova Pro · ${freeLeft} restants)`
-                          : '· Payer 2 € et exporter'}
+                          : `· Payer ${prixExport} et exporter`}
                       </span>
                     </button>
                     <button type="button" onClick={openProMix}
@@ -575,7 +618,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                       <span className="block text-[15px] font-black text-white">Mon morceau complet</span>
                       <span className="block text-[12px] text-slate-300 mt-0.5">
                         {format === 'MP3' ? 'Fichier MP3' : format === 'WAV' ? 'Fichier WAV qualité studio' : `Fichier ${format}`}, sans tag, prêt pour Spotify ou YouTube.
-                        {completPaye && (freeLeft !== null && freeLeft > 0 ? ` Gratuit avec Nova Pro (${freeLeft} restants).` : ' 2 €.')}
+                        {completPaye && ` ${prixExport} pour ce projet, ou illimité avec Nova Pro.`}
                       </span>
                     </span>
                     {payWait ? <span className="text-[11px] text-slate-300">Paiement…</span> : <i className="fas fa-download text-emerald-300" aria-hidden="true"></i>}
@@ -894,7 +937,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
-                            <span>{adminPending && (bloque || needsVoicesPayment) ? 'VÉRIFICATION…' : bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
+                            <span>{(adminPending && (bloque || needsVoicesPayment)) || (accesPending && !acces) ? 'VÉRIFICATION…' : bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? `PAYER ${prixExport} ET EXPORTER` : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
                         </button>
                         {!bloque && !needsVoicesPayment && (
                           <button type="button" onClick={() => void handleExport(true)} disabled={isRendering || payWait} data-testid="export-queue"
@@ -918,7 +961,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               <span className="text-2xl leading-none" aria-hidden="true">🎚️</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px] font-black text-white">Séance pour Pro Tools (AAF + BWF)</span>
-                <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Gratuit.</span>
+                <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Comprise dans l'export de ce projet (licence, export payé ou Nova Pro).</span>
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
             </button>

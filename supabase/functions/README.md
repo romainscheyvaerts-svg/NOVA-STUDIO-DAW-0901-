@@ -138,3 +138,22 @@ npx supabase functions deploy studio-inbox --project-ref mxdrxpzxbgybchzzvpkf --
 
 Retour arrière : `npx supabase functions delete studio-inbox --project-ref mxdrxpzxbgybchzzvpkf`,
 puis le bloc « Retour arrière » en tête de la migration.
+
+## Tarifs Nova, grille du 14/10/2026 — PAS DÉPLOYÉE
+
+Source unique des prix et des règles : `_shared/novaTarifs.ts` (export 1,99 €/projet, Nova Pro
+9,99 €/mois ou 89 €/an, cadeaux : instru 30 j, mélodie 7 j, Melody Exclusive 30 j, séance au
+studio 30 j, cumulables ; gratuit : 1 projet en ligne 7 jours). Le DAW et le site la lisent par
+`nova-billing` → `pricing` (public). Le serveur décide seul de l'export (`export_access`).
+
+| Fonction | Référence | Changement |
+|---|---|---|
+| `nova-billing` | **ce dépôt** (la copie du site est marquée « ne pas déployer d'ici ») | grille, `pricing`, `export_access`, `melody_perk`, Pro annuel, cadeaux déduits des achats, anciens produits et actions acceptés |
+| `daw-session` | **ce dépôt** (idem) | projet gratuit 7 jours (1 à la fois), 410 après expiration, collaboration : seul l'hôte a besoin de Nova Pro, séance studio = 30 j de Pro |
+| `daw-session-purge` | **ce dépôt** (nouvelle) | ménage des projets expirés ; clé `NOVA_PURGE_KEY`, simulation par défaut ; **pas programmée** |
+| `deliver-instrumental`, `beatmaker` | dépôt du **site** | mélodie offerte du mois (décompte par `nova-billing`), espace beatmaker ouvert aux abonnés Nova Pro |
+
+Migration : `supabase/migrations/20261014120000_nova_tarifs.sql` (AVANT les fonctions).
+Tests : `npx vitest run supabase/tests` (dont `novaTarifs.test.ts`) ; migration :
+`PGLITE=… node supabase/tests/nova_tarifs.pglite.mjs`.
+Ordre de mise en ligne, commandes et retour arrière : `D:\1 WORK\CONTENU\nova-tarifs\DEPLOIEMENT.md`.

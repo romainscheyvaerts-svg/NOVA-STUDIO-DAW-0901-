@@ -69,6 +69,8 @@ class Query implements PromiseLike<any> {
   gt(c: string, v: any) { this.filters.push(r => r[c] > v); return this; }
   gte(c: string, v: any) { this.filters.push(r => r[c] >= v); return this; }
   lt(c: string, v: any) { this.filters.push(r => r[c] < v); return this; }
+  lte(c: string, v: any) { this.filters.push(r => r[c] <= v); return this; }
+  is(c: string, v: any) { this.filters.push(r => (v === null ? r[c] === null || r[c] === undefined : r[c] === v)); return this; }
   order(c: string, o?: { ascending?: boolean }) { this.orderBy = { col: c, asc: o?.ascending !== false }; return this; }
   limit(n: number) { this.max = n; return this; }
 
