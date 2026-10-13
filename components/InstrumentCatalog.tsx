@@ -304,11 +304,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
       setTimeout(() => document.body.removeChild(dragIcon), 0);
   };
 
-  const hasLicense = (instId: string) => {
-      // Pour les licences, on vérifie si l'ID existe dans owned_instruments
-      // Note: owned_instruments contient des numbers, il faudra peut-être adapter
-      return false; // À adapter selon votre système de licences
-  };
+  // Instrus achetées sur le site (lues par le studio dans instrumental_purchases).
+  const hasLicense = (instId: string | number) => (user?.owned_instruments || []).map(String).includes(String(instId));
 
   const handleStripeBuy = async () => {
       if (!user || !selectedBeat) return;
@@ -416,7 +413,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                 <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-2">
                         <h3 title={inst.title} className={`text-[12px] font-semibold leading-tight line-clamp-2 break-words ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
-                        {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
+                        {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Licence achetée : export débloqué"></i>}
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 gap-x-1.5 mt-1 min-w-0 whitespace-nowrap">
                         <span className="mono shrink-0 text-slate-300">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo auto'}</span>

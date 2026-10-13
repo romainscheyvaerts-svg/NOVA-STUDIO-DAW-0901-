@@ -1509,6 +1509,39 @@ function Studio() {
     // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
     if (isNovaDesktop()) { try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ } }
   };
+  // Instrus / mélodies ACHETÉES sur studiomakemusic.com (compte Make Music) : avant,
+  // le DAW ne les lisait jamais → l'export restait bloqué même après l'achat.
+  const [catalogOwned, setCatalogOwned] = useState<string[]>([]);
+  const ownedInstruments = React.useMemo(
+    () => [...new Set([...(user?.owned_instruments || []).map(String), ...catalogOwned])],
+    [user?.owned_instruments, catalogOwned]);
+  const ownedRef = useRef<string[]>(ownedInstruments);
+  ownedRef.current = ownedInstruments;
+  /** Le compte tel que le catalogue le voit : achats du site compris (coche « achetée »). */
+  const userWithOwned = React.useMemo(() => (user ? { ...user, owned_instruments: ownedInstruments } : user), [user, ownedInstruments]);
+  const refreshOwnedBeats = useCallback(async () => {
+    try {
+      const { data: who } = await catalogSupabase.auth.getUser();
+      if (!who?.user) { setCatalogOwned(prev => (prev.length ? [] : prev)); return; }
+      const { data, error } = await catalogSupabase.from('instrumental_purchases').select('instrumental_id').eq('user_id', who.user.id);
+      if (error) return; // hors ligne ou serveur indisponible : on garde ce qu'on sait
+      const ids: string[] = [...new Set<string>((data || []).map((r: any) => String(r.instrumental_id)).filter(Boolean))].sort();
+      setCatalogOwned(prev => (prev.length === ids.length && prev.every((x, k) => x === ids[k]) ? prev : ids));
+    } catch { /* hors ligne : on garde ce qu'on sait */ }
+  }, []);
+  useEffect(() => {
+    void refreshOwnedBeats();
+    // Achat fait dans un autre onglet (boutique du site) : relu au retour sur le studio.
+    const onFocus = () => { if (document.visibilityState === 'visible') void refreshOwnedBeats(); };
+    document.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+    const { data: sub } = catalogSupabase.auth.onAuthStateChange(() => { void refreshOwnedBeats(); });
+    return () => {
+      document.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+      sub?.subscription?.unsubscribe();
+    };
+  }, [refreshOwnedBeats]);
   const handleBuyLicense = (instrumentId: string | number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
   const handleSaveCloud = async (projectName: string) => { 
@@ -1570,7 +1603,7 @@ function Studio() {
     setSaveState({ isSaving: true, progress: 10, message: 'Préparation du projet...' });
     try {
       // Récupérer les IDs des instruments possédés (pour exclusion licence)
-      const ownedIds = user?.owned_instruments || [];
+      const ownedIds = ownedRef.current;
       // Effets VST3 du PC rendus dans l'audio : le projet continue sur téléphone.
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       setSaveState(s => ({ ...s, progress: 40, message: 'Création du fichier ZIP...' }));
@@ -4961,7 +4994,7 @@ function Studio() {
     autosaveBusy.current = true;
     try {
       const t0 = performance.now();
-      const snap = snapshotOf(st, user?.owned_instruments || []);
+      const snap = snapshotOf(st, ownedRef.current);
       // Travail synchrone (fil de l'interface) : la mise en JSON. L'écriture IndexedDB est asynchrone.
       const syncMs = Math.round((performance.now() - t0) * 10) / 10;
       const r = await recoveryStore().saveVersion({
@@ -5195,7 +5228,7 @@ function Studio() {
       // En collaboration, seul l'artiste écrit l'instantané (les autres passent par le journal).
       const collabNow = collabRef.current;
       // Plusieurs artistes : seul l'hôte l'écrit (avant : chacun l'écrasait toutes les 20 s).
-      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow ? collabNow.client.safeSeq : st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
+      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow ? collabNow.client.safeSeq : st.collabSeq }, ownedRef.current, { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
       setCloudSession({ ...cur, version: r.version, name: st.name || cur.name, syncedAt: Date.now() });
       if (opts.interactive) setTimeout(() => setCloudProgress(null), 1500);
       return true;
@@ -9595,12 +9628,12 @@ function Studio() {
   const nextStepActions = useMemo((): NextStepAction[] => {
     if (!nextStep) return [];
     const beat = getCatalogBeat(state.tracks);
-    const owned = !!beat && (user?.owned_instruments || []).map(String).includes(beat.id);
+    const owned = !!beat && ownedInstruments.includes(String(beat.id));
     const list: NextStepAction[] = beat && !owned ? ['buy_beat'] : [];
     if (nextStep === 'take') list.push('pro_mix', 'share', 'studio');
     else list.push('pro_mix', 'studio', 'share');
     return list.slice(0, 3);
-  }, [nextStep, state.tracks, user]);
+  }, [nextStep, state.tracks, ownedInstruments]);
   const handleNextStep = (a: NextStepAction) => {
     track('next_step_clicked', { action: a, trigger: nextStep || '' });
     setNextStep(null);
@@ -9948,7 +9981,7 @@ function Studio() {
             <aside className="shrink-0 z-10">
               <PanelBoundary name="le navigateur latéral" onClose={toggleSidebar}>
                 <SideBrowser2
-                    user={user} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
+                    user={userWithOwned} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense} selectedTrackId={state.selectedTrackId}
                     onLoadBeat={handleLoadCatalogBeat} onMakeBeat={(m: any) => { void startMelodyProjectRef.current?.(m); }}
@@ -10184,7 +10217,7 @@ function Studio() {
 
               {activeMobileTab === 'BROWSER' && (
                 <MobileBrowserPage
-                  user={user}
+                  user={userWithOwned}
                   onAddPlugin={handleAddPluginFromContext}
                   onPurchase={handleBuyLicense}
                   onLoadBeat={handleLoadCatalogBeat} onMakeBeat={(m: any) => { void startMelodyProjectRef.current?.(m); }}
@@ -10464,7 +10497,7 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
+      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} /></PanelBoundary>}
       {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
       {metronomeDialogOpen && (
