@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import React, { useState, useEffect, useRef } from 'react';
 import { termHelp } from '../utils/pluginUi';
+import { Faceplate, HwPresets, HwSection, HwWindow, Knob, PushButton, ToggleSwitch } from './hw';
 import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
@@ -405,7 +405,7 @@ export class DenoiserNode {
   }
 }
 
-// ============== UI COMPONENT ==============
+/// ============== UI COMPONENT ==============
 
 interface VocalDenoiserUIProps {
   node: DenoiserNode;
@@ -413,96 +413,68 @@ interface VocalDenoiserUIProps {
   onParamsChange?: (p: DenoiserParams) => void;
 }
 
+const DENOISER_DEFAULTS: DenoiserParams = { threshold: -40, range: -40, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true, autoThreshold: false, lowCut: 0, humFilter: false };
+const DN_ACCENT = '#34d399';
+/** Préréglages dans la barre d'outils (format du kit : id, nom, réglages). */
+const DN_PRESETS = DENOISER_PRESETS.map((pr, i) => { const { name, ...params } = pr; return { id: `dn${i}`, name, params }; });
+const msFr = (s: number) => { const ms = s * 1000; return `${ms < 10 ? ms.toFixed(1).replace('.', ',') : Math.round(ms)} ms`; };
+const hzFr = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',')} kHz` : `${Math.round(v)} Hz`);
+
 export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<DenoiserParams>(initialParams);
-  const [status, setStatus] = useState({ reduction: 1.0, reductionDb: 0, inputLevel: -60, isOpen: true, isActive: false });
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const paramsRef = useRef(params);
+  const ledRef = useRef<HTMLSpanElement>(null);
+  const stateRef = useRef<HTMLSpanElement>(null);
+  const view: DenoiserParams = { ...DENOISER_DEFAULTS, ...Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v !== undefined && !(typeof v === 'number' && !Number.isFinite(v)))) } as DenoiserParams;
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
-  useEffect(() => { paramsRef.current = params; }, [params]);
-
-  // Animation loop for metering
+  // Mesures : canvas, voyant et état écrits directement à chaque image (la façade ne se redessine pas).
   useEffect(() => {
     let animFrame = 0;
+    let lastOpen: boolean | null = null;
     const update = () => {
-      setStatus(node.getStatus());
+      const status = node.getStatus();
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (canvas && ctx) {
+        const { threshold, range } = viewRef.current;
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 6; i++) { const y = (i / 6) * h; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+        const threshY = h - ((threshold + 60) / 60) * h;
+        ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(w, threshY); ctx.stroke(); ctx.setLineDash([]);
+        const rangeY = h - ((range + 60) / 60) * h;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+        ctx.fillRect(0, threshY, w, rangeY - threshY);
+        const levelY = Math.max(0, Math.min(h, h - ((status.inputLevel + 60) / 60) * h));
+        ctx.fillStyle = status.isOpen ? '#10b981' : '#ef4444';
+        ctx.fillRect(10, levelY, 20, h - levelY);
+        const grHeight = (1 - status.reduction) * h;
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(w - 30, 0, 20, grHeight);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '10px monospace';
+        ctx.fillText('ENTRÉE', 36, h - 6);
+        ctx.fillText('RÉDUCTION', w - 96, h - 6);
+        ctx.fillText('SEUIL', 40, Math.max(12, threshY - 4));
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${Math.round(status.inputLevel)} dB`, 36, Math.max(24, levelY - 5));
+        if (status.reductionDb < -0.5) ctx.fillText(`${status.reductionDb.toFixed(1).replace('.', ',')} dB`, w - 96, Math.min(h - 20, grHeight + 14));
+      }
+      if (status.isOpen !== lastOpen) {
+        lastOpen = status.isOpen;
+        if (ledRef.current) ledRef.current.dataset.on = status.isOpen ? 'true' : 'false';
+        if (stateRef.current) stateRef.current.textContent = status.isOpen ? 'Ouverte : ta voix passe' : 'Fermée : le bruit est coupé';
+      }
       animFrame = requestAnimationFrame(update);
     };
     animFrame = requestAnimationFrame(update);
     return () => cancelAnimationFrame(animFrame);
   }, [node]);
-
-  // Canvas drawing
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const w = canvas.width;
-    const h = canvas.height;
-    
-    ctx.clearRect(0, 0, w, h);
-    
-    // Background grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 6; i++) {
-      const y = (i / 6) * h;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-    
-    // Threshold line
-    const threshY = h - ((params.threshold + 60) / 60) * h;
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, threshY);
-    ctx.lineTo(w, threshY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    // Range zone (below threshold)
-    const rangeY = h - ((params.range + 60) / 60) * h;
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
-    ctx.fillRect(0, threshY, w, rangeY - threshY);
-    
-    // Input level meter (left side)
-    const levelY = h - ((status.inputLevel + 60) / 60) * h;
-    const clampedLevelY = Math.max(0, Math.min(h, levelY));
-    ctx.fillStyle = status.isOpen ? '#10b981' : '#ef4444';
-    ctx.fillRect(10, clampedLevelY, 20, h - clampedLevelY);
-    
-    // Gain reduction meter (right side)
-    const grHeight = (1 - status.reduction) * h;
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(w - 30, 0, 20, grHeight);
-    
-    // Gate status indicator
-    ctx.fillStyle = status.isOpen ? '#10b981' : '#ef4444';
-    ctx.beginPath();
-    ctx.arc(w / 2, 20, 8, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Labels
-    ctx.fillStyle = '#64748b';
-    ctx.font = '9px monospace';
-    ctx.fillText('ENTRÉE', 14, h - 5);
-    ctx.fillText('RÉD.', w - 34, h - 5);
-    ctx.fillText(status.isOpen ? 'OUVERTE' : 'FERMÉE', w/2 - 24, 35);
-    
-    // dB values
-    ctx.fillStyle = '#fff';
-    ctx.font = '10px monospace';
-    ctx.fillText(`${Math.round(status.inputLevel)}dB`, 5, clampedLevelY - 5);
-    if (status.reductionDb < -0.5) {
-      ctx.fillText(`${status.reductionDb.toFixed(1)}dB`, w - 45, grHeight + 15);
-    }
-    
-  }, [params.threshold, params.range, status]);
 
   const handleParamChange = (key: keyof DenoiserParams, value: number | boolean) => {
     const newParams = { ...params, [key]: value };
@@ -511,8 +483,7 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
     if (onParamsChange) onParamsChange(newParams);
   };
 
-  const loadPreset = (index: number) => {
-    const preset = DENOISER_PRESETS[index];
+  const loadPreset = (preset: Record<string, any>) => {
     const newParams = { ...params, ...preset, isEnabled: params.isEnabled };
     setParams(newParams);
     node.updateParams(newParams);
@@ -520,122 +491,54 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
   };
 
   return (
-    <div className="w-[520px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-teal-400 border border-teal-500/20 shadow-lg shadow-teal-500/5">
-            <i className="fas fa-broom text-xl"></i>
+    <HwWindow type="DENOISER" width={620} accent={DN_ACCENT} accentInk="#03170e"
+      toolbar={<HwPresets presets={DN_PRESETS} current={view as any} onApply={pr => loadPreset(pr.params)} />}
+      idleHelp={<>Coupe le souffle et les bruits de la pièce entre tes phrases. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish="hammer" model="Anti-bruit" kicker="Porte de bruit vocale · seuil appris" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: DN_ACCENT }}>
+        <div className="flex items-center gap-2.5 mb-2" aria-live="polite" title="Ouverte : ta voix passe. Fermée : le bruit est coupé.">
+          <span ref={ledRef} className="hw-led hw-led-lg" data-on="true" style={{ ['--led' as any]: DN_ACCENT }} aria-hidden="true" />
+          <span className="hw-lcd"><span ref={stateRef}>Ouverte : ta voix passe</span></span>
+        </div>
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: 130 }}>
+            <canvas ref={canvasRef} width={520} height={130} className="w-full h-full block" aria-label="Niveau d'entrée, seuil et réduction" />
           </div>
-          <div>
-            <h2 className="text-lg font-black text-white tracking-tight leading-none">Anti-bruit</h2>
-            <p className="text-[11px] text-slate-400 mt-1">Coupe le souffle et les bruits de la pièce entre tes phrases.</p>
+        </div>
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3 mt-3">
+          <Knob paramId="threshold" label="Seuil" size="L" cap="black" min={-60} max={0} step={0.5} value={view.threshold} defaultValue={-40}
+            onChange={v => handleParamChange('threshold', v)} format={v => `${v.toFixed(1).replace('.', ',')} dB`}
+            hint={`${termHelp('Seuil') || 'Sous ce niveau, le son est coupé.'}${view.autoThreshold ? ' Seuil auto actif : cette valeur devient un minimum.' : ''}`}
+            scale={[{ v: -60, label: '-60' }, { v: -40, label: '-40' }, { v: -20, label: '-20' }, { v: 0, label: '0' }]} />
+          <Knob paramId="range" label="Plage" size="M" cap="black" min={-80} max={0} step={0.5} value={view.range} defaultValue={-40}
+            onChange={v => handleParamChange('range', v)} format={v => `${v.toFixed(1).replace('.', ',')} dB`} hint={termHelp('Plage') || 'De combien le son baisse quand la porte est fermée.'}
+            scale={[{ v: -80, label: '-80' }, { v: -40, label: '-40' }, { v: 0, label: '0' }]} />
+          <Knob paramId="scFreq" label="Détection" ariaLabel="Filtre de détection" size="M" cap="black" curve="log" min={20} max={20000} step={1} value={view.scFreq} defaultValue={1000}
+            onChange={v => handleParamChange('scFreq', v)} format={hzFr} hint={termHelp('Filtre de détection') || 'Fréquence que la porte écoute pour décider de s’ouvrir.'}
+            scale={[{ v: 20, label: '20' }, { v: 1000, label: '1k' }, { v: 20000, label: '20k' }]} />
+        </div>
+        <HwSection title="Temps" className="mt-3">
+          <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+            <Knob paramId="attack" label="Attaque" size="M" cap="black" curve="log" min={0.0001} max={0.1} step={0.0001} value={view.attack} defaultValue={0.005}
+              onChange={v => handleParamChange('attack', v)} format={msFr} hint={termHelp('Attaque') || 'Vitesse d’ouverture.'} ticks={11} />
+            <Knob paramId="hold" label="Maintien" size="M" cap="black" min={0} max={0.5} step={0.001} value={view.hold} defaultValue={0.05}
+              onChange={v => handleParamChange('hold', v)} format={msFr} hint={termHelp('Maintien') || 'Temps minimum d’ouverture.'} ticks={11} />
+            <Knob paramId="release" label="Relâche" size="M" cap="black" curve="log" min={0.01} max={2} step={0.001} value={view.release} defaultValue={0.15}
+              onChange={v => handleParamChange('release', v)} format={msFr} hint={termHelp('Relâche') || 'Vitesse de fermeture.'} ticks={11} />
           </div>
+        </HwSection>
+        <div className="hw-rule" />
+        <div className="flex flex-wrap items-center justify-around gap-x-3 gap-y-3">
+          <ToggleSwitch label="Mode" paramId="flip" value={view.flip ? 1 : 0} onChange={v => handleParamChange('flip', v === 1)}
+            hint="Porte : coupe le son sous le seuil (entre les phrases). Baisse : baisse le son quand il dépasse le seuil (ducking)."
+            options={[{ v: 0, label: 'Porte' }, { v: 1, label: 'Baisse' }]} />
+          <PushButton active={!!view.autoThreshold} onClick={() => handleParamChange('autoThreshold', !view.autoThreshold)} text="Seuil auto" led={DN_ACCENT} dark
+            hint="Apprend le bruit de la pièce et place le seuil 9 dB au-dessus (le réglage « Seuil » devient un minimum)." valueText={view.autoThreshold ? 'actif' : 'coupé'} />
+          <PushButton active={!!view.humFilter} onClick={() => handleParamChange('humFilter', !view.humFilter)} text="Anti-ronflette" led={DN_ACCENT} dark
+            hint="Repère une ronflette 50 / 60 Hz (câble, ampli) et la retire avec des filtres très étroits." valueText={view.humFilter ? 'actif' : 'coupé'} />
+          <PushButton active={(view.lowCut || 0) > 0} onClick={() => handleParamChange('lowCut', (view.lowCut || 0) > 0 ? 0 : 80)} text={(view.lowCut || 0) > 0 ? `Coupe-bas ${Math.round(view.lowCut || 0)} Hz` : 'Coupe-bas 80 Hz'}
+            led={DN_ACCENT} dark hint="Retire les grondements sous la voix (pieds du micro, manipulations), 12 dB/oct." valueText={(view.lowCut || 0) > 0 ? 'actif' : 'coupé'} />
         </div>
-        <div className="flex items-center space-x-3">
-          <select
-            onChange={(e) => loadPreset(parseInt(e.target.value))}
-            aria-label="Préréglages de l'anti-bruit"
-            className="bg-nv-surface border border-white/10 rounded-xl px-3 py-2 text-[11px] font-bold text-white cursor-pointer hover:border-teal-500/50 transition-all"
-          >
-            <option value="-1">Préréglages…</option>
-            {DENOISER_PRESETS.map((p, i) => (
-              <option key={i} value={i}>{p.name}</option>
-            ))}
-          </select>
-          <button data-plugin-power 
-            onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-teal-500 border-teal-400 text-black shadow-lg shadow-teal-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-          >
-            <i className="fas fa-power-off"></i>
-          </button>
-        </div>
-      </div>
-
-      {/* Visualizer */}
-      <div className="h-36 bg-black/60 rounded-[28px] border border-white/5 relative overflow-hidden shadow-inner">
-        <canvas ref={canvasRef} width={480} height={144} className="w-full h-full" />
-      </div>
-
-      {/* Main Controls Row 1 */}
-      <div className="grid grid-cols-4 gap-4">
-        <ProKnob label="Seuil" value={params.threshold} min={-60} max={0} suffix="dB" color="#14b8a6" onChange={(v) => handleParamChange('threshold', v)} />
-        <ProKnob label="Plage" value={params.range} min={-80} max={0} suffix="dB" color="#f59e0b" onChange={(v) => handleParamChange('range', v)} />
-        <ProKnob label="Attaque" value={params.attack} min={0.0001} max={0.1} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('attack', v)} />
-        <ProKnob label="Maintien" value={params.hold} min={0} max={0.5} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('hold', v)} />
-      </div>
-
-      {/* Main Controls Row 2 */}
-      <div className="grid grid-cols-4 gap-4">
-        <ProKnob label="Relâche" value={params.release} min={0.01} max={2.0} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('release', v)} />
-        <ProKnob label="Filtre de détection" value={params.scFreq} min={20} max={20000} suffix="Hz" color="#8b5cf6" log onChange={(v) => handleParamChange('scFreq', v)} />
-        <div className="flex flex-col items-center justify-center">
-          <button
-            onClick={() => handleParamChange('flip', !params.flip)}
-            title={params.flip ? 'Baisse auto (ducking) : baisse le son quand il dépasse le seuil' : 'Porte (gate) : coupe le son sous le seuil (entre les phrases)'}
-            className={`w-16 h-10 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${params.flip ? 'bg-purple-500 border-purple-400 text-white shadow-lg shadow-purple-500/30' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            {params.flip ? 'Baisse' : 'Porte'}
-          </button>
-          <span className="text-[9px] font-bold text-slate-400 mt-2">Mode</span>
-        </div>
-        <div className="flex flex-col items-center justify-center">
-          <div className={`w-16 h-10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase tracking-wider border ${status.isOpen ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : 'bg-red-500/20 border-red-500/30 text-red-400'}`}>
-            {status.isOpen ? 'Ouverte' : 'Fermée'}
-          </div>
-          <span className="text-[9px] font-bold text-slate-400 mt-2" title="Ouverte : ta voix passe. Fermée : le bruit est coupé.">État</span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============== PRO KNOB COMPONENT ==============
-
-const ProKnob: React.FC<{
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (v: number) => void;
-  suffix: string;
-  color: string;
-  factor?: number;
-  log?: boolean;
-}> = ({ label, value, min, max, onChange, suffix, color, factor = 1, log = false }) => {
-  const safeVal = Number.isFinite(value) ? value : min;
-  const knob = useKnobInteraction(safeVal, onChange, { min, max, log });
-  const norm = log
-    ? Math.log10(safeVal / min) / Math.log10(max / min)
-    : (safeVal - min) / (max - min);
-  const rotation = (Math.max(0, Math.min(1, norm)) * 270) - 135;
-
-
-  const displayVal = log ? Math.round(safeVal) : Math.round(safeVal * factor);
-
-  return (
-    <div className="flex flex-col items-center space-y-2" title={termHelp(label) || undefined}>
-      <div
-        {...knob.bind}
-        className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-teal-500/50 transition-all shadow-xl relative"
-      >
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div
-          className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75"
-          style={{
-            backgroundColor: color,
-            boxShadow: `0 0 12px ${color}44`,
-            transform: `rotate(${rotation}deg) translateY(2px)`
-          }}
-        />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[50px]">
-          <span className="text-[9px] font-mono font-bold text-white">{displayVal}{suffix}</span>
-        </div>
-      </div>
-    </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
