@@ -243,11 +243,14 @@ export function cabinButtons(o: {
   online: boolean;
   engineerHere: boolean;
   pending: CabinCmd | null;
+  /** Nom de l'ingé quand aucun état n'est encore reçu. */
+  eng?: string;
 }): CabinButtons {
-  const eng = o.state?.eng || "l'ingé";
+  const eng = o.state?.eng || o.eng || "l'ingé";
+  const Eng = eng.charAt(0).toUpperCase() + eng.slice(1);
   let blocked: string | null = null;
   if (!o.online) blocked = '📡 Pas de réseau sur ton téléphone : rien ne peut partir. Reconnecte le Wi-Fi du studio.';
-  else if (!o.engineerHere) blocked = `${eng} n'est pas dans la séance pour l'instant.`;
+  else if (!o.engineerHere) blocked = `${Eng} n'est pas dans la séance pour l'instant : la télécommande revient dès qu'il est là.`;
   else if (o.link === 'attente') blocked = `Connexion à la console de ${eng}…`;
   else if (o.link === 'perdu') blocked = `Liaison avec ${eng} perdue : on ne lance rien sans être sûr qu'il reçoit. Touche « Réessayer ».`;
   else if (o.state && !o.state.allowed) blocked = `🔒 ${eng} n'a pas activé la télécommande de cabine. Demande-lui (Parler).`;

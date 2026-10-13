@@ -91,7 +91,7 @@ const CabinRemote: React.FC<CabinRemoteProps> = (p) => {
   const eng = p.engineerName || "l'ingé";
   const link = cabinLink(p.receivedAt, now);
   const st = p.state ? { ...p.state, allowed: p.allowed && p.state.allowed } : null;
-  const b = cabinButtons({ state: st ?? (p.allowed ? null : { rec: false, play: false, ci: null, allowed: false, eng }), link: p.allowed ? link : 'ok', online, engineerHere: p.engineerHere, pending: p.pending });
+  const b = cabinButtons({ state: st ?? (p.allowed ? null : { rec: false, play: false, ci: null, allowed: false, eng }), link: p.allowed ? link : 'ok', online, engineerHere: p.engineerHere, pending: p.pending, eng });
   const recording = !!st && st.rec && st.ci === null;
   const counting = !!st && st.ci !== null;
   const pos = st && p.receivedAt !== null ? cabinPosition(st, p.receivedAt, now) : 0;
