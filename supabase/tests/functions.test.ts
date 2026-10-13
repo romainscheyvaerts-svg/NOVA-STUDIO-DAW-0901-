@@ -9,7 +9,7 @@ import { createFakeDb, setCurrentDb, type FakeDb } from './fakes/supabase';
 import { lastHandler } from './fakes/denoServe';
 import { resetStripe, stripeState } from './fakes/stripe';
 
-(globalThis as any).Deno = { env: { get: (k: string) => ({ SUPABASE_URL: 'http://fake.local', SUPABASE_SERVICE_ROLE_KEY: 'service', STRIPE_SECRET_KEY: 'sk_test' } as Record<string, string>)[k] } };
+(globalThis as any).Deno = { env: { get: (k: string) => ({ SUPABASE_URL: 'http://fake.local', SUPABASE_SERVICE_ROLE_KEY: 'service', STRIPE_SECRET_KEY: 'sk_test', NOVA_PURGE_KEY: 'cle-menage' } as Record<string, string>)[k] } };
 
 type Handler = (req: Request) => Promise<Response> | Response;
 let dawSession: Handler;
@@ -106,7 +106,7 @@ describe('daw-session', () => {
     db.storage['daw-sessions'] = store;
   });
 
-  it('collaboration : compte connecté ET abonné exigé ; une clé par appareil ; op seulement après join', async () => {
+  it('collaboration (séance sans hôte) : compte connecté ET Nova Pro exigés ; une clé par appareil ; op seulement après join', async () => {
     const { json: s } = await call(dawSession, { action: 'create', name: 'Feat' });
     const join = { action: 'join', id: s.id, secret: s.secret, role: 'artist', device_id: 'tel-1' };
     expect((await call(dawSession, join)).status).toBe(401);
@@ -137,7 +137,23 @@ describe('daw-session', () => {
     expect(db.tables.daw_sessions[0].owner_id).toBe('u-artiste');
   });
 
-  it("code d'invitation : 6 caractères, le même pendant 24 h, résolu seulement par un abonné", async () => {
+  it("collaboration en hôte : l'hôte Nova Pro invite, l'invité n'a rien à payer ; hôte sans Pro → 402 clair", async () => {
+    const { json: s } = await call(dawSession, { action: 'create', name: 'Hôte', purpose: 'collab' }, { token: 'jwt.inge.ok' });
+    const guest = { action: 'join', id: s.id, secret: s.secret, role: 'artist', device_id: 'tel' };
+    const host = { action: 'join', id: s.id, secret: s.secret, role: 'engineer', device_id: 'pc' };
+    const h0 = await call(dawSession, host, { token: 'jwt.inge.ok' });
+    expect(h0.status).toBe(402);
+    expect(h0.json.reason).toBe('host_pro');
+    expect(h0.json.error).toMatch(/invités n'ont rien à payer/);
+    const g0 = await call(dawSession, guest, { token: 'jwt.artiste.ok' });
+    expect(g0.status).toBe(402);
+    expect(g0.json.reason).toBe('host_not_pro');
+    subscribe('u-inge');
+    expect((await call(dawSession, host, { token: 'jwt.inge.ok' })).status).toBe(200);
+    expect((await call(dawSession, guest, { token: 'jwt.artiste.ok' })).status).toBe(200); // invité gratuit
+  });
+
+  it("code d'invitation : 6 caractères, le même pendant 24 h, résolu si l'hôte (ou l'invité) a Nova Pro", async () => {
     const { json: s } = await call(dawSession, { action: 'create', name: 'Code' }, { token: 'jwt.inge.ok' });
     const c1 = await call(dawSession, { action: 'invite_code', id: s.id, secret: s.secret }, { token: 'jwt.inge.ok' });
     expect(c1.status).toBe(200);
@@ -149,6 +165,10 @@ describe('daw-session', () => {
     const r = await call(dawSession, { action: 'resolve_code', code: c1.json.code.toLowerCase().replace(/(...)/, '$1 ') }, { token: 'jwt.artiste.ok' });
     expect(r.status).toBe(200);
     expect(r.json.link).toBe(`${s.id}.${s.secret}`);
+    // Hôte Pro : un invité gratuit résout le code.
+    db.users['jwt.invite.ok'] = { id: 'u-invite', email: 'invite@example.com' };
+    subscribe('u-inge');
+    expect((await call(dawSession, { action: 'resolve_code', code: c1.json.code }, { token: 'jwt.invite.ok' })).status).toBe(200);
   });
 });
 
@@ -164,39 +184,37 @@ describe('nova-billing', () => {
     expect(stripeState.created).toHaveLength(0);
   });
 
-  it('export des pistes : paiement 2 € créé, vérifié, puis projet débloqué (prix inchangé)', async () => {
+  it("ancien produit « export_voices » : payé 1,99 € (grille du 14/10), vérifié, puis projet débloqué pour ce compte", async () => {
     const c = await call(novaBilling, { action: 'checkout', product: 'export_voices', project_key: 'projet-123', return_url: ret }, { token: 'jwt.artiste.ok' });
     expect(c.status).toBe(200);
-    expect(stripeState.created[0].line_items[0].price_data.unit_amount).toBe(200);
+    expect(stripeState.created[0].line_items[0].price_data.unit_amount).toBe(199);
     expect(stripeState.created[0].success_url).toBe(`${ret}?nova_paid={CHECKOUT_SESSION_ID}`);
     expect((await call(novaBilling, { action: 'verify', session_id: 'pas-un-id' })).status).toBe(400);
     expect((await call(novaBilling, { action: 'verify', session_id: c.json.session_id })).json.paid).toBe(false);
-    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(false);
-    Object.assign(stripeState.sessions[c.json.session_id], { payment_status: 'paid', amount_total: 200, customer_details: { email: 'artiste@example.com' } });
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(false);
+    Object.assign(stripeState.sessions[c.json.session_id], { payment_status: 'paid', amount_total: 199, customer_details: { email: 'artiste@example.com' } });
     const v = await call(novaBilling, { action: 'verify', session_id: c.json.session_id });
-    expect(v.json).toMatchObject({ paid: true, kind: 'export_voices', project_key: 'projet-123' });
-    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' })).json.unlocked).toBe(true);
+    expect(v.json).toMatchObject({ paid: true, kind: 'export_project', project_key: 'projet-123' });
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.artiste.ok' })).json.unlocked).toBe(true);
+    // Un autre compte qui connaît la clé du projet ne profite pas de l'achat.
+    expect((await call(novaBilling, { action: 'export_unlocked', project_key: 'projet-123' }, { token: 'jwt.inge.ok' })).json.unlocked).toBe(false);
   });
 
-  it('abonnement : 5 €/mois et 10 €/mois (prix inchangés)', async () => {
+  it('abonnement : anciens noms (collab, beatmaker) → Nova Pro 9,99 €/mois ; abonnés existants inchangés (prix chez Stripe)', async () => {
     await call(novaBilling, { action: 'checkout', product: 'collab', return_url: ret }, { token: 'jwt.artiste.ok' });
     await call(novaBilling, { action: 'checkout', product: 'beatmaker', return_url: ret }, { token: 'jwt.artiste.ok' });
-    expect(stripeState.created.map(p => p.line_items[0].price_data.unit_amount)).toEqual([500, 1000]);
-    expect(stripeState.created.every(p => p.mode === 'subscription' && p.line_items[0].price_data.recurring.interval === 'month')).toBe(true);
+    expect(stripeState.created.map(p => p.line_items[0].price_data.unit_amount)).toEqual([999, 999]);
+    expect(stripeState.created.every(p => p.mode === 'subscription' && p.line_items[0].price_data.recurring.interval === 'month' && p.metadata.nova_plan === 'collab')).toBe(true);
   });
 
-  it('exports gratuits Nova Pro : refus sans abonnement, 10 par période, admin sans décompte', async () => {
+  it("ancien « crédit d'export » Nova Pro : refus sans abonnement, illimité avec, admin sans écriture", async () => {
     expect((await call(novaBilling, { action: 'use_export_credit', project_key: 'projet-1' })).json.reason).toBe('login');
     expect((await call(novaBilling, { action: 'use_export_credit', project_key: 'projet-1' }, { token: 'jwt.artiste.ok' })).json.reason).toBe('not_pro');
     subscribe('u-artiste');
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       const r = await call(novaBilling, { action: 'use_export_credit', project_key: `projet-${i}x` }, { token: 'jwt.artiste.ok' });
-      expect(r.json.unlocked).toBe(true);
-      expect(r.json.remaining).toBe(9 - i);
+      expect(r.json.unlocked).toBe(true); // Nova Pro : exports illimités (plus de quota de 10)
     }
-    const again = await call(novaBilling, { action: 'use_export_credit', project_key: 'projet-0x' }, { token: 'jwt.artiste.ok' });
-    expect(again.json.unlocked).toBe(true); // déjà débloqué : pas décompté une 2e fois
-    expect((await call(novaBilling, { action: 'use_export_credit', project_key: 'projet-11x' }, { token: 'jwt.artiste.ok' })).json.reason).toBe('quota');
     const before = db.writes.length;
     const admin = await call(novaBilling, { action: 'use_export_credit', project_key: 'projet-adm' }, { token: 'jwt.admin.ok' });
     expect(admin.json).toMatchObject({ unlocked: true, admin: true });
@@ -205,7 +223,7 @@ describe('nova-billing', () => {
 
   it('statut sans compte : aucun abonnement, rien écrit', async () => {
     const r = await call(novaBilling, { action: 'status' });
-    expect(r.json).toEqual({ plans: [], admin: false });
+    expect(r.json).toMatchObject({ plans: [], admin: false, pro: null });
     expect(db.writes).toHaveLength(0);
   });
 });
