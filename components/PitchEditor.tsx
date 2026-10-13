@@ -10,6 +10,7 @@ import {
   analyzeRegion, clipRegion, correctedClipPatch, editingSource, editsForNotes, manualNotes, renderRegion, revertClipPatch, storeEdits,
 } from '../utils/pitchEdit';
 import { isInScale, keyLabelFr, noteNameFr, NOTE_NAMES_FR, SCALE_CHOICES } from '../utils/scales';
+import { useTheme } from '../utils/themeStore';
 
 /**
  * Justesse note par note (V19) : l'éditeur, comme Flex Pitch (Logic),
@@ -48,6 +49,20 @@ const scaleTag = (c: number) => (Math.abs(c) >= 50 ? 'hors gamme' : Math.abs(c) 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 /** Couleur d'une note selon sa justesse (écart à la gamme, en cents). */
+/** Couleurs du dessin (canvas) selon le thème : le canvas ne lit pas les variables CSS. */
+const PITCH_DARK = {
+  bg: '#0b0d10', root: 'rgba(34,211,238,0.13)', inKey: 'rgba(34,211,238,0.055)', outKey: 'rgba(0,0,0,0.25)', rowLine: 'rgba(255,255,255,0.04)',
+  second: 'rgba(255,255,255,0.10)', halfSecond: 'rgba(255,255,255,0.04)', outside: 'rgba(0,0,0,0.45)', level: 'rgba(148,163,184,0.18)',
+  origin: 'rgba(148,163,184,0.55)', selected: '#ffffff', sung: 'rgba(203,213,225,0.55)', corrected: '#67e8f9', timeText: 'rgba(148,163,184,0.8)',
+  playhead: '#f472b6', keysBg: '#121418', keyBlack: '#1e2229', keyWhite: '#2a2f38', keyMark: '#22d3ee', keyText: '#e2e8f0', keyTextOff: '#64748b',
+};
+const PITCH_LIGHT: typeof PITCH_DARK = {
+  bg: '#f8fafc', root: 'rgba(8,145,178,0.16)', inKey: 'rgba(8,145,178,0.07)', outKey: 'rgba(15,23,42,0.045)', rowLine: 'rgba(15,23,42,0.07)',
+  second: 'rgba(15,23,42,0.14)', halfSecond: 'rgba(15,23,42,0.06)', outside: 'rgba(100,116,139,0.2)', level: 'rgba(100,116,139,0.22)',
+  origin: 'rgba(71,85,105,0.6)', selected: '#0f172a', sung: 'rgba(71,85,105,0.55)', corrected: '#0891b2', timeText: 'rgba(71,85,105,0.95)',
+  playhead: '#db2777', keysBg: '#e2e8f0', keyBlack: '#cbd5e1', keyWhite: '#f1f5f9', keyMark: '#0891b2', keyText: '#0f172a', keyTextOff: '#64748b',
+};
+
 const noteColor = (cents: number) => (Math.abs(cents) <= 8 ? '#22d3ee' : Math.abs(cents) <= 20 ? '#facc15' : '#fb7185');
 
 const usePhone = () => {
@@ -253,6 +268,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef<HTMLCanvasElement>(null);
+  const light = useTheme().theme === 'light';
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 800, h: 360 });
   useEffect(() => {
     const el = scrollRef.current;
@@ -288,33 +304,35 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, width, H);
+    // Thème clair : grille claire comme la timeline et le piano roll (avant : écran noir dans une fenêtre blanche).
+    const P = light ? PITCH_LIGHT : PITCH_DARK;
+    ctx.fillStyle = P.bg; ctx.fillRect(0, 0, width, H);
     // Lignes de la grille : gamme surlignée, tonique plus marquée.
     for (let m = range.lo; m <= range.hi; m++) {
       const y = yOf(m) - rowH / 2;
       const inKey = typeof key.root === 'number' && isInScale(m, key.root, key.scale);
       const isRoot = typeof key.root === 'number' && ((m - key.root) % 12 + 12) % 12 === 0;
-      ctx.fillStyle = isRoot ? 'rgba(34,211,238,0.13)' : inKey ? 'rgba(34,211,238,0.055)' : 'rgba(0,0,0,0.25)';
+      ctx.fillStyle = isRoot ? P.root : inKey ? P.inKey : P.outKey;
       ctx.fillRect(0, y, width, rowH);
-      ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fillRect(0, y, width, 1);
+      ctx.fillStyle = P.rowLine; ctx.fillRect(0, y, width, 1);
     }
     // Repères de temps (toutes les 0,5 s).
     ctx.font = '10px ui-sans-serif, system-ui'; ctx.textBaseline = 'top';
     const step = pps > 160 ? 0.25 : pps > 60 ? 0.5 : 1;
     for (let t = 0; t < dur; t += step) {
       const x = t * pps;
-      ctx.fillStyle = Math.abs(t - Math.round(t)) < 1e-6 ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)';
+      ctx.fillStyle = Math.abs(t - Math.round(t)) < 1e-6 ? P.second : P.halfSecond;
       ctx.fillRect(x, 0, 1, H);
     }
     // Limites du clip (la marge autour sert aux fins de notes).
     if (source) {
       const a = (source.offset - source.region.start) * pps, b = a + (clip?.duration || 0) * pps;
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillStyle = P.outside;
       ctx.fillRect(0, 0, Math.max(0, a), H); ctx.fillRect(b, 0, Math.max(0, width - b), H);
     }
     // Niveau (forme d'onde discrète en bas).
     const { rmsDb, midi } = analysis.track;
-    ctx.fillStyle = 'rgba(148,163,184,0.18)';
+    ctx.fillStyle = P.level;
     for (let i = 0; i < rmsDb.length; i++) {
       const h = clamp((rmsDb[i] + 60) / 60, 0, 1) * H * 0.18;
       ctx.fillRect(i * hopSec * pps, H - h, Math.max(1, hopSec * pps), h);
@@ -328,7 +346,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       const cents = centsFromScale(c, key.root, key.scale);
       const h = Math.max(6, rowH * 0.72);
       if (e && Math.abs(e.shift) > 0.005) {
-        ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(148,163,184,0.55)'; ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]); ctx.strokeStyle = P.origin; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(x0, yOf(n.center) - h / 2, x1 - x0, h, r); ctx.stroke(); ctx.setLineDash([]);
       }
       const isSel = sel.has(i);
@@ -336,7 +354,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       ctx.fillStyle = noteColor(cents);
       ctx.beginPath(); ctx.roundRect(x0, yOf(c) - h / 2, Math.max(2, x1 - x0), h, r); ctx.fill();
       ctx.globalAlpha = 1;
-      if (isSel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke(); }
+      if (isSel) { ctx.strokeStyle = P.selected; ctx.lineWidth = 2; ctx.stroke(); }
     });
     // Courbes : hauteur chantée (gris) et hauteur corrigée (cyan).
     const drawCurve = (v: Float32Array | Float32Array | null, color: string, w: number) => {
@@ -351,8 +369,8 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       ctx.stroke();
     };
     // Sans les petits pics de bord de passage (fin / début de note avant un blanc) : affichage seulement.
-    drawCurve(displayPitchCurve(midi), 'rgba(203,213,225,0.55)', 1.2);
-    if (changed && target) drawCurve(displayPitchCurve(target), '#67e8f9', 1.8);
+    drawCurve(displayPitchCurve(midi), P.sung, 1.2);
+    if (changed && target) drawCurve(displayPitchCurve(target), P.corrected, 1.8);
     // Étiquettes des notes (par-dessus les courbes) : nom et écart à la gamme.
     const fs = Math.max(9, Math.min(12, rowH * 0.55));
     ctx.font = `bold ${fs}px ui-sans-serif, system-ui`; ctx.textBaseline = 'middle';
@@ -374,12 +392,12 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     // Repères de temps (secondes depuis le début du clip).
     if (source) {
       const zero = source.offset - source.region.start;
-      ctx.font = '10px ui-sans-serif, system-ui'; ctx.textBaseline = 'top'; ctx.fillStyle = 'rgba(148,163,184,0.8)';
+      ctx.font = '10px ui-sans-serif, system-ui'; ctx.textBaseline = 'top'; ctx.fillStyle = P.timeText;
       const lab = pps > 120 ? 0.5 : pps > 40 ? 1 : 2;
       for (let t = 0; zero + t < dur; t += lab) ctx.fillText(`${(t).toFixed(lab < 1 ? 1 : 0).replace('.', ',')} s`, (zero + t) * pps + 3, 3);
     }
-    if (playhead !== null) { ctx.fillStyle = '#f472b6'; ctx.fillRect(playhead * pps, 0, 2, H); }
-  }, [open, analysis, notes, edits, sel, box.h, width, pps, range, rowH, yOf, key, source, clip?.duration, dur, hopSec, target, changed, playhead]);
+    if (playhead !== null) { ctx.fillStyle = P.playhead; ctx.fillRect(playhead * pps, 0, 2, H); }
+  }, [open, analysis, notes, edits, sel, box.h, width, pps, range, rowH, yOf, key, source, clip?.duration, dur, hopSec, target, changed, playhead, light]);
 
   // Clavier (noms des notes) à gauche.
   useEffect(() => {
@@ -391,18 +409,19 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#121418'; ctx.fillRect(0, 0, W, H);
+    const P = light ? PITCH_LIGHT : PITCH_DARK;
+    ctx.fillStyle = P.keysBg; ctx.fillRect(0, 0, W, H);
     ctx.font = `${Math.max(8, Math.min(11, rowH * 0.6))}px ui-sans-serif, system-ui`; ctx.textBaseline = 'middle';
     for (let m = range.lo; m <= range.hi; m++) {
       const y = yOf(m);
       const black = [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
       const inKey = typeof key.root === 'number' && isInScale(m, key.root, key.scale);
-      ctx.fillStyle = black ? '#1e2229' : '#2a2f38';
+      ctx.fillStyle = black ? P.keyBlack : P.keyWhite;
       ctx.fillRect(0, y - rowH / 2, W, rowH - 1);
-      if (inKey) { ctx.fillStyle = '#22d3ee'; ctx.fillRect(W - 3, y - rowH / 2, 3, rowH - 1); }
-      if (rowH >= 9) { ctx.fillStyle = inKey ? '#e2e8f0' : '#64748b'; ctx.fillText(noteNameFr(m), 4, y); }
+      if (inKey) { ctx.fillStyle = P.keyMark; ctx.fillRect(W - 3, y - rowH / 2, 3, rowH - 1); }
+      if (rowH >= 9) { ctx.fillStyle = inKey ? P.keyText : P.keyTextOff; ctx.fillText(noteNameFr(m), 4, y); }
     }
-  }, [open, box.h, range, rowH, yOf, key]);
+  }, [open, box.h, range, rowH, yOf, key, light]);
 
   // ----- Souris / doigt -----
   const drag = useRef<null | { kind: 'note' | 'pan' | 'box'; x: number; y: number; moved: boolean; base: (NoteEdit | undefined)[]; idx: number[]; scroll: number; pushed: boolean }>(null);

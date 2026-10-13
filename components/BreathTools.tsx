@@ -10,6 +10,7 @@ import {
 } from '../utils/breaths';
 import { isVoiceTrack } from '../utils/vocalRoles';
 import { isTrackFrozen } from '../utils/freeze';
+import { useTheme } from '../utils/themeStore';
 
 /**
  * Respirations (comme Breath Control de Waves / De-breath de RX) :
@@ -481,6 +482,7 @@ const BreathPreview: React.FC<PreviewProps> = ({ clip, regions, detected, exclud
   const all = useMemo(() => [...detected.map(d => ({ ...d, kind: excluded.some(e => e.start === d.start) ? 'off' : 'on' })), ...regions.filter(r => !detected.some(d => d.start === r.start)).map(r => ({ ...r, kind: 'add' }))].sort((a, b) => a.start - b.start), [detected, excluded, regions]);
 
   const tOfX = (x: number, w: number) => view + (x / w) * span;
+  const light = useTheme().theme === 'light';
 
   useEffect(() => {
     const c = cv.current;
@@ -489,17 +491,19 @@ const BreathPreview: React.FC<PreviewProps> = ({ clip, regions, detected, exclud
     const w = (c.width = Math.round(c.clientWidth * dpr)), h = (c.height = Math.round(c.clientHeight * dpr));
     const ctx = c.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, w, h);
+    // Thème clair : forme d'onde sur fond clair, comme la timeline (avant : bandeau noir dans la fenêtre blanche).
+    const L = light;
+    ctx.fillStyle = L ? '#f1f5f9' : '#0b0d10'; ctx.fillRect(0, 0, w, h);
     const xOf = (t: number) => ((t - view) / span) * w;
     for (const r of all) {
       const x0 = xOf(r.start), x1 = xOf(r.end);
       if (x1 < 0 || x0 > w) continue;
-      ctx.fillStyle = r.kind === 'off' ? 'rgba(148,163,184,0.12)' : 'rgba(167,139,250,0.28)';
+      ctx.fillStyle = r.kind === 'off' ? (L ? 'rgba(100,116,139,0.15)' : 'rgba(148,163,184,0.12)') : (L ? 'rgba(139,92,246,0.18)' : 'rgba(167,139,250,0.28)');
       ctx.fillRect(x0, 0, Math.max(2, x1 - x0), h);
-      ctx.fillStyle = r.kind === 'off' ? '#64748b' : r.kind === 'add' ? '#f0abfc' : '#a78bfa';
+      ctx.fillStyle = r.kind === 'off' ? (L ? '#94a3b8' : '#64748b') : r.kind === 'add' ? (L ? '#c026d3' : '#f0abfc') : (L ? '#7c3aed' : '#a78bfa');
       ctx.fillRect(x0, h - 4 * dpr, Math.max(2, x1 - x0), 4 * dpr);
     }
-    if (dragSpan) { ctx.fillStyle = 'rgba(240,171,252,0.25)'; ctx.fillRect(xOf(dragSpan.start), 0, xOf(dragSpan.end) - xOf(dragSpan.start), h); }
+    if (dragSpan) { ctx.fillStyle = L ? 'rgba(192,38,211,0.18)' : 'rgba(240,171,252,0.25)'; ctx.fillRect(xOf(dragSpan.start), 0, xOf(dragSpan.end) - xOf(dragSpan.start), h); }
     const sr = buffer.sampleRate, data = buffer.getChannelData(0);
     let pk = 1e-4;
     for (let i = Math.floor(from * sr); i < Math.floor(to * sr); i += 16) pk = Math.max(pk, Math.abs(data[i] || 0));
@@ -511,12 +515,12 @@ const BreathPreview: React.FC<PreviewProps> = ({ clip, regions, detected, exclud
       for (let i = Math.floor(t0 * sr); i < Math.floor(t1 * sr); i += 2) m = Math.max(m, Math.abs(data[i] || 0));
       const g = breathGainAt(edits, (t0 + t1) / 2);
       const hh = Math.max(1, Math.min(1, m * scale) * h * 0.9);
-      ctx.fillStyle = '#334155';
+      ctx.fillStyle = L ? '#cbd5e1' : '#334155';
       ctx.fillRect(x, h / 2 - hh / 2, 1, hh);
-      if (g < 0.999) { const hg = Math.max(1, hh * g); ctx.fillStyle = '#c4b5fd'; ctx.fillRect(x, h / 2 - hg / 2, 1, hg); }
-      else { ctx.fillStyle = '#22d3ee'; ctx.fillRect(x, h / 2 - hh / 2, 1, hh); }
+      if (g < 0.999) { const hg = Math.max(1, hh * g); ctx.fillStyle = L ? '#8b5cf6' : '#c4b5fd'; ctx.fillRect(x, h / 2 - hg / 2, 1, hg); }
+      else { ctx.fillStyle = L ? '#0891b2' : '#22d3ee'; ctx.fillRect(x, h / 2 - hh / 2, 1, hh); }
     }
-  }, [all, buffer, dragSpan, fadeMs, from, gainDb, regions, span, to, view]);
+  }, [all, buffer, dragSpan, fadeMs, from, gainDb, regions, span, to, view, light]);
 
   const stop = () => { try { playing.current?.stop(); } catch { /* déjà arrêté */ } playing.current = null; setPlayMode(null); };
   useEffect(() => stop, []);

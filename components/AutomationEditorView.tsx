@@ -124,10 +124,11 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
 
       const isLight = document.documentElement.getAttribute('data-theme') === 'light';
       // Colors
-      const HEADER_BG = isLight ? '#0f172a' : '#0c0d10'; // Navy Header
-      const GRID_COLOR = isLight ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255,255,255,0.1)';
-      const TEXT_COLOR = isLight ? '#f1f5f9' : '#64748b'; // White text in header
-      const PH_COLOR = isLight ? '#38bdf8' : '#00f2ff';
+      // Règle : en clair, bandeau gris clair et chiffres encre (avant : bandeau marine, resté sombre).
+      const HEADER_BG = isLight ? '#e8ecf2' : '#0c0d10';
+      const GRID_COLOR = isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255,255,255,0.1)';
+      const TEXT_COLOR = isLight ? '#475569' : '#64748b';
+      const PH_COLOR = isLight ? '#0891b2' : '#00f2ff';
 
       // 1. Clear Canvas (Transparent Body)
       // Correction Critique : On efface TOUT et on ne redessine PAS de fond opaque sur le corps.
