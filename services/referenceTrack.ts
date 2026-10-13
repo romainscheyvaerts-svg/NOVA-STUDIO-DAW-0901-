@@ -10,8 +10,10 @@
 import { audioEngine } from '../engine/AudioEngine';
 import { lufsOf, truePeakOf } from '../utils/audioMeasure';
 import { referenceMatchGainDb } from '../utils/masterAssistant';
+import { thirdOctaveSpectrum } from '../utils/referenceMatch';
 
-export interface ReferenceInfo { name: string; duration: number; lufs: number; truePeak: number }
+/** `curve` : spectre moyen par tiers d'octave (lot 4b, « Caler sur la référence »). */
+export interface ReferenceInfo { name: string; duration: number; lufs: number; truePeak: number; curve: number[] }
 
 type Listener = () => void;
 
@@ -42,7 +44,7 @@ class ReferencePlayer {
     const ch = Array.from({ length: Math.min(2, buf.numberOfChannels) }, (_, c) => buf.getChannelData(c));
     this.stop();
     this.buffer = buf;
-    this.info = { name: file.name.replace(/\.[^.]+$/, ''), duration: buf.duration, lufs: lufsOf(ch, buf.sampleRate), truePeak: truePeakOf(ch, 4, 48) };
+    this.info = { name: file.name.replace(/\.[^.]+$/, ''), duration: buf.duration, lufs: lufsOf(ch, buf.sampleRate), truePeak: truePeakOf(ch, 4, 48), curve: thirdOctaveSpectrum(ch, buf.sampleRate) };
     this.offset = 0;
     this.updateMatch();
     this.emit();
