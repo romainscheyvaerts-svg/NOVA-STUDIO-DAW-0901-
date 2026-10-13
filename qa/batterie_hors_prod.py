@@ -43,6 +43,8 @@ BATTERIE = [
     ("v21_fenetres", []), ("harmoniseur_fenetre", []),
     # 13/10/2026 : kits NOVA (sons à la demande, brouillés, jamais exportés gratuitement), PC + téléphone, sombre + clair.
     ("kits_batterie", []),
+    # 14/10/2026 : synthé NOVA en un clic (« 🎹 Synthé NOVA »), sons, façade, mini-clavier (bureau et téléphone, sombre et clair).
+    ("synthe", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

@@ -69,6 +69,7 @@ import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
+import { presetSettings as synthPresetSettings, DEFAULT_PRESET_ID as SYNTH_DEFAULT_PRESET, SYNTH_PRESETS } from './utils/novaSynthPresets';
 import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
@@ -3788,8 +3789,12 @@ function Studio() {
   }, [armedTrackId]);
 
   /** Cree un clip MIDI vide sur une piste instrument et ouvre le piano roll. */
-  /** Mode instru : nouvelle piste MIDI (synthé) avec un motif de 4 mesures, piano roll ouvert. */
-  const handleNewMidiTrack = useCallback(() => {
+  /**
+   * Mode instru : nouvelle piste MIDI jouée par le synthé NOVA (son « Keys R&B »), motif de
+   * 4 mesures, piano roll ouvert. chooseSound : l'écran du synthé s'ouvre par-dessus pour
+   * choisir le son ; en le fermant, on retrouve le piano roll (bouton « 🎹 Synthé NOVA »).
+   */
+  const handleNewMidiTrack = useCallback((chooseSound = false) => {
     const st = stateRef.current;
     const trackId = `track-midi-${Date.now().toString(36)}`;
     const clipId = `clip-midi-${Date.now().toString(36)}`;
@@ -3801,6 +3806,7 @@ function Studio() {
       const track: Track = {
         id: trackId, name: `SYNTHÉ ${n}`, type: TrackType.MIDI, color, isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
         volume: 0.8, pan: 0, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0,
+        novaSynth: synthPresetSettings(SYNTH_DEFAULT_PRESET),
         clips: [{ id: clipId, start, duration: bar * 4, offset: 0, fadeIn: 0, fadeOut: 0, name: 'Motif', color, type: TrackType.MIDI, notes: [], isMuted: false, gain: 1 }],
       };
       // Sous la mélodie et la batterie, au-dessus des voix.
@@ -3808,8 +3814,12 @@ function Studio() {
       draft.tracks.splice(at >= 0 ? at : draft.tracks.length, 0, track);
     }));
     setTimeout(() => setMidiEditorOpen({ trackId, clipId }), 50);
-    setAiNotification('🎹 Piste MIDI créée : dessine tes notes dans le piano roll (clic pour poser, glisser pour allonger).');
+    // Écran des sons : il s'explique lui-même (pas de bulle, qui couvrait le clavier d'essai).
+    if (chooseSound) setTimeout(() => openSynthPanel(trackId), 80);
+    else setAiNotification('🎹 Piste MIDI créée (synthé NOVA) : dessine tes notes dans le piano roll (clic pour poser, glisser pour allonger).');
   }, [setState]);
+  /** « 🎹 Synthé NOVA » : piste synthé en un clic, écran des sons ouvert. */
+  const handleNewSynthTrack = useCallback(() => handleNewMidiTrack(true), [handleNewMidiTrack]);
 
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => {
     const track = stateRef.current.tracks.find(t => t.id === trackId);
@@ -10042,6 +10052,7 @@ function Studio() {
       // Beat
       a('Beat', 'pal.drums', 'Batterie (boîte à rythmes, pas à pas)', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
       a('Beat', 'pal.808', 'Basse 808 (piano roll accordé)', () => handleOpen808(), { keywords: '808 basse bass' }),
+      a('Beat', 'pal.synth', `🎹 Synthé NOVA : nouvelle piste et choix du son (${SYNTH_PRESETS.length} sons)`, () => handleNewSynthTrack(), { pt: 'New Instrument Track', keywords: 'synthé synth synthétiseur instrument clavier son preset pad nappe lead pluck basse piano rhodes cloche afro amapiano rage drill' }),
       a('Beat', 'pal.midi', 'Nouvelle piste MIDI et son piano roll', () => handleNewMidiTrack(), { pt: 'New Instrument Track', keywords: 'midi piano roll synthé instrument' }),
       a('Beat', 'pal.sampler', 'Nouvelle piste Sampler', () => requestSampler({ kind: 'new' }), { keywords: 'sampler sample chop' }),
       // Réglages
@@ -10160,6 +10171,7 @@ function Studio() {
           onOpenDrums={() => setDrumsOpen(true)}
           onOpenKits={openKits}
           onNewMidiTrack={handleNewMidiTrack}
+          onNewSynthTrack={handleNewSynthTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
           onOpenLyrics={() => setLyricsOpen(o => !o)}
@@ -10301,6 +10313,7 @@ function Studio() {
                   onOpenDrums={() => setDrumsOpen(true)}
                   onOpenKits={openKits}
                   onNewMidiTrack={handleNewMidiTrack}
+                  onNewSynthTrack={handleNewSynthTrack}
                   onOpen808={handleOpen808}
                   onOpenVocalTools={() => setVocalToolsOpen(true)}
                   onOpenLyrics={() => setLyricsOpen(o => !o)}
@@ -11166,7 +11179,7 @@ function Studio() {
                      )}
                      {!t.vstInstrument && !t.melodicSampler && (
                        <button type="button" onClick={() => openSynthPanel(t.id)} data-testid="open-synth-panel"
-                         title="Ouvrir le synthé NOVA : 48 sons (pianos, nappes, plucks, cloches…) et tous les réglages"
+                         title={`Ouvrir le synthé NOVA : ${SYNTH_PRESETS.length} sons (pianos, nappes, plucks, cloches, afro, rage…) et tous les réglages`}
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-cyan-500/15 border-cyan-400/50 text-cyan-100 hover:bg-cyan-500/25 shrink-0">
                          <i className="fas fa-sliders-h mr-1" />{t.novaSynth?.name || 'Synthé'}
                        </button>
