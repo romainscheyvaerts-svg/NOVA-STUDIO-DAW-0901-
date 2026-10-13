@@ -281,7 +281,7 @@ const LoudnessPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
         <span className="text-[9px] font-black uppercase text-slate-500">Vumètres</span>
         <select value={scale.id} onChange={e => meterPrefs.setScale(e.target.value as any)} aria-label="Échelle des vumètres" title={scale.hint}
-          className="h-7 rounded-lg bg-black/40 [[data-theme=light]_&]:bg-white border border-white/10 px-2 text-[11px]">
+          className="h-7 rounded-lg bg-black/40 [[data-theme=light]_&]:bg-nv-surface border border-white/10 px-2 text-[11px]">
           {METER_SCALES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
         <div className="flex rounded-lg overflow-hidden border border-white/10" role="radiogroup" aria-label="Point de mesure des pistes">

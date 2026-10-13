@@ -10,6 +10,20 @@
   <title>Écoute — NOVA Studio</title>
   <link rel="icon" type="image/png" sizes="192x192" href="%BASE_URL%icons/icon-192.png">
   <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png">
+  <script>
+    // Thème : celui choisi dans NOVA sur cet appareil (« nova_theme »), sinon celui du
+    // téléphone. Avant le 13/10/2026, la page restait noire même en thème clair.
+    (function () {
+      var t = 'dark';
+      try {
+        var p = localStorage.getItem('nova_theme');
+        if (p === 'light' || p === 'dark') t = p;
+        else if (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+      } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t);
+      if (t === 'light') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f1f4f8');
+    })();
+  </script>
   <style>
     @font-face {
       font-family: 'Inter';
@@ -19,6 +33,7 @@
       src: url('%BASE_URL%fonts/inter-latin.woff2') format('woff2');
     }
     html, body { margin: 0; background: #0c0d10; color: #fff; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-text-size-adjust: 100%; }
+    [data-theme="light"], [data-theme="light"] body { background: #f1f4f8; color: #0f172a; }
     #ecoute-chargement { min-height: 100dvh; display: grid; place-items: center; color: #94a3b8; font: 600 14px/1.4 Inter, system-ui, sans-serif; }
   </style>
 </head>
