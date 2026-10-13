@@ -2,114 +2,131 @@ import React from 'react';
 import { DEFAULT_HARMONIZER, HARMONIZER_PRESETS, HARMONIZER_SPECS, HARMONY_INTERVALS } from '../engine/v21Params';
 import { createHarmonyMath } from '../engine/psolaCore';
 import { NOTE_NAMES_FR, SCALE_CHOICES, noteNameFr, scaleIntervals } from '../utils/scales';
-import { V21Presets, V21Shell, V21Slider, V21Toggle, useV21Meters, useV21Params } from './v21Ui';
+import { V21Knob, V21Presets, V21Shell, useV21Meter, useV21Params } from './v21Ui';
 import { useProjectChords } from '../utils/chordTrack';
 import { chordNameFr, chordOfCode, chordSymbol } from '../utils/chordDetect';
+import { HwLcdSelect, HwSection, Led, PushButton, ToggleSwitch } from './hw';
 
 /**
  * Fenêtre de l'Harmoniseur NOVA (V21) : 1 à 4 voix d'harmonie dans la gamme
  * du projet, comme les harmonies du Vocal Transformer de Logic, le Pitcher de
  * FL Studio ou un harmoniseur TC-Helicon. Formants préservés.
+ *
+ * Façade « matériel » (vague 2B) : rack indigo à 4 tranches de voix, afficheurs
+ * LCD (tonalité, intervalles, notes jouées), boutons rotatifs du kit plugins/hw.
  */
 const spec = (id: string) => HARMONIZER_SPECS.find(s => s.id === id)!;
 const math = createHarmonyMath();
+const ACCENT = '#f0abfc';
+
+const FOLLOW_HINT = "Les voix se calent sur les notes de l'accord en cours (couloir d'accords de l'arrangement) au lieu de la gamme seule : sur un La chanté en La mineur, la tierce donne Do, la quinte Mi ; sur Fa majeur, la voix passe sur les notes de Fa. Le changement d'accord tombe pile sur le temps, en lecture comme à l'export.";
+
+/** Note chantée : seul cet afficheur suit les mesures. */
+const SungNote: React.FC<{ node: any }> = ({ node }) => {
+  const sung = useV21Meter(node, m => +(m?.pitch?.note || 0));
+  return <span className="hw-lcd" title="Note chantée en ce moment (détection de hauteur)"><small>chantée</small><b data-nova-harmonizer="note">{sung > 0 ? noteNameFr(sung) : '—'}</b></span>;
+};
+
+/** Accord en cours (piste d'accords) : suit les mesures. */
+const ChordNow: React.FC<{ node: any; count: number }> = ({ node, count }) => {
+  const code = useV21Meter(node, m => +(m?.chord || 0));
+  const c = chordOfCode(code);
+  if (c) return <span className="hw-lcd"><small>accord</small><b data-nova-harmonizer="chord">{`${chordSymbol(c.root, c.quality)} (${chordNameFr(c.root, c.quality)})`}</b></span>;
+  return <span className="hw-lcd"><small>{count} accord{count > 1 ? 's' : ''} · lance la lecture</small></span>;
+};
+
+/** Note jouée par une voix : suit les mesures. */
+const VoiceNote: React.FC<{ node: any; deg: number; rootKey: number; scale: number[]; follow: boolean }> = ({ node, deg, rootKey, scale, follow }) => {
+  const sung = useV21Meter(node, m => +(m?.pitch?.note || 0));
+  const chord = useV21Meter(node, m => (follow ? +(m?.chord || 0) : 0));
+  return <span className="hw-lcd" title="Note jouée par cette voix en ce moment" style={{ justifyContent: 'center' }}>→ {sung > 0 ? noteNameFr(sung + math.shiftFor(sung, rootKey, scale, deg, chord)) : '—'}</span>;
+};
 
 export const NovaHarmonizerUI: React.FC<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [p, set] = useV21Params(DEFAULT_HARMONIZER as Record<string, any>, initialParams || {}, node, onParamsChange);
-  const m = useV21Meters(node);
+  const d = DEFAULT_HARMONIZER as any as Record<string, number>;
   const n = Math.max(1, Math.min(4, Math.round(p.voices)));
-  const sung: number = m?.pitch?.note || 0;
   const scale = scaleIntervals(p.scale);
   const chromatic = (p.scale || 'CHROMATIC').toUpperCase() === 'CHROMATIC';
   // Piste d'accords : les voix se calent sur l'accord en cours (lecture et export).
   const chords = useProjectChords();
   const hasChords = chords.length > 0;
   const follow = p.followChords === undefined || +p.followChords >= 0.5;
-  const chordNow: number = follow && hasChords ? (+m?.chord || 0) : 0;
-  const chordNowTxt = (() => { const c = chordOfCode(chordNow); return c ? `${chordSymbol(c.root, c.quality)} (${chordNameFr(c.root, c.quality)})` : ''; })();
-  const harmonyOf = (deg: number) => (sung > 0 ? noteNameFr(sung + math.shiftFor(sung, p.rootKey, scale, deg, chordNow)) : '—');
+  const followText = !hasChords ? "Aucun accord dans le projet : pose-les dans le couloir d'accords (sous la règle) ou détecte-les sur le beat, les voix les suivront."
+    : !follow ? 'Désactivé : les voix suivent la gamme seule.' : 'Les voix se calent sur l’accord en cours.';
 
   return (
-    <V21Shell type="HARMONIZER" title="Harmoniseur" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a1020] to-nv-bg"
-      subtitle="Ajoute 1 à 4 voix d'harmonie dans la gamme, timbre naturel (comme les harmonies du Vocal Transformer de Logic ou le Pitcher de FL Studio)">
-      <V21Presets presets={HARMONIZER_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-fuchsia-400" />
-
-      {/* Tonalité */}
-      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-3" title="Gamme utilisée pour calculer les harmonies. NOVA prend celle du projet (détectée sur le beat) ; change-la si besoin.">
-        <label className="block">
-          <span className="text-[11px] font-bold text-slate-200">Tonique</span>
-          <select aria-label="Tonique" value={p.rootKey} onChange={e => set({ rootKey: +e.target.value })}
-            className="mt-1 w-full h-9 rounded-lg bg-white/5 border border-white/10 text-[12px] font-bold text-white px-2">
-            {NOTE_NAMES_FR.map((nm, i) => <option key={i} value={i} className="bg-[#1a1020]">{nm}</option>)}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-[11px] font-bold text-slate-200">Gamme</span>
-          <select aria-label="Gamme" value={(p.scale || 'CHROMATIC').toUpperCase()} onChange={e => set({ scale: e.target.value })}
-            className="mt-1 w-full h-9 rounded-lg bg-white/5 border border-white/10 text-[12px] font-bold text-white px-2">
-            {SCALE_CHOICES.map(s => <option key={s.id} value={s.id} className="bg-[#1a1020]">{s.label}</option>)}
-          </select>
-        </label>
-        <div className="text-right text-[10px] text-slate-500 pb-1" aria-live="polite" title="Note chantée en ce moment (détection de hauteur)">
-          Note chantée<br /><b className="text-[13px] font-mono text-fuchsia-300" data-nova-harmonizer="note">{sung > 0 ? noteNameFr(sung) : '—'}</b>
+    <V21Shell type="HARMONIZER" title="Harmoniseur" node={node} finish="indigo" kicker="1 à 4 voix dans la gamme · formants préservés" modelStyle="serif" width={700}
+      uiAccent={ACCENT} uiAccentInk="#1f0524" faceStyle={{ ['--hw-accent' as any]: ACCENT }}
+      subtitle="Ajoute 1 à 4 voix d'harmonie dans la gamme du projet, au timbre naturel. NOVA prend la tonalité détectée sur le beat ; change-la si besoin."
+      toolbar={<V21Presets presets={HARMONIZER_PRESETS} current={p} onApply={pr => set(pr.params as any)} />}>
+      <HwSection title="Tonalité">
+        <div className="flex flex-wrap items-end justify-center gap-x-3 gap-y-2">
+          <HwLcdSelect label="Tonique" ariaLabel="Tonique" hint="Tonalité utilisée pour calculer les harmonies (celle du projet par défaut)." paramId="rootKey" width={84}
+            value={p.rootKey} options={NOTE_NAMES_FR.map((nm, i) => ({ v: i, label: nm }))} onChange={v => set({ rootKey: +v })} />
+          <HwLcdSelect label="Gamme" ariaLabel="Gamme" hint="Gamme utilisée pour calculer les harmonies. NOVA prend celle du projet (détectée sur le beat) ; change-la si besoin." paramId="scale" width={170}
+            value={(p.scale || 'CHROMATIC').toUpperCase()} options={SCALE_CHOICES.map(s => ({ v: s.id, label: s.label }))} onChange={v => set({ scale: v })} />
+          <SungNote node={node} />
         </div>
-      </div>
-      {/* Piste d'accords */}
-      <label className={`mb-3 flex items-start gap-2 rounded-xl border p-2.5 ${hasChords ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.06] cursor-pointer' : 'border-white/10 bg-white/[0.03] opacity-70'}`}
-        title="Les voix se calent sur les notes de l'accord en cours (couloir d'accords de l'arrangement) au lieu de la gamme seule : sur un La chanté en La mineur, la tierce donne Do, la quinte Mi ; sur Fa majeur, la voix passe sur les notes de Fa. Le changement d'accord tombe pile sur le temps, en lecture comme à l'export.">
-        <input type="checkbox" className="mt-0.5 accent-fuchsia-400" aria-label="Suivre la piste d'accords" data-nova-harmonizer="follow-chords"
-          checked={follow} onChange={e => set({ followChords: e.target.checked ? 1 : 0 })} />
-        <span className="min-w-0">
-          <span className="block text-[11px] font-bold text-slate-100">Suivre la piste d'accords</span>
-          <span className="block text-[10px] text-slate-400 leading-snug">
-            {!hasChords ? "Aucun accord dans le projet : pose-les dans le couloir d'accords (sous la règle) ou détecte-les sur le beat, les voix les suivront."
-              : !follow ? 'Désactivé : les voix suivent la gamme seule.'
-              : chordNowTxt ? <>Accord en cours : <b className="font-mono text-fuchsia-200" data-nova-harmonizer="chord">{chordNowTxt}</b> — les voix se calent sur ses notes.</>
-              : `${chords.length} accord${chords.length > 1 ? 's' : ''} dans le projet : les voix se calent sur l'accord en cours (lance la lecture pour l'entendre).`}
-          </span>
-        </span>
-      </label>
-      {chromatic && !(follow && hasChords) && <p className="mb-3 text-[10px] text-amber-300">Tonalité inconnue : les intervalles sont fixes (tierce majeure, quinte…). Choisis la gamme du morceau, ou pose les accords, pour des harmonies toujours justes.</p>}
+        <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+          <PushButton role="checkbox" active={follow} onClick={() => set({ followChords: follow ? 0 : 1 })} text="Suivre les accords" led={ACCENT} dark
+            ariaLabel="Suivre la piste d'accords" hint={`${FOLLOW_HINT} ${followText}`} valueText={follow ? 'activé' : 'désactivé'}
+            dataAttrs={{ 'data-nova-harmonizer': 'follow-chords' }} />
+          {hasChords && follow
+            ? <ChordNow node={node} count={chords.length} />
+            : <span className="hw-silk hw-silk-soft" style={{ textTransform: 'none', letterSpacing: '0.02em', fontSize: 10.5, maxWidth: 330, textAlign: 'left' }}>{followText}</span>}
+        </div>
+        {chromatic && !(follow && hasChords) && (
+          <div className="mt-2 flex items-center justify-center gap-2" title="Choisis la gamme du morceau, ou pose les accords, pour des harmonies toujours justes.">
+            <Led on color="#fbbf24" />
+            <span className="hw-silk" style={{ textTransform: 'none', letterSpacing: '0.02em', fontSize: 10.5 }}>Tonalité inconnue : intervalles fixes (tierce majeure, quinte…)</span>
+          </div>
+        )}
+      </HwSection>
 
-      {/* Voix */}
-      <div className="mb-2 flex items-center gap-2" title={spec('voices').hint}>
-        <span className="text-[11px] font-bold text-slate-200">Voix</span>
-        <div className="grid grid-cols-4 gap-1 flex-1" role="radiogroup" aria-label="Nombre de voix">
+      <HwSection title="Voix" className="mt-3" aside={
+        <span className="flex gap-1.5" role="radiogroup" aria-label="Nombre de voix" data-nova-param="voices">
           {[1, 2, 3, 4].map(v => (
-            <button key={v} type="button" role="radio" aria-checked={n === v} onClick={() => set({ voices: v })}
-              className={`h-9 rounded-lg text-[12px] font-black border ${n === v ? 'bg-fuchsia-400 text-black border-fuchsia-300' : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>{v}</button>
+            <PushButton key={v} role="radio" active={n === v} onClick={() => set({ voices: v })} text={String(v)} led={ACCENT} dark className="hw-push-sm"
+              ariaLabel={`${v} voix`} hint={spec('voices').hint} />
           ))}
+        </span>
+      }>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[1, 2, 3, 4].map(i => {
+            const deg = Math.round(p[`v${i}Deg`]);
+            const on = i <= n;
+            return (
+              <div key={i} className="hw-well flex flex-col items-center gap-1.5 px-1.5 py-2 min-w-0" data-nova-voice={on ? i : undefined}
+                style={on ? undefined : { opacity: 0.4 }} aria-disabled={!on}>
+                <div className="flex items-center gap-1.5"><Led on={on} color={ACCENT} /><span className="hw-silk">Voix {i}</span></div>
+                <HwLcdSelect ariaLabel={`Intervalle de la voix ${i}`} hint={spec(`v${i}Deg`).hint} paramId={`v${i}Deg`} width="100%" amber disabled={!on}
+                  value={deg} options={HARMONY_INTERVALS.map(iv => ({ v: iv.deg, label: iv.short }))} onChange={v => set({ [`v${i}Deg`]: +v })} />
+                <div className="flex items-start justify-center gap-0.5">
+                  <V21Knob spec={spec(`v${i}Level`)} label="Niveau" value={p[`v${i}Level`]} defaultValue={d[`v${i}Level`]} onChange={v => set({ [`v${i}Level`]: v })}
+                    size="S" cap="silver" ticks={7} disabled={!on} />
+                  <V21Knob spec={spec(`v${i}Pan`)} label="Pan" value={p[`v${i}Pan`]} defaultValue={d[`v${i}Pan`]} onChange={v => set({ [`v${i}Pan`]: v })}
+                    size="S" cap="silver" ticks={7} disabled={!on} />
+                </div>
+                {on && <VoiceNote node={node} deg={deg} rootKey={p.rootKey} scale={scale} follow={follow && hasChords} />}
+              </div>
+            );
+          })}
         </div>
-      </div>
-      <div className="space-y-2 mb-4">
-        {[1, 2, 3, 4].slice(0, n).map(i => {
-          const deg = Math.round(p[`v${i}Deg`]);
-          return (
-            <div key={i} className="rounded-xl bg-white/[0.04] border border-white/10 p-2.5" data-nova-voice={i}>
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label className="flex items-center gap-2 min-w-0" title={spec(`v${i}Deg`).hint}>
-                  <span className="text-[11px] font-black text-fuchsia-300 shrink-0">Voix {i}</span>
-                  <select aria-label={`Intervalle de la voix ${i}`} value={deg} onChange={e => set({ [`v${i}Deg`]: +e.target.value })}
-                    className="h-8 min-w-0 rounded-lg bg-white/5 border border-white/10 text-[12px] font-bold text-white px-2">
-                    {HARMONY_INTERVALS.map(iv => <option key={iv.deg} value={iv.deg} className="bg-[#1a1020]">{iv.label}</option>)}
-                  </select>
-                </label>
-                <span className="shrink-0 text-[11px] font-mono text-slate-300" title="Note jouée par cette voix en ce moment">→ {harmonyOf(deg)}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <V21Slider compact spec={spec(`v${i}Level`)} label="Niveau" value={p[`v${i}Level`]} onChange={v => set({ [`v${i}Level`]: v })} accent="accent-fuchsia-400" />
-                <V21Slider compact spec={spec(`v${i}Pan`)} label="Panoramique" value={p[`v${i}Pan`]} onChange={v => set({ [`v${i}Pan`]: v })} accent="accent-fuchsia-400" />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      </HwSection>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-3">
-        <V21Slider spec={spec('dry')} value={p.dry} onChange={v => set({ dry: v })} accent="accent-fuchsia-400" />
-        <V21Slider spec={spec('humanize')} value={p.humanize} onChange={v => set({ humanize: v })} accent="accent-fuchsia-400" />
-        <V21Slider spec={spec('formant')} value={p.formant} onChange={v => set({ formant: v })} accent="accent-fuchsia-400" />
-        <V21Toggle spec={spec('preserve')} value={p.preserve} onChange={v => set({ preserve: v })} onLabel="Préservés" offLabel="Chipmunk" />
+      <div className="hw-rule" />
+      <div className="flex flex-wrap items-center justify-around gap-x-3 gap-y-3">
+        <V21Knob spec={spec('dry')} label="Voix principale" value={p.dry} defaultValue={d.dry} onChange={v => set({ dry: v })} size="M" cap="silver"
+          scale={[{ v: -60, label: '-60' }, { v: -24, label: '-24' }, { v: 0, label: '0' }, { v: 6, label: '+6' }]} />
+        <V21Knob spec={spec('humanize')} label="Humanisation" value={p.humanize} defaultValue={d.humanize} onChange={v => set({ humanize: v })} size="M" cap="silver"
+          scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]} />
+        <V21Knob spec={spec('formant')} label="Formant" value={p.formant} defaultValue={d.formant} onChange={v => set({ formant: v })} size="M" cap="silver"
+          scale={[{ v: -12, label: '-12' }, { v: 0, label: '0' }, { v: 12, label: '+12' }]} />
+        <span data-nova-param="preserve">
+          <ToggleSwitch label="Formants" hint={spec('preserve').hint} value={p.preserve >= 0.5 ? 1 : 0} onChange={v => set({ preserve: v })}
+            options={[{ v: 1, label: 'Préservés' }, { v: 0, label: 'Chipmunk' }]} />
+        </span>
       </div>
     </V21Shell>
   );
