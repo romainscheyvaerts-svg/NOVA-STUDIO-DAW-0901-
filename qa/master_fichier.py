@@ -10,11 +10,14 @@ thème sombre ET clair :
   3. A/B : original / master / référence, « même volume perçu » coché par défaut ;
   4. référence (MP3) : l'EQ se cale dessus, l'écart spectral diminue ; cible « Comme la
      référence » atteinte à ±0,5 LU ;
-  5. export (compte admin, bureau) : WAV 24 bits téléchargé IDENTIQUE au bit près au tampon
-     écouté (empreinte SHA-256 du tampon joué, codé comme l'export) ; MP3 320 kb/s dont la
-     crête vraie décodée (ffmpeg) reste ≤ −1 dBTP ;
-  6. compte gratuit (téléphone) : bouton « Payer 2 € et télécharger », Stripe ouvert dans un
-     nouvel onglet avec la clé du morceau, puis téléchargement une fois le paiement vérifié ;
+  5. export, nova-billing simulé avec la grille du 14/10 (simulateur de qa/tarifs.py) :
+     - admin (bureau, sombre) : WAV 24 bits téléchargé IDENTIQUE au bit près au tampon écouté
+       (empreinte SHA-256 du tampon joué, codé comme l'export) ; MP3 320 kb/s dont la crête
+       vraie décodée (ffmpeg) reste ≤ −1 dBTP ;
+     - compte gratuit : « Payer 1,99 € et télécharger » (prix de la grille), export_access
+       avec la clé du morceau (aucun élément du catalogue, aucun kit, portée mix), Stripe
+       avec le produit export_project, puis téléchargement une fois le paiement vérifié ;
+     - Nova Pro : « inclus dans Nova Pro », téléchargement sans paiement ;
   7. studio : palette Ctrl+K (bureau) et menu du téléphone ouvrent la page ; Échap la ferme ;
   8. thème clair : aucune zone très sombre, aucun texte sous 3:1 (mêmes mesures que
      qa/theme_clair.py) ; captures regardées.
@@ -29,7 +32,8 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3452/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-bandlab\lot4_mastering\qa")
 sys.path.insert(0, str(Path(__file__).parent))
 from qalib import launch, new_page, OUT, BASE, Log  # noqa: E402
-from desktop_gate import install_mocks, SUPERADMIN, NON_ABONNE  # noqa: E402
+from desktop_gate import install_mocks  # noqa: E402
+from tarifs import Billing as TarifsBilling, route_billing  # noqa: E402  (nova-billing simulé, grille du 14/10)
 _r1 = (Path(__file__).parent / "r1_export.py").read_text(encoding="utf-8").split("\nwith sync_playwright() as p:")[0]
 exec(compile(_r1, "r1_export.py", "exec"))  # DEFAULT_BEAT, close_welcome, wait_text_gone…
 from theme_clair import AUDIT_JS, pixels_sombres, ZONES_VOULUES, PIXELS_VOULUS, AIRE_MIN, LUM_SOMBRE, CONTRASTE_MIN, PIXELS_SOMBRES_MAX, BANDE_LIGNES  # noqa: E402
@@ -43,6 +47,22 @@ DL = OUT / "telechargements"
 DL.mkdir(parents=True, exist_ok=True)
 
 res = {"ecrans": [], "controles": {}, "echecs": []}
+
+
+class Billing(TarifsBilling):
+    """Simulateur de qa/tarifs.py, plus un compte admin (export_access : via admin)."""
+
+    def access(self, body):
+        if self.cas == "admin":
+            return {"grille": "2026-10-14", "missing": [], "items": [], "login_required": False, "kits": False, "offers": None,
+                    "pro": None, "unlocked": True, "via": "admin", "reason": None}
+        return super().access(body)
+
+    def reply(self, body):
+        st, payload = super().reply(body)
+        if self.cas == "admin" and body.get("action") == "status":
+            payload = {**payload, "admin": True}
+        return st, payload
 
 
 def ok(cle, cond, detail=""):
@@ -121,7 +141,9 @@ def parcours(b, vp, theme, compte):
     ctx, page = new_page(b, vp, log)
     page.set_default_navigation_timeout(90000)
     set_theme_init(ctx, theme)
-    install_mocks(page, "romain" if compte == "admin" else "artiste", SUPERADMIN if compte == "admin" else NON_ABONNE, {})
+    install_mocks(page, "romain" if compte == "admin" else "artiste", {}, {})
+    sim = Billing({"admin": "admin", "gratuit": "export_199", "pro": "pro"}[compte])
+    route_billing(page, sim)
     tag = f"{vp}/{theme}"
     page.goto(BASE, wait_until="domcontentloaded")
     btn = page.locator("[data-testid=landing-quick-master]").locator("visible=true")
@@ -205,15 +227,29 @@ def parcours(b, vp, theme, compte):
             ok("MP3 320 kb/s : crête vraie décodée ≤ −1 dBTP", tpv <= -1.0 and mp3.suffix == ".mp3", f"{mp3.name} · {lu[-1] if lu else '?'} LUFS · crête vraie {tpv} dBTP")
             res["export_mp3"] = {"fichier": mp3.name, "true_peak": tpv, "lufs": float(lu[-1]) if lu else None}
             mesure(page, "export_fait", vp, theme)
+    elif compte == "pro":
+        ok(f"{tag} libellé Nova Pro", "inclus dans Nova Pro" in label, label)
+        with page.expect_download(timeout=60000) as d:
+            page.locator("[data-qm-telecharger]").click()
+        wav = DL / ("pro_" + d.value.suggested_filename)
+        d.value.save_as(str(wav))
+        checkouts = [c for c in sim.calls if c.get("action") == "checkout"]
+        ok(f"{tag} Nova Pro : téléchargé sans paiement", not checkouts and wav.stat().st_size > 1000, wav.name)
+        mesure(page, "pro_fait", vp, theme)
     else:
-        ok(f"{tag} libellé compte gratuit", "Payer" in label and "télécharger" in label, label)
+        ok(f"{tag} libellé compte gratuit (prix de la grille)", "Payer 1,99 € et télécharger" in label, label)
+        acc = [c for c in sim.calls if c.get("action") == "export_access"]
+        q = acc[-1] if acc else {}
+        ok(f"{tag} export_access : clé du morceau, sans catalogue ni kit", str(q.get("project_key", "")).startswith("master:") and q.get("catalog_ids") == [] and q.get("kits") is False and q.get("scope") == "mix", json.dumps(q)[:200])
         page.locator("[data-qm-format=wav]").click()
         with page.expect_download(timeout=60000) as d:
             page.locator("[data-qm-telecharger]").click()
-        opened = page.evaluate("() => window.__opened || []")
         wav = DL / ("payant_" + d.value.suggested_filename)
         d.value.save_as(str(wav))
-        ok(f"{tag} paiement Stripe puis téléchargement", any("checkout.stripe.com" in u for u in opened) and wav.stat().st_size > 1000, f"onglets : {opened[:2]} · {wav.name}")
+        co = [c for c in sim.calls if c.get("action") == "checkout"]
+        ok(f"{tag} paiement Stripe (export_project, clé du morceau) puis téléchargement",
+           len(co) == 1 and co[0].get("product") == "export_project" and str(co[0].get("project_key", "")).startswith("master:") and wav.stat().st_size > 1000,
+           f"{json.dumps(co[:1])[:160]} · {wav.name}")
         msg = page.locator("[data-qm-export-msg]").inner_text()
         ok(f"{tag} message après paiement", "Paiement reçu" in msg, msg[:140])
         mesure(page, "paiement_fait", vp, theme)
@@ -232,7 +268,8 @@ def studio(b, vp, theme):
     ctx, page = new_page(b, vp, log)
     page.set_default_navigation_timeout(90000)
     set_theme_init(ctx, theme)
-    install_mocks(page, "romain", SUPERADMIN, {})
+    install_mocks(page, "romain", {}, {})
+    route_billing(page, Billing("admin"))
     page.goto(BASE, wait_until="domcontentloaded")
     page.get_by_text(DEFAULT_BEAT, exact=True).first.wait_for(timeout=60000)
     page.get_by_text(DEFAULT_BEAT, exact=True).first.click()
@@ -277,6 +314,9 @@ def studio(b, vp, theme):
         avant, apres = float(e.get_attribute("data-avant")), float(e.get_attribute("data-apres"))
         ok("projet : Master Nova calé sur la référence", apres < avant, f"écart {avant:.2f} → {apres:.2f} dB ({(1 - apres / avant) * 100:.0f} %)")
         res.setdefault("ecarts_reference", {})["projet Master Nova"] = {"avant": avant, "apres": apres}
+        allumees = page.locator("[data-nova-master] [data-nova-cible][aria-pressed=true]").count()
+        ok("Master Nova : plus de plateforme en surbrillance, cible « Comme la référence » affichée",
+           allumees == 0 and page.locator("[data-nova-master] [data-nova-cible=reference]").count() == 1, f"plateformes allumées : {allumees}")
         page.locator("[data-nova-master-rapport] details summary").first.click()
         mesure(page, "master_nova_reference", vp, theme, 500)
         page.locator("[data-nova-master] > div").first.evaluate("el => el.scrollTop = el.scrollHeight")
@@ -296,7 +336,7 @@ def main():
         b = launch(p)
         for theme in a.themes.split(","):
             for vp in a.formats.split(","):
-                compte = "admin" if (vp == "pc") == (theme == "dark") else "gratuit"
+                compte = {("pc", "dark"): "admin", ("tel390", "dark"): "gratuit", ("pc", "light"): "gratuit", ("tel390", "light"): "pro"}.get((vp, theme), "gratuit")
                 try:
                     parcours(b, vp, theme, compte)
                 except Exception as e:  # noqa

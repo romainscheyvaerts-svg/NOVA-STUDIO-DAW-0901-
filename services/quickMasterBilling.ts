@@ -1,33 +1,29 @@
 /**
- * Export du « Master express » (lot 4a) : la règle d'export existante de NOVA.
+ * Export du « Master express » (lot 4a) : la règle d'export de NOVA, décidée
+ * par le SERVEUR (nova-billing, grille du 14/10/2026).
  *
  *  - écoute gratuite et illimitée (rien ici ne la bloque) ;
- *  - export payant par morceau : même produit Stripe que l'export d'un projet
- *    (`export_voices`, services/Billing.ts), ou un des exports gratuits du
- *    mois de Nova Pro ;
- *  - admins : gratuit.
+ *  - export payant par morceau, au prix de la grille (`loadPricing`,
+ *    `euros`), avec le produit d'export de la grille (`productFor`) ;
+ *  - admin, Nova Pro (abonnement ou cadeau), morceau déjà payé : libre, c'est
+ *    le serveur qui le dit (`exportAccess`).
  *
- * BRANCHEMENT SUR LA NOUVELLE GRILLE DE PRIX : tout passe par UNE fonction,
- * `unlockMasterExport`, et UNE clé produit, `QUICK_MASTER_PRODUCT` (avec son
- * libellé de prix `QUICK_MASTER_PRICE_LABEL`). Quand le produit « export à
- * 1,99 € » existera dans nova-billing, il suffit de changer ces deux
- * constantes. Billing.ts n'est pas modifié.
+ * Le master d'un fichier est vu par le serveur comme un projet SANS élément du
+ * catalogue ni kit, en portée « mix », dont la clé est l'empreinte du fichier
+ * (`master:<sha256>`). L'API n'a pas (encore) de portée « master de fichier » :
+ * cette requête donne exactement la règle voulue (admin → Pro → déjà payé →
+ * paiement) sans rien inventer côté navigateur.
  */
 import {
-  BillingProduct, billingStatus, isExportVoicesUnlocked, markExportVoicesUnlocked, openCheckout, spendExportCredit, waitPaid,
+  ExportAccess, ExportQuery, Grille, euros, exportAccess, forgetExportAccess, loadPricing, productFor, startExportPayment, waitPaid,
 } from './Billing';
 import { md5Hex } from '../utils/md5';
-
-/** Clé produit Stripe du master express (aujourd'hui : l'export d'un projet). */
-export const QUICK_MASTER_PRODUCT: BillingProduct = 'export_voices';
-/** Prix affiché sur le bouton (suit le produit ci-dessus). */
-export const QUICK_MASTER_PRICE_LABEL = '2 €';
 
 /** Clé d'achat d'un morceau : empreinte du fichier (payer une fois = exporter toutes ses variantes de master). */
 export async function masterFileKey(bytes: Uint8Array): Promise<string> {
   let hex = '';
   try {
-    const d = await crypto.subtle.digest('SHA-256', bytes);
+    const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
     hex = Array.from(new Uint8Array(d), b => b.toString(16).padStart(2, '0')).join('');
   } catch {
     hex = md5Hex(bytes);
@@ -35,47 +31,50 @@ export async function masterFileKey(bytes: Uint8Array): Promise<string> {
   return `master:${hex.slice(0, 32)}`;
 }
 
-export type MasterExportAccess =
-  | { kind: 'admin' }
-  | { kind: 'unlocked' }
-  | { kind: 'pro_credit'; left: number }
-  | { kind: 'pay' };
+/** Requête d'export d'un master de fichier (aucun élément du catalogue, aucun kit). */
+export const masterExportQuery = (fileKey: string): ExportQuery => ({ projectKey: fileKey, catalogIds: [], kits: false, scope: 'mix' });
 
-/** Ce que coûtera l'export de ce morceau pour ce compte (pour le libellé du bouton). */
-export async function masterExportAccess(fileKey: string): Promise<MasterExportAccess> {
-  const st = await billingStatus();
-  if (st.admin) return { kind: 'admin' };
-  if (await isExportVoicesUnlocked(fileKey)) return { kind: 'unlocked' };
-  const pro = st.plans.some(p => p.plan === 'collab');
-  if (pro && (st.free_exports_left ?? 0) > 0) return { kind: 'pro_credit', left: st.free_exports_left ?? 0 };
-  return { kind: 'pay' };
+export interface MasterExportAccess {
+  kind: 'admin' | 'pro' | 'unlocked' | 'pay' | 'error';
+  /** Prix de l'export selon la grille du serveur (« 1,99 € ») ; null si la grille est indisponible. */
+  price: string | null;
+  loginRequired: boolean;
+  grille: Grille;
+  message?: string;
 }
 
-export interface UnlockResult { ok: boolean; via?: 'admin' | 'deja_paye' | 'nova_pro' | 'paiement'; message: string; left?: number }
+/** Ce que coûtera l'export de ce morceau pour ce compte (libellé du bouton), d'après le serveur. */
+export async function masterExportAccess(fileKey: string): Promise<MasterExportAccess> {
+  const [grille, a]: [Grille, ExportAccess] = await Promise.all([loadPricing(), exportAccess(masterExportQuery(fileKey))]);
+  const price = grille.unavailable ? null : euros(grille.export.cents);
+  const base = { price, loginRequired: !!a.login_required, grille };
+  if (a.unlocked) return { ...base, kind: a.via === 'admin' ? 'admin' : a.via === 'pro' ? 'pro' : 'unlocked' };
+  if (a.reason === 'erreur') return { ...base, kind: 'error', message: a.message || 'Vérification impossible, réessaie.' };
+  return { ...base, kind: 'pay' };
+}
+
+export interface UnlockResult { ok: boolean; via?: 'admin' | 'pro' | 'deja_paye' | 'credit' | 'paiement'; message: string }
 
 /**
- * LE point d'entrée du paiement : admin → gratuit ; déjà payé → libre ;
- * Nova Pro avec des exports gratuits → un crédit ; sinon Stripe Checkout
- * (nouvel onglet, à appeler pendant le clic), puis attente du paiement.
+ * LE point d'entrée du paiement. Débloqué par le serveur → libre ; sinon
+ * `startExportPayment` (produit de la grille, Stripe ouvert pendant le clic :
+ * l'accès est lu d'avance), puis attente du paiement.
  */
 export async function unlockMasterExport(fileKey: string, opts: { access?: MasterExportAccess | null; isCancelled?: () => boolean; onWaiting?: () => void } = {}): Promise<UnlockResult> {
-  // Accès déjà lu (à l'affichage du bouton) : Stripe s'ouvre pendant le clic, pas bloqué comme fenêtre surgissante.
   const access = opts.access || await masterExportAccess(fileKey);
   if (access.kind === 'admin') return { ok: true, via: 'admin', message: 'Compte admin : export gratuit.' };
+  if (access.kind === 'pro') return { ok: true, via: 'pro', message: 'Inclus dans Nova Pro.' };
   if (access.kind === 'unlocked') return { ok: true, via: 'deja_paye', message: 'Morceau déjà débloqué : exporte autant de versions que tu veux.' };
-  if (access.kind === 'pro_credit') {
-    const r = await spendExportCredit(fileKey);
-    if (r.unlocked) {
-      markExportVoicesUnlocked(fileKey);
-      return { ok: true, via: 'nova_pro', left: r.remaining, message: `⭐ Export gratuit Nova Pro utilisé (il t'en reste ${r.remaining} ce mois-ci).` };
-    }
-  }
+  if (access.kind === 'error') return { ok: false, message: access.message || 'Vérification impossible, réessaie.' };
+  if (access.loginRequired) return { ok: false, message: 'Connecte-toi à ton compte Make Music pour exporter (l’écoute reste gratuite).' };
+  if (!productFor(access.grille, 'export') || access.grille.unavailable) return { ok: false, message: 'Prix indisponible (connexion ?) : réessaie dans un instant.' };
   try {
-    const sid = await openCheckout(QUICK_MASTER_PRODUCT, { project_key: fileKey });
+    const r = await startExportPayment(masterExportQuery(fileKey), access.grille);
+    if (r.credit) { forgetExportAccess(fileKey); return { ok: true, via: 'credit', message: '⭐ Export Nova Pro utilisé.' }; }
     opts.onWaiting?.();
-    const paid = await waitPaid(sid, opts.isCancelled);
+    const paid = r.sessionId ? await waitPaid(r.sessionId, opts.isCancelled) : false;
     if (!paid) return { ok: false, message: 'Paiement non reçu : l’écoute reste libre, réessaie quand tu veux.' };
-    markExportVoicesUnlocked(fileKey);
+    forgetExportAccess(fileKey);
     return { ok: true, via: 'paiement', message: '✅ Paiement reçu : ton master se télécharge.' };
   } catch (e: any) {
     const m = String(e?.message || 'erreur');

@@ -6,7 +6,7 @@ import {
 import { THIRD_OCTAVE_CENTERS, normalizeCurve, matchBandLabel } from '../utils/referenceMatch';
 import { fmtDb, PLATFORM_TARGETS } from '../utils/masterAssistant';
 import { DecodedFile, QuickMasterEngine, QuickMasterPlayer, Source, decodeAudioFile, masterMp3, masterWav24, waveformPeaks } from '../services/quickMasterEngine';
-import { MasterExportAccess, QUICK_MASTER_PRICE_LABEL, masterExportAccess, masterFileKey, unlockMasterExport } from '../services/quickMasterBilling';
+import { MasterExportAccess, masterExportAccess, masterFileKey, unlockMasterExport } from '../services/quickMasterBilling';
 import { saveBlob } from '../utils/saveBlob';
 import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
@@ -175,7 +175,7 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
     if (!fileKey || !result) return;
     let live = true;
     setAccess(null);
-    void masterExportAccess(fileKey).then(a => { if (live) setAccess(a); }).catch(() => { if (live) setAccess({ kind: 'pay' }); });
+    void masterExportAccess(fileKey).then(a => { if (live) setAccess(a); });
     return () => { live = false; };
   }, [fileKey, !!result]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -234,9 +234,10 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
     if (!result || !file || !fileKey) return;
     setExportMsg(null);
     payCancelled.current = false;
-    const u = await unlockMasterExport(fileKey, { access, isCancelled: () => payCancelled.current, onWaiting: () => setExporting('En attente du paiement (onglet Stripe)…') });
+    // Accès en erreur (réseau) : le serveur est réinterrogé au clic.
+    const u = await unlockMasterExport(fileKey, { access: access && access.kind !== 'error' ? access : null, isCancelled: () => payCancelled.current, onWaiting: () => setExporting('En attente du paiement (onglet Stripe)…') });
     if (!u.ok) { setExporting(null); setExportMsg({ text: u.message, ok: false }); return; }
-    setAccess(a => (a && a.kind === 'admin') ? a : { kind: 'unlocked' });
+    setAccess(a => (!a || a.kind === 'admin' || a.kind === 'pro') ? a : { ...a, kind: 'unlocked' });
     try {
       setExporting(format === 'wav' ? 'Fichier WAV 24 bits…' : 'Encodage MP3 320 kb/s…');
       const name = masterFileName(file.name, result.style, result.target, format);
@@ -280,9 +281,10 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
   const playable = !!file && !busy;
   const exportLabel = !access ? 'Vérification du compte…'
     : access.kind === 'admin' ? 'Télécharger · gratuit (admin)'
+    : access.kind === 'pro' ? 'Télécharger · inclus dans Nova Pro'
     : access.kind === 'unlocked' ? 'Télécharger'
-    : access.kind === 'pro_credit' ? `Télécharger · gratuit Nova Pro (${access.left} restants)`
-    : `Payer ${QUICK_MASTER_PRICE_LABEL} et télécharger`;
+    : access.kind === 'error' ? 'Télécharger (vérification du compte)'
+    : access.price ? `Payer ${access.price} et télécharger` : 'Payer et télécharger';
 
   const sources: { id: Source; label: string; hint: string; on: string }[] = [
     { id: 'original', label: 'Original', hint: 'Ton fichier tel que tu l’as déposé.', on: 'bg-white text-black' },

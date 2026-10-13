@@ -33,6 +33,8 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   const [character, setCharacter] = useState<MasterCharacter>(saved.character || 'propre');
   const [eqAmount, setEqAmount] = useState<number>(typeof saved.eq === 'number' ? saved.eq : 60);
   const [running, setRunning] = useState(false);
+  // Cible « comme la référence » en cours (après « Caler sur la référence ») : aucune plateforme n'est alors choisie.
+  const [refTarget, setRefTarget] = useState(false);
   const [step, setStep] = useState<{ label: string; p: number } | null>(null);
   const [result, setResult] = useState<MasterNovaResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +86,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   // « Caler sur la référence » (lot 4b) : EQ calée sur la référence et même niveau qu'elle.
   const run = async (matchRef = false) => {
     setRunning(true); setError(null); setResult(null);
+    setRefTarget(matchRef && !!referencePlayer.info);
     try {
       if (bypassed) onSetBypass(false);
       setAb('avec');
@@ -155,15 +158,25 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
           <section>
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">1 · Où va ton morceau ?</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {PLATFORM_TARGETS.map(t => (
-                <button key={t.id} type="button" data-nova-cible={t.id} onClick={() => setTargetId(t.id)} aria-pressed={t.id === targetId} title={t.hint}
-                  className={`rounded-xl border px-3 py-2 text-left ${t.id === targetId ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
-                  <div className="text-[12px] font-black">{t.label}</div>
-                  <div className={`text-[11px] font-mono ${t.id === targetId ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, 0)} LUFS · {fmtDb(t.ceiling)} dBTP</div>
-                </button>
-              ))}
+              {PLATFORM_TARGETS.map(t => {
+                const on = t.id === targetId && !refTarget;
+                return (
+                  <button key={t.id} type="button" data-nova-cible={t.id} onClick={() => { setTargetId(t.id); setRefTarget(false); }} aria-pressed={on} title={t.hint}
+                    className={`rounded-xl border px-3 py-2 text-left ${on ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                    <div className="text-[12px] font-black">{t.label}</div>
+                    <div className={`text-[11px] font-mono ${on ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, 0)} LUFS · {fmtDb(t.ceiling)} dBTP</div>
+                  </button>
+                );
+              })}
+              {refTarget && ref && (
+                <div data-nova-cible="reference" aria-current="true" title="Cible posée par « Caler sur la référence » : le niveau de ton morceau de référence. Choisis une plateforme pour revenir à ses cibles."
+                  className="rounded-xl border px-3 py-2 text-left bg-fuchsia-500 text-black border-fuchsia-400">
+                  <div className="text-[12px] font-black">🎯 Comme la référence</div>
+                  <div className="text-[11px] font-mono text-black/70">{fmtDb(referencePlatformTarget(ref.lufs).lufs)} LUFS · {fmtDb(-1)} dBTP</div>
+                </div>
+              )}
             </div>
-            <p className="mt-2 text-[11px] text-slate-500">{platformTarget.hint}</p>
+            <p className="mt-2 text-[11px] text-slate-500">{refTarget ? 'Cible de la référence : choisis une plateforme pour revenir à ses cibles (puis relance l’analyse).' : platformTarget.hint}</p>
           </section>
 
           {/* 2. Caractère et EQ */}
