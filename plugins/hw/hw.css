@@ -496,3 +496,13 @@
 @media (prefers-reduced-motion: reduce) {
   .hw-push-cap, .hw-led, .hw-chip { transition: none; }
 }
+
+/* Couleurs pleines de secours sous les dégradés (outils de contraste, impression). */
+.hw-push-cap { background-color: #e2ddd1; }
+.hw-push-dark .hw-push-cap { background-color: #2a2a2a; }
+.hw-lcd { background-color: #0d1712; }
+.hw-lcd-amber { background-color: #1a130a; }
+.hw-toolbar { background-color: #121418; }
+.hw-screen-glass { background-color: #07090c; }
+.hw-push[aria-pressed='true'] .hw-push-cap, .hw-push[aria-checked='true'] .hw-push-cap { background-color: #d6d0c3; }
+.hw-push-dark[aria-pressed='true'] .hw-push-cap, .hw-push-dark[aria-checked='true'] .hw-push-cap { background-color: #1f1f1f; }

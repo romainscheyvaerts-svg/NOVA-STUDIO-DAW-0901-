@@ -21,6 +21,23 @@ KINDS = sys.argv[2:] or ["OPTO_VINTAGE", "FET76", "LEVELER2A", "VOXSTRIP", "MAST
 os.makedirs(OUT, exist_ok=True)
 
 MEASURE = """(k) => {
+  // Contraste des textes HTML (hors SVG) sur leur fond opaque le plus proche (WCAG).
+  const contraste = (root) => {
+    const lum = (c) => { const m = c.match(/[\d.]+/g); if (!m) return 0; const [r, g, b] = m.slice(0, 3).map(v => { v = +v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const bgOf = (n) => { while (n) { const c = getComputedStyle(n).backgroundColor; const m = c.match(/[\d.]+/g); if (m && (m.length < 4 || +m[3] > 0.5)) return c; n = n.parentElement; } return 'rgb(12,13,16)'; };
+    let worst = 99, txt = '';
+    root.querySelectorAll('*').forEach(n => {
+      if (n.closest('svg') || n.closest('.hw-sr-only')) return;
+      const t = [...n.childNodes].filter(x => x.nodeType === 3).map(x => x.textContent.trim()).join('');
+      if (!t || !n.getClientRects().length) return;
+      const cs = getComputedStyle(n);
+      if (cs.visibility === 'hidden' || +cs.opacity === 0) return;
+      const L1 = lum(cs.color), L2 = lum(bgOf(n));
+      const r = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      if (r < worst) { worst = r; txt = t.slice(0, 40); }
+    });
+    return { contraste_min: Math.round(worst * 100) / 100, texte_le_moins_contraste: txt };
+  };
   const el = document.querySelector(`[data-qa-hw] [data-nova-plugin='${k}']`) || document.querySelector('[data-qa-hw] [data-nova-plugin]') || document.querySelector('[data-qa-hw]');
   const r = el.getBoundingClientRect();
   const sc = document.querySelector('[data-qa-scroller]');
@@ -34,6 +51,7 @@ MEASURE = """(k) => {
     plus_petit_rotatif_px: knobs.length ? Math.round(Math.min(...knobs.map(b => Math.min(b.width, b.height)))) : null,
     rotatifs_sous_44px: petits,
     curseurs_range: el.querySelectorAll('input[type=range]').length,
+    ...contraste(el),
   };
 }"""
 
