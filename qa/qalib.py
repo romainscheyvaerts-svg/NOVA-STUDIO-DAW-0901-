@@ -119,6 +119,9 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
     if os.environ.get("QA_CHORD_LANE") == "1":
         ctx.add_init_script("try { localStorage.setItem('nova_chord_lane', '1'); } catch (e) {}")
     ctx.add_init_script(APP_MODULE_INIT)
+    # QA_THEME=light|dark : rejoue n'importe quel scénario dans ce thème (qa/theme_clair.py).
+    if os.environ.get("QA_THEME") in ("light", "dark"):
+        ctx.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{os.environ['QA_THEME']}'); }} catch (e) {{}}")
     # Sortie audio nommée, comme Chrome la donne sur un vrai PC une fois le micro autorisé
     # (headless : aucune sortie nommée, la question « Tu as un casque ? » bloquait les séances).
     # Le VRAI chemin de l'appli est suivi (utils/headphoneDetect lit le nom de la sortie) : rien

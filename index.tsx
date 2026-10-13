@@ -11,12 +11,14 @@ import { installGlobalErrorLog } from './utils/errorLog';
 import { installActionLog, installConsoleRing } from './utils/feedbackLog';
 import { startFeedbackQueue } from './services/feedback';
 import { FeedbackHost } from './components/FeedbackHost';
-import { themeStore } from './utils/themeStore';
+import { themeStore, followHostTheme } from './utils/themeStore';
 
 // Tampon des 30 dernières erreurs et des 20 dernières actions (anonymes), joint
 // aux signalements « Signaler un bug / proposer une idée » ; file d'envoi hors ligne.
 // Thème mémorisé (sombre / clair / auto) appliqué avant le premier rendu.
 themeStore.init();
+// Intégré au site Make Music (cadre) : suit son réglage noir / blanc.
+followHostTheme();
 installConsoleRing();
 installActionLog();
 installGlobalErrorLog();

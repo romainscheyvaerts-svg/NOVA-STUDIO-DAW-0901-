@@ -358,7 +358,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
         {/* Sidebar gauche - Actions principales */}
         <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-nv-bg flex flex-col">
           <div className="p-4 space-y-3">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Démarrer</h2>
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Démarrer</h2>
+              {/* Intégré au site (cadre) : la barre de marque est masquée, le bouton de thème reste ici. */}
+              <ThemeToggleButton className="nova-embed-only" />
+            </div>
 
             {/* Reprise de la dernière session (sauvegarde automatique sur l'appareil) */}
             {savedSession && onResumeSession && (

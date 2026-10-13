@@ -124,7 +124,9 @@ const SEM_DARK = {
 };
 const SEM_LIGHT = {
   '--nv-bg': '241 244 248', '--nv-panel': '232 236 242', '--nv-surface': '255 255 255', '--nv-raised': '255 255 255',
-  '--nv-well': '148 163 184', '--nv-line': INK, '--nv-ink': INK, '--nv-muted': '71 85 105',
+  // Creux (champs, onglets, barres) : gris clair. Le gris moyen d'avant (slate-400) donnait des
+  // pavés sombres et un texte discret à 2,9:1 (13/10/2026).
+  '--nv-well': '220 226 234', '--nv-line': INK, '--nv-ink': INK, '--nv-muted': '71 85 105',
   '--nv-accent': '8 145 178', '--nv-accent-ink': '14 116 144', '--nv-rec': '220 38 38',
   '--bg-main': '#f1f4f8', '--bg-surface': '#ffffff', '--bg-panel': '#e8ecf2', '--bg-item': 'rgba(15, 23, 42, 0.05)',
   '--border-dim': 'rgba(15, 23, 42, 0.09)', '--border-highlight': 'rgba(15, 23, 42, 0.18)',

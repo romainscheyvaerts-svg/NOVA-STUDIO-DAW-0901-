@@ -19,9 +19,10 @@ import VstLateAlert from './VstLateAlert';
  */
 
 const LEVEL_UI = {
-  ok: { color: '#22c55e', label: 'normale' },
-  charge: { color: '#f59e0b', label: 'élevée' },
-  surcharge: { color: '#ef4444', label: 'surcharge' },
+  // `text` : classe du thème (foncée en thème clair : le vert #22c55e sur fond crème tombait à 1,9:1).
+  ok: { color: '#22c55e', text: 'text-green-500', label: 'normale' },
+  charge: { color: '#f59e0b', text: 'text-amber-500', label: 'élevée' },
+  surcharge: { color: '#ef4444', text: 'text-red-500', label: 'surcharge' },
 } as const;
 
 const ALERT_EVERY_MS = 60_000;
@@ -133,7 +134,7 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
       >
         {!compact && <span {...barItem('libelle-cpu', 7)} className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>CPU</span>}
         <Bars value={pct} color={ui.color} />
-        {!compact && <span className="mono nova-chiffres text-[10px] font-bold w-7 text-right" style={{ color: ui.color }}>{pct}%</span>}
+        {!compact && <span className={`mono nova-chiffres text-[10px] font-bold w-7 text-right ${ui.text}`}>{pct}%</span>}
         {safe && <i className="fas fa-life-ring text-[9px] text-cyan-300" aria-label="Mode sécurité actif"></i>}
         {bridge.status === 'connected' && (
           <span data-testid="bridge-status" data-bridge="connected" className="flex items-center gap-1 border-l border-white/10 pl-1.5 text-[9px] font-black text-emerald-300">
@@ -156,7 +157,7 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
               <button type="button" onClick={() => setOpen(false)} aria-label="Fermer" className="w-8 h-8 rounded-lg hover:bg-white/10 text-slate-400"><i className="fas fa-times"></i></button>
             </div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-3">
-              <dt className="text-slate-400">Audio</dt><dd className="font-bold" style={{ color: ui.color }}>{pct} % · {ui.label}</dd>
+              <dt className="text-slate-400">Audio</dt><dd className={`font-bold ${ui.text}`}>{pct} % · {ui.label}</dd>
               <dt className="text-slate-400">Interface</dt><dd className="font-bold">{s.ui} %</dd>
               <dt className="text-slate-400">Craquements / min</dt><dd className={`font-bold ${s.underrunsPerMin ? 'text-red-300' : ''}`}>{s.underrunsPerMin}</dd>
               <dt className="text-slate-400">Sons en retard</dt><dd className="font-bold">{s.lateEvents}</dd>

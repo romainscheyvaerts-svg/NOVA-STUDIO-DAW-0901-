@@ -23,7 +23,7 @@ const DragField: React.FC<{
   return (
     <div {...k.bind} ref={k.wheelRef} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} aria-valuetext={text}
       data-testid={testId} title={`${help}\n${KNOB_HINT}`}
-      className={`nova-hit-tactile flex-1 min-w-0 h-6 [@media(pointer:coarse)]:h-8 rounded bg-black/40 [[data-theme=light]_&]:bg-white border border-white/10 flex flex-col items-center justify-center leading-none cursor-ns-resize touch-none select-none ${disabled ? 'opacity-40' : ''}`}>
+      className={`nova-hit-tactile flex-1 min-w-0 h-6 [@media(pointer:coarse)]:h-8 rounded bg-black/40 [[data-theme=light]_&]:bg-nv-surface border border-white/10 flex flex-col items-center justify-center leading-none cursor-ns-resize touch-none select-none ${disabled ? 'opacity-40' : ''}`}>
       <span className="text-[7px] font-black uppercase text-slate-500">{label}</span>
       <span className="text-[9px] font-mono tabular-nums" style={{ color: Math.abs(value - def) > 1e-3 ? color : undefined }}>{text}</span>
     </div>

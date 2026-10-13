@@ -34,6 +34,8 @@ BATTERIE = [
     ("frequence_preuve", []), ("collab_artiste", []), ("prise_directe", []), ("commentaires_versions", []), ("lien_ecoute", []),
     # Chantier 17 : studio Make Music connecté (télécommande de cabine, « Envoyer au studio » sur un studio-inbox simulé, port libre).
     ("studio_connecte", []),
+    # 13/10/2026 : thème clair (aucun écran resté sombre, textes lisibles, DAW intégré au site qui suit son thème).
+    ("theme_clair", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).
