@@ -23,6 +23,7 @@ import { NovaNoiseGateUI } from '../../plugins/NoiseGatePlugin';
 import { NovaDjFilterUI, NovaLofiUI } from '../../plugins/FilterPlugin';
 import { V21_DEFAULTS } from '../../engine/v21Params';
 import { defaultBuiltinParams } from '../../utils/sessionTemplate';
+import { NOVA_FX_NAMES } from '../../utils/pluginLabel';
 
 let root: Root | null = null;
 
@@ -50,7 +51,7 @@ function fakeNode(kind: string) {
     },
     // Stéréo
     analyzerL: analyser(0), analyzerR: analyser(0.9),
-    // Anti-bruit
+    // Gate de bruit (ex-Anti-bruit)
     getStatus: () => { const s = t(); const open = Math.sin(s * 2) > -0.2; return { reduction: open ? 1 : 0.2, reductionDb: open ? 0 : -14, inputLevel: -30 + 14 * Math.sin(s * 2), isOpen: open, isActive: !open, noiseFloorDb: -62, thresholdDb: -45, humHz: 50 }; },
     // Analyse
     getParams: () => sync,
@@ -98,7 +99,7 @@ export function mountHwPlugin(kind: string, mobile: boolean) {
     root.render(
       <div className="nova-sombre fixed inset-0 overflow-y-auto bg-nv-bg pt-14 pb-8" style={{ zIndex: 99999 }} data-qa-scroller>
         <div className="fixed top-0 left-0 right-0 z-[310] h-12 bg-black/90 border-b border-white/10 flex items-center justify-between pl-4 pr-1">
-          <span className="text-[13px] font-bold text-white">{kind}</span>
+          <span className="text-[13px] font-bold text-white">{NOVA_FX_NAMES[kind] || kind}</span>
           <span className="w-11 h-11 flex items-center justify-center text-white"><i className="fas fa-times" /></span>
         </div>
         <FitToWidth>
@@ -110,7 +111,7 @@ export function mountHwPlugin(kind: string, mobile: boolean) {
     root.render(
       <div className="fixed inset-0 flex items-start justify-center overflow-auto p-6 pt-16" style={{ zIndex: 99999, background: 'rgba(0,0,0,0.55)' }}>
         <div className="nova-sombre relative">
-          <div className="absolute left-0 right-0 -top-14 h-12 bg-black/90 rounded-full border border-white/10 flex items-center px-6 text-[12px] font-bold text-white">{kind}</div>
+          <div className="absolute left-0 right-0 -top-14 h-12 bg-black/90 rounded-full border border-white/10 flex items-center px-6 text-[12px] font-bold text-white">{NOVA_FX_NAMES[kind] || kind}</div>
           <div className="nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-[40px]">{ui(kind)}</div>
         </div>
       </div>,

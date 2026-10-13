@@ -12,7 +12,8 @@ export interface EffectEntry { id: string; name: string; icon?: string; /** Rubr
 
 /** Rubrique et nature de chaque effet (ordre des rubriques = ordre d'une chaîne de mix). */
 const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
-  DENOISER: { cat: 'Nettoyage', kind: 'réduction de bruit', also: 'souffle bruit denoise' },
+  // Lot 1 : c'est un gate (il coupe le bruit ENTRE les phrases) ; le vrai débruitage est « ✨ Nettoyer la voix » (clip).
+  DENOISER: { cat: 'Nettoyage', kind: 'gate vocal : coupe le bruit entre les phrases', also: 'gate porte souffle bruit denoise anti-bruit' },
   DEESSER: { cat: 'Nettoyage', kind: 'de-esser', also: 'sifflantes s ess' },
   GATE: { cat: 'Nettoyage', kind: 'gate / expandeur', also: 'porte noise gate side-chain' },
   PROEQ12: { cat: 'Égaliseur', kind: 'égaliseur 12 bandes', also: 'eq egaliseur filtre coupe-bas low cut' },

@@ -1,4 +1,4 @@
-"""Vague 2B des façades « matériel » (Chorus, Flanger, Doubleur, Stéréo, Anti-bruit,
+"""Vague 2B des façades « matériel » (Chorus, Flanger, Doubleur, Stéréo, Gate de bruit (ex-Anti-bruit),
 Analyse tempo / tonalité, Harmoniseur, Voix grave / aiguë, Tape stop, Gate rythmique,
 Gate, Filtre DJ, Lo-fi) : captures headless, sans fenêtre, hors production.
 
@@ -37,9 +37,9 @@ os.makedirs(OUT, exist_ok=True)
 
 # Recherche dans le menu « Ajouter un effet » (mode --reel).
 RECHERCHE = {
-    "CHORUS": "chorus", "FLANGER": "flanger", "DOUBLER": "doubleur", "STEREOSPREADER": "stéréo", "DENOISER": "bruit",
+    "CHORUS": "chorus", "FLANGER": "flanger", "DOUBLER": "doubleur", "STEREOSPREADER": "stéréo", "DENOISER": "gate de bruit",
     "MASTERSYNC": "master", "HARMONIZER": "harmoniseur", "VOICESHIFT": "voix grave", "TIMEFX": "tape stop",
-    "GATEFX": "gate rythmique", "GATE": "gate", "DJFILTER": "filtre dj", "LOFI": "lo-fi",
+    "GATEFX": "gate rythmique", "GATE": "expandeur", "DJFILTER": "filtre dj", "LOFI": "lo-fi",
 }
 
 MEASURE = """(k) => {

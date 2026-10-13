@@ -43,7 +43,7 @@ const NOVA_FX: { type: PluginType; label: string }[] = [
   { type: 'VOCALSATURATOR', label: 'Saturation' },
   { type: 'CHORUS', label: 'Chorus' },
   { type: 'DOUBLER', label: 'Doubleur' },
-  { type: 'DENOISER', label: 'Porte de bruit' },
+  { type: 'DENOISER', label: 'Gate de bruit' },
   { type: 'STEREOSPREADER', label: 'Élargisseur stéréo' },
   { type: 'LIMITER', label: 'Limiteur' },
   { type: 'VOICESHIFT', label: 'Voix grave / aiguë' },

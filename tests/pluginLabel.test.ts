@@ -15,7 +15,7 @@ describe('noms lisibles des effets', () => {
   });
   it('effets de NOVA en français (plus de « COMPRESSOR »)', () => {
     expect(pluginDisplayName({ type: 'COMPRESSOR', name: 'COMPRESSOR' } as any)).toBe('Compresseur');
-    expect(pluginDisplayName({ type: 'DENOISER', name: '' } as any)).toBe('Anti-bruit');
+    expect(pluginDisplayName({ type: 'DENOISER', name: '' } as any)).toBe('Gate de bruit');
   });
   it('tonalité courte pour les pastilles', () => {
     expect(shortKey('F# mineur')).toBe('F#m');
