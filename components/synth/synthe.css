@@ -1,0 +1,149 @@
+/*
+ * Façade du synthé NOVA (components/SynthPanel.tsx), construite avec le kit
+ * « matériel » (plugins/hw). Finition propre au synthé : panneau anthracite
+ * bleuté, flancs en bois, sérigraphie blanc cassé, accents cyan et magenta.
+ * La façade reste sombre dans les deux thèmes (zone .nova-sombre) ; le cadre
+ * (en-tête, navigateur de sons, clavier) suit le thème via Tailwind.
+ */
+
+.hw-face.syn-finish {
+  --hw-face-solid: #171a22;
+  --hw-face:
+    radial-gradient(120% 60% at 50% -10%, rgba(120, 200, 255, 0.10), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(70% 50% at 100% 105%, rgba(232, 121, 249, 0.08), rgba(0, 0, 0, 0) 60%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    linear-gradient(180deg, #1e2230 0%, #171a22 55%, #12141a 100%);
+  --hw-ink: #eef1f7;
+  --hw-ink-soft: #a9b2c4;
+  --hw-accent: #5eead4;
+  --hw-rule: rgba(238, 241, 247, 0.14);
+  --hw-edge-hi: rgba(180, 210, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.28);
+  --syn-cyan: #5eead4;
+  --syn-magenta: #f0abfc;
+  --syn-amber: #fcd34d;
+  padding: 16px 18px 14px;
+  border-radius: 6px;
+}
+@media (max-width: 639px) { .hw-face.syn-finish { padding: 12px 10px 12px; } }
+.hw-face.syn-finish .hw-face-head { margin-bottom: 8px; }
+
+/* Flancs en bois (bureau) */
+.syn-cheeks { display: flex; align-items: stretch; min-width: 0; }
+.syn-cheeks > .hw-face { flex: 1 1 auto; min-width: 0; }
+.syn-cheek {
+  flex: none; width: 16px; border-radius: 6px;
+  background:
+    repeating-linear-gradient(176deg, rgba(0, 0, 0, 0.16) 0 2px, rgba(255, 255, 255, 0.03) 2px 5px, rgba(0, 0, 0, 0.08) 5px 9px),
+    linear-gradient(90deg, #5a3519, #7b4a24 40%, #4a2a12);
+  box-shadow: inset 0 1px 0 rgba(255, 220, 180, 0.25), inset 0 -1px 0 rgba(0, 0, 0, 0.5), 0 10px 20px -10px rgba(0, 0, 0, 0.8);
+}
+@media (max-width: 1023px) { .syn-cheek { display: none; } }
+
+/* Grille des modules */
+.syn-grid { display: grid; gap: 10px 14px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.syn-osc { grid-column: span 2; }
+.syn-filter { grid-column: span 2; }
+.syn-env { grid-column: span 2; }
+.syn-lfo { grid-column: span 2; }
+.syn-play { grid-column: span 2; }
+.syn-fx { grid-column: span 3; }
+.syn-out { grid-column: span 1; }
+@media (max-width: 1279px) {
+  .syn-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .syn-osc, .syn-filter, .syn-env, .syn-lfo, .syn-play, .syn-fx, .syn-out { grid-column: span 1; }
+  .syn-osc:nth-child(3) { grid-column: span 2; }
+}
+@media (max-width: 639px) {
+  .syn-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .syn-osc:nth-child(3) { grid-column: span 1; }
+}
+
+.syn-mod { position: relative; min-width: 0; padding: 8px 10px 10px; border-radius: 7px; background: var(--hw-well); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.05); }
+.syn-mod[data-off='true'] .syn-mod-body { opacity: 0.38; }
+.syn-mod .hw-section-title { margin: 0 0 6px; }
+.syn-mod-head { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.syn-mod-head .hw-section-title { flex: 1 1 auto; margin: 0; min-width: 0; }
+.syn-fold { display: none; }
+.syn-mod-body { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+
+/* Téléphone : modules repliables (en-tête de 44 px) */
+@media (max-width: 639px) {
+  .syn-fold {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 44px; height: 44px; margin: -6px -6px -6px 0; border: 0; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05); color: var(--hw-ink); cursor: pointer;
+  }
+  .syn-fold i { transition: transform 150ms ease; }
+  .syn-mod[data-open='false'] .syn-fold i { transform: rotate(-90deg); }
+  .syn-mod[data-open='false'] .syn-mod-body { display: none; }
+  .syn-mod-head { min-height: 44px; cursor: pointer; }
+}
+
+/* Rangées de boutons rotatifs */
+.syn-knobs { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-around; gap: 4px 6px; }
+.syn-knobs-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); justify-items: center; gap: 2px 4px; }
+.syn-knobs-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-items: center; gap: 2px 4px; }
+.syn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.syn-row-split { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.syn-row-split > .syn-screen { flex: 1 1 auto; }
+
+/* Sélecteurs à poussoirs (formes d'onde, types) */
+.syn-radio { display: flex; gap: 4px; flex-wrap: wrap; }
+.syn-radio .hw-push-cap { min-width: 36px; height: 28px; padding: 0 7px; font-size: 10px; }
+.syn-radio .hw-push { gap: 3px; }
+.syn-radio .hw-led { width: 6px; height: 6px; }
+.syn-ico { width: 22px; height: 12px; display: block; }
+.syn-radio-2x2 { display: grid; grid-template-columns: repeat(2, auto); align-content: center; gap: 4px; flex: none; }
+@media (max-width: 639px) {
+  .syn-radio .hw-push-cap { min-width: 44px; height: 44px; font-size: 11px; }
+  .syn-radio .hw-led { display: none; }
+}
+
+/* Petits écrans (SVG) */
+.syn-screen { position: relative; min-width: 0; }
+.syn-screen .hw-screen-glass { height: 100%; }
+.syn-screen svg { display: block; width: 100%; height: 100%; }
+.syn-screen-wave { height: 54px; }
+.syn-screen-filter, .syn-screen-env, .syn-screen-lfo { height: 74px; }
+.syn-screen-cap {
+  position: absolute; left: 7px; top: 4px; z-index: 2; pointer-events: none;
+  font: 700 9px/1.2 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.04em; color: #9fb4c8;
+}
+.syn-screen-cap b { color: #e6fffb; font-weight: 700; }
+.syn-screen-cap-r { left: auto; right: 7px; }
+.syn-grid-lines line { stroke: rgba(160, 200, 230, 0.10); stroke-width: 1; }
+.syn-trace { fill: none; stroke: var(--syn-cyan); stroke-width: 1.8; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(94, 234, 212, 0.55)); }
+.syn-trace-2 { fill: none; stroke: var(--syn-magenta); stroke-width: 1.4; stroke-dasharray: 4 3; opacity: 0.9; }
+.syn-trace-ghost { fill: none; stroke: var(--syn-cyan); stroke-width: 1; opacity: 0.28; }
+.syn-fill { fill: rgba(94, 234, 212, 0.10); stroke: none; }
+.syn-dot { fill: #e6fffb; }
+
+/* Écran du nom du son (en-tête) */
+.syn-lcd {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0; height: 44px; padding: 0 12px; border-radius: 8px;
+  background: linear-gradient(180deg, #0b1410, #0e1a14); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #9cf0b8; font-family: 'JetBrains Mono', ui-monospace, monospace; text-shadow: 0 0 6px rgba(120, 255, 170, 0.3);
+}
+.syn-lcd small { font-size: 9.5px; font-weight: 600; color: #6fbf8c; text-shadow: none; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.syn-lcd span { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Clavier (lit de touches) */
+.syn-keys { position: relative; height: 92px; touch-action: none; user-select: none; -webkit-user-select: none; }
+@media (max-width: 639px) { .syn-keys { height: 104px; } }
+.syn-key { position: absolute; top: 0; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.syn-key-w {
+  bottom: 0; border-radius: 0 0 6px 6px;
+  background: linear-gradient(180deg, #e9ecf1 0%, #fbfcfd 70%, #e3e6eb 100%);
+  box-shadow: inset 0 -5px 0 #c9ced6, inset -1px 0 0 rgba(0, 0, 0, 0.18), 0 2px 3px rgba(0, 0, 0, 0.35);
+}
+.syn-key-b {
+  z-index: 2; height: 60%; border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, #1b1d22 0%, #2c3038 85%, #3b404a 100%);
+  box-shadow: inset 0 -4px 0 #0a0b0d, 0 3px 4px rgba(0, 0, 0, 0.55);
+}
+.syn-key[data-down='true'].syn-key-w { background: linear-gradient(180deg, #a5f3fc 0%, #67e8f9 100%); box-shadow: inset 0 -2px 0 #22d3ee, 0 1px 1px rgba(0, 0, 0, 0.3); }
+.syn-key[data-down='true'].syn-key-b { background: linear-gradient(180deg, #0e7490 0%, #22d3ee 100%); box-shadow: inset 0 -1px 0 #0e7490; }
+.syn-key-label { position: absolute; left: 0; right: 0; bottom: 7px; text-align: center; font: 700 9px/1 Inter, system-ui, sans-serif; color: #64748b; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) { .syn-fold i { transition: none; } }

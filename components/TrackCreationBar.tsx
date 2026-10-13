@@ -21,6 +21,8 @@ interface TrackCreationBarProps {
    */
   beatmaking?: boolean;
   onNewMidiTrack?: () => void;
+  /** « 🎹 Synthé NOVA » : piste synthé en un clic, écran des sons ouvert (sinon onNewMidiTrack). */
+  onNewSynthTrack?: () => void;
   onOpenDrums?: () => void;
   /** Crée / ouvre la piste 808 (piano roll). */
   onOpen808?: () => void;
@@ -36,8 +38,9 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAddVoiceTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808, docked }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAddVoiceTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onNewSynthTrack, onOpenDrums, onOpen808, docked }) => {
   const style = findVocalMixStyle(currentStyleId);
+  const newSynth = onNewSynthTrack ?? onNewMidiTrack;
   return (
     <div data-dock-scroll={docked ? '' : undefined} className={docked
       ? 'flex items-center gap-2 max-w-full overflow-x-auto scrollbar-hide' 
@@ -54,6 +57,15 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         <i className="fas fa-microphone text-sm text-cyan-400"></i>
         <span data-dock-label className="text-xs font-bold">Piste voix</span>
       </button>
+      {/* Synthé NOVA en un clic (piste MIDI + écran des sons, piano roll dessous). Juste après
+          « Piste voix » : au téléphone, il était caché au bout de la barre qui défile. */}
+      {beatmaking && newSynth && (
+        <button type="button" onClick={() => newSynth()} data-testid="new-synth-track" aria-label="Synthé NOVA : nouvelle piste" {...(docked ? dockItem(5) : {})}
+          title="Nouvelle piste MIDI avec le synthé NOVA : choisis ton son (pianos, nappes, leads, basses, afro, rage…) puis écris tes notes au piano roll"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-violet-400/50 text-violet-200 hover:text-white">
+          <span className="text-base leading-none">🎹</span><span data-dock-label className="text-xs font-bold">Synthé NOVA</span>
+        </button>
+      )}
       {beatmaking && onOpenDrums && (
         <button type="button" onClick={onOpenDrums} aria-label="Batterie" {...(docked ? dockItem(4) : {})} title="Boîte à rythmes : pas, sons, mix de chaque pad"
           className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-orange-400/40 text-orange-200 hover:text-white">
@@ -72,12 +84,6 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
           aria-label="Nouvelle piste Sampler"
           className="shrink-0 h-12 min-w-[48px] px-3 xl:px-4 rounded-full shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-amber-400/40 text-amber-200 hover:text-white">
           <span className="text-base leading-none">🎛️</span><span data-dock-label className={docked ? 'text-xs font-bold' : 'hidden xl:inline text-xs font-bold'}>Sampler</span>
-        </button>
-      )}
-      {beatmaking && onNewMidiTrack && (
-        <button type="button" onClick={onNewMidiTrack} aria-label="Nouvelle piste MIDI" {...(docked ? dockItem(4) : {})} title="Nouvelle piste MIDI (synthé, basse…) et son piano roll"
-          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-violet-400/40 text-violet-200 hover:text-white">
-          <span className="text-base leading-none">🎹</span><span data-dock-label className="text-xs font-bold"><span className={docked ? '' : 'hidden xl:inline'}>Piste </span>MIDI</span>
         </button>
       )}
       {onOpenLyrics && (

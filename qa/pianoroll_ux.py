@@ -43,6 +43,7 @@ def open_roll(pg):
     pg.locator("button[title^='Nouvelle piste MIDI']").first.click()
     pg.locator(ROLL).first.wait_for(timeout=10000)
     pg.wait_for_timeout(800)
+    if pg.locator("[data-testid=synth-panel]").count(): pg.get_by_role("button", name="Fermer le synthé").click(); pg.wait_for_timeout(300)  # 14/10 : le bouton « Synthé NOVA » ouvre aussi l'écran des sons
 
 
 def close_menu(pg):
