@@ -59,6 +59,8 @@ interface ExportModalProps {
   /** Démo taguée / extrait à partager (dispo sans licence). */
   /** Fenêtre « Fais écouter ton son » ; 'demo' y lance directement la démo MP3. */
   onOpenShare?: (auto?: 'demo') => void;
+  /** Chantier 17 : « Envoyer au studio Make Music » (projet, stems, notes, réservation). */
+  onSendToStudio?: () => void;
   /** Identifiant stable du projet (achat « mes pistes seules » rattaché au projet). */
   projectKey?: string;
   /** Export terminé (carte « Et maintenant ? »). */
@@ -68,7 +70,7 @@ interface ExportModalProps {
 /** Demande de garder la fenêtre d'export ouverte (Ctrl+Maj+E alors qu'elle est déjà là). */
 export const EXPORT_KEEP_OPEN_EVENT = 'nova:export-keep-open';
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState: timelineState, ownedInstrumentIds = [], onOpenShare, projectKey, onExported }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState: timelineState, ownedInstrumentIds = [], onOpenShare, onSendToStudio, projectKey, onExported }) => {
   // R21 · Arrangement exporté (« Clean », « Radio edit »…) : le projet joué est
   // celui de l'arrangement (sections dans son ordre, passages coupés). Vide : la timeline.
   const [arrangementId, setArrangementId] = useState<string>(() => takeExportArrangement() || '');
@@ -503,6 +505,17 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-black text-white">Extrait 30 s pour les réseaux</span>
                       <span className="block text-[12px] text-slate-300 mt-0.5">Vidéo ou MP3 avec le tag Make Music, pour Insta, TikTok ou WhatsApp. Gratuit.</span>
+                    </span>
+                    <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
+                  </button>
+                )}
+
+                {onSendToStudio && (
+                  <button type="button" data-testid="export-send-studio" onClick={onSendToStudio} disabled={isRendering} className={`${choix} border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/15`}>
+                    <span className="text-2xl leading-none" aria-hidden="true">🏠</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-black text-white">Envoyer au studio Make Music</span>
+                      <span className="block text-[12px] text-slate-300 mt-0.5">Le projet, les stems et tes notes arrivent chez l'ingé, et tu demandes ton créneau en même temps.</span>
                     </span>
                     <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
                   </button>

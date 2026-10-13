@@ -1227,7 +1227,7 @@ export interface DAWState {
    * Collaboration : ce que l'artiste invité peut modifier dans la séance de
    * l'ingé (utils/guestRights). Absent : pas de restriction (séance d'un artiste).
    */
-  collabGuestRights?: { limited: boolean; ownMix?: boolean; markers?: boolean; by?: string; at?: number };
+  collabGuestRights?: { limited: boolean; ownMix?: boolean; markers?: boolean; remote?: boolean; by?: string; at?: number };
   /**
    * Collaboration : opérations sur le temps (R12) déjà appliquées à ce projet (leurs identifiants, les
    * 200 dernières). L'instantané en ligne peut contenir une opération reçue en direct que le journal
