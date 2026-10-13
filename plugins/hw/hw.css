@@ -115,6 +115,7 @@
   position: relative;
   color: var(--hw-ink);
   background: var(--hw-face);
+  background-color: var(--hw-face-solid, #1f2023);
   border-radius: 9px;
   padding: 22px 26px 22px;
   box-shadow:
@@ -129,6 +130,7 @@
 
 /* Finitions (une par modèle, voir README) */
 .hw-finish-cream {
+  --hw-face-solid: #e5d8b6;
   --hw-face:
     radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 60%),
     repeating-linear-gradient(90deg, rgba(120, 92, 50, 0.025) 0 2px, rgba(255, 255, 255, 0.02) 2px 5px),
@@ -142,6 +144,7 @@
   --hw-well: rgba(80, 60, 30, 0.1);
 }
 .hw-finish-black {
+  --hw-face-solid: #161616;
   --hw-face:
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.022) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
     linear-gradient(180deg, #242424 0%, #161616 60%, #0f0f0f 100%);
@@ -153,6 +156,7 @@
   --hw-well: rgba(0, 0, 0, 0.35);
 }
 .hw-finish-silver {
+  --hw-face-solid: #b9bdc2;
   --hw-face:
     repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.07) 0 1px, rgba(0, 0, 0, 0.025) 1px 2px, rgba(0, 0, 0, 0) 2px 3px),
     radial-gradient(140% 90% at 30% 0%, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 55%),
@@ -166,6 +170,7 @@
   --hw-well: rgba(30, 34, 40, 0.1);
 }
 .hw-finish-burgundy {
+  --hw-face-solid: #47161e;
   --hw-face:
     radial-gradient(120% 60% at 50% -5%, rgba(255, 200, 200, 0.12), rgba(255, 255, 255, 0) 60%),
     linear-gradient(180deg, #5b1e27 0%, #47161e 55%, #380f16 100%);
@@ -177,6 +182,7 @@
   --hw-well: rgba(0, 0, 0, 0.22);
 }
 .hw-finish-graphite {
+  --hw-face-solid: #25282d;
   --hw-face:
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
     linear-gradient(180deg, #2d3036 0%, #23262b 60%, #1c1e22 100%);
@@ -187,6 +193,7 @@
   --hw-well: rgba(0, 0, 0, 0.3);
 }
 .hw-finish-bronze {
+  --hw-face-solid: #2e2116;
   --hw-face:
     radial-gradient(120% 70% at 50% 0%, rgba(255, 190, 120, 0.14), rgba(255, 255, 255, 0) 60%),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
@@ -198,6 +205,7 @@
   --hw-well: rgba(0, 0, 0, 0.28);
 }
 .hw-finish-steel {
+  --hw-face-solid: #22303c;
   --hw-face:
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
     linear-gradient(180deg, #2c3a48 0%, #22303c 60%, #1a2530 100%);
@@ -206,6 +214,18 @@
   --hw-accent: #f2777a;
   --hw-rule: rgba(232, 240, 247, 0.18);
   --hw-well: rgba(0, 0, 0, 0.26);
+}
+
+.hw-finish-slate {
+  --hw-face:
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #4a5160 0%, #3d4350 60%, #333844 100%);
+  --hw-face-solid: #3d4350;
+  --hw-ink: #f1f3f6;
+  --hw-ink-soft: #c3c9d3;
+  --hw-accent: #f87171;
+  --hw-rule: rgba(241, 243, 246, 0.2);
+  --hw-well: rgba(0, 0, 0, 0.22);
 }
 
 /* Vis aux coins */
@@ -359,6 +379,46 @@
 .hw-lcd small { font-size: 10px; font-weight: 600; color: #6fbf8c; text-shadow: none; }
 .hw-lcd-amber { color: #ffcf7a; background: linear-gradient(180deg, #17110a, #1d150b); text-shadow: 0 0 6px rgba(255, 190, 90, 0.35); }
 .hw-lcd-amber small { color: #c99a52; }
+
+/* ── Échelle de LED ─────────────────────────────────────────────────────── */
+.hw-seg { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.hw-seg-body { position: relative; display: flex; flex-direction: column; align-items: stretch; width: 100%; }
+.hw-seg-v .hw-seg-body { flex-direction: row; width: auto; gap: 4px; }
+.hw-seg-track { position: relative; padding: 3px; border-radius: 4px; background: #08090a; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.12); height: 16px; box-sizing: border-box; }
+.hw-seg-v .hw-seg-track { width: 18px; height: auto; }
+.hw-seg-cells { display: flex; gap: 2px; width: 100%; height: 100%; }
+.hw-seg-cell { flex: 1 1 0; border-radius: 1.5px; background: color-mix(in srgb, var(--seg) 15%, #121212); }
+.hw-seg-cell[data-on='true'] { background: var(--seg); box-shadow: 0 0 5px color-mix(in srgb, var(--seg) 70%, transparent); }
+.hw-seg-marker { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px rgba(0, 0, 0, 0.8); pointer-events: none; }
+.hw-seg-v .hw-seg-marker { top: auto; bottom: auto; left: -3px; right: -3px; width: auto; height: 2px; margin: 0 0 -1px; }
+.hw-seg-scale { position: relative; height: 12px; margin-top: 2px; font: 700 8.5px/1 Inter, system-ui, sans-serif; color: var(--hw-ink-soft); }
+.hw-seg-scale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.hw-seg-v .hw-seg-scale { width: 22px; height: auto; margin: 0; }
+.hw-seg-v .hw-seg-scale span { left: 0; top: auto; transform: translateY(50%); }
+.hw-seg-readout { margin-top: 2px; }
+
+/* ── Écran (courbes) ───────────────────────────────────────────────────── */
+.hw-screen {
+  position: relative;
+  border-radius: 8px;
+  padding: 4px;
+  background: linear-gradient(180deg, #1b1d21, #0c0d0f);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 rgba(255, 255, 255, 0.12), 0 6px 14px -8px rgba(0, 0, 0, 0.9);
+}
+.hw-screen-glass {
+  position: relative;
+  overflow: hidden;
+  border-radius: 5px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 100% 16px,
+    radial-gradient(120% 90% at 50% 0%, #10161b 0%, #05070a 75%);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.85);
+}
+.hw-screen-glass::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 40%); }
+.hw-screen-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 2px 4px; }
+.hw-screen-tab { height: 26px; padding: 0 9px; border: 0; border-radius: 5px; background: #23262b; color: #b9c0ca; font-size: 10.5px; font-weight: 800; cursor: pointer; }
+.hw-screen-tab[aria-selected='true'], .hw-screen-tab[aria-pressed='true'] { background: var(--hw-accent); color: #160d03; }
+@media (max-width: 639px) { .hw-screen-tab { height: 32px; } }
 
 /* ── LED ────────────────────────────────────────────────────────────────── */
 .hw-led {

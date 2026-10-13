@@ -22,6 +22,8 @@ import { HwWindow, HwPresets, Faceplate, HwSection, Knob, VuMeter, ToggleSwitch,
 | `ToggleSwitch` | Interrupteur à levier 2 ou 3 positions (groupe radio, flèches). |
 | `PushButton` | Bouton-poussoir à LED ; `role="radio"` dans un groupe exclusif (`role="radiogroup"` sur le parent). |
 | `Led` | Voyant. |
+| `SegmentMeter` | Échelle de LED (réduction, crête de sortie), horizontale ou verticale, repère fixe (plafond), afficheur LCD ; animée hors React. |
+| `.hw-screen` > `.hw-screen-glass` | Écran (courbes, canvas) avec cadre et vitre ; onglets `.hw-screen-tab`. |
 | `InfoBar` / `useHwHelp` | Aide hors façade : survol, toucher ou focus d'un réglage → nom, valeur, rôle dans la ligne du bas (comme Pro Tools). Seule la ligne se redessine. |
 
 Les calculs purs (course, crans, pas, angle) sont dans `knobMath.ts`, testés par
@@ -41,7 +43,10 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `black` | noir brossé `#161616` | blanc cassé `#f1efe8` | FET 76 |
 | `silver` | aluminium brossé `#b9bdc2` | quasi-noir `#17191c` | Leveler 2A |
 | `burgundy` | émail bordeaux `#47161e` | crème `#f3e6c8`, accent or | Vox Strip |
-| `graphite`, `bronze`, `steel` | libres (modernes, à lampes, bleu acier) | clair | à venir |
+| `graphite` | anodisé gris foncé `#25282d` | blanc `#eceef1`, accent orange | Mastering Transient |
+| `steel` | bleu acier `#22303c` | blanc bleuté `#e8f0f7`, accent ambre | Nova Limiter |
+| `slate` | peinture gris-bleu `#3d4350` | blanc `#f1f3f6`, accent rouge | De-esser |
+| `bronze` | bronze foncé `#2e2116` | crème `#f6e7cf`, accent orange | Saturation |
 
 L'encre atteint au moins 7:1 de contraste sur sa façade ; `--hw-ink-soft` au moins 4,5:1.
 Les couleurs des façades sont codées dans `hw.css`, pas en classes Tailwind : elles ne
@@ -76,6 +81,10 @@ position. `arc` (couleur) ajoute un arc de valeur, réservé aux modèles modern
 infobulle et dans la ligne d'info. Le texte « au repos » de la ligne d'info décrit
 l'appareil. Les libellés sérigraphiés sont courts (« Seuil », « Sortie ») ;
 `ariaLabel` garde le nom complet.
+
+**Marche / arrêt.** Pas d'interrupteur général sur la façade : la barre de la fenêtre
+(PluginEditor) porte le seul bypass (`[data-plugin-power]` est masqué dans les fenêtres
+hébergées). Les boutons « Actif » d'un module (compresseur, égaliseur…) restent permis.
 
 **Barre d'outils.** Ce qui relève du logiciel NOVA (préréglages, « Caler sur ma
 voix », messages) va dans la barre d'outils sombre, pas sur la façade.

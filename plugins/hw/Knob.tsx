@@ -181,7 +181,8 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
   };
 
   const labeled = !!(scale && scale.length) || !!(detents && detents.some(d => d.label));
-  const g = labeled ? { rc: 28, t0: 31.5, t1: 34.5, t1M: 36.5, lab: 44 } : { rc: 36, t0: 39.5, t1: 42.5, t1M: 45 };
+  // Avec un arc de valeur, le capuchon rétrécit un peu pour laisser l'arc visible entre lui et les graduations.
+  const g = labeled ? { rc: arc ? 26 : 28, t0: 31.5, t1: 34.5, t1M: 36.5, lab: 44 } : { rc: arc ? 33 : 36, t0: 39.5, t1: 42.5, t1M: 45 };
   // Chiffres de l'échelle : même taille à l'écran quelle que soit la taille du bouton.
   const labFont = size === 'XL' ? 7.4 : size === 'L' ? 8.8 : 10;
 
@@ -224,7 +225,7 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
   const rc = g.rc;
   const arcPath = useMemo(() => {
     if (!arc) return null;
-    const r = g.t0 - 2.6;
+    const r = g.t0 - 2.4;
     const from = bipolar ? 0 : -sweep / 2;
     const to = angle;
     if (Math.abs(to - from) < 0.5) return null;
