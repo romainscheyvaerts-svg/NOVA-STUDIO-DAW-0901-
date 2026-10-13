@@ -17,6 +17,7 @@ import { NovaLimiterUI } from '../../plugins/LimiterPlugin';
 import { DEFAULT_LIMITER_PARAMS } from '../../engine/LimiterNode';
 import { VocalDeEsserUI, DEESSER_DEFAULTS } from '../../plugins/DeEsserPlugin';
 import { VocalSaturatorUI } from '../../plugins/VocalSaturatorPlugin';
+import { ui2a } from './hwPlugins2a';
 
 let root: Root | null = null;
 
@@ -46,6 +47,8 @@ function ui(kind: string) {
   const node = fakeNode(kind);
   // Réglages remontés au projet : relus par qa/plugins_hw_gestes.py.
   const noop = (p: any) => { (window as any).__qaHwParams = { ...((window as any).__qaHwParams || {}), ...(p || {}) }; };
+  const v2a = ui2a(kind, noop); // Égaliseur, Réverbe, Écho, Nova Tune (vague 2A)
+  if (v2a) return v2a;
   if (ANALOG_SPECS[kind]) return <NovaAnalogCompUI kind={kind} node={node} initialParams={{ ...ANALOG_SPECS[kind].defaults }} onParamsChange={noop} trackId="qa" />;
   if (kind === 'MASTERTRANSIENT') {
     const romain = MT_PRESETS.find(p => p.id === 'romain')!.params;

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, useHwHelp, type KnobProps } from './hw';
+import { HwPresetSelect, hwCtx, useHwCanvas } from './hw/screens';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, SMOOTH, setParamSmooth, TimelineLfo } from './vocalDspUtils';
@@ -786,290 +787,220 @@ export class ReverbNode {
   }
 }
 
-export const ProfessionalReverbUI: React.FC<{ 
-  node: ReverbNode, 
-  initialParams: ReverbParams, 
+// ── Fenêtre ─────────────────────────────────────────────────────────────────
+
+const RV_ACCENT = '#c4b5fd';
+const RV_MODES: { id: ReverbMode; label: string; hint: string }[] = [
+  { id: 'ROOM', label: 'Pièce', hint: 'Petite pièce : réflexions rapprochées, naturel, garde la voix devant.' },
+  { id: 'HALL', label: 'Salle', hint: 'Grande salle : montée plus lente, queue ample et douce.' },
+  { id: 'PLATE', label: 'Plaque', hint: 'Plaque métallique : dense et brillante, le classique des voix.' },
+  { id: 'CATHEDRAL', label: 'Cathédrale', hint: 'Très grand espace : longue montée, graves qui tiennent.' },
+  { id: 'SHIMMER', label: 'Shimmer', hint: 'Queue aérienne et brillante, pour les nappes et les ambiances.' },
+  { id: 'SPRING', label: 'Ressort', hint: 'Réverbe à ressort : rebonds métalliques, couleur vintage.' },
+];
+/** Noms français des préréglages (l'identifiant reste le nom d'origine). */
+const RV_PRESET_FR: Record<string, string> = {
+  'Vocal Plate': 'Plaque voix', 'Tight Room': 'Pièce serrée', 'Large Hall': 'Grande salle', Cathedral: 'Cathédrale',
+  'Shimmer Pad': 'Nappe shimmer', 'Drums Room': 'Pièce batterie', 'Ambient Wash': 'Ambiance large', 'Snare Plate': 'Plaque caisse claire',
+  'Spring Reverb': 'Ressort', '80s Gated': 'Gated années 80', 'Dark Cave': 'Grotte sombre', 'Bright Chamber': 'Chambre brillante',
+};
+const RV_PRESETS = REVERB_PRESETS.map(({ name, ...params }) => ({ id: name, name: RV_PRESET_FR[name] || name, params: params as Record<string, any> }));
+/** Temps des premières réflexions selon l'algorithme (comme le moteur). */
+const RV_ER_MULT: Record<ReverbMode, number> = { ROOM: 0.6, HALL: 1, PLATE: 0.4, CATHEDRAL: 1.8, SHIMMER: 1.2, SPRING: 0.3 };
+const RV_ER_TIMES = [0.012, 0.022, 0.035, 0.048, 0.065, 0.085];
+
+const rvMs = (s: number) => `${Math.round((s || 0) * 1000)} ms`;
+const rvSec = (s: number) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${frNumRv(s, s < 10 ? 2 : 1)} s`);
+const frNumRv = (v: number, d = 1) => (Number.isFinite(v) ? v : 0).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v: number) => `${Math.round((v || 0) * 100)} %`;
+const hzRv = (hz: number) => (hz >= 1000 ? `${(hz / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} kHz` : `${Math.round(hz)} Hz`);
+
+/**
+ * Écran de la réverbe : réponse de la salle (pré-délai, premières réflexions,
+ * montée puis queue, aigus qui meurent plus vite). Dessinée seulement quand un
+ * réglage ou la taille change (aucune animation à chaque image).
+ */
+const ReverbScreen: React.FC<{ p: ReverbParams }> = ({ p }) => {
+  const { wrapRef, canvasRef, size } = useHwCanvas();
+  const help = useHwHelp('rv-screen', 'Réponse de la salle', 'Trait rose : pré-délai. Barres blanches : premières réflexions. Nuage violet : la queue de la réverbe ; pointillés : les aigus, qui s’éteignent plus vite quand l’amorti monte.', undefined);
+  useEffect(() => {
+    const c = hwCtx(canvasRef.current, size);
+    if (!c) return;
+    const { w, h } = size;
+    c.clearRect(0, 0, w, h);
+    const top = 26, bottom = h - 18;
+    const decay = clamp(safeNum(p.decay, 2), 0.1, 15);
+    const pre = clamp(safeNum(p.preDelay, 0.025), 0, 0.2);
+    const sizeV = clamp(safeNum(p.size, 0.7), 0, 1);
+    const mode = (MODE_SHAPES[p.mode] ? p.mode : 'HALL') as ReverbMode;
+    const shape = MODE_SHAPES[mode];
+    const attack = shape.attack(sizeV);
+    const T = Math.max(0.5, Math.min(12, pre + decay * 1.15));
+    const xOf = (t: number) => (t / T) * w;
+    const yOf = (a: number) => bottom - Math.max(0, Math.min(1, a)) * (bottom - top);
+    // Grille du temps
+    const steps = [0.05, 0.1, 0.25, 0.5, 1, 2, 5];
+    const step = steps.find(s => T / s <= 7) || 5;
+    c.font = '600 9.5px Inter, system-ui, sans-serif';
+    c.textAlign = 'center';
+    for (let t = 0; t <= T + 1e-6; t += step) {
+      const x = Math.round(xOf(t)) + 0.5;
+      c.strokeStyle = 'rgba(255,255,255,0.07)'; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(x, top - 6); c.lineTo(x, bottom); c.stroke();
+      if (t > 0) { c.fillStyle = 'rgba(203,213,225,0.75)'; c.fillText(t < 1 ? `${Math.round(t * 1000)} ms` : `${frNumRv(t, t % 1 ? 1 : 0)} s`, x, h - 5); }
+    }
+    c.strokeStyle = 'rgba(255,255,255,0.16)';
+    c.beginPath(); c.moveTo(0, bottom + 0.5); c.lineTo(w, bottom + 0.5); c.stroke();
+    // Pré-délai
+    const xp = xOf(pre);
+    c.fillStyle = 'rgba(244,63,94,0.08)'; c.fillRect(0, top - 6, xp, bottom - top + 6);
+    c.strokeStyle = '#fb7185'; c.lineWidth = 1.5; c.setLineDash([4, 3]);
+    c.beginPath(); c.moveTo(xp, top - 6); c.lineTo(xp, bottom); c.stroke(); c.setLineDash([]);
+    // Queue : enveloppe exponentielle (−60 dB en « durée »), texture pseudo-aléatoire stable.
+    const frozen = !!p.freeze;
+    const damp = clamp(safeNum(p.damping, 0.5), 0, 1);
+    const env = (t: number, d: number) => {
+      if (t < pre) return 0;
+      const u = t - pre;
+      const rise = Math.min(1, u / Math.max(0.002, attack));
+      return frozen ? rise * 0.72 : rise * 0.86 * Math.pow(10, (-3 * u) / d);
+    };
+    const rnd = seededRandom(`${mode}|${sizeV.toFixed(2)}|${safeNum(p.diffusion, 0.8).toFixed(2)}`);
+    const grad = c.createLinearGradient(0, top, 0, bottom);
+    grad.addColorStop(0, 'rgba(216,180,254,0.95)'); grad.addColorStop(1, 'rgba(129,140,248,0.35)');
+    c.fillStyle = grad;
+    const dens = 0.35 + 0.65 * clamp(safeNum(p.diffusion, 0.8), 0, 1);
+    for (let x = 0; x < w; x += 2) {
+      const a = env((x / w) * T, decay);
+      if (a <= 0.004) continue;
+      const k = (1 - dens) * rnd() + dens * (0.55 + 0.45 * rnd());
+      const hh = a * k * (bottom - top);
+      c.fillRect(x, bottom - hh, 1.4, hh);
+    }
+    // Enveloppe (trait) et aigus (pointillés : amortis)
+    const outline = (d: number, style: string, dash: number[], lw: number) => {
+      c.strokeStyle = style; c.lineWidth = lw; c.setLineDash(dash);
+      c.beginPath();
+      for (let x = 0; x <= w; x += 2) { const y = yOf(env((x / w) * T, d)); if (x === 0) c.moveTo(x, y); else c.lineTo(x, y); }
+      c.stroke(); c.setLineDash([]);
+    };
+    outline(decay, '#ede9fe', [], 1.6);
+    if (!frozen) outline(Math.max(0.05, decay * shape.hf * (1 - 0.75 * damp)), 'rgba(125,211,252,0.95)', [5, 4], 1.4);
+    // Premières réflexions
+    const erl = clamp(safeNum(p.erLevel, 0.3), 0, 1);
+    c.fillStyle = '#ffffff';
+    for (const t0 of RV_ER_TIMES) {
+      const t = t0 * RV_ER_MULT[mode] * (0.8 + sizeV * 0.4);
+      const x = xOf(t);
+      const hh = erl * 0.8 * (bottom - top);
+      c.globalAlpha = 0.85; c.fillRect(x - 1, bottom - hh, 2, hh); c.globalAlpha = 1;
+    }
+  }, [p.decay, p.preDelay, p.size, p.damping, p.diffusion, p.erLevel, p.mode, p.freeze, size]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div ref={wrapRef} className="relative h-full w-full" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave}>
+      <canvas ref={canvasRef} className="hw-screen-canvas" aria-label="Réponse de la salle : pré-délai, premières réflexions et queue de la réverbe" />
+      <span className="hw-screen-label" style={{ left: 8, top: 6 }}>Durée <b>{rvSec(clamp(safeNum(p.decay, 2), 0.1, 15))}</b> · pré-délai <b>{rvMs(p.preDelay)}</b></span>
+      {p.freeze && <span className="hw-screen-label" style={{ right: 8, top: 6, color: '#7dd3fc' }}>Figée : la queue tient tant que « Figer » est enfoncé</span>}
+      {!p.freeze && p.irUrl && <span className="hw-screen-label" style={{ right: 8, top: 6 }}>Empreinte capturée : durée, taille, diffusion et algorithme sans effet</span>}
+    </div>
+  );
+};
+
+export const ProfessionalReverbUI: React.FC<{
+  node: ReverbNode,
+  initialParams: ReverbParams,
   onParamsChange?: (p: ReverbParams) => void,
   trackId?: string,
   pluginId?: string
 }> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<ReverbParams>(initialParams);
-  const [inputLevel, setInputLevel] = useState(-100);
-  const [outputLevel, setOutputLevel] = useState(-100);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const paramsRef = useRef(params);
+  // Valeurs réelles du moteur pour les réglages absents du projet (affichage seulement : rien n'est ajouté aux réglages envoyés).
+  const base = useRef<Partial<ReverbParams>>((() => { try { return node?.getParams?.() || {}; } catch { return {}; } })());
+  const v = { ...base.current, ...params } as ReverbParams;
 
-  const handleParamChange = (key: keyof ReverbParams, value: any) => {
-    const newParams = { ...params, [key]: value };
-    setParams(newParams);
-    node.updateParams(newParams);
-    if (onParamsChange) onParamsChange(newParams);
-  };
+  const apply = useCallback((patch: Partial<ReverbParams>) => {
+    const next = { ...paramsRef.current, ...patch } as ReverbParams;
+    paramsRef.current = next;
+    setParams(next);
+    node.updateParams(next);
+    onParamsChange?.(next);
+  }, [node, onParamsChange]);
 
-  const loadPreset = (index: number) => {
-    const preset = REVERB_PRESETS[index];
-    if (preset) {
-      const newParams = { ...params, ...preset };
-      setParams(newParams);
-      node.updateParams(newParams);
-      if (onParamsChange) onParamsChange(newParams);
-    }
-  };
-
-  // Animation loop for metering and visualization
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const w = canvas.width;
-    const h = canvas.height;
-    let animId = 0;
-
-    const draw = () => {
-      // Update meters
-      setInputLevel(node.getInputLevel());
-      setOutputLevel(node.getOutputLevel());
-      
-      ctx.clearRect(0, 0, w, h);
-      
-      // Grid
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < w; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-
-      const duration = params.decay;
-      const displayTime = Math.min(8, duration * 1.5);
-      
-      // Early reflections visualization
-      ctx.fillStyle = '#818cf8';
-      const erTimes = [0.012, 0.019, 0.027, 0.038];
-      erTimes.forEach(t => {
-        const x = (t / displayTime) * w;
-        const erHeight = params.erLevel * (h - 40) * 0.6;
-        ctx.globalAlpha = 0.5;
-        ctx.fillRect(x - 1, h - 20 - erHeight, 3, erHeight);
-      });
-      ctx.globalAlpha = 1;
-
-      // Decay envelope
-      ctx.beginPath();
-      ctx.strokeStyle = '#6366f1';
-      ctx.lineWidth = 2.5;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#6366f166';
-      ctx.moveTo(0, h - 20);
-      
-      for (let x = 0; x < w; x++) {
-        const t = (x / w) * displayTime;
-        if (t > duration) break;
-        const envelope = Math.pow(1 - t / duration, 4);
-        const noise = (Math.random() * 0.1 * envelope);
-        const y = (h - 20) - ((envelope + noise) * (h - 40));
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      // Pre-delay marker
-      const preDelayX = (params.preDelay / displayTime) * w;
-      ctx.strokeStyle = '#f43f5e';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(preDelayX, 0);
-      ctx.lineTo(preDelayX, h);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Freeze indicator
-      if (params.freeze) {
-        ctx.fillStyle = '#22d3ee';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText('FREEZE', w - 60, 20);
-      }
-      
-      animId = requestAnimationFrame(draw);
-    };
-    
-    animId = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(animId);
-  }, [node, params]);
-
-  // Level meter component
-  const LevelMeter: React.FC<{ level: number; label: string }> = ({ level, label }) => {
-    const percent = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));
+  const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
+  const K = (id: keyof ReverbParams, o: Partial<KnobProps> & { min: number; max: number; def: number }) => {
+    const { def, ...rest } = o;
+    const raw = Number((v as any)[id]);
     return (
-      <div className="flex flex-col items-center">
-        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">{paramFr(label)}</span>
-        <div className="w-3 h-24 bg-black/60 rounded relative overflow-hidden border border-white/5">
-          <div 
-            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-indigo-500 via-indigo-400 to-cyan-400 transition-all duration-75"
-            style={{ height: `${percent}%` }}
-          />
-        </div>
-        <span className="text-[7px] font-mono text-slate-500 mt-1">{Math.round(level)}</span>
-      </div>
+      <Knob key={id as string} paramId={id as string} size="M" cap="silver" arc={RV_ACCENT} ticks={11} defaultValue={def}
+        value={Number.isFinite(raw) ? raw : def} onChange={x => apply({ [id]: x } as any)} {...rest} />
     );
   };
+  const readIn = () => { try { return node.getInputLevel(); } catch { return -100; } };
+  const readOut = () => { try { return node.getOutputLevel(); } catch { return -100; } };
+  const meterColor = (db: number) => (db > -3 ? '#f87171' : db > -12 ? '#facc15' : '#a78bfa');
 
   return (
-    <div className="w-[680px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 border border-indigo-500/20">
-            <i className="fas fa-mountain-sun text-xl"></i>
+    <HwWindow type="REVERB" width={800} accent={RV_ACCENT} accentInk="#1b1030"
+      toolbar={<HwPresetSelect presets={RV_PRESETS} current={v as any} onApply={pr => apply(pr.params as Partial<ReverbParams>)} />}
+      idleHelp={<>Place la voix dans une pièce : de la petite cabine à la grande salle. Choisis l’algorithme, puis la durée et le mélange. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="black" className="hw-finish-violet" model="Réverbe" kicker="Salles · plaques · ressorts" modelStyle="wide" style={{ ['--hw-accent' as any]: RV_ACCENT }}>
+        <HwSection title="Algorithme" aside={<PushButton active={!!v.freeze} onClick={() => apply({ freeze: !v.freeze })} text="Figer" led="#7dd3fc" dark className="hw-push-sm"
+          ariaLabel="Figer la réverbe" valueText={v.freeze ? 'figée' : 'libre'} hint="Fige la queue : elle tient sans fin (nappes, transitions). Relâche pour revenir." />}>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5" role="radiogroup" aria-label="Algorithme">
+            {RV_MODES.map(m => (
+              <PushButton key={m.id} role="radio" active={v.mode === m.id} onClick={() => apply({ mode: m.id })} text={m.label} led={RV_ACCENT} dark hint={m.hint}
+                valueText={v.mode === m.id ? 'choisi' : undefined} dataAttrs={{ 'data-nova-mode': m.id }} />
+            ))}
           </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight">Réverbe</h2>
-            <p className="text-[11px] text-slate-400 mt-1">Place la voix dans une pièce : de la petite cabine à la grande salle.</p>
+        </HwSection>
+
+        <div className="mt-3 flex items-stretch gap-2.5">
+          <div className="hw-screen flex-1 min-w-0">
+            <div className="hw-screen-glass" style={{ height: 150 }}><ReverbScreen p={v} /></div>
           </div>
-        </div>
-        
-        <div className="flex items-center space-x-3">
-          {/* Freeze toggle */}
-          <button
-            onClick={() => handleParamChange('freeze', !params.freeze)}
-            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
-              params.freeze 
-                ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/30' 
-                : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'
-            }`}
-          >
-            <i className="fas fa-snowflake mr-2"></i>Figer
-          </button>
-          
-          {/* Power */}
-          <button data-plugin-power 
-            onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${
-              params.isEnabled 
-                ? 'bg-indigo-500 border-indigo-400 text-white shadow-lg shadow-indigo-500/30' 
-                : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'
-            }`}
-          >
-            <i className="fas fa-power-off text-sm"></i>
-          </button>
-        </div>
-      </div>
-
-      {/* Mode & Preset selectors */}
-      <div className="flex items-center justify-between">
-        <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5">
-          {(['ROOM', 'HALL', 'PLATE', 'CATHEDRAL', 'SHIMMER', 'SPRING'] as ReverbMode[]).map(m => (
-            <button 
-              key={m}
-              onClick={() => handleParamChange('mode', m)}
-              className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase transition-all ${
-                params.mode === m 
-                  ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' 
-                  : 'text-slate-500 hover:text-white'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-        
-        <select 
-          onChange={(e) => loadPreset(parseInt(e.target.value))}
-          className="bg-nv-surface border border-white/10 rounded-xl px-4 py-2 text-[9px] font-black text-white hover:border-indigo-500/50 outline-none cursor-pointer"
-          defaultValue="-1"
-        >
-          <option disabled value="-1">Préréglages</option>
-          {REVERB_PRESETS.map((p, i) => (
-            <option key={i} value={i}>{p.name.toUpperCase()}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Visualization + Meters */}
-      <div className="flex space-x-4">
-        <div className="flex-1 h-36 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden">
-          <canvas ref={canvasRef} width={520} height={144} className="w-full h-full" />
-          <div className="absolute top-2 left-3 text-[7px] font-black text-slate-600 uppercase tracking-widest">
-            Réponse de la salle
+          <div className="hw-well flex items-end gap-1.5 px-2 py-2" aria-label="Niveaux d’entrée et de sortie">
+            <SegmentMeter orientation="vertical" read={readIn} min={-60} max={0} segments={18} holdMs={1200} label="In" length={120}
+              colorAt={meterColor} hint="Niveau à l’entrée de la réverbe (dB crête)." />
+            <SegmentMeter orientation="vertical" read={readOut} min={-60} max={0} segments={18} holdMs={1200} label="Out" length={120}
+              colorAt={meterColor} hint="Niveau à la sortie (voix + réverbe, dB crête)." />
           </div>
         </div>
-        
-        <div className="flex space-x-2 bg-black/40 rounded-[24px] border border-white/5 p-3">
-          <LevelMeter level={inputLevel} label="IN" />
-          <LevelMeter level={outputLevel} label="OUT" />
+
+        <div className="mt-3 flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+          {K('decay', { label: 'Durée', size: 'L', min: 0.1, max: 15, def: 2, curve: 'log', step: 0.01, format: rvSec,
+            scale: [{ v: 0.1, label: '0,1' }, { v: 1, label: '1' }, { v: 5, label: '5' }, { v: 15, label: '15 s' }],
+            hint: help('Durée', v.irUrl ? 'Sans effet avec une empreinte capturée.' : 'Temps que met la réverbe à s’éteindre (−60 dB).') })}
+          {K('preDelay', { label: 'Pré-délai', min: 0, max: 0.2, def: 0.025, step: 0.001, format: rvMs, hint: help('Pré-délai', 'Petit temps avant la réverbe : garde la voix nette devant.') })}
+          {K('size', { label: 'Taille', min: 0, max: 1, def: 0.7, step: 0.01, format: pct, hint: help('Taille', 'Petite pièce (gauche) ou grand espace (droite).') })}
+          {K('diffusion', { label: 'Diffusion', min: 0, max: 1, def: 0.8, step: 0.01, format: pct, hint: 'Densité des échos : bas = granuleux, haut = lisse.' })}
+          {K('damping', { label: 'Amorti', min: 0, max: 1, def: 0.5, step: 0.01, format: pct, hint: help('Amorti', 'Les aigus s’éteignent plus vite : plus sombre, plus naturel.') })}
+          {K('mix', { label: 'Mélange', size: 'L', min: 0, max: 1, def: 0.3, step: 0.01, format: pct,
+            scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }],
+            hint: help('Mélange', 'Part de réverbe. En départ (bus de retour), mets 100 %.') })}
         </div>
-      </div>
 
-      {/* Main controls row 1 */}
-      <div className="grid grid-cols-6 gap-4">
-        <ReverbKnob label="Durée" value={params.decay} min={0.1} max={15} suffix="s" color="#6366f1" onChange={v => handleParamChange('decay', v)} />
-        <ReverbKnob label="Pre-Delay" value={params.preDelay} min={0} max={0.2} factor={1000} suffix="ms" color="#6366f1" onChange={v => handleParamChange('preDelay', v)} />
-        <ReverbKnob label="Taille" value={params.size} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('size', v)} />
-        <ReverbKnob label="Amorti" value={params.damping} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('damping', v)} />
-        <ReverbKnob label="Diffusion" value={params.diffusion ?? 0.8} min={0} max={1} factor={100} suffix="%" color="#818cf8" onChange={v => handleParamChange('diffusion', v)} />
-        <ReverbKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#22d3ee" onChange={v => handleParamChange('mix', v)} />
-      </div>
-
-      {/* Advanced controls row 2 */}
-      <div className="grid grid-cols-7 gap-3 pt-4 border-t border-white/5">
-        <ReverbKnob label="ER Level" value={params.erLevel} min={0} max={1} factor={100} suffix="%" color="#818cf8" onChange={v => handleParamChange('erLevel', v)} />
-        <ReverbKnob label="Coupe-bas" value={params.lowCut} min={20} max={1000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('lowCut', v)} />
-        <ReverbKnob label="Coupe-haut" value={params.highCut} min={1000} max={20000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('highCut', v)} />
-        <ReverbKnob label="Bass Boost" value={params.bassBoost ?? 0} min={0} max={1} factor={100} suffix="%" color="#f97316" onChange={v => handleParamChange('bassBoost', v)} />
-        <ReverbKnob label="Largeur" value={params.width} min={0} max={2} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('width', v)} />
-        <ReverbKnob label="Mod" value={params.modDepth} min={0} max={1} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('modDepth', v)} />
-        <ReverbKnob label="Ducking" value={params.ducking} min={0} max={1} factor={100} suffix="%" color="#10b981" onChange={v => handleParamChange('ducking', v)} />
-      </div>
-    </div>
-  );
-};
-
-const ReverbKnob: React.FC<{ 
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (v: number) => void;
-  suffix: string;
-  color: string;
-  log?: boolean;
-  factor?: number;
-}> = ({ label, value, min, max, onChange, suffix, color, log, factor = 1 }) => {
-  const safeVal = Number.isFinite(value) ? value : min;
-  const knob = useKnobInteraction(safeVal, onChange, { min, max, log });
-  const norm = log 
-    ? Math.max(0, Math.min(1, Math.log10(safeVal / min) / Math.log10(max / min)))
-    : (safeVal - min) / (max - min);
-
-
-
-  const displayValue = log ? Math.round(safeVal) : Math.round(safeVal * factor * 10) / 10;
-
-  return (
-    <div className="flex flex-col items-center space-y-2 select-none touch-none">
-      <div 
-        {...knob.bind}
-        className="relative w-11 h-11 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-indigo-500/50 transition-all shadow-xl"
-      >
-        <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1 h-4 -ml-0.5 -mt-4 origin-bottom rounded-full transition-transform duration-75"
-          style={{ 
-            backgroundColor: color,
-            boxShadow: `0 0 8px ${color}44`,
-            transform: `rotate(${(norm * 270) - 135}deg) translateY(2px)` 
-          }}
-        />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[44px]">
-          <span className="text-[8px] font-mono font-bold text-white">{displayValue}{suffix}</span>
+        <div className="hw-rule" style={{ margin: '12px 0 10px' }} />
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <HwSection title="Couleur" className="flex-[3_1_230px] min-w-0">
+            <div className="flex flex-wrap items-start justify-around gap-x-1 gap-y-2">
+              {K('lowCut', { label: 'Coupe-bas', size: 'S', min: 20, max: 1000, def: 160, curve: 'log', step: 1, format: hzRv, hint: help('Coupe-bas', 'Retire les graves de la réverbe (moins de boue).') })}
+              {K('highCut', { label: 'Coupe-haut', size: 'S', min: 1000, max: 20000, def: 10000, curve: 'log', step: 10, format: hzRv, hint: help('Coupe-haut', 'Retire les aigus de la réverbe (plus doux, plus loin).') })}
+              {K('bassBoost', { label: 'Graves', ariaLabel: 'Graves de la queue', size: 'S', min: 0, max: 1, def: 0, step: 0.01, format: pct, hint: 'Ajoute du corps dans le bas de la queue.' })}
+            </div>
+          </HwSection>
+          <HwSection title="Espace et mouvement" className="flex-[5_1_330px] min-w-0">
+            <div className="flex flex-wrap items-start justify-around gap-x-1 gap-y-2">
+              {K('erLevel', { label: 'Réflexions', ariaLabel: 'Premières réflexions', size: 'S', min: 0, max: 1, def: 0.3, step: 0.01, format: pct, hint: 'Niveau des premières réflexions (les murs proches).' })}
+              {K('width', { label: 'Largeur', ariaLabel: 'Largeur stéréo', size: 'S', min: 0, max: 2, def: 1, step: 0.01, format: pct, hint: help('Largeur stéréo', '0 % = mono, 100 % = stéréo, 200 % = très large.') })}
+              {K('modDepth', { label: 'Modulation', size: 'S', min: 0, max: 1, def: 0.1, step: 0.01, format: pct, hint: 'Léger mouvement de la queue : plus vivant, moins métallique.' })}
+              {K('modRate', { label: 'Vitesse', ariaLabel: 'Vitesse de modulation', size: 'S', min: 0, max: 5, def: 0.5, step: 0.01, format: x => `${frNumRv(x, 2)} Hz`, hint: 'Vitesse du mouvement de la queue.' })}
+              {K('ducking', { label: 'Retrait', ariaLabel: 'Retrait sous la voix', size: 'S', min: 0, max: 1, def: 0, step: 0.01, format: pct, hint: help('Retrait sous la voix', 'La réverbe se retire quand tu chantes et revient dans les silences.') })}
+            </div>
+          </HwSection>
         </div>
-      </div>
-    </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
 

@@ -1,7 +1,9 @@
 
 import { AutomationSet, MappedParam, parseEqKey } from '../engine/automationParams';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { gainDbFr } from '../utils/pluginUi';
+import { Faceplate, HwSection, HwWindow, Knob, Led, PushButton, useHwHelp } from './hw';
+import { fmtHzFr, frNum, useHwCanvas } from './hw/screens';
 import { termHelp } from '../utils/pluginUi';
 
 /** Types de filtre en français, avec ce qu'ils font. */
@@ -406,262 +408,443 @@ export class ProEQ12Node {
   }
 }
 
-const EQKnob: React.FC<{ 
-  label: string, value: number, min: number, max: number, onChange: (v: number) => void, 
-  suffix: string, color: string, log?: boolean, disabled?: boolean, precision?: number 
-}> = ({ label, value, min, max, onChange, suffix, color, log, disabled, precision = 0 }) => {
-  const safeValue = Number.isFinite(value) ? value : min;
-  const knob = useKnobInteraction(safeValue, onChange, { min, max, log, disabled });
-  const norm = log ? (Math.log10(safeValue / min) / Math.log10(max / min)) : (safeValue - min) / (max - min);
-  
+// ── Fenêtre ─────────────────────────────────────────────────────────────────
 
-  const rotation = (norm * 270) - 135;
+const EQ_ACCENT = '#7dd3fc';
+/** Couleur de chaque bande (points de l'écran, LED, arcs des boutons). */
+const BAND_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#4ade80', '#2dd4bf', '#22d3ee', '#60a5fa', '#818cf8', '#a78bfa', '#e879f9', '#f472b6'];
+const DEFAULT_FREQS = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
+const TYPE_ORDER: ProEQFilterType[] = ['highpass', 'lowshelf', 'peaking', 'highshelf', 'lowpass', 'notch'];
+/** Bande sans gain : coupe-bas, coupe-haut, encoche (le gain n'y fait rien). */
+const noGain = (t: ProEQFilterType) => t.includes('pass') || t === 'notch';
+const bandColor = (b: ProEQBand | undefined, i: number) => b?.color || BAND_COLORS[i % BAND_COLORS.length];
+const fmtGain = (g: number) => `${g > 0.05 ? '+' : g < -0.05 ? '−' : ''}${frNum(Math.abs(g), 1)} dB`;
+const shortHz = (hz: number) => (hz >= 1000 ? `${(hz / 1000).toLocaleString('fr-FR', { maximumFractionDigits: hz >= 10000 ? 0 : 1 })}k` : String(Math.round(hz)));
+const DEFAULT_EQ: ProEQ12Params = {
+  isEnabled: true, masterGain: 1,
+  bands: DEFAULT_FREQS.map((f, i) => ({ id: i, type: (i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking') as ProEQFilterType, frequency: f, gain: 0, q: 1, isEnabled: true, isSolo: false })),
+};
+
+/** Forme du filtre (petite icône sur les boutons de type). */
+const FILTER_ICON: Record<ProEQFilterType, string> = {
+  highpass: 'M1 13 C 5 13, 7 3, 11 3 L 25 3',
+  lowshelf: 'M1 4 L 8 4 C 12 4, 13 10, 17 10 L 25 10',
+  peaking: 'M1 10 L 7 10 C 10 10, 11 2, 13 2 C 15 2, 16 10, 19 10 L 25 10',
+  highshelf: 'M1 10 L 9 10 C 13 10, 14 4, 18 4 L 25 4',
+  lowpass: 'M1 3 L 15 3 C 19 3, 21 13, 25 13',
+  notch: 'M1 4 L 10 4 C 12 4, 12.4 13, 13 13 C 13.6 13, 14 4, 16 4 L 25 4',
+};
+const FilterIcon: React.FC<{ type: ProEQFilterType }> = ({ type }) => (
+  <svg width="26" height="14" viewBox="0 0 26 14" aria-hidden="true"><path d={FILTER_ICON[type]} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+
+/**
+ * Réponse (dB) d'une bande seule à la fréquence f, formules des filtres
+ * biquad du Web Audio (affichage de la bande choisie, en couleur).
+ */
+function bandResponseDb(b: ProEQBand, f: number, sr: number): number {
+  const f0 = Math.max(10, Math.min(sr * 0.495, b.frequency || 1000));
+  const w0 = (2 * Math.PI * f0) / sr, cw = Math.cos(w0), sw = Math.sin(w0);
+  const Q = Math.max(0.0001, b.q || 1);
+  const A = Math.pow(10, (b.gain || 0) / 40);
+  let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+  switch (b.type) {
+    case 'lowpass': case 'highpass': {
+      const al = sw / (2 * Math.pow(10, Q / 20));
+      const lp = b.type === 'lowpass';
+      b0 = lp ? (1 - cw) / 2 : (1 + cw) / 2; b1 = lp ? 1 - cw : -(1 + cw); b2 = b0;
+      a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; break;
+    }
+    case 'notch': { const al = sw / (2 * Q); b0 = 1; b1 = -2 * cw; b2 = 1; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; break; }
+    case 'lowshelf': case 'highshelf': {
+      const al = (sw / 2) * Math.SQRT2, sA = 2 * Math.sqrt(A) * al;
+      if (b.type === 'lowshelf') {
+        b0 = A * ((A + 1) - (A - 1) * cw + sA); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - sA);
+        a0 = (A + 1) + (A - 1) * cw + sA; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - sA;
+      } else {
+        b0 = A * ((A + 1) + (A - 1) * cw + sA); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - sA);
+        a0 = (A + 1) - (A - 1) * cw + sA; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - sA;
+      }
+      break;
+    }
+    default: { const al = sw / (2 * Q); b0 = 1 + al * A; b1 = -2 * cw; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cw; a2 = 1 - al / A; }
+  }
+  const w = (2 * Math.PI * f) / sr;
+  const c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
+  const nr = b0 + b1 * c1 + b2 * c2, ni = -(b1 * s1 + b2 * s2);
+  const dr = a0 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
+  return 10 * Math.log10((nr * nr + ni * ni) / (dr * dr + di * di) + 1e-30);
+}
+
+const fToX = (f: number, w: number) => (Math.log10(Math.max(MIN_FREQ, f) / MIN_FREQ) / Math.log10(MAX_FREQ / MIN_FREQ)) * w;
+const xToF = (x: number, w: number) => MIN_FREQ * Math.pow(MAX_FREQ / MIN_FREQ, Math.max(0, Math.min(w, x)) / w);
+
+/**
+ * Écran de l'égaliseur : grille, spectre (après égalisation), courbe totale,
+ * bande choisie en couleur, points des 12 bandes à glisser. Dessiné hors React :
+ * fond et courbes sont préparés une fois (et recalculés quand les réglages ou
+ * l'automation changent), seul le spectre suit le son à chaque image.
+ */
+const EqScreen: React.FC<{
+  node: ProEQ12Node;
+  params: ProEQ12Params;
+  selected: number;
+  range: number;
+  onSelect: (i: number) => void;
+  onBand: (i: number, patch: Partial<ProEQBand>) => void;
+}> = ({ node, params, selected, range, onSelect, onBand }) => {
+  const { wrapRef, canvasRef, size } = useHwCanvas();
+  const latest = useRef({ params, selected, range, onSelect, onBand });
+  latest.current = { params, selected, range, onSelect, onBand };
+  const version = useRef(0);
+  // Réglages changés : courbes à refaire (et pendant 300 ms, le temps des fondus du moteur).
+  const dirtyUntil = useRef(0);
+  useEffect(() => { version.current++; dirtyUntil.current = performance.now() + 320; }, [params, selected, range]);
+  const help = useHwHelp('eq-screen', 'Écran de l’égaliseur', 'Glisse un point : gauche-droite = fréquence, haut-bas = gain (Maj = fin). Molette = largeur de la bande choisie. Double-clic sur un point = gain à 0 dB.', undefined);
+
+  const geo = (h: number) => { const top = 10, bottom = h - 20; return { top, bottom, mid: (top + bottom) / 2 }; };
+  const pointOf = (b: ProEQBand, w: number, h: number) => {
+    const { top, mid } = geo(h);
+    const r = latest.current.range;
+    const g = b.type.includes('pass') ? 0 : Math.max(-r, Math.min(r, b.gain || 0));
+    return { x: fToX(b.frequency, w), y: mid - (g / r) * (mid - top) };
+  };
+
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv || !size.w || !node) return;
+    const { w, h, dpr } = size;
+    const W = Math.round(w * dpr), H = Math.round(h * dpr);
+    const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+    const bg = mk(), fg = mk();
+    const { top, bottom, mid } = geo(h);
+    const sr = node.postAnalyzer?.context?.sampleRate || 48000;
+    const cols = Math.max(2, Math.floor(w / 2));
+    const freqs = new Float32Array(cols);
+    for (let i = 0; i < cols; i++) freqs[i] = xToF((i / (cols - 1)) * w, w);
+    const bins = node.postAnalyzer?.frequencyBinCount || 2048;
+    const spec = new Uint8Array(bins);
+    const binHz = sr / 2 / bins;
+    const binLo = new Int32Array(cols), binHi = new Int32Array(cols);
+    for (let i = 0; i < cols; i++) {
+      const f0 = xToF(((i - 0.5) / (cols - 1)) * w, w), f1 = xToF(((i + 0.5) / (cols - 1)) * w, w);
+      binLo[i] = Math.max(1, Math.floor(f0 / binHz)); binHi[i] = Math.max(binLo[i], Math.min(bins - 1, Math.ceil(f1 / binHz)));
+    }
+    let bgRange = -1;
+    let respPrev: Float32Array | null = null;
+    let specSum = -1;
+    let lastResp = 0;
+    let drawnVersion = -1;
+
+    const drawBg = (r: number) => {
+      const c = bg.getContext('2d')!;
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, h);
+      c.lineWidth = 1;
+      c.font = '600 9.5px Inter, system-ui, sans-serif';
+      c.textBaseline = 'alphabetic';
+      for (const f of [30, 40, 50, 60, 70, 80, 90, 300, 400, 600, 700, 800, 900, 3000, 4000, 6000, 7000, 8000, 9000]) {
+        const x = Math.round(fToX(f, w)) + 0.5;
+        c.strokeStyle = 'rgba(255,255,255,0.035)'; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+      }
+      c.fillStyle = 'rgba(203,213,225,0.78)';
+      for (const [f, t] of [[50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k']] as [number, string][]) {
+        const x = Math.round(fToX(f, w)) + 0.5;
+        c.strokeStyle = 'rgba(255,255,255,0.08)'; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+        c.textAlign = 'center'; c.fillText(t, x, h - 6);
+      }
+      const step = r <= 12 ? 3 : r <= 24 ? 6 : 10;
+      c.textAlign = 'left';
+      for (let d = -r; d <= r + 1e-6; d += step) {
+        const y = Math.round(mid - (d / r) * (mid - top)) + 0.5;
+        c.strokeStyle = d === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.06)';
+        c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke();
+        if (d !== 0 && Math.abs(d) < r) { c.fillStyle = 'rgba(203,213,225,0.7)'; c.fillText(`${d > 0 ? '+' : ''}${d}`, 4, y - 3); }
+      }
+      bgRange = r;
+    };
+
+    const drawFg = (resp: Float32Array) => {
+      const { params: p, selected: sel, range: r } = latest.current;
+      const c = fg.getContext('2d')!;
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, h);
+      const yOf = (db: number) => mid - (Math.max(-r * 1.05, Math.min(r * 1.05, db)) / r) * (mid - top);
+      // Bande choisie : sa propre courbe, remplie de sa couleur.
+      const b = p.bands[sel];
+      if (b && b.isEnabled !== false) {
+        const col = bandColor(b, sel);
+        c.beginPath(); c.moveTo(0, mid);
+        for (let i = 0; i < cols; i++) c.lineTo((i / (cols - 1)) * w, yOf(bandResponseDb(b, freqs[i], sr)));
+        c.lineTo(w, mid); c.closePath();
+        c.globalAlpha = 0.22; c.fillStyle = col; c.fill(); c.globalAlpha = 1;
+      }
+      // Courbe totale (filtres réels du moteur : suit aussi l'automation).
+      c.beginPath();
+      for (let i = 0; i < cols; i++) {
+        const y = yOf(20 * Math.log10(Math.max(resp[i], 1e-5)));
+        if (i === 0) c.moveTo(0, y); else c.lineTo((i / (cols - 1)) * w, y);
+      }
+      c.strokeStyle = '#f8fafc'; c.lineWidth = 2.2; c.shadowColor = 'rgba(125,211,252,0.6)'; c.shadowBlur = 6; c.stroke(); c.shadowBlur = 0;
+      // Points des bandes (la bande choisie au-dessus, plus grande).
+      const order = p.bands.map((_, i) => i).filter(i => i !== sel).concat(sel);
+      c.font = '800 9px Inter, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      for (const i of order) {
+        const bb = p.bands[i];
+        if (!bb) continue;
+        const { x, y } = pointOf(bb, w, h);
+        const on = bb.isEnabled !== false;
+        const col = bandColor(bb, i);
+        const rad = i === sel ? 9.5 : 7.5;
+        c.beginPath(); c.arc(x, y, rad, 0, Math.PI * 2);
+        c.fillStyle = on ? col : '#3b4250'; c.fill();
+        c.lineWidth = i === sel ? 2.5 : 1.2; c.strokeStyle = i === sel ? '#ffffff' : 'rgba(0,0,0,0.65)'; c.stroke();
+        c.fillStyle = on ? '#0b0f17' : '#cbd5e1'; c.fillText(String(i + 1), x, y + 0.5);
+      }
+    };
+
+    let raf = 0;
+    const loop = (t: number) => {
+      raf = requestAnimationFrame(loop);
+      const r = latest.current.range;
+      let dirty = false;
+      if (bgRange !== r) { drawBg(r); dirty = true; }
+      const v = version.current;
+      // Réponse réelle du moteur : à chaque réglage, pendant les fondus, puis 4 fois par seconde (automation).
+      if (v !== drawnVersion || t < dirtyUntil.current || t - lastResp > 250) {
+        lastResp = t;
+        let resp: Float32Array;
+        try { resp = node.getFrequencyResponse(freqs); } catch { resp = new Float32Array(cols).fill(1); }
+        let same = !!respPrev && v === drawnVersion;
+        if (same && respPrev) for (let i = 0; i < cols; i += 3) if (Math.abs(resp[i] - respPrev[i]) > 1e-4) { same = false; break; }
+        if (!same) { drawFg(resp); respPrev = resp; dirty = true; }
+        drawnVersion = v;
+      }
+      // Spectre : redessiné seulement s'il a bougé (silence = rien à faire).
+      try { node.postAnalyzer.getByteFrequencyData(spec); } catch { spec.fill(0); }
+      let sum = 0;
+      for (let i = 1; i < bins; i += 7) sum += spec[i];
+      if (sum !== specSum) { specSum = sum; dirty = true; }
+      if (!dirty) return;
+      const c = cv.getContext('2d');
+      if (!c) return;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, W, H);
+      c.drawImage(bg, 0, 0);
+      if (sum > 0) {
+        c.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // Spectre : −90 dB en bas, −10 dB en haut (son propre repère).
+        const yS = (byte: number) => { const db = (byte / 255) * 70 - 100; return bottom - Math.max(0, Math.min(1, (db + 90) / 80)) * (bottom - top); };
+        c.beginPath(); c.moveTo(0, bottom);
+        for (let i = 0; i < cols; i++) {
+          let m = 0;
+          for (let k = binLo[i]; k <= binHi[i]; k++) if (spec[k] > m) m = spec[k];
+          c.lineTo((i / (cols - 1)) * w, yS(m));
+        }
+        c.lineTo(w, bottom); c.closePath();
+        const g = c.createLinearGradient(0, top, 0, bottom);
+        g.addColorStop(0, 'rgba(125,211,252,0.32)'); g.addColorStop(1, 'rgba(125,211,252,0.04)');
+        c.fillStyle = g; c.fill();
+        c.strokeStyle = 'rgba(125,211,252,0.5)'; c.lineWidth = 1; c.stroke();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      c.drawImage(fg, 0, 0);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [node, size]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Glisser un point (souris, doigt, stylet) ──
+  const drag = useRef<{ id: number; idx: number; x: number; y: number; f: number; g: number } | null>(null);
+  const local = (e: { clientX: number; clientY: number }) => {
+    const r = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+  };
+  const nearest = (x: number, y: number, w: number, h: number, maxD: number) => {
+    let best = -1, bd = maxD;
+    latest.current.params.bands.forEach((b, i) => {
+      const pt = pointOf(b, w, h);
+      const d = Math.hypot(x - pt.x, y - pt.y);
+      // À égalité, la bande choisie passe devant.
+      if (d < bd || (d === bd && i === latest.current.selected)) { bd = d; best = i; }
+    });
+    return best;
+  };
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const { x, y, w, h } = local(e);
+    const idx = nearest(x, y, w, h, e.pointerType === 'mouse' ? 22 : 32);
+    help.show();
+    if (idx < 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* déjà relâché */ }
+    const b = latest.current.params.bands[idx];
+    latest.current.onSelect(idx);
+    drag.current = { id: e.pointerId, idx, x: e.clientX, y: e.clientY, f: b.frequency, g: b.gain || 0 };
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = drag.current;
+    const { x, y, w, h } = local(e);
+    if (!d || d.id !== e.pointerId) {
+      if (e.pointerType === 'mouse') e.currentTarget.style.cursor = nearest(x, y, w, h, 22) >= 0 ? 'grab' : 'crosshair';
+      return;
+    }
+    e.currentTarget.style.cursor = 'grabbing';
+    const fine = e.shiftKey ? 0.2 : 1;
+    const { top, mid } = geo(h);
+    const r = latest.current.range;
+    const frequency = Math.max(MIN_FREQ, Math.min(MAX_FREQ, xToF(fToX(d.f, w) + (e.clientX - d.x) * fine, w)));
+    const band = latest.current.params.bands[d.idx];
+    let gain = d.g + (((d.y - e.clientY) * fine) / (mid - top)) * r;
+    gain = band.type.includes('pass') ? 0 : Math.max(MIN_GAIN, Math.min(MAX_GAIN, Math.round(gain * 10) / 10));
+    if (e.shiftKey) { d.f = frequency; d.g = gain; d.x = e.clientX; d.y = e.clientY; }
+    latest.current.onBand(d.idx, { frequency, gain });
+  };
+  const endDrag = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drag.current || drag.current.id !== e.pointerId) return;
+    drag.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* déjà relâché */ }
+    e.currentTarget.style.cursor = '';
+  };
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y, w, h } = local(e);
+    const idx = nearest(x, y, w, h, 22);
+    if (idx < 0) return;
+    const b = latest.current.params.bands[idx];
+    if (!noGain(b.type)) latest.current.onBand(idx, { gain: 0 });
+  };
+  // Molette : largeur (Q) de la bande choisie ; écouteur natif non passif (la page ne défile pas).
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (w: WheelEvent) => {
+      if (w.deltaY === 0) return;
+      w.preventDefault();
+      const { params: p, selected: s } = latest.current;
+      const b = p.bands[s];
+      if (!b) return;
+      const k = w.shiftKey ? 1.03 : 1.12;
+      const q = Math.max(0.1, Math.min(10, Math.round((w.deltaY < 0 ? b.q * k : b.q / k) * 100) / 100));
+      if (q !== b.q) latest.current.onBand(s, { q });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [wrapRef]);
+
+  const b = params.bands[selected];
   return (
-    <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 select-none touch-none ${disabled ? 'opacity-20 grayscale' : ''}`}>
-      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-nv-surface border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
-        <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}`, transform: `rotate(${rotation}deg) translateY(2px)` }} />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-1.5 py-0.5 rounded border border-white/5 min-w-[45px]">
-          <span className="text-[8px] font-mono font-bold text-white">{safeValue.toFixed(precision)}{suffix}</span>
-        </div>
-      </div>
+    <div ref={wrapRef} className="relative h-full w-full" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave}>
+      <canvas ref={canvasRef} className="hw-screen-canvas touch-none" style={{ cursor: 'crosshair' }} data-nova-eq-screen
+        aria-label="Courbe de l’égaliseur : glisse les points numérotés pour régler les bandes"
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onDoubleClick={onDoubleClick} />
+      {b && (
+        <span className="hw-screen-label" style={{ left: 8, top: 7 }} aria-live="polite">
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 9, background: bandColor(b, selected), marginRight: 6 }} />
+          Bande {selected + 1} · {(FILTER_LABELS[b.type] || { label: b.type }).label} · <b>{fmtHzFr(b.frequency)}</b>
+          {!noGain(b.type) && <> · <b>{fmtGain(b.gain || 0)}</b></>}
+          {b.isEnabled === false && <span style={{ color: '#fca5a5' }}> · coupée</span>}
+        </span>
+      )}
     </div>
   );
 };
 
 export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Params, onParamsChange?: (p: ProEQ12Params) => void }> = ({ node, initialParams, onParamsChange }) => {
-  const [params, setParams] = useState(initialParams);
-  const [selectedBandIdx, setSelectedBandIdx] = useState(0);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const freqToX = (f: number, w: number) => (Math.log10(f / MIN_FREQ) / Math.log10(MAX_FREQ / MIN_FREQ)) * w;
-  const xToFreq = (x: number, w: number) => MIN_FREQ * Math.pow(MAX_FREQ / MIN_FREQ, x / w);
-  const dbToY = (db: number, h: number) => h - (Math.max(0, Math.min(1, (db + DB_SCALE) / (DB_SCALE * 2))) * h);
-  const yToDb = (y: number, h: number) => ((1 - (y / h)) * (DB_SCALE * 2)) - DB_SCALE;
+  const [params, setParams] = useState<ProEQ12Params>(() => (initialParams && Array.isArray(initialParams.bands) && initialParams.bands.length
+    ? initialParams : { ...DEFAULT_EQ, ...(initialParams || {}), bands: DEFAULT_EQ.bands.map(b => ({ ...b })) }));
+  const paramsRef = useRef(params);
+  const [sel, setSel] = useState(0);
+  const [range, setRange] = useState(12);
+  const narrow = typeof window !== 'undefined' && window.innerWidth < 640;
 
-  const frequencies = useMemo(() => {
-    const f = new Float32Array(1024);
-    for (let i = 0; i < 1024; i++) f[i] = MIN_FREQ * Math.pow(MAX_FREQ / MIN_FREQ, i / 1023);
-    return f;
-  }, []);
+  const commit = useCallback((next: ProEQ12Params) => {
+    paramsRef.current = next;
+    setParams(next);
+    node.updateParams(next);
+    onParamsChange?.(next);
+  }, [node, onParamsChange]);
 
   const updateBand = useCallback((idx: number, updates: Partial<ProEQBand>) => {
-    // Refactored to avoid side-effects inside setState
-    const newBands = [...params.bands];
-    newBands[idx] = { ...newBands[idx], ...updates };
-    const newParams = { ...params, bands: newBands };
-    
-    setParams(newParams);
-    node.updateParams(newParams);
-    if (onParamsChange) onParamsChange(newParams);
-  }, [params, node, onParamsChange]);
+    const cur = paramsRef.current;
+    const bands = [...cur.bands];
+    bands[idx] = { ...bands[idx], ...updates };
+    commit({ ...cur, bands });
+  }, [commit]);
 
-  const handleGraphInteraction = (clientX: number, clientY: number) => {
-    const rect = canvasRef.current?.getBoundingClientRect(); 
-    if (!rect) return;
-    const x = clientX - rect.left; 
-    const y = clientY - rect.top;
-    
-    // Find band
-    let closestIdx = -1; let minDist = 30;
-    params.bands.forEach((b, i) => {
-      const bx = freqToX(b.frequency, rect.width); 
-      const by = b.type.includes('pass') ? rect.height / 2 : dbToY(b.gain, rect.height);
-      const dist = Math.sqrt((x - bx) ** 2 + (y - by) ** 2);
-      if (dist < minDist) { minDist = dist; closestIdx = i; }
-    });
+  const band = params.bands[sel] || params.bands[0];
+  const col = bandColor(band, sel);
+  const gainless = noGain(band.type);
+  const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
+  const master = Number.isFinite(params.masterGain) ? params.masterGain : 1;
 
-    if (closestIdx !== -1) {
-      setSelectedBandIdx(closestIdx);
-      return { idx: closestIdx, startX: clientX, startY: clientY, startFreq: params.bands[closestIdx].frequency, startGain: params.bands[closestIdx].gain };
-    }
-    return null;
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    const data = handleGraphInteraction(e.clientX, e.clientY);
-    if (!data) return;
-    const rect = canvasRef.current!.getBoundingClientRect();
-
-    const onMouseMove = (m: MouseEvent) => {
-      const dx = m.clientX - data.startX; 
-      const dy = data.startY - m.clientY;
-      const curX = freqToX(data.startFreq, rect.width) + dx;
-      const newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, xToFreq(Math.max(0, Math.min(rect.width, curX)), rect.width)));
-      let newGain = data.startGain + (dy / (rect.height / 2)) * MAX_GAIN;
-      if (params.bands[data.idx].type.includes('pass')) newGain = 0;
-      else newGain = Math.max(-DB_SCALE, Math.min(DB_SCALE, newGain));
-      updateBand(data.idx, { frequency: newFreq, gain: newGain });
-    };
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const touch = e.touches[0];
-    const data = handleGraphInteraction(touch.clientX, touch.clientY);
-    if (!data) return;
-    const rect = canvasRef.current!.getBoundingClientRect();
-
-    const onTouchMove = (t: TouchEvent) => {
-      if (t.cancelable) t.preventDefault();
-      const m = t.touches[0];
-      const dx = m.clientX - data.startX; 
-      const dy = data.startY - m.clientY;
-      const curX = freqToX(data.startFreq, rect.width) + dx;
-      const newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, xToFreq(Math.max(0, Math.min(rect.width, curX)), rect.width)));
-      let newGain = data.startGain + (dy / (rect.height / 2)) * MAX_GAIN;
-      if (params.bands[data.idx].type.includes('pass')) newGain = 0;
-      else newGain = Math.max(-DB_SCALE, Math.min(DB_SCALE, newGain));
-      updateBand(data.idx, { frequency: newFreq, gain: newGain });
-    };
-    const onTouchEnd = () => { window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-    window.addEventListener('touchmove', onTouchMove, { passive: false }); window.addEventListener('touchend', onTouchEnd);
-  };
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false })!;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (rect && (canvas.width !== rect.width || canvas.height !== rect.height)) { canvas.width = rect.width; canvas.height = rect.height; }
-    const w = canvas.width; const h = canvas.height;
-
-    ctx.fillStyle = '#0c0d10'; ctx.fillRect(0, 0, w, h);
-    ctx.lineWidth = 1; ctx.strokeStyle = '#1e2229'; ctx.beginPath();
-    [30, 60, 100, 200, 500, 1000, 2000, 5000, 10000, 15000].forEach(f => { const x = freqToX(f, w); ctx.moveTo(x, 0); ctx.lineTo(x, h); });
-    [-18, -12, -6, 0, 6, 12, 18].forEach(db => { const y = dbToY(db, h); ctx.moveTo(0, y); ctx.lineTo(w, y); });
-    ctx.stroke();
-    
-    ctx.strokeStyle = '#334155'; ctx.beginPath(); const zeroY = dbToY(0, h); ctx.moveTo(0, zeroY); ctx.lineTo(w, zeroY); ctx.stroke();
-
-    const binCount = node.preAnalyzer.frequencyBinCount;
-    const postData = new Uint8Array(binCount);
-    node.postAnalyzer.getByteFrequencyData(postData);
-    const step = Math.ceil(binCount / w); 
-    
-    ctx.beginPath(); ctx.moveTo(0, h);
-    for (let i = 0; i < binCount; i += step) {
-        const freq = i * (node.preAnalyzer.context.sampleRate / 2) / binCount;
-        if (freq < MIN_FREQ) continue; if (freq > MAX_FREQ) break;
-        const x = freqToX(freq, w);
-        const y = h - ((postData[i] / 255) * h); 
-        ctx.lineTo(x, y);
-    }
-    ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fillStyle = 'rgba(6, 182, 212, 0.2)'; ctx.fill();
-
-    const resp = node.getFrequencyResponse(frequencies);
-    ctx.beginPath(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5;
-    for(let i=0; i<frequencies.length; i++) {
-        const x = freqToX(frequencies[i], w);
-        const db = 20 * Math.log10(Math.max(resp[i], 0.00001));
-        const y = dbToY(db, h);
-        if (i===0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    params.bands.forEach((b, i) => {
-      const x = freqToX(b.frequency, w);
-      const y = b.type.includes('pass') ? h / 2 : dbToY(b.gain, h);
-      ctx.beginPath(); ctx.arc(x, y, selectedBandIdx === i ? 8 : 5, 0, Math.PI * 2);
-      ctx.fillStyle = b.isEnabled ? (selectedBandIdx === i ? '#fff' : 'rgba(255,255,255,0.7)') : '#333';
-      ctx.fill();
-      if (selectedBandIdx === i) {
-        ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 2; ctx.stroke();
-      }
-    });
-  }, [node, frequencies, params, selectedBandIdx]);
-
-  useEffect(() => {
-    let animFrame = 0; const loop = () => { draw(); animFrame = requestAnimationFrame(loop); };
-    animFrame = requestAnimationFrame(loop); return () => cancelAnimationFrame(animFrame);
-  }, [draw]);
-
-  const currentBand = params.bands[selectedBandIdx];
-  
   return (
-    <div className="w-[850px] bg-nv-bg border border-white/10 rounded-[40px] overflow-hidden shadow-2xl flex flex-col select-none animate-in fade-in zoom-in duration-300">
-      <div className="p-8 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
-        <div className="flex items-center space-x-6">
-          <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20 shadow-lg shadow-cyan-500/5"><i className="fas fa-wave-square text-2xl"></i></div>
-          <div><h2 className="text-2xl font-black text-white tracking-tight leading-none">Égaliseur <span className="text-[11px] ml-2 font-normal text-slate-500">{params.bands.length} bandes</span></h2><p className="text-[12px] text-slate-400 mt-2">Sculpte le son : retire ce qui gêne, ajoute de la présence ou de l'air.</p></div>
+    <HwWindow type="PROEQ12" width={880} accent={EQ_ACCENT} accentInk="#04131c"
+      idleHelp={<>Égaliseur paramétrique 12 bandes : retire ce qui gêne, ajoute de la présence ou de l’air. Glisse les points de l’écran, ou choisis une bande dessous et tourne ses boutons. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="black" className="hw-finish-midnight" model="Égaliseur" kicker="Paramétrique · 12 bandes" modelStyle="wide" style={{ ['--hw-accent' as any]: EQ_ACCENT }}>
+        <div className="hw-screen-tabs justify-end" role="group" aria-label="Échelle de l’écran">
+          <span className="hw-silk hw-silk-soft mr-auto" style={{ textAlign: 'left' }}>Échelle</span>
+          {[12, 30].map(r => (
+            <button key={r} type="button" className="hw-screen-tab" aria-pressed={range === r} onClick={() => setRange(r)}
+              title={r === 12 ? 'Écran zoomé : ±12 dB (corrections fines)' : 'Écran entier : ±30 dB'}>±{r} dB</button>
+          ))}
         </div>
-        
-        <div className="flex items-center space-x-4">
-           <div className="flex bg-black/40 rounded-xl p-1 border border-white/5">
-            {params.bands.map((b, i) => (
-              <button 
-                key={i} 
- onClick={() => setSelectedBandIdx(i)} title={`Bande ${i + 1} : ${(FILTER_LABELS[b.type] || { label: b.type }).label}, ${Math.round(b.frequency)} Hz`} aria-label={`Bande ${i + 1}`} 
-                className={`w-8 h-8 rounded-lg text-[9px] font-black transition-all border ${selectedBandIdx === i ? 'bg-white text-black border-white' : 'bg-transparent text-slate-600 border-transparent hover:text-slate-400'}`}
-                style={{ color: selectedBandIdx === i ? '#000' : b.color || '#fff' }}
-              >
-                {i + 1}
-              </button>
-            ))}
+        <div className="hw-screen">
+          <div className="hw-screen-glass" style={{ height: narrow ? 210 : 280 }}>
+            <EqScreen node={node} params={params} selected={sel} range={range} onSelect={setSel} onBand={updateBand} />
           </div>
-          <button data-plugin-power 
-            onClick={() => { const newState = !params.isEnabled; setParams({...params, isEnabled: newState}); node.updateParams({isEnabled: newState}); }}
-            className={`w-12 h-12 rounded-full border transition-all flex items-center justify-center ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600'}`}
-          >
-            <i className="fas fa-power-off"></i>
-          </button>
         </div>
-      </div>
 
-      <div ref={containerRef} className="relative h-[320px] bg-black/40 cursor-crosshair border-b border-white/5 overflow-hidden" onWheel={(e) => { const delta = e.deltaY > 0 ? -0.1 : 0.1; updateBand(selectedBandIdx, { q: Math.max(0.1, Math.min(10, currentBand.q + delta)) }); }}>
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(0,242,255,0.03),transparent)]" />
-        <canvas ref={canvasRef} className="w-full h-full touch-none" onMouseDown={handleMouseDown} onTouchStart={handleTouchStart} />
-        <div className="absolute bottom-4 right-6 text-[10px] font-bold text-slate-600">Glisse un point pour régler · molette = largeur</div>
-      </div>
-
-      <div className="p-10 bg-white/[0.01] flex flex-col space-y-10">
-        <div className="flex items-center justify-between">
-           <div className="flex items-center space-x-10">
-              <div className="space-y-4">
-                <label className="text-[11px] font-bold text-slate-400 ml-1">Type de filtre (bande {selectedBandIdx + 1})</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['highpass', 'lowshelf', 'peaking', 'highshelf', 'lowpass', 'notch'] as ProEQFilterType[]).map(t => (
-                    <button 
-                      key={t} 
-                      title={FILTER_LABELS[t].help}
-                      onClick={() => updateBand(selectedBandIdx, { type: t, gain: (t.includes('pass') || t === 'notch') ? 0 : currentBand.gain })} 
-                      className={`px-3 py-2 rounded-xl text-[10px] font-bold border transition-all ${currentBand.type === t ? 'bg-cyan-500 text-black border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-                    >
-                      {FILTER_LABELS[t].label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="h-16 w-px bg-white/5 self-end mb-1" />
-
-              <div className="flex space-x-8">
-                <EQKnob label="Fréquence" value={currentBand.frequency} min={MIN_FREQ} max={MAX_FREQ} log suffix="Hz" onChange={v => updateBand(selectedBandIdx, { frequency: v })} color={currentBand.color || '#fff'} />
-                <EQKnob label="Gain" value={currentBand.gain} min={MIN_GAIN} max={MAX_GAIN} suffix="dB" onChange={v => updateBand(selectedBandIdx, { gain: v })} color={currentBand.color || '#fff'} disabled={currentBand.type.includes('pass') || currentBand.type === 'notch'} precision={1} />
-                <EQKnob label="Largeur" value={currentBand.q} min={0.1} max={10} suffix="" onChange={v => updateBand(selectedBandIdx, { q: v })} color={currentBand.color || '#fff'} precision={2} />
-              </div>
-           </div>
-
-           <div className="flex flex-col items-end space-y-4">
-              <button 
-                onClick={() => updateBand(selectedBandIdx, { isEnabled: !currentBand.isEnabled })}
-                aria-pressed={currentBand.isEnabled}
-                title="Active ou coupe seulement cette bande (l'égaliseur entier se coupe avec le bouton de la barre du haut)"
-                className={`h-10 px-6 rounded-xl text-[11px] font-bold border transition-all ${currentBand.isEnabled ? 'bg-white/5 border-white/20 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
-              >
-                {currentBand.isEnabled ? `Bande ${selectedBandIdx + 1} active` : `Bande ${selectedBandIdx + 1} coupée`}
-              </button>
-           </div>
+        <div className="hw-bands mt-2.5" role="group" aria-label="Bandes">
+          {params.bands.map((b, i) => (
+            <button key={i} type="button" className="hw-band" aria-pressed={sel === i} data-off={b.isEnabled === false ? 'true' : undefined}
+              style={{ ['--band' as any]: bandColor(b, i) }} onClick={() => setSel(i)}
+              title={`Bande ${i + 1} : ${(FILTER_LABELS[b.type] || { label: b.type }).label}, ${Math.round(b.frequency)} Hz${b.isEnabled === false ? ' (coupée)' : ''}`} aria-label={`Bande ${i + 1}`}>
+              <span className="flex items-center gap-1"><Led on={b.isEnabled !== false} color={bandColor(b, i)} />{i + 1}</span>
+              <small>{shortHz(b.frequency)}</small>
+            </button>
+          ))}
         </div>
-      </div>
-    </div>
+
+        <div className="hw-rule" style={{ margin: '12px 0 10px' }} />
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+          <HwSection title={`Bande ${sel + 1}`} className="flex-[4_1_460px] min-w-0"
+            aside={<PushButton active={band.isEnabled !== false} onClick={() => updateBand(sel, { isEnabled: band.isEnabled === false })} text="Active" led={col} dark
+              className="hw-push-sm" ariaLabel={`Bande ${sel + 1} active`} valueText={band.isEnabled !== false ? 'active' : 'coupée'}
+              hint="Active ou coupe seulement cette bande (l’égaliseur entier se coupe avec le bouton de la barre du haut)." />}>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5" role="radiogroup" aria-label={`Type de filtre (bande ${sel + 1})`}>
+              {TYPE_ORDER.map(t => (
+                <PushButton key={t} role="radio" active={band.type === t} dark led={col} className="hw-push-icon" hint={FILTER_LABELS[t].help}
+                  ariaLabel={FILTER_LABELS[t].label} valueText={band.type === t ? 'choisi' : undefined}
+                  onClick={() => updateBand(sel, { type: t, gain: (t.includes('pass') || t === 'notch') ? 0 : band.gain })}>
+                  <FilterIcon type={t} /><span>{FILTER_LABELS[t].label}</span>
+                </PushButton>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
+              <Knob key={`f${sel}`} paramId="frequency" label="Fréquence" size="L" cap="black" arc={col} min={MIN_FREQ} max={MAX_FREQ} curve="log" value={band.frequency}
+                defaultValue={DEFAULT_FREQS[sel] ?? 1000} onChange={v => updateBand(sel, { frequency: v })} format={fmtHzFr}
+                scale={[{ v: 20, label: '20' }, { v: 200, label: '200' }, { v: 2000, label: '2k' }, { v: 20000, label: '20k' }]}
+                hint={help('Fréquence', 'Centre (ou point de coupure) de la bande.')} />
+              <Knob key={`g${sel}`} paramId="gain" label="Gain" size="L" cap="black" arc={col} bipolar min={MIN_GAIN} max={MAX_GAIN} step={0.1} value={gainless ? 0 : band.gain}
+                defaultValue={0} disabled={gainless} onChange={v => updateBand(sel, { gain: v })} format={v => (gainless ? '—' : fmtGain(v))}
+                scale={[{ v: -30, label: '−30' }, { v: 0, label: '0' }, { v: 30, label: '+30' }]}
+                hint={gainless ? 'Sans effet pour ce type de filtre (coupe-bas, coupe-haut, encoche).' : help('Gain', 'Monte (+) ou baisse (−) la zone de la bande.')} />
+              <Knob key={`q${sel}`} paramId="q" label={band.type.includes('pass') ? 'Résonance' : 'Largeur'} size="M" cap="black" arc={col} min={0.1} max={10} curve="log" step={0.01}
+                value={band.q} defaultValue={1} onChange={v => updateBand(sel, { q: v })} format={v => `Q ${frNum(v, 2)}`} ticks={11}
+                hint={band.type.includes('pass') ? 'Bosse au point de coupure : plus la valeur est haute, plus la coupure résonne.' : help('Largeur', 'Petite valeur = zone large et douce, grande valeur = zone étroite et précise.')} />
+            </div>
+          </HwSection>
+          <HwSection title="Sortie" className="flex-[1_1_140px] min-w-0">
+            <div className="flex justify-center pt-1">
+              <Knob paramId="masterGain" label="Volume" ariaLabel="Volume de sortie" size="M" cap="black" arc={EQ_ACCENT} bipolar min={0.25} max={4} curve="log"
+                value={Math.max(0.25, Math.min(4, master))} defaultValue={1} onChange={v => commit({ ...paramsRef.current, masterGain: v })}
+                format={v => gainDbFr(v)} scale={[{ v: 0.25, label: '−12' }, { v: 1, label: '0' }, { v: 4, label: '+12' }]}
+                hint="Volume après l’égaliseur, pour comparer à volume égal (en dB)." />
+            </div>
+          </HwSection>
+        </div>
+      </Faceplate>
+    </HwWindow>
   );
 };
