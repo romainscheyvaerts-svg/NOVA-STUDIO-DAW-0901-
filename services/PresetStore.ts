@@ -6,10 +6,12 @@
  *    seule (on les duplique pour les modifier) ;
  *  - favoris (étoile) rangés à part : un preset livré peut aussi être favori.
  *
- * Cloud : les modèles de session (services/TemplateStore) n'ont pas encore de
- * stockage en ligne (pas de table Supabase) ; les presets restent donc sur
- * l'appareil, avec export / import de fichiers .novapreset et .novachain pour
- * les emporter (et ils voyagent dans le projet et en collaboration, avec l'effet).
+ * Cloud (chantier 19) : les presets restent d'abord sur l'appareil (hors ligne
+ * compris) ; services/PresetCloud les synchronise avec le compte Make Music
+ * (table nova_presets) quand le serveur répond. Ce module prévient de chaque
+ * changement (onPresetsChanged) ; les presets reçus d'un autre poste passent par
+ * putFromCloud / removeFromCloud (sans être renvoyés). Export / import de
+ * fichiers .novapreset et .novachain pour les emporter à la main.
  */
 import {
   AnyPreset, CHAIN_FORMAT, newPresetId, parsePresetFile, PluginPreset, presetFilename, presetMatches, PRESET_FORMAT,
@@ -120,6 +122,33 @@ let bundledCache: Promise<AnyPreset[]> | null = null;
 export const setBundledPresetLoader = (l: BundledLoader | null) => { bundledLoader = l || defaultBundled; bundledCache = null; };
 const bundledPresets = () => { if (!bundledCache) bundledCache = bundledLoader().catch(() => []); return bundledCache; };
 
+// ─── Changements (synchronisation entre postes : services/PresetCloud) ────────
+
+export type PresetChange =
+  | { type: 'save'; id: string; updatedAt: number }
+  | { type: 'delete'; id: string; at: number }
+  /** Reçus d'un autre poste : les listes ouvertes se rafraîchissent. */
+  | { type: 'remote' };
+const changeListeners = new Set<(c: PresetChange) => void>();
+export const onPresetsChanged = (fn: (c: PresetChange) => void): (() => void) => { changeListeners.add(fn); return () => { changeListeners.delete(fn); }; };
+const emitChange = (c: PresetChange) => { for (const fn of [...changeListeners]) { try { fn(c); } catch { /* un écouteur ne bloque pas l'enregistrement */ } } };
+
+/** Presets de l'utilisateur sur cet appareil (sans les livrés). */
+export const listUserPresets = async (): Promise<AnyPreset[]> => {
+  const b = await bundledPresets();
+  return (await userPresets()).filter(p => !b.some(x => x.id === p.id));
+};
+/** Preset reçu d'un autre poste (pas renvoyé au serveur). */
+export const putFromCloud = async (p: AnyPreset): Promise<void> => {
+  const copy = { ...p } as AnyPreset;
+  delete (copy as any).bundled;
+  await getBackend().put(copy);
+};
+/** Preset supprimé sur un autre poste. */
+export const removeFromCloud = async (id: string): Promise<void> => { await getBackend().remove(id); setFavorite(id, false); };
+/** Prévient les listes ouvertes qu'un autre poste a changé des presets. */
+export const notifyRemotePresets = () => emitChange({ type: 'remote' });
+
 // ─── API ───────────────────────────────────────────────────────────────────────
 
 const byFavThenName = (a: AnyPreset, b: AnyPreset) =>
@@ -146,6 +175,7 @@ export const savePreset = async <T extends AnyPreset>(p: T): Promise<T> => {
   const copy = { ...p, id: b.some(x => x.id === p.id) ? newPresetId(p.format === CHAIN_FORMAT ? 'c' : 'p') : p.id, updatedAt: Date.now() } as T;
   delete (copy as any).bundled;
   await getBackend().put(copy);
+  emitChange({ type: 'save', id: copy.id, updatedAt: copy.updatedAt });
   return copy;
 };
 
@@ -157,6 +187,7 @@ export const renamePreset = async (id: string, name: string): Promise<AnyPreset>
   if (!clean) throw new Error('Donne un nom au preset.');
   const next = { ...p, name: clean.slice(0, 80), updatedAt: Date.now() };
   await getBackend().put(next);
+  emitChange({ type: 'save', id: next.id, updatedAt: next.updatedAt });
   return next;
 };
 
@@ -166,6 +197,7 @@ export const deletePreset = async (id: string): Promise<void> => {
   if (p.bundled) throw new Error('Les presets livrés avec NOVA ne se suppriment pas.');
   await getBackend().remove(id);
   setFavorite(id, false);
+  emitChange({ type: 'delete', id, at: Date.now() });
 };
 
 /** Fichier à télécharger (.novapreset / .novachain). */
@@ -181,5 +213,6 @@ export const importPresetText = async (text: string): Promise<AnyPreset> => {
   const clash = existing.some(x => x.id === p.id);
   const saved = { ...p, id: clash ? newPresetId(p.format === CHAIN_FORMAT ? 'c' : 'p') : p.id, updatedAt: Date.now() } as AnyPreset;
   await getBackend().put(saved);
+  emitChange({ type: 'save', id: saved.id, updatedAt: saved.updatedAt });
   return saved;
 };

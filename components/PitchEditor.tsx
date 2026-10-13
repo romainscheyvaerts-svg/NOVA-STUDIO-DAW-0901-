@@ -3,7 +3,7 @@ import type { Clip, Track } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import type { PitchNote, PitchTrack } from '../utils/pitchAnalysis';
 import {
-  autoCorrect, centsFromScale, correctionCurve, CorrectStyle, displayPitchCurve, guessKey, hasEdits, isNeutral, NATURAL_TRANSITION_MS,
+  autoCorrect, centsFromScale, clampFormant, correctionCurve, CorrectStyle, displayPitchCurve, FORMANT_RANGE, guessKey, hasEdits, isNeutral, NATURAL_TRANSITION_MS,
   NEUTRAL_EDIT, NoteEdit, nudgeEdit, snapEdit, targetCenter, targetPitch,
 } from '../utils/pitchCorrect';
 import {
@@ -186,7 +186,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
 
   const curve = useMemo(() => (analysis && notes.length ? correctionCurve(analysis.track, notes, edits) : null), [analysis, notes, edits]);
   const target = useMemo(() => (analysis && curve ? targetPitch(analysis.track, curve) : null), [analysis, curve]);
-  const sig = useMemo(() => JSON.stringify(edits.map(e => (e && !isNeutral(e) ? [e.shift.toFixed(4), e.drift.toFixed(3), e.vibrato.toFixed(3), e.transitionMs ?? null] : 0))), [edits]);
+  const sig = useMemo(() => JSON.stringify(edits.map(e => (e && !isNeutral(e) ? [e.shift.toFixed(4), e.drift.toFixed(3), e.vibrato.toFixed(3), e.transitionMs ?? null, e.formant ?? 0] : 0))), [edits]);
   const changed = hasEdits(edits);
 
   // ----- Rendu (aperçu = ce qui sera appliqué) -----
@@ -708,6 +708,15 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           onChange={e => editNotes(selected, (_, ed) => ({ ...ed, transitionMs: Number(e.target.value) }), false)}
           className="w-28 accent-cyan-400" style={{ minHeight: 30 }} />
         <span className="w-16 font-mono text-[11px] text-cyan-300">{firstSel.transitionMs === undefined ? 'naturelle' : `${firstSel.transitionMs} ms`}</span>
+      </label>
+      <label className="flex items-center gap-2" title="Timbre de la note sans changer sa hauteur : à droite, voix plus fine ; à gauche, plus grave et épaisse (Melodyne : outil Formant). Double-clic : timbre d’origine.">
+        <span className="w-[60px] text-[11px] font-bold text-slate-300">Formant</span>
+        <input type="range" min={-FORMANT_RANGE} max={FORMANT_RANGE} step={0.5} value={firstSel.formant ?? 0} aria-label="Formant de la note"
+          data-testid="pitch-formant" onPointerDown={() => snapshot()}
+          onDoubleClick={() => editNotes(selected, (_, ed) => { const o = { ...ed }; delete o.formant; return o; })}
+          onChange={e => editNotes(selected, (_, ed) => ({ ...ed, formant: clampFormant(Number(e.target.value)) }), false)}
+          className="w-28 accent-fuchsia-400" style={{ minHeight: 30 }} />
+        <span className="w-[86px] font-mono text-[11px] text-fuchsia-300" data-testid="pitch-formant-value">{!firstSel.formant ? 'timbre gardé' : `${firstSel.formant > 0 ? '+' : '−'}${Math.abs(firstSel.formant).toFixed(1).replace('.', ',')} dt`}</span>
       </label>
     </>
   );

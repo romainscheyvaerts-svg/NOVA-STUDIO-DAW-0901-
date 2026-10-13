@@ -24,7 +24,17 @@ export interface NoteEdit {
   vibrato: number;
   /** Transition depuis la note précédente (ms). Absente = naturelle. */
   transitionMs?: number;
+  /**
+   * Formant de la note (demi-tons, −12 à +12). Absent / 0 = timbre gardé.
+   * Positif : voix plus fine (plus « petite ») ; négatif : plus grave, plus
+   * épaisse — sans changer la hauteur (Melodyne : outil Formant).
+   */
+  formant?: number;
 }
+
+/** Course du formant par note (demi-tons). */
+export const FORMANT_RANGE = 12;
+export const clampFormant = (v: number) => Math.max(-FORMANT_RANGE, Math.min(FORMANT_RANGE, Number.isFinite(v) ? Math.round(v * 10) / 10 : 0));
 
 export const NEUTRAL_EDIT: NoteEdit = { shift: 0, drift: 0, vibrato: 1 };
 
@@ -34,7 +44,10 @@ export const NATURAL_TRANSITION_MS = 70;
 export type CorrectStyle = 'naturel' | 'robot';
 
 export const isNeutral = (e?: NoteEdit): boolean =>
-  !e || (Math.abs(e.shift) < 1e-4 && e.drift < 1e-4 && Math.abs(e.vibrato - 1) < 1e-4 && e.transitionMs === undefined);
+  !e || (Math.abs(e.shift) < 1e-4 && e.drift < 1e-4 && Math.abs(e.vibrato - 1) < 1e-4 && e.transitionMs === undefined && !(Math.abs(e.formant || 0) >= 0.05));
+
+/** Au moins une note a un formant déplacé. */
+export const hasFormant = (edits: (NoteEdit | undefined)[]): boolean => edits.some(e => Math.abs(e?.formant || 0) >= 0.05);
 
 const mod12 = (n: number) => ((n % 12) + 12) % 12;
 
@@ -177,6 +190,31 @@ export function correctionCurve(track: PitchTrack, notes: PitchNote[], edits: (N
 
   // Aucune correction là où rien n'est chanté.
   for (let i = 0; i < n; i++) if (Number.isNaN(track.midi[i])) out[i] = 0;
+  return out;
+}
+
+/**
+ * Courbe de formant (demi-tons) trame par trame : la valeur de chaque note,
+ * avec un fondu en cosinus de 20 ms à ses bords (pas de saut de timbre), 0
+ * hors des notes. Le rendu (utils/pitchRender) relit chaque grain plus vite
+ * (formant plus haut) ou plus lentement, sans toucher à l'espacement des grains
+ * (la hauteur ne bouge pas).
+ */
+export function formantCurve(track: PitchTrack, notes: PitchNote[], edits: (NoteEdit | undefined)[]): Float32Array {
+  const n = track.midi.length;
+  const out = new Float32Array(n);
+  if (!hasFormant(edits)) return out;
+  const hopMs = (track.hop / track.sr) * 1000;
+  const fade = Math.max(1, Math.round(20 / hopMs));
+  notes.forEach((note, k) => {
+    const f = clampFormant(edits[k]?.formant || 0);
+    if (Math.abs(f) < 0.05) return;
+    const len = note.i1 - note.i0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.min(1, ease((i + 0.5) / fade), ease((len - i - 0.5) / fade));
+      out[note.i0 + i] += f * w;
+    }
+  });
   return out;
 }
 

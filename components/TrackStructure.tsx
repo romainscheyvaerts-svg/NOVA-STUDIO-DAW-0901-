@@ -16,6 +16,7 @@ import { trackDisplayName } from '../utils/sendLabels';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { openNovaWindow } from '../utils/novaWindows';
 import { canCommit, canPrintBus, canRestore, commitLabel, restoreCommitted } from '../utils/commit';
+import { editSelectionStore } from '../utils/editSelection';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
 import { isAraInsert } from '../utils/araInsert';
 import { canHavePlaylists, playlistsOf } from '../utils/trackPlaylists';
@@ -170,6 +171,10 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
     title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Pro Tools : Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
     onClick: () => openNovaWindow('track-preset', { trackId: id }),
   });
+  // VCA : reporter son gain dans ses pistes (Pro Tools « Coalesce VCA Automation », utils/vcaCoalesce).
+  if (target.isVca) items.push({ label: 'Fusionner le VCA dans ses pistes', icon: 'fa-compress-alt',
+    title: 'Pro Tools « Coalesce VCA » : le gain du VCA passe dans le fader et la courbe de volume de chaque piste ; le son ne change pas, le VCA revient à 0 dB',
+    onClick: () => runEditCommand('vcaCoalesce', { trackIds: [id] }) });
   // Playlists de piste (Pro Tools : New / Duplicate Playlist, sélecteur de playlist).
   if (canHavePlaylists(target)) {
     const { list, activeId } = playlistsOf(target);
@@ -177,6 +182,14 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
       onClick: () => runEditCommand('playlistNew', { trackIds: [id] }) });
     items.push({ label: 'Dupliquer la playlist', icon: 'fa-clone', title: 'Pro Tools « Duplicate Playlist » : copie de travail (avant un nettoyage, une version clean…)',
       onClick: () => runEditCommand('playlistNew', { trackIds: [id], duplicate: true }) });
+    // Plage sélectionnée sur cette piste : la copier / déplacer vers une nouvelle playlist (utils/playlistSelection).
+    const sel = editSelectionStore.get().time;
+    if (sel && sel.end - sel.start > 1e-3 && sel.trackIds.includes(id)) {
+      items.push({ label: 'Copier la sélection vers une nouvelle playlist', icon: 'fa-share-square', title: 'Pro Tools « Copy Selection to New Playlist » : la plage part dans une version à part ; on entend toujours la même',
+        onClick: () => runEditCommand('playlistFromSelection', {}) });
+      items.push({ label: 'Déplacer la sélection vers une nouvelle playlist', icon: 'fa-cut', title: 'Pro Tools « Move Selection to New Playlist » : la plage quitte la version qu’on entend',
+        onClick: () => runEditCommand('playlistFromSelection', { move: true }) });
+    }
     if (list.length > 1) list.filter(p => p.id !== activeId).slice(0, 6).forEach(p => items.push({
       label: `Écouter la playlist « ${p.name} »`, icon: 'fa-list', onClick: () => runEditCommand('playlistSwitch', { trackId: id, id: p.id }),
     }));

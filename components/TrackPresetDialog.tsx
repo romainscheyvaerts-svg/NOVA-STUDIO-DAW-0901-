@@ -17,8 +17,9 @@ import {
   TrackPreset, trackPresetSummary,
 } from '../utils/presets';
 import {
-  deletePreset, exportPresetFile, importPresetText, isFavorite, listTrackPresets, renamePreset, savePreset, setFavorite,
+  deletePreset, exportPresetFile, importPresetText, isFavorite, listTrackPresets, onPresetsChanged, renamePreset, savePreset, setFavorite,
 } from '../services/PresetStore';
+import PresetCloudStatus from './PresetCloudStatus';
 import { novaBridge } from '../services/NovaBridge';
 import { syncLiveVstStates } from '../services/VstFreeze';
 import { saveBlob } from '../utils/saveBlob';
@@ -67,6 +68,8 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
     try { setList(await listTrackPresets()); } catch (e: any) { setList([]); setStatus({ kind: 'error', text: `Track Presets illisibles : ${e?.message || e}` }); }
   }, []);
   useEffect(() => { if (open) { setStatus(null); void refresh(); } }, [open, refresh]);
+  // Track Presets reçus d'un autre poste (services/PresetCloud) : la liste se met à jour.
+  useEffect(() => (open ? onPresetsChanged(c => { if (c.type === 'remote') void refresh(); }) : undefined), [open, refresh]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -145,6 +148,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+          <PresetCloudStatus />
           {status && (
             <p role={status.kind === 'error' ? 'alert' : 'status'} className={`rounded-lg px-3 py-2 text-[12px] ${status.kind === 'error' ? 'bg-red-500/10 text-red-400' : status.kind === 'ok' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-nv-accent/10'}`}>{status.text}</p>
           )}
@@ -239,7 +243,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
           {!simple && (
             <div className="flex justify-between">
               <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={`${btn} text-nv-muted hover:bg-nv-accent/10`}><i className="fas fa-file-import mr-1" />Importer un {CHAIN_EXT}…</button>
-              <span className="self-center text-[10px] text-nv-muted" title="Pas encore de stockage en ligne pour les modèles et les presets : exporte-les pour les emporter.">Rangés sur cet appareil</span>
+              <span className="self-center text-[10px] text-nv-muted" title="Gardés sur cet appareil (hors ligne compris) et synchronisés avec ton compte Make Music quand tu es connecté : l’état est en haut de la fenêtre. Exporter : pour les donner à quelqu’un.">Sur cet appareil · synchro : voir en haut</span>
               <input ref={fileRef} type="file" accept={`${CHAIN_EXT},application/json`} className="hidden" onChange={e => void onImport(e.target.files?.[0])} />
             </div>
           )}

@@ -4,6 +4,7 @@ import type { Track } from '../types';
 import { runEditCommand } from '../utils/editCommands';
 import { canHavePlaylists, hasPlaylists, playlistsOf, playlistSummary } from '../utils/trackPlaylists';
 import { chordLabel, keysOf } from '../utils/keymap';
+import { editSelectionStore } from '../utils/editSelection';
 
 /**
  * Playlists d'une piste (Pro Tools : sélecteur de playlist de l'en-tête) :
@@ -78,6 +79,22 @@ export const PlaylistMenu: React.FC<{ track: Track; anchor: { x: number; y: numb
         title="Pro Tools « Duplicate Playlist » : copie de travail avant un nettoyage, une version clean, un autre comp">
         <i className="fas fa-clone w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Dupliquer la playlist</span><span className="text-[10px] text-nv-muted">{keyHint('pt.playlistDuplicate')}</span>
       </button>
+      {(() => {
+        const sel = editSelectionStore.get().time;
+        if (!sel || sel.end - sel.start < 1e-3 || !sel.trackIds.includes(track.id)) return null;
+        return (<>
+          <button type="button" role="menuitem" data-testid="playlist-from-selection" className={`${row} hover:bg-nv-accent/10`}
+            onClick={() => { run('playlistFromSelection', {}); onClose(); }}
+            title="Pro Tools « Copy Selection to New Playlist » : la plage sélectionnée part dans une version à part ; on entend toujours la même">
+            <i className="fas fa-share-square w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Copier la sélection vers une nouvelle playlist</span>
+          </button>
+          <button type="button" role="menuitem" data-testid="playlist-move-selection" className={`${row} hover:bg-nv-accent/10`}
+            onClick={() => { run('playlistFromSelection', { move: true }); onClose(); }}
+            title="Pro Tools « Move Selection to New Playlist » : la plage quitte la version qu’on entend">
+            <i className="fas fa-cut w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Déplacer la sélection vers une nouvelle playlist</span>
+          </button>
+        </>);
+      })()}
     </div>,
     document.body,
   );

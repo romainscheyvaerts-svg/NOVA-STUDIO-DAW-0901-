@@ -108,22 +108,32 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
       , document.body)}
       {writeOpen && createPortal(
         <div role="menu" aria-label="Écrire l’automation sur la plage" data-testid="range-write"
-          className="fixed z-[650] flex flex-col gap-0.5 rounded-xl border border-sky-400/30 bg-nv-surface p-1.5 shadow-2xl min-w-[260px]"
+          className="fixed z-[650] flex flex-col gap-0.5 rounded-xl border border-sky-400/30 bg-nv-surface p-1.5 shadow-2xl min-w-[260px] max-h-[calc(100vh-120px)] overflow-y-auto"
           style={(() => { const r = barRef.current?.getBoundingClientRect(); return r ? { bottom: Math.max(8, window.innerHeight - r.top + 4), left: Math.max(8, r.left) } : {}; })()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setWriteOpen(false); } }}>
           <span className="px-2 pt-0.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-sky-200">Écrire la valeur actuelle sur la plage</span>
           {([
-            { id: 'pt.writeCurrent', label: 'Volume (position du fader)', arg: {} },
-            { id: 'pt.writePan', label: 'Pan', arg: { param: 'pan' } },
-            { id: 'pt.writeAll', label: 'Tous les réglages automatisés', arg: { all: true } },
-          ]).map(o => (
+            { id: 'pt.writeCurrent', label: 'Volume (position du fader)', arg: {}, cmd: 'writeAutomation' as const },
+            { id: 'pt.writePan', label: 'Pan', arg: { param: 'pan' }, cmd: 'writeAutomation' as const },
+            { id: 'pt.writeAll', label: 'Tous les réglages automatisés', arg: { all: true }, cmd: 'writeAutomation' as const },
+            { sep: 'Volume actuel sur une étendue' },
+            { id: 'pt.writeToStart', label: 'Du début jusqu’ici (Write to Start)', arg: { span: 'start' }, cmd: 'writeAutomationSpan' as const },
+            { id: 'pt.writeToEnd', label: 'D’ici à la fin (Write to End)', arg: { span: 'end' }, cmd: 'writeAutomationSpan' as const },
+            { id: 'pt.writeToAll', label: 'Tout le morceau (Write to All)', arg: { span: 'all' }, cmd: 'writeAutomationSpan' as const },
+            { id: 'pt.writeToPunch', label: 'Zone de punch (Write to Punch)', arg: { span: 'punch' }, cmd: 'writeAutomationSpan' as const },
+            { sep: 'Glisser d’une valeur à l’autre' },
+            { id: 'pt.glide', label: 'Rampe droite sur la plage (Glide)', arg: {}, cmd: 'glideAutomation' as const },
+            { id: 'pt.glideCurrent', label: 'Rampe jusqu’au fader (Glide to Current)', arg: { toCurrent: true }, cmd: 'glideAutomation' as const },
+          ] as ({ id: string; label: string; arg: any; cmd: 'writeAutomation' | 'writeAutomationSpan' | 'glideAutomation' } | { sep: string })[]).map(o => ('sep' in o ? (
+            <span key={o.sep} className="px-2 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-200/80 border-t border-white/10 mt-0.5">{o.sep}</span>
+          ) : (
             <button key={o.id} type="button" role="menuitem" data-testid={`range-${o.id}`}
-              onClick={() => { runEditCommand('writeAutomation', o.arg); setWriteOpen(false); }}
+              onClick={() => { runEditCommand(o.cmd, o.arg); setWriteOpen(false); }}
               className="nova-hit-tactile flex min-h-[34px] [@media(pointer:coarse)]:min-h-[44px] items-center gap-2 rounded-lg px-2 text-left text-[12px] font-semibold text-slate-100 hover:bg-white/10">
               <span className="flex-1">{o.label}</span>
               <span className="text-[10px] text-slate-400">{keysOf(o.id)[0] ? chordLabel(keysOf(o.id)[0]) : ''}</span>
             </button>
-          ))}
+          )))}
         </div>
       , document.body)}
     </>

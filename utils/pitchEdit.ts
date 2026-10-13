@@ -14,7 +14,7 @@
  */
 import type { BreathEdit, Clip, PitchEditInfo, StoredNoteEdit } from '../types';
 import { analyzePitch, monoOf, segmentNotes, PitchNote, PitchTrack } from './pitchAnalysis';
-import { correctionCurve, CorrectStyle, NoteEdit, isNeutral } from './pitchCorrect';
+import { correctionCurve, CorrectStyle, formantCurve, hasFormant, NoteEdit, isNeutral } from './pitchCorrect';
 import { renderPitch } from './pitchRender';
 
 export type { StoredNoteEdit, PitchEditInfo } from '../types';
@@ -75,7 +75,7 @@ export function storeEdits(notes: PitchNote[], edits: (NoteEdit | undefined)[], 
     const e = edits[k];
     if (!e || isNeutral(e)) return;
     const r = (v: number) => Math.round(v * 10000) / 10000;
-    out.push({ t0: r(n.start + regionStart), t1: r(n.end + regionStart), shift: r(e.shift), drift: r(e.drift), vibrato: r(e.vibrato), ...(e.transitionMs !== undefined ? { transitionMs: Math.round(e.transitionMs) } : {}), ...(manual?.has(k) ? { manual: true } : {}) });
+    out.push({ t0: r(n.start + regionStart), t1: r(n.end + regionStart), shift: r(e.shift), drift: r(e.drift), vibrato: r(e.vibrato), ...(e.transitionMs !== undefined ? { transitionMs: Math.round(e.transitionMs) } : {}), ...(Math.abs(e.formant || 0) >= 0.05 ? { formant: Math.round((e.formant || 0) * 10) / 10 } : {}), ...(manual?.has(k) ? { manual: true } : {}) });
   });
   return out;
 }
@@ -152,14 +152,14 @@ export interface AnalysisResult {
 
 export type PitchJob =
   | { kind: 'analyze'; channels: Float32Array[]; sr: number }
-  | { kind: 'render'; channels: Float32Array[]; track: PitchTrack; curve: Float32Array };
+  | { kind: 'render'; channels: Float32Array[]; track: PitchTrack; curve: Float32Array; formant?: Float32Array };
 
 export function runJob(job: PitchJob): { analysis?: AnalysisResult; channels?: Float32Array[] } {
   if (job.kind === 'analyze') {
     const track = analyzePitch(monoOf(job.channels), job.sr);
     return { analysis: { track, notes: segmentNotes(track) } };
   }
-  return { channels: renderPitch(job.channels, job.track, job.curve) };
+  return { channels: renderPitch(job.channels, job.track, job.curve, undefined, job.formant) };
 }
 
 /** Tranche de canaux [start, end[ (secondes) d'un AudioBuffer, copiée. */
@@ -200,7 +200,8 @@ export async function analyzeRegion(buffer: AudioBuffer, start: number, end: num
 /** Rend la partie [start, end[ (s) d'un son avec la courbe de correction. */
 export async function renderRegion(ctx: BaseAudioContext, buffer: AudioBuffer, start: number, end: number, track: PitchTrack, notes: PitchNote[], edits: (NoteEdit | undefined)[]): Promise<AudioBuffer> {
   const curve = correctionCurve(track, notes, edits);
-  const r = await inWorker({ kind: 'render', channels: sliceChannels(buffer, start, end), track, curve });
+  const formant = hasFormant(edits) ? formantCurve(track, notes, edits) : undefined;
+  const r = await inWorker({ kind: 'render', channels: sliceChannels(buffer, start, end), track, curve, ...(formant ? { formant } : {}) });
   const ch = r.channels!;
   const out = ctx.createBuffer(ch.length, ch[0].length, buffer.sampleRate);
   ch.forEach((c, i) => out.getChannelData(i).set(c));

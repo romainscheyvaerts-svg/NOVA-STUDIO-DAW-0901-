@@ -103,6 +103,8 @@ def _cat(path: str, method: str) -> str:
         return "pochettes"
     if path.startswith("/rest/v1/instrumentals"):
         return "catalogue_liste"
+    if path.startswith("/rest/v1/nova_presets"):
+        return "presets_cloud_" + ("ecriture" if method in ("POST", "PATCH", "PUT", "DELETE") else "lecture")
     if path.startswith("/rest/v1/"):
         return "rest_ecriture" if method in ("POST", "PATCH", "PUT", "DELETE") else "rest_autres"
     if path.startswith("/storage/v1/"):
@@ -417,6 +419,123 @@ def simulate_quota(on: bool = True):
     QUOTA["actif"] = bool(on)
 
 
+# ------------------------------------------- comptes et tables simulés (sur demande)
+# Pour les scénarios « connectés » (ex. presets synchronisés entre deux postes) : un compte
+# simulé (jeton JWT factice : seul « sub » compte) et des tables avec état, partagées par tous
+# les navigateurs du processus, avec la règle RLS « chacun ses lignes ». Rien n'est simulé
+# tant qu'un scénario ne le demande pas.
+COMPTES: dict = {}            # jeton d'accès -> utilisateur
+TABLES: dict = {}             # nom -> {"cle": (...), "lignes": {cle: ligne}, "regle": fonction}
+# Tables écrites par NOVA mais pas encore créées en production : réponse du vrai serveur
+# (404 PGRST205). Un scénario peut les simuler avec table_simulee().
+TABLES_ABSENTES = {"nova_presets"}
+_HORLOGE = {"n": 0}
+
+
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def compte_simule(user_id: str, email: str) -> dict:
+    """Déclare un compte ; renvoie la session à poser dans le localStorage du navigateur
+    (clé sb-<projet>-auth-token). Aucune vraie connexion : le jeton n'a pas de signature valable."""
+    now = int(time.time())
+    head = {"alg": "HS256", "typ": "JWT"}
+    payload = {"sub": user_id, "role": "authenticated", "aud": "authenticated", "email": email, "exp": now + 30 * 86400}
+    token = _b64url(json.dumps(head).encode()) + "." + _b64url(json.dumps(payload).encode()) + ".qa-hors-prod"
+    user = {"id": user_id, "aud": "authenticated", "role": "authenticated", "email": email,
+            "email_confirmed_at": "2026-10-01T00:00:00Z", "app_metadata": {}, "user_metadata": {}}
+    COMPTES[token] = user
+    return {"access_token": token, "refresh_token": "qa-refresh-" + user_id, "token_type": "bearer",
+            "expires_in": 30 * 86400, "expires_at": now + 30 * 86400, "user": user}
+
+
+def _token_of(headers: dict) -> str:
+    auth = headers.get("authorization", "")
+    return auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+
+
+def _sub_of(headers: dict):
+    tok = _token_of(headers)
+    return COMPTES[tok]["id"] if tok in COMPTES else None
+
+
+def _horodatage() -> str:
+    """Heure « serveur » strictement croissante (curseur updated_at des clients)."""
+    _HORLOGE["n"] += 1
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".%06d+00:00" % _HORLOGE["n"]
+
+
+def _regle_nova_presets(ancienne, nouvelle: dict):
+    """Règles de supabase/migrations/20261012200000_nova_presets.sql : la plus récente gagne,
+    updated_at = heure du serveur, ligne supprimée vidée."""
+    if ancienne and int(nouvelle.get("client_updated_at") or 0) < int(ancienne.get("client_updated_at") or 0):
+        return None
+    ligne = {**(ancienne or {}), **nouvelle}
+    ligne.setdefault("device_id", "")
+    ligne.setdefault("deleted", False)
+    if ligne.get("deleted"):
+        ligne["body"] = {}
+    ligne["updated_at"] = _horodatage()
+    return ligne
+
+
+def table_simulee(nom: str, cle=("user_id", "preset_id"), regle=None) -> dict:
+    """Simule une table avec état (RLS : user_id = le compte du jeton)."""
+    if regle is None and nom == "nova_presets":
+        regle = _regle_nova_presets
+    TABLES[nom] = {"cle": tuple(cle), "lignes": {}, "regle": regle}
+    return TABLES[nom]
+
+
+def table_retiree(nom: str):
+    TABLES.pop(nom, None)
+
+
+def _rest_table(method: str, table: str, q: list, h: dict, body, cors: dict):
+    if table not in TABLES:
+        return Resp(404, cors, {"code": "PGRST205", "details": None, "hint": None,
+                                "message": "Could not find the table 'public." + table + "' in the schema cache"})
+    t = TABLES[table]
+    sub = _sub_of(h)
+    if not sub:
+        return Resp(401, cors, {"code": "42501", "message": "permission denied for table " + table})
+    mine = [r for r in t["lignes"].values() if r.get("user_id") == sub]
+    if method in ("GET", "HEAD"):
+        st, hdr, payload = postgrest(mine, q, h.get("accept", ""), h.get("prefer", ""), method)
+        return Resp(st, {**cors, **hdr}, payload if payload is not None else b"",
+                    "application/json; charset=utf-8" if payload is not None else None)
+    if method == "POST":
+        try:
+            rows = json.loads(body or b"[]")
+        except Exception:
+            return Resp(400, cors, {"code": "PGRST102", "message": "Empty or invalid json"})
+        rows = rows if isinstance(rows, list) else [rows]
+        out = []
+        for r in rows:
+            r = {**r, "user_id": r.get("user_id", sub)}
+            if r["user_id"] != sub:
+                return Resp(403, cors, {"code": "42501", "message": 'new row violates row-level security policy for table "' + table + '"'})
+            k = tuple(r.get(c) for c in t["cle"])
+            ancienne = t["lignes"].get(k)
+            if ancienne and "merge-duplicates" not in h.get("prefer", ""):
+                return Resp(409, cors, {"code": "23505", "message": "duplicate key value violates unique constraint"})
+            ligne = t["regle"](ancienne, r) if t["regle"] else {**(ancienne or {}), **r}
+            if ligne is not None:
+                t["lignes"][k] = ligne
+                out.append(ligne)
+        if "return=representation" in h.get("prefer", ""):
+            return Resp(201, cors, out)
+        return Resp(201, cors, b"")
+    if method == "DELETE":
+        filt = [(c, v) for c, v in q if c not in ("select", "order", "limit", "offset")]
+        gone = [k for k, r in t["lignes"].items() if r.get("user_id") == sub and all(_match(r, c, v) for c, v in filt)]
+        for k in gone:
+            del t["lignes"][k]
+        return Resp(204, cors, b"")
+    return Resp(405, cors, {"message": "méthode non simulée"})
+
+
 def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | None:
     """Réponse simulée pour une requête *.supabase.co, ou None si non simulée (→ bloquée)."""
     h = {k.lower(): v for k, v in (headers or {}).items()}
@@ -473,6 +592,8 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
     # ---------------- REST (PostgREST)
     if path.startswith("/rest/v1/"):
         table = path[len("/rest/v1/"):].strip("/")
+        if table in TABLES or table in TABLES_ABSENTES:
+            return _rest_table(method, table, q, h, body, cors)
         if method in ("POST", "PATCH", "PUT", "DELETE") and not table.startswith("rpc/"):
             prefer = h.get("prefer", "")
             if "return=representation" in prefer:
@@ -524,6 +645,8 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
     # ---------------- Auth (aucun compte : chaque scénario connecté pose ses propres routes)
     if path.startswith("/auth/v1/"):
         ep = path[len("/auth/v1/"):]
+        if ep.startswith("user") and _sub_of(h):
+            return Resp(200, cors, COMPTES[_token_of(h)])
         if ep.startswith("user"):
             return Resp(401, cors, {"code": 401, "error_code": "no_authorization", "msg": "QA hors production : aucune session"})
         if ep.startswith("token"):
