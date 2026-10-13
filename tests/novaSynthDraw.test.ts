@@ -66,3 +66,39 @@ describe('Écrans du synthé : calculs de dessin', () => {
     expect(amp(lfoPath('sine', 2, 1, 100, 40))).toBeGreaterThan(amp(lfoPath('sine', 2, 0.1, 100, 40)) * 3);
   });
 });
+
+import { normalizeSynth, driveCurve, defaultSynth, settingsKey } from '../utils/novaSynth';
+
+describe('Synthé NOVA : saturation et enveloppe de hauteur (facultatives)', () => {
+  it('absentes ou nulles : rien n\'est écrit dans les réglages (sons existants identiques)', () => {
+    const a = normalizeSynth(defaultSynth());
+    expect('drive' in a).toBe(false);
+    expect('pitchEnv' in a).toBe(false);
+    const b = normalizeSynth({ ...defaultSynth(), drive: 0, pitchEnv: { amount: 0, decay: 0.1 } });
+    expect(settingsKey(b)).toBe(settingsKey(a));
+  });
+
+  it('bornées et stables', () => {
+    const s = normalizeSynth({ ...defaultSynth(), drive: 7, pitchEnv: { amount: 99, decay: -1 } });
+    expect(s.drive).toBe(1);
+    expect(s.pitchEnv).toEqual({ amount: 24, decay: 0.02 });
+    expect(normalizeSynth(s)).toEqual(s);
+  });
+
+  it('courbe de saturation : impaire, monotone, ±1 → ±1', () => {
+    const c = driveCurve(0.5, 101);
+    expect(c[0]).toBeCloseTo(-1, 6);
+    expect(c[100]).toBeCloseTo(1, 6);
+    expect(c[50]).toBeCloseTo(0, 6);
+    for (let i = 1; i < c.length; i++) expect(c[i]).toBeGreaterThan(c[i - 1]);
+    // Plus de drive = plus de gain aux petits niveaux.
+    expect(driveCurve(1, 101)[55]).toBeGreaterThan(driveCurve(0.1, 101)[55]);
+  });
+});
+
+describe('Synthé NOVA : arrivée progressive du LFO (facultative)', () => {
+  it('absente ou nulle : rien n\'est écrit ; bornée à 3 s', () => {
+    expect('lfoDelay' in normalizeSynth({ ...defaultSynth(), lfoDelay: 0 })).toBe(false);
+    expect(normalizeSynth({ ...defaultSynth(), lfoDelay: 9 }).lfoDelay).toBe(3);
+  });
+});

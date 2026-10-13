@@ -16,7 +16,7 @@
  */
 import {
   NovaSynthSettings, VoiceSlot, normalizeSynth, noteFreq, unisonVoices, oscCents, velocityGain, cutoffFor,
-  mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart,
+  mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart, driveCurve,
   MIN_ATTACK, MIN_RELEASE, STEAL_FADE, RELEASE_TAIL,
 } from '../utils/novaSynth';
 import { SynthControllers } from './midiControllers';
@@ -39,6 +39,15 @@ interface Voice extends VoiceSlot {
   /** Débranche la voix des contrôleurs MIDI (pitch bend, vibrato, brillance). */
   detach?: () => void;
 }
+
+/** Courbes de saturation partagées (une par valeur de drive). */
+const curveCache = new Map<number, Float32Array>();
+const curveFor = (drive: number) => {
+  const key = Math.round(drive * 1000) / 1000;
+  let c = curveCache.get(key);
+  if (!c) { c = driveCurve(key); curveCache.set(key, c); }
+  return c;
+};
 
 const noiseCache = new WeakMap<BaseAudioContext, AudioBuffer>();
 /** Bruit blanc DÉTERMINISTE (même graine partout) : lecture et export identiques. */
@@ -309,6 +318,16 @@ export class NovaSynthNode {
     }
     let head: AudioNode = mix;
     for (const f of filters) { head.connect(f); head = f; }
+    // Saturation (facultative) : entre le filtre et l'ampli, comme un étage de drive.
+    // Sans drive, aucun nœud : le graphe est celui d'avant, à l'échantillon près.
+    if (s.drive && s.drive > 0) {
+      const ws = ctx.createWaveShaper();
+      ws.curve = curveFor(s.drive);
+      ws.oversample = '2x';
+      head.connect(ws);
+      head = ws;
+      nodes.push(ws);
+    }
     head.connect(amp);
     const rel = ctx.createGain();
     amp.connect(rel);
@@ -353,6 +372,19 @@ export class NovaSynthNode {
         nodes.push(osc, g);
       }
     }
+    // --- Enveloppe de hauteur (facultative) : une source constante ajoutée au désaccord de
+    // chaque oscillateur, qui part de amount demi-tons et retombe à 0 (τ = decay / 4).
+    // Indépendante du glissé et des contrôleurs MIDI, qui s'ajoutent aussi au désaccord.
+    if (s.pitchEnv && s.pitchEnv.amount !== 0 && oscs.length) {
+      const pe = ctx.createConstantSource();
+      pe.offset.value = 0;
+      pe.offset.setValueAtTime(s.pitchEnv.amount * 100, t);
+      pe.offset.setTargetAtTime(0, t, Math.max(1e-3, s.pitchEnv.decay / 4));
+      oscs.forEach(o => pe.connect(o.detune));
+      pe.start(t);
+      sources.push(pe);
+      nodes.push(pe);
+    }
     // --- Bruit (même départ pour une même touche : déterministe)
     if (s.noise.level > 0) {
       const n = ctx.createBufferSource();
@@ -388,6 +420,17 @@ export class NovaSynthNode {
         rel.connect(trem);
         tail = trem;
         nodes.push(trem);
+      }
+      // Arrivée progressive (facultative) : la profondeur monte de 0 à sa valeur.
+      if (s.lfoDelay && s.lfoDelay > 0) {
+        const full = lg.gain.value;
+        lg.gain.setValueAtTime(0, t);
+        lg.gain.linearRampToValueAtTime(full, t + s.lfoDelay);
+        if (tail !== rel && 'gain' in tail) {
+          const tg = (tail as GainNode).gain, base = tg.value;
+          tg.setValueAtTime(1, t);
+          tg.linearRampToValueAtTime(base, t + s.lfoDelay);
+        }
       }
       lfo.start(t);
       sources.push(lfo);
