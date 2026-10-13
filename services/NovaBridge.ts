@@ -15,6 +15,9 @@
  *   autotune du PC réglé sur la gamme du beat, mix piloté par Nova.
  * - v8 : séparation de stems (module optionnel Demucs installé à la demande sur le
  *   PC) : STEMS_STATUS / STEMS_INSTALL / STEMS_CANCEL / STEMS_SEPARATE.
+ * - v12 (R24) : voix par l'IA locale (module optionnel) : retirer la réverbe de la
+ *   pièce (DeepFilterNet) et transcrire les paroles (Whisper) : VOICE_STATUS /
+ *   VOICE_INSTALL / VOICE_CANCEL / VOICE_DEVERB / VOICE_TRANSCRIBE.
  *
  * - v10 : pannes isolées. Un plugin qui plante, se fige ou sort des NaN passe en
  *   « panne » sur le pont (son sec, piste alignée) : événement PLUGIN_CRASHED
@@ -123,6 +126,8 @@ export interface BridgeState {
   projects?: boolean;
   /** (v14) Pont Pro Tools : prises BWF écrites dans le dossier choisi par l'ingé (services/ProToolsBridge). */
   protools?: boolean;
+  /** (v12, R24) Voix par l'IA locale : retirer la réverbe, transcrire les paroles. */
+  voice?: boolean;
 }
 
 /** Première version du pont qui sait caler un compresseur sur une réduction cible. */
@@ -203,6 +208,68 @@ export interface SeparationResult {
 
 /** Erreur de séparation : code « not_installed », « cancelled » ou « error ». */
 export class StemsError extends Error {
+  constructor(message: string, readonly code: 'not_installed' | 'cancelled' | 'error' | 'unavailable') {
+    super(message);
+  }
+}
+
+/** Première version du pont qui a la voix par l'IA locale (R24). */
+export const BRIDGE_VOICE_VERSION = 12;
+
+export type VoiceFeature = 'transcribe' | 'deverb';
+
+export interface VoiceFeatureStatus {
+  installed: boolean;
+  /** Modèle (« large-v3-turbo ») ou moteur (« deepfilternet3 »). */
+  model: string | null;
+  device: 'cuda' | 'cpu' | null;
+  gpu: string | null;
+  /** Octets à télécharger pour l'installer maintenant (annoncé avant). */
+  downloadBytes: number | null;
+}
+
+/** État du module « voix par l'IA locale » sur le PC (VOICE_STATUS). */
+export interface VoiceModuleStatus {
+  installing: boolean;
+  installFeature: VoiceFeature | null;
+  install: VoiceEvent | null;
+  features: Record<VoiceFeature, VoiceFeatureStatus>;
+  sizeBytes: number | null;
+}
+
+/** Événement du pont (VOICE_EVENT) : installation, déréverbération ou transcription en cours. */
+export interface VoiceEvent {
+  kind: 'install' | 'deverb' | 'transcribe';
+  event: 'progress' | 'done' | 'error' | 'cancelled' | 'device' | 'fallback' | string;
+  feature?: VoiceFeature;
+  jobId?: string | null;
+  pct?: number;
+  message?: string;
+  step?: string;
+  device?: string;
+}
+
+export interface VoiceWord { w: string; s: number; e: number; p?: number; b?: boolean }
+
+export interface TranscriptionResult {
+  words: VoiceWord[];
+  language: string;
+  model: string;
+  device: string;
+  seconds: number;
+}
+
+export interface DeverbResult {
+  channels: Float32Array[];
+  sampleRate: number;
+  device: string;
+  seconds: number;
+  /** B7 : durée de réverbération de la pièce lue sur la prise (s), si mesurée. */
+  rt60?: number;
+}
+
+/** Erreur de la voix par l'IA : code « not_installed », « cancelled », « error » ou « unavailable ». */
+export class VoiceError extends Error {
   constructor(message: string, readonly code: 'not_installed' | 'cancelled' | 'error' | 'unavailable') {
     super(message);
   }
@@ -314,6 +381,9 @@ class NovaBridgeService {
   private projectFrames = new Map<number, DiskAudio[]>();
   private araListeners = new Set<(e: AraEvent) => void>();
   private araInsertListeners = new Map<string, Set<(e: any) => void>>();
+  private voiceListeners = new Set<(e: VoiceEvent) => void>();
+  /** req_id de chaque calcul « voix » en cours (délai prolongé à chaque progression). */
+  private voiceJobs = new Map<string, number>();
 
   // --- État ---------------------------------------------------------------
 
@@ -439,6 +509,7 @@ class NovaBridgeService {
             sidechain: !!hello.sidechain && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
             projects: !!hello.projects && (Number(hello.version) || 0) >= BRIDGE_PROJECTS_VERSION,
             protools: !!hello.protools && (Number(hello.version) || 0) >= BRIDGE_PROTOOLS_VERSION,
+            voice: !!hello.voice && (Number(hello.version) || 0) >= BRIDGE_VOICE_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -459,6 +530,7 @@ class NovaBridgeService {
         this.stemFrames.clear();
         this.projectFrames.clear();
         this.stemsJobs.clear();
+        this.voiceJobs.clear();
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
           if (this.wantsAutoReconnect()) {
@@ -497,7 +569,8 @@ class NovaBridgeService {
       this.pending.delete(msg.req_id);
       window.clearTimeout(p.timer);
       if (msg.success === false) {
-        const err: Error & { licenseRequired?: boolean; unstable?: boolean; quarantined?: boolean } = new Error(msg.error || 'Erreur du pont VST');
+        const err: Error & { licenseRequired?: boolean; unstable?: boolean; quarantined?: boolean; code?: string } = new Error(msg.error || 'Erreur du pont VST');
+        if (typeof msg.code === 'string') err.code = msg.code;
         // (v7) Chargement discret refusé par une fenêtre de licence / démo.
         if (msg.license_required) err.licenseRequired = true;
         // Plugin qui plante le pont (isolé par le pont, qui continue) : à ne pas recharger.
@@ -509,6 +582,10 @@ class NovaBridgeService {
     }
     if (msg && msg.action === 'STEMS_EVENT') {
       this.onStemsEventMsg(msg);
+      return;
+    }
+    if (msg && msg.action === 'VOICE_EVENT') {
+      this.onVoiceEventMsg(msg);
       return;
     }
     if (msg && msg.action === 'ARA_EVENT') {
@@ -597,6 +674,11 @@ class NovaBridgeService {
       this.projectFrames.delete(meta.req_id);
       if (!meta.success) p.reject(new Error(meta.error || 'Projet illisible sur le disque'));
       else p.resolve({ record: meta.record, missing: meta.missing || [], audio });
+      return;
+    }
+    if (meta.action === 'VOICE_DEVERB') {
+      if (!meta.success) p.reject(new VoiceError(meta.error || 'Calcul impossible', meta.code === 'not_installed' || meta.code === 'cancelled' ? meta.code : 'error'));
+      else p.resolve({ ...meta, channels: deinterleave() });
       return;
     }
     if (meta.action === 'STEMS_SEPARATE') {
@@ -1081,6 +1163,93 @@ class NovaBridgeService {
     return this.request({ action: 'PROJECT_LOAD', project_id: projectId, ...(versionId ? { version_id: versionId } : {}) }, 30000);
   }
 
+  // --- Voix par l'IA locale (pont v12, R24) -------------------------------------
+
+  /** Progression de l'installation, d'une déréverbération ou d'une transcription. */
+  onVoiceEvent(cb: (e: VoiceEvent) => void): () => void {
+    this.voiceListeners.add(cb);
+    return () => { this.voiceListeners.delete(cb); };
+  }
+
+  private onVoiceEventMsg(msg: any) {
+    const kind = msg.kind === 'install' || msg.kind === 'deverb' ? msg.kind : 'transcribe';
+    const e: VoiceEvent = {
+      kind, event: String(msg.event || 'progress'), feature: msg.feature, jobId: msg.job_id ?? null,
+      pct: typeof msg.pct === 'number' ? msg.pct : undefined, message: msg.message, step: msg.step, device: msg.device,
+    };
+    // Un calcul qui avance n'a pas expiré : on repousse son délai.
+    const reqId = e.jobId ? this.voiceJobs.get(e.jobId) : undefined;
+    const p = reqId !== undefined ? this.pending.get(reqId) : undefined;
+    if (p && reqId !== undefined) {
+      window.clearTimeout(p.timer);
+      p.timer = window.setTimeout(() => {
+        this.pending.delete(reqId);
+        p.reject(new VoiceError('Le pont ne donne plus de nouvelles du calcul', 'error'));
+      }, VOICE_SILENCE_MS);
+    }
+    this.voiceListeners.forEach(cb => { try { cb(e); } catch { /* écouteur fautif */ } });
+  }
+
+  private requireVoice() {
+    if (!this.isConnected()) throw new VoiceError('Pont non connecté', 'unavailable');
+    if (!this.state.voice) throw new VoiceError('Mets à jour Nova Studio pour Windows pour utiliser la voix par l’IA.', 'unavailable');
+  }
+
+  async voiceStatus(): Promise<VoiceModuleStatus> {
+    this.requireVoice();
+    return parseVoiceStatus(await this.request({ action: 'VOICE_STATUS' }, 30000));
+  }
+
+  /** Installe une fonction (transcription ou déréverbération) sur le PC, en arrière-plan. */
+  async voiceInstall(feature: VoiceFeature, variant: 'cpu' | 'cuda' | 'auto' = 'auto'): Promise<VoiceModuleStatus & { started: boolean }> {
+    this.requireVoice();
+    const r = await this.request({ action: 'VOICE_INSTALL', feature, variant }, 30000);
+    return { ...parseVoiceStatus(r), started: !!r.started };
+  }
+
+  async voiceCancel(target: { jobId: string } | { install: true }): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    const r = await this.request('install' in target ? { action: 'VOICE_CANCEL', install: true } : { action: 'VOICE_CANCEL', job_id: target.jobId });
+    return !!r.cancelled;
+  }
+
+  /** Envoie un son au pont et attend la réponse (délai prolongé à chaque progression). */
+  private voiceJob(action: 'VOICE_DEVERB' | 'VOICE_TRANSCRIBE', jobId: string, meta: Record<string, any>, channels: Float32Array[]): Promise<any> {
+    this.requireVoice();
+    const ws = this.ws!;
+    const req_id = this.nextId++;
+    const buf = buildType2Frame({ action, req_id, job_id: jobId, ...meta }, channels);
+    this.voiceJobs.set(jobId, req_id);
+    return new Promise<any>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(req_id);
+        reject(new VoiceError('Le pont ne répond pas', 'error'));
+      }, VOICE_SILENCE_MS);
+      this.pending.set(req_id, { resolve, reject, timer });
+      ws.send(buf);
+    }).catch((e: any) => {
+      if (e instanceof VoiceError) throw e;
+      const code = e?.code === 'not_installed' || e?.code === 'cancelled' ? e.code : 'error';
+      throw new VoiceError(e?.message || 'Calcul impossible', code);
+    }).finally(() => { this.voiceJobs.delete(jobId); });
+  }
+
+  /** Voix sans la réverbe de la pièce (100 %, même longueur, mêmes canaux). */
+  async deverbVoice(opts: { jobId: string; channels: Float32Array[]; sampleRate: number }): Promise<DeverbResult> {
+    const r = await this.voiceJob('VOICE_DEVERB', opts.jobId, { sample_rate: Math.round(opts.sampleRate) }, opts.channels);
+    return { channels: r.channels, sampleRate: Number(r.sample_rate) || opts.sampleRate, device: String(r.device || 'cpu'), seconds: Number(r.seconds) || 0,
+      ...(Number(r.rt60) > 0 ? { rt60: Number(r.rt60) } : {}) };
+  }
+
+  /** Paroles horodatées mot par mot (temps en secondes du son envoyé). */
+  async transcribeVoice(opts: { jobId: string; channels: Float32Array[]; sampleRate: number; language: 'fr' | 'en' | 'mix' | 'auto' }): Promise<TranscriptionResult> {
+    const r = await this.voiceJob('VOICE_TRANSCRIBE', opts.jobId, { sample_rate: Math.round(opts.sampleRate), language: opts.language }, opts.channels);
+    const words: VoiceWord[] = (Array.isArray(r.words) ? r.words : [])
+      .filter((w: any) => w && typeof w.w === 'string' && isFinite(w.s) && isFinite(w.e))
+      .map((w: any) => ({ w: String(w.w), s: Number(w.s), e: Number(w.e), ...(isFinite(w.p) ? { p: Number(w.p) } : {}), ...(w.b ? { b: true } : {}) }));
+    return { words, language: String(r.language || opts.language), model: String(r.model || ''), device: String(r.device || 'cpu'), seconds: Number(r.seconds) || 0 };
+  }
+
   // --- Plugins ARA : Melodyne, VocAlign (pont v9) ----------------------------
 
   onAraEvent(cb: (e: AraEvent) => void): () => void {
@@ -1233,6 +1402,26 @@ class NovaBridgeService {
 
 /** Sans nouvelles du pont pendant une séparation (pas une durée totale). */
 const STEMS_SILENCE_MS = 120000;
+/** Sans nouvelle du pont pendant ce temps, un calcul « voix » est abandonné (1er chargement du modèle sur la carte : jusqu'à ~1 min). */
+const VOICE_SILENCE_MS = 180000;
+
+function parseVoiceStatus(r: any): VoiceModuleStatus {
+  const ev = r.install;
+  const feat = (k: VoiceFeature): VoiceFeatureStatus => {
+    const f = (r.features || {})[k] || {};
+    return {
+      installed: !!f.installed, model: f.model || null, device: f.device === 'cuda' ? 'cuda' : f.device === 'cpu' ? 'cpu' : null,
+      gpu: f.gpu || null, downloadBytes: typeof f.download_bytes === 'number' ? f.download_bytes : null,
+    };
+  };
+  return {
+    installing: !!r.installing,
+    installFeature: r.install_feature === 'transcribe' || r.install_feature === 'deverb' ? r.install_feature : null,
+    install: ev ? { kind: 'install', event: String(ev.event || 'progress'), feature: ev.feature, pct: ev.pct, message: ev.message, step: ev.step } : null,
+    features: { transcribe: feat('transcribe'), deverb: feat('deverb') },
+    sizeBytes: typeof r.size_bytes === 'number' ? r.size_bytes : null,
+  };
+}
 
 function parseStemsStatus(r: any): StemsModuleStatus {
   const ev = r.install;

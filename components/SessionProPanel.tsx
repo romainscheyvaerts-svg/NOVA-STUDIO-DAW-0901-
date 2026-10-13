@@ -3,6 +3,8 @@ import type { DAWState } from '../types';
 import ClipsList from './ClipsList';
 import { applyR21, applyR21Silent, openImportSession, r21Bus, R21Tab, sessionPanelStore } from '../utils/r21Bus';
 import { NOTE_LABELS, noteValue, PROJECT_NOTE_FIELDS, ProjectNoteField, withNote, withTrackComment } from '../utils/sessionNotes';
+import { withLyricsCorrections } from '../utils/voiceLyrics';
+
 import {
   addMutedRange, ARRANGEMENT_PRESETS, arrangementSections, arrangementSummary, moveSection, newArrangement, removeMutedRange,
   renderArrangement, resolveArrangement, SongArrangement, toggleMutedClips, upsertArrangement,
@@ -13,6 +15,12 @@ import { compareVersions, diffLines, nextVersionNumber, versionName } from '../u
 import { projectRateOf, ProjectRate, rateLabel, RATE_HINT } from '../utils/projectRate';
 import { ProjectRatePicker, requestProjectRate } from './ProjectRateControls';
 import { audioEngine } from '../engine/AudioEngine';
+
+/** Paroles : les mots des clips transcrits suivent la correction (R24). */
+const setNote = (s: DAWState, f: ProjectNoteField, text: string): DAWState => {
+  const next = withNote(s, f, text);
+  return f === 'lyrics' && next !== s ? withLyricsCorrections(next, next.lyrics || '') : next;
+};
 
 /**
  * R21 · Panneau « Session » : notes (projet et pistes), liste des clips,
@@ -43,12 +51,12 @@ const NoteEditor: React.FC<{ state: DAWState; f: ProjectNoteField }> = ({ state,
   useEffect(() => { if (!focused) setText(value); }, [value, focused]);
   useEffect(() => {
     if (text === value) return;
-    const t = window.setTimeout(() => applyR21Silent(s => withNote(s, f, text)), 400);
+    const t = window.setTimeout(() => applyR21Silent(s => setNote(s, f, text)), 400);
     return () => window.clearTimeout(t);
   }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <textarea value={text} onChange={e => setText(e.target.value)} onFocus={() => setFocused(true)}
-      onBlur={() => { setFocused(false); if (text !== value) applyR21Silent(s => withNote(s, f, text)); }}
+      onBlur={() => { setFocused(false); if (text !== value) applyR21Silent(s => setNote(s, f, text)); }}
       placeholder={NOTE_LABELS[f].placeholder} aria-label={NOTE_LABELS[f].label} data-testid={`note-${f}`}
       className={`${field} min-h-[140px] flex-1 resize-none py-2 leading-relaxed`} />
   );

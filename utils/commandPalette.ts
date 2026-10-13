@@ -24,6 +24,8 @@ export interface PaletteAction {
   keys?: string;
   /** Équivalent Pro Tools (infobulle). */
   pt?: string;
+  /** Ligne de détail sous le libellé (contexte d'un mot chanté, B7). */
+  detail?: string;
   /** Pourquoi l'action est grisée (« sélectionne un clip d'abord »…) ; absente = disponible. */
   disabledReason?: string;
   run: () => void;

@@ -306,3 +306,27 @@ describe('ProjectIO : rendu gelé périmé après réouverture', () => {
     expect(freezeDrift(t)).toEqual({ content: ['c2'], approx: [], live: [] });
   });
 });
+
+describe('ProjectIO : paroles transcrites (R24)', () => {
+  it('la transcription du son du clip reste valable à la réouverture ; celle d’un autre son reste caduque', async () => {
+    const { projectTimedWords, transcriptValid } = await import('../utils/voiceLyrics');
+    audioBufferRegistry.register(makeBuffer(1, 44100, 44100), 'voix-1');
+    audioBufferRegistry.register(makeBuffer(1, 44100, 44100), 'voix-2');
+    const words = [{ w: 'Silence', s: 0.1, e: 0.4, b: true }, { w: 'blanc', s: 0.5, e: 0.8 }];
+    const ok = makeClip({ id: 'ok', bufferId: 'voix-1', start: 2, duration: 1, transcript: { version: 1, language: 'fr', model: 'large-v3-turbo', words, bufferId: 'voix-1', at: 1, show: true } });
+    const old = makeClip({ id: 'old', bufferId: 'voix-2', start: 5, duration: 1, transcript: { version: 1, language: 'fr', model: 'large-v3-turbo', words, bufferId: 'voix-1', at: 1 } });
+    const blob = await ProjectIO.saveProject(makeState([makeTrack({ id: 'lead', clips: [ok, old] })], { lyrics: 'Silence blanc' }), []);
+    const saved = await jsonOf(await zipOf(blob));
+    expect(saved.tracks[0].clips[0].transcript.bufferId).toBe('@meme-son');
+    expect(saved.tracks[0].clips[1].transcript.bufferId).toBe('@autre-son');
+    audioBufferRegistry.clear();
+    const s = await reload(blob);
+    const [c1, c2] = s!.tracks[0].clips;
+    expect(c1.bufferId).not.toBe('voix-1');
+    expect(c1.transcript!.bufferId).toBe(c1.bufferId);
+    expect(transcriptValid(c1)).toBe(true);
+    expect(transcriptValid(c2)).toBe(false);
+    expect(projectTimedWords(s!.tracks).map(w => [w.w, w.t])).toEqual([['Silence', 2.1], ['blanc', 2.5]]);
+    expect(s!.lyrics).toBe('Silence blanc');
+  });
+});

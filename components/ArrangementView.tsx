@@ -47,6 +47,10 @@ import { STEMS_TOOLTIP } from '../services/StemSeparation';
 import { araAvailability } from '../utils/araEdit';
 import { useAraContext } from './AraDialog';
 import { clipGainWheel, isClipGainWheel } from '../utils/clipGainWheel';
+import { useVoiceAvailability } from './VoiceAIDialog';
+import { DEVERB_TOOLTIP, setTranscriptShown, TRANSCRIBE_TOOLTIP, voiceMenuState } from '../services/VoiceAI';
+import { clipLyricLabels } from '../utils/voiceLyrics';
+import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
@@ -351,6 +355,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
   // Melodyne / VocAlign : pont + plugins présents ? (commandes grisées sinon)
   const araCtx = useAraContext();
+  // R24 : voix par l'IA locale (appli Windows) : grisée sur le site, avec la raison.
+  const voiceAvail = useVoiceAvailability();
   // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
   // deja les evenements, mais ArrangementView les ignorait).
   const dragTrackIdRef = useRef<string | null>(null);
@@ -677,6 +683,28 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
+  // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
+  const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH });
+  revealRef.current = { zoomH, zoomV, tracksTop, visibleTracks, extraH };
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const d = (ev as CustomEvent<RevealTimeDetail>).detail;
+      const el = scrollContainerRef.current;
+      if (!el || !d || !Number.isFinite(d.time)) return;
+      const r = revealRef.current;
+      const cw = Math.max(1, el.clientWidth - headerWidth);
+      const x = d.time * r.zoomH;
+      if (x < el.scrollLeft + cw * 0.05 || x > el.scrollLeft + cw * 0.9) el.scrollLeft = Math.max(0, x - cw * 0.25);
+      if (d.trackId) {
+        let y = r.tracksTop;
+        for (const t of r.visibleTracks) { if (t.id === d.trackId) break; y += r.zoomV + r.extraH(t); }
+        const ch = el.clientHeight;
+        if (y < el.scrollTop + r.tracksTop || y + r.zoomV > el.scrollTop + ch) el.scrollTop = Math.max(0, y - r.tracksTop - ch * 0.25);
+      }
+    };
+    window.addEventListener(REVEAL_TIME_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_TIME_EVENT, onReveal);
+  }, [headerWidth]);
 
   // Mode avancé (G13) : FX, M, S, envois et R mangeaient le nom (« LEAD C... ») ;
   // colonne un peu plus large sur grand écran, tant que l'utilisateur ne l'a pas réglée.
@@ -888,6 +916,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     // R23 : changer de beat en gardant les voix ; repérer les passages à refaire.
     if (target && target.id === 'instrumental') menuItems.unshift({ label: 'Remplacer l’instru… (garder les voix)', icon: 'fa-random', title: 'Nouveau beat : tes voix sont recalées sur son tempo et transposées dans sa tonalité, en une seule annulation.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'openSwap' }); } });
     if (isVoiceTrack(target) && target.clips.some(c => !c.isMuted)) menuItems.push({ label: 'Repérer les passages à refaire', icon: 'fa-redo', title: 'Justesse, calage sur le temps, niveau, saturation, bruit : les passages qui détonnent passent en rouge, « Refaire » pose le punch.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'findSpots', trackId }); } });
+    // B7 : toutes les prises de la piste transcrites d'un coup (recherche d'un mot, prompteur calé).
+    if (isVoiceTrack(target)) {
+      const takes = target.clips.filter(c => c.type !== TrackType.MIDI && !c.notes && (c.bufferId || c.buffer));
+      if (takes.length) {
+        const tx = voiceMenuState(voiceAvail, TRANSCRIBE_TOOLTIP);
+        menuItems.push({ label: takes.length > 1 ? `Transcrire les paroles de la piste (${takes.length} clips)…` : 'Transcrire les paroles de la piste…', icon: 'fa-closed-captioning',
+          title: tx.title, disabled: tx.disabled,
+          onClick: () => { setContextMenu(null); openNovaWindow('voice-transcribe', { targets: takes.map(c => ({ trackId, clipId: c.id })) }); } });
+      }
+    }
     if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
     // Piste guide (R3) : la voix témoin s'entend pendant la prise, jamais exportée ni mixée.
     if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({
@@ -1900,6 +1938,31 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.restore();
     }
 
+    // R24 : paroles transcrites, mot par mot à leur place dans le temps (option « texte au-dessus du clip »).
+    const lyricLabels = h > 34 && w > 24 ? clipLyricLabels(clip) : [];
+    if (lyricLabels.length) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 4);
+        ctx.clip();
+        ctx.font = '600 10px Inter';
+        const ly = y + 21;
+        let lastEnd = -Infinity;
+        const viewW = ctx.canvas.width;
+        for (const lab of lyricLabels) {
+            const lx = x + lab.at * zoomH;
+            if (lx > viewW) break;
+            const tw = ctx.measureText(lab.text).width;
+            if (lx < lastEnd + 3 || lx + tw < 0) continue; // mots serrés (zoom arrière) : un sur deux
+            ctx.fillStyle = cv.labelBg;
+            ctx.fillRect(lx - 1, ly, tw + 4, 13);
+            ctx.fillStyle = clip.isMuted ? cv.labelMuted : cv.accent;
+            ctx.fillText(lab.text, lx + 1, ly + 10);
+            lastEnd = lx + tw + 4;
+        }
+        ctx.restore();
+    }
+
     // Poignée de gain de clip
     // (Ligne de gain affichée : c'est elle qu'on tire, components/ClipGainTools.)
     if (clip.bufferId && w > 16 && h > 30 && !clipGainEdit.view.line) {
@@ -2512,6 +2575,21 @@ useEffect(() => {
         onClick: () => { openNovaWindow('ara-vocalign', target); close(); } });
       if (cm.clip.araEdit) voice.push({ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
         onClick: () => { openNovaWindow(cm.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); close(); } });
+    }
+    // R24 : voix par l'IA locale (appli Windows) : retirer la réverbe de la pièce, transcrire les paroles.
+    if (audioOnly && !cm.clip.notes) {
+      const c = cm.clip;
+      const dv = voiceMenuState(voiceAvail, DEVERB_TOOLTIP);
+      const tx = voiceMenuState(voiceAvail, TRANSCRIBE_TOOLTIP);
+      const many = selTargets().filter(tg => { const x = tracks.find(t => t.id === tg.trackId)?.clips.find(y => y.id === tg.clipId); return !!x && x.type !== TrackType.MIDI && !x.notes; });
+      voice.push('separator',
+        { label: 'Retirer la réverbe de la pièce…', icon: 'fa-microphone-lines', title: dv.title, disabled: dv.disabled,
+          onClick: () => { openNovaWindow('voice-deverb', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } },
+        { label: many.length > 1 ? `Transcrire les paroles (${many.length} clips)…` : 'Transcrire les paroles…', icon: 'fa-closed-captioning', title: tx.title, disabled: tx.disabled,
+          onClick: () => { openNovaWindow('voice-transcribe', { targets: many }); close(); } });
+      if (c.transcript) voice.push({ label: c.transcript.show ? 'Masquer le texte du clip' : 'Afficher le texte au-dessus du clip', icon: 'fa-font',
+        title: 'Les paroles transcrites s’affichent sur le clip, à leur place dans le temps',
+        onClick: () => { const pch = setTranscriptShown(c, !c.transcript?.show); if (pch) onEditClip?.(cm.trackId, c.id, 'UPDATE_PROPS', pch); close(); } });
     }
     const voiceGroup = group('Voix', 'fa-microphone', voice, 'Pour les clips audio (voix).');
 

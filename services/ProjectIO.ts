@@ -6,6 +6,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
 import { novaBridge } from './NovaBridge';
 import { isTrackFrozen, FREEZE_SAME_SOUND, FREEZE_OTHER_SOUND } from '../utils/freeze';
+import { TRANSCRIPT_OTHER_SOUND, TRANSCRIPT_SAME_SOUND } from '../utils/voiceLyrics';
 import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
 import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
 import { samplerBufferKey } from '../utils/melodicSampler';
@@ -64,6 +65,10 @@ export class ProjectIO {
                 // changent à la réouverture : on garde seulement « même son » / « autre son ».
                 if (sClip.freezeRef && typeof sClip.freezeRef.buf === 'string') {
                     sClip.freezeRef.buf = sClip.freezeRef.buf === clip.bufferId ? FREEZE_SAME_SOUND : FREEZE_OTHER_SOUND;
+                }
+                // R24 : paroles transcrites, même principe (« même son » / « autre son »).
+                if (sClip.transcript && typeof sClip.transcript.bufferId === 'string') {
+                    sClip.transcript.bufferId = sClip.transcript.bufferId === clip.bufferId ? TRANSCRIPT_SAME_SOUND : TRANSCRIPT_OTHER_SOUND;
                 }
                 
                 // On met à jour la référence dans le JSON quoi qu'il arrive
@@ -380,6 +385,10 @@ export class ProjectIO {
             // Rendu gelé : « même son » retrouve l'identifiant du son rechargé.
             if (clip.freezeRef?.buf === FREEZE_SAME_SOUND) {
                 if (clip.bufferId) clip.freezeRef.buf = clip.bufferId; else delete clip.freezeRef.buf;
+            }
+            // R24 : paroles transcrites de ce son : rattachées au son rechargé.
+            if (clip.transcript?.bufferId === TRANSCRIPT_SAME_SOUND) {
+                if (clip.bufferId) clip.transcript.bufferId = clip.bufferId; else delete clip.transcript.bufferId;
             }
             // Prise d'origine d'un clip retouché par Melodyne / VocAlign (ARA).
             const ae = clip.araEdit;

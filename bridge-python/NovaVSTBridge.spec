@@ -21,6 +21,8 @@ if os.path.isfile('../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHos
     binaries += [('../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHost.exe', '.')]
     datas += [('../native-host/LICENCES.md', 'vst-host')]
     datas += [(f, 'vst-host/licences') for f in glob.glob('../native-host/licences/*.txt')]
+hiddenimports += ['voice_service', 'voice_install', 'deverb_service', 'transcribe_service']
+datas += [('voice_worker.py', '.')]  # R24 voix par l'IA locale : moteur lancé dans le module optionnel
 
 
 a = Analysis(

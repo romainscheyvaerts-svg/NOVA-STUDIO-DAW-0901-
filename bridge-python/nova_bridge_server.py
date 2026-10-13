@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v11
+NOVA BRIDGE VST3 — v12
 
 Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
 (effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
@@ -72,6 +72,20 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   key, label, index, count, nch, nframes, sample_rate, path} + audio,
                                   et la réponse finale {action:"STEMS_SEPARATE", req_id, success,
                                   stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
+    (v12, R24) Voix par l'IA locale (module optionnel, voir voice_service.py) :
+    VOICE_STATUS                → features {transcribe|deverb: {installed, model, device, gpu,
+                                  download_bytes}}, installing, install_feature, install, size_bytes
+    VOICE_INSTALL feature [variant auto|cpu|cuda]
+                                → installation en arrière-plan (VOICE_EVENT kind=install, feature)
+    VOICE_CANCEL job_id | install=true
+    VOICE_DEVERB                trame type 2 {action, req_id, job_id, sample_rate, nch, nframes} + audio
+                                  → trame type 2 {action:"VOICE_DEVERB", req_id, success, nch, nframes,
+                                  sample_rate, seconds, device, engine} + voix sans la réverbe (100 %)
+    VOICE_TRANSCRIBE            trame type 2 {action, req_id, job_id, sample_rate, nch, nframes,
+                                  language: fr|en|mix|auto} + audio → JSON {action, req_id, success,
+                                  words:[{w, s, e, p, b?}], segments, language, model, device, seconds}
+      Progression : VOICE_EVENT {kind: deverb|transcribe, job_id, event, pct, message, device?}.
+      Échec : success=false, error, code: not_installed|cancelled|error.
     (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
     (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
     (v13) Projets sur le DISQUE (Nova Studio, voir project_store.py) : chaque version de la
@@ -177,6 +191,9 @@ import ara_insert
 import ara_service
 import license_watch
 import stems_service
+import deverb_service
+import transcribe_service
+import voice_service
 import vst_automation
 import vst_host
 import vst_sidechain
@@ -186,7 +203,7 @@ import project_store
 import protools_files
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
-VERSION = 14
+VERSION = 15
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -345,6 +362,9 @@ class NovaBridgeServer:
         self.slow = TestSlowdown.from_env()
         if self.slow.active:
             logger.warning(f"⚠ OPTION DE TEST : pont ralenti ({self.slow.ms:g} ms + gigue {self.slow.jitter_ms:g} ms)")
+        # (v12, R24) Voix par l'IA locale : déréverbération et transcription (module optionnel)
+        self.voice = voice_service.VoiceService()
+        self.voice_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice")
 
     # --- démarrage ---------------------------------------------------------
 
@@ -595,6 +615,8 @@ class NovaBridgeServer:
                               "instruments": vst_host.HAS_VST,
                               "license_events": license_watch.IS_WINDOWS,
                               "params_text": True, "stems": True, "calibrate_gr": vst_host.HAS_VST,
+                              # (v12, R24) voix par l'IA locale : retirer la réverbe, transcrire les paroles
+                              "voice": True,
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
@@ -1100,6 +1122,9 @@ class NovaBridgeServer:
             if meta.get("action") == "PT_WRITE_FILE":
                 await self._pt_write_file(ws, meta, buf)
                 return
+            if meta.get("action") in ("VOICE_DEVERB", "VOICE_TRANSCRIBE"):
+                await self._voice_job(ws, meta, data)
+                return
             if meta.get("action") == "ARA_OPEN":
                 await self._ara_open(ws, meta, data)
                 return
@@ -1368,6 +1393,86 @@ def _protools_server_methods():
 
 
 _protools_server_methods()
+
+
+def _voice_server_methods():
+    """(v12, R24) Voix par l'IA locale : actions ajoutées à NovaBridgeServer."""
+
+    async def _a_voice_status(self, ws, req):
+        st = await self.loop.run_in_executor(self.misc_pool, self.voice.status)
+        self._reply(ws, req, {"success": True, **st})
+
+    async def _a_voice_install(self, ws, req):
+        feature = str(req.get("feature") or "")
+        if feature not in ("transcribe", "deverb"):
+            self._reply(ws, req, {"success": False, "error": "Fonction inconnue"})
+            return
+        variant = str(req.get("variant") or "auto")
+        if variant not in ("cpu", "cuda", "auto"):
+            variant = "auto"
+
+        def on_event(ev):
+            msg = {"action": "VOICE_EVENT", "kind": "install", **ev}
+            for c in list(self.clients):
+                self.loop.call_soon_threadsafe(lambda c=c: asyncio.ensure_future(self._send(c, msg)))
+
+        started = self.voice.start_install(feature, on_event, variant=variant)
+        logger.info(f"🧩 Installation voix ({feature}) " + ("lancée" if started else "refusée : une autre tourne"))
+        st = await self.loop.run_in_executor(self.misc_pool, self.voice.status)
+        self._reply(ws, req, {"success": True, "started": started, **st})
+
+    async def _a_voice_cancel(self, ws, req):
+        ok = self.voice.cancel_install() if req.get("install") else self.voice.cancel(str(req.get("job_id") or ""))
+        self._reply(ws, req, {"success": True, "cancelled": ok})
+
+    async def _voice_job(self, ws, meta: dict, data):
+        """VOICE_DEVERB (réponse : trame type 2 avec la voix traitée à 100 %) ou
+        VOICE_TRANSCRIBE (réponse JSON : mots horodatés). Progression : VOICE_EVENT."""
+        action = meta.get("action")
+        req_id = meta.get("req_id")
+        job_id = str(meta.get("job_id") or req_id)
+        kind = "deverb" if action == "VOICE_DEVERB" else "transcribe"
+        try:
+            nch = max(1, min(2, int(meta.get("nch") or 1)))
+            nframes = int(meta.get("nframes") or (data.size // nch))
+            sr = int(meta.get("sample_rate") or 48000)
+            audio = np.ascontiguousarray(data[: nframes * nch].reshape(nframes, nch).T, dtype=np.float32)
+
+            def on_event(ev):
+                msg = {"action": "VOICE_EVENT", "kind": kind, "job_id": job_id, **ev}
+                self.loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._send(ws, msg)))
+
+            t = time.time()
+            if kind == "deverb":
+                res = await self.loop.run_in_executor(
+                    self.voice_pool, lambda: deverb_service.deverb(self.voice, job_id, audio, sr, on_event))
+                out = res.pop("audio")
+                logger.info(f"🎙️ Réverbe retirée : {nframes / sr:.1f} s en {time.time() - t:.1f} s")
+                await self._send(ws, build_render_frame({"action": "VOICE_DEVERB", "req_id": req_id, "job_id": job_id,
+                                                         "success": True, "nch": int(out.shape[0]), "nframes": int(out.shape[1]),
+                                                         **res}, out.T.reshape(-1)))
+            else:
+                language = str(meta.get("language") or "fr")
+                res = await self.loop.run_in_executor(
+                    self.voice_pool, lambda: transcribe_service.transcribe(self.voice, job_id, audio, sr, language, on_event))
+                logger.info(f"📝 Transcription : {nframes / sr:.1f} s, {len(res['words'])} mots en {time.time() - t:.1f} s ({res.get('device')})")
+                self._reply(ws, {"req_id": req_id}, {"action": "VOICE_TRANSCRIBE", "job_id": job_id, "success": True, **res})
+        except Exception as e:
+            code = ("not_installed" if isinstance(e, voice_service.VoiceNotInstalled)
+                    else "cancelled" if isinstance(e, voice_service.VoiceCancelled) else "error")
+            if code != "cancelled":
+                logger.error(f"{action} : {e}")
+            reply = {"action": action, "req_id": req_id, "job_id": job_id, "success": False, "error": str(e), "code": code}
+            if kind == "deverb":
+                await self._send(ws, build_render_frame(reply, None))
+            else:
+                self._reply(ws, {"req_id": req_id}, reply)
+
+    for fn in (_a_voice_status, _a_voice_install, _a_voice_cancel, _voice_job):
+        setattr(NovaBridgeServer, fn.__name__, fn)
+
+
+_voice_server_methods()
 ara_service.install(NovaBridgeServer, build_render_frame)
 ara_insert.install(NovaBridgeServer, build_render_frame, parse_render_frame)
 
