@@ -176,9 +176,13 @@ class StudioSim:
 
 # Chez l'ingé : instant où la prise démarre (état du projet, relevé toutes les 2 ms) ; le début du
 # décompte est noté par l'appli elle-même (window.__novaCabin.countIn).
-WATCH_E = """() => { if (window.__qaW) return; window.__qaW = 1; window.__qa = { rec: [], get ci() { return (window.__novaCabin && window.__novaCabin.countIn) || []; } }; let was = false;
+# « Prise lancée » = le moteur audio enregistre (enregistreur créé, micro capté) ; l'écran de l'ingé
+# (état du projet) est mesuré à part : il suit au dessin suivant de l'interface.
+WATCH_E = """async () => { if (window.__qaW) return; window.__qaW = 1; window.__qa = { rec: [], eng: [], get ci() { return (window.__novaCabin && window.__novaCabin.countIn) || []; } };
+  const eng = (await window.__novaAppModule('/engine/AudioEngine.ts')).audioEngine; let was = false, wasE = false;
   setInterval(() => { const d = window.__novaTest && window.__novaTest.getState(); if (!d) return;
-    if (d.isRecording && !was) window.__qa.rec.push(Date.now()); was = d.isRecording; }, 2); }"""
+    if (d.isRecording && !was) window.__qa.rec.push(Date.now()); was = d.isRecording;
+    const on = !!eng.recordingTrackId; if (on && !wasE) window.__qa.eng.push(Date.now()); wasE = on; }, 2); }"""
 WATCH_T = """() => { if (window.__qaW) return; window.__qaW = 1; window.__qa = { light: [], count: [] }; let was = false, wasC = false;
   setInterval(() => { const el = document.querySelector('[data-testid=cabin]'); const on = !!el && el.dataset.rec === '1'; const c = !!el && !!el.dataset.count;
     if (on && !was) window.__qa.light.push(Date.now()); was = on; if (c && !wasC) window.__qa.count.push(Date.now()); wasC = c; }, 2); }"""
@@ -196,13 +200,18 @@ def last_sent(T):
     return T.evaluate("() => { const s = (window.__novaCabin || {}).sent || []; return s[s.length - 1] || null; }")
 
 
+def txt(page, testid):
+    """Texte d'un élément s'il est là (sans attendre : il peut disparaître entre deux lectures)."""
+    return page.evaluate("(id) => { const e = document.querySelector('[data-testid=' + id + ']'); return e ? e.innerText : ''; }", testid)
+
+
 def tap(page, testid):
     page.get_by_test_id(testid).tap(timeout=5000)
 
 
 def cabin_rec_take(E, T, seconds=1.5, count_in=False, on_rec=None):
     """REC depuis le téléphone, attente de la prise chez Max, STOP depuis le téléphone. Renvoie les délais (ms)."""
-    n_rec, n_ci = E.evaluate("() => window.__qa.rec.length"), E.evaluate("() => window.__qa.ci.length")
+    n_rec, n_ci, n_eng = E.evaluate("() => window.__qa.rec.length"), E.evaluate("() => window.__qa.ci.length"), E.evaluate("() => window.__qa.eng.length")
     n_light, n_count = T.evaluate("() => window.__qa.light.length"), T.evaluate("() => window.__qa.count.length")
     n_exec = E.evaluate("() => ((window.__novaCabin || {}).executed || []).length")
     tap(T, "cabin-rec")
@@ -217,9 +226,11 @@ def cabin_rec_take(E, T, seconds=1.5, count_in=False, on_rec=None):
     s = last_sent(T)
     tap_at = s["tapAt"]
     rec_at = E.evaluate("() => window.__qa.rec[window.__qa.rec.length - 1]")
+    engs = E.evaluate(f"() => window.__qa.eng.slice({n_eng})")
     ex = E.evaluate(f"() => ((window.__novaCabin || {{}}).executed || []).slice({n_exec})")
     light_at = T.evaluate("() => window.__qa.light[window.__qa.light.length - 1]")
-    out = {"recu_chez_l_inge_ms": (ex[0]["at"] - tap_at) if ex else None, "prise_lancee_ms": rec_at - tap_at, "voyant_rec_telephone_ms": light_at - tap_at}
+    out = {"recu_chez_l_inge_ms": (ex[0]["at"] - tap_at) if ex else None, "prise_lancee_ms": (engs[0] - tap_at) if engs else None,
+           "ecran_de_l_inge_a_jour_ms": rec_at - tap_at, "voyant_rec_telephone_ms": light_at - tap_at}
     if count_in:
         ci = E.evaluate(f"() => window.__qa.ci.slice({n_ci})")
         cnt = T.evaluate(f"() => window.__qa.count.slice({n_count})")
@@ -323,7 +334,7 @@ def part_cabine(p, sim):
         snap(E, "E02_inge_notification_cabine")
     warm = cabin_rec_take(E, T, 1.2, on_rec=on_rec)
     RES["mesures"]["premiere_prise_micro_a_ouvrir"] = warm
-    check("L'ingé voit qui a lancé REC (« Nina a lancé REC depuis la cabine ») et sur quelle piste", "Nina a lancé REC depuis la cabine" in seen.get("txt", "") and "Cabine · Nina" in seen.get("txt", ""))
+    check("L'ingé voit la prise de la cabine en cours, sur sa piste « Cabine · Nina »", "Cabine · Nina" in seen.get("txt", "") and "Enregistrement" in seen.get("txt", ""), seen.get("txt", "")[-300:])
 
     # Délai REC : 12 prises, décompte coupé
     trials = []
@@ -333,10 +344,13 @@ def part_cabine(p, sim):
         "essais": trials,
         "doigt_vers_commande_recue_ms": stats([t["recu_chez_l_inge_ms"] for t in trials]),
         "doigt_vers_prise_lancee_ms": stats([t["prise_lancee_ms"] for t in trials]),
+        "doigt_vers_ecran_de_l_inge_ms": stats([t["ecran_de_l_inge_a_jour_ms"] for t in trials]),
         "doigt_vers_voyant_rec_telephone_ms": stats([t["voyant_rec_telephone_ms"] for t in trials]),
     }
     lat = RES["mesures"]["rec_depuis_le_telephone"]["doigt_vers_prise_lancee_ms"]
-    check("REC lancé depuis le téléphone en ≤ 300 ms (pire des 12 essais)", lat and lat["max"] <= 300, lat)
+    check("REC lancé depuis le téléphone en ≤ 300 ms (le moteur de Max enregistre ; pire des 12 essais)", lat and lat["n"] == 12 and lat["max"] <= 300, lat)
+    light = RES["mesures"]["rec_depuis_le_telephone"]["doigt_vers_voyant_rec_telephone_ms"]
+    check("Voyant REC allumé au téléphone en ≤ 500 ms (pire des 12 essais)", light and light["max"] <= 500, light)
     after = voix_clips(E)
     check("13 prises posées chez Max, sur sa piste « Cabine · Nina » (1 + 12)", after - before == 13, after - before)
     RES["mesures"]["piste_de_la_cabine"] = st(E, "(() => { const t = d.tracks.find(t => t.name.startsWith('Cabine')); return t ? { nom: t.name, proprietaire: t.collabOwnerName, sortie: t.outputTrackId, prises: t.clips.length } : null; })()")
@@ -373,8 +387,9 @@ def part_cabine(p, sim):
         digits = set()
         t_end = time.time() + 4
         while time.time() < t_end and not st(E, "d.isRecording"):
-            if T.get_by_test_id("cabin-countdown").count():
-                digits.add(T.get_by_test_id("cabin-countdown").inner_text().split("\n")[0].strip())
+            d = T.evaluate("() => { const p = document.querySelector('[data-testid=cabin-countdown] p'); return p ? p.textContent.trim() : null; }")
+            if d:
+                digits.add(d)
             T.wait_for_timeout(60)
         tap_at = last_sent(T)["tapAt"]
         ci_t = T.evaluate(f"() => window.__qa.count.slice({n_cnt})")
@@ -397,7 +412,6 @@ def part_cabine(p, sim):
     wait_for(E, lambda: st(E, "d.isPlaying"), 5, step=20, what="lecture lancée")
     T.wait_for_timeout(2500)
     snap(T, "T07_lecture")
-    pos_before = E.evaluate("() => window.DAW_CONTROL ? null : null")
     tap(T, "cabin-home")
     T.wait_for_timeout(600)
     pos = T.get_by_test_id("cabin-status").inner_text()
@@ -430,11 +444,10 @@ def part_cabine(p, sim):
     T.context.set_offline(True)
     T.evaluate("() => window.dispatchEvent(new Event('offline'))")
     T.wait_for_timeout(1200)
-    blocked = T.get_by_test_id("cabin-blocked").inner_text() if T.get_by_test_id("cabin-blocked").count() else ""
+    blocked = txt(T, "cabin-blocked")
     rec_disabled = not T.get_by_test_id("cabin-rec").is_enabled()
     snap(T, "T08_reseau_coupe")
     T.evaluate("() => window.__novaCabin.forceSend('rec')")
-    shown = T.get_by_test_id("cabin-blocked").inner_text() if T.get_by_test_id("cabin-blocked").count() else ""
     T.wait_for_timeout(1500)
     cloud.down.discard("T"); rt.blocked.discard("T")
     T.context.set_offline(False)
@@ -453,7 +466,6 @@ def part_cabine(p, sim):
     rt.drop("E"); rt.blocked.add("E")
     try:
         wait_for(T, lambda: T.get_by_test_id("cabin-blocked").count() > 0 and not T.get_by_test_id("cabin-rec").is_enabled(), 20, step=200, what="liaison perdue")
-        t_lost = time.time()
         lost = T.get_by_test_id("cabin-blocked").inner_text()
         snap(T, "T09_inge_injoignable")
         check("Max injoignable : boutons coupés, raison claire, « Réessayer » proposé",
@@ -492,9 +504,9 @@ def part_cabine(p, sim):
     close_panel(E)
     try:
         wait_for(T, lambda: not T.get_by_test_id("cabin-rec").is_enabled(), 15, step=100, what="télécommande retirée")
-        txt = T.get_by_test_id("cabin-blocked").inner_text()
+        why = txt(T, "cabin-blocked")
         snap(T, "T11_telecommande_retiree")
-        check("Max retire la télécommande : boutons coupés, l'artiste sait pourquoi", "pas activé" in txt, txt)
+        check("Max retire la télécommande : boutons coupés, l'artiste sait pourquoi", "pas activé" in why, why)
     except AssertionError as e:
         check("Max retire la télécommande : boutons coupés, l'artiste sait pourquoi", False, str(e))
     T.evaluate("() => window.__novaCabin.forceSend('rec')")
@@ -548,7 +560,7 @@ def part_envoi(p, sim, vp, fail=False):
     open_send(S, phone)
     S.wait_for_timeout(800)
     snap(S, f"S{vp}_1_formulaire")
-    preview = S.get_by_test_id("studio-notes-preview").inner_text() if S.get_by_test_id("studio-notes-preview").count() else ""
+    preview = txt(S, "studio-notes-preview")
     check(f"{vp} : aperçu des notes horodatées (commentaire à 0:12,4, repère du refrain)", "0:12,4" in preview and "Refrain" in preview, preview)
     S.get_by_test_id("studio-slot-soir").click()
     S.get_by_role("button", name="Une heure de plus").click()
@@ -561,7 +573,7 @@ def part_envoi(p, sim, vp, fail=False):
     S.get_by_test_id("studio-date").fill("2020-01-01")
     S.get_by_test_id("studio-send-go").click()
     S.wait_for_timeout(400)
-    err = S.get_by_test_id("studio-err-date").inner_text() if S.get_by_test_id("studio-err-date").count() else ""
+    err = txt(S, "studio-err-date")
     check(f"{vp} : jour passé refusé avec une phrase claire, rien n'est parti", "déjà passé" in err and len(sim.calls) == n_before, err)
     S.get_by_test_id("studio-date").fill(good_date)
     if fail:

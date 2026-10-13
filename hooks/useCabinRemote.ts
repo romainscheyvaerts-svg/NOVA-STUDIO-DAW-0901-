@@ -35,6 +35,11 @@ export function useCabinHost(o: {
   isRecording: boolean;
   isPlaying: boolean;
   countInBeat: number | null;
+  /**
+   * Le moteur enregistre déjà (avant que l'écran de l'ingé soit redessiné) : le voyant du
+   * téléphone s'allume dès que la prise est vraiment lancée.
+   */
+  engineRecording?: () => boolean;
   /** Une prise est en train de démarrer (armement, décompte). */
   busy: () => boolean;
   online: () => OnlineMember[];
@@ -58,7 +63,7 @@ export function useCabinHost(o: {
     if (!w || p.role !== 'engineer') return;
     const st: CabinState = {
       from: w.memberKey, eng: p.name, allowed: allowedOverride ?? !!p.rights?.remote,
-      rec: p.isRecording, play: p.isPlaying, pos: Math.max(0, p.position()), ci: p.countInBeat,
+      rec: p.isRecording || !!p.engineRecording?.(), play: p.isPlaying || !!p.engineRecording?.(), pos: Math.max(0, p.position()), ci: p.countInBeat,
       track: p.armedName(), at: Date.now(),
     };
     w.broadcast(CABIN_EV.state, st as unknown as Record<string, unknown>);
@@ -113,6 +118,16 @@ export function useCabinHost(o: {
     if (d.log) p.notify(d.log);
     if (d.action === 'record') {
       p.record({ key: c.from, name: sender?.display_name || '' });
+      // Voyant du téléphone allumé dès que le moteur enregistre (sans attendre le dessin de l'écran).
+      if (p.engineRecording) {
+        const t1 = Date.now();
+        const fast = () => {
+          const q = ref.current;
+          if (q.engineRecording?.()) { try { qa().engineRec = [...(qa().engineRec || []), Date.now()]; } catch { /* */ } publish(); return; }
+          if (Date.now() - t1 < 20000) window.setTimeout(fast, 8);
+        };
+        window.setTimeout(fast, 0);
+      }
       // La prise n'a pas démarré (micro refusé, question à l'écran de l'ingé…) : on le dit à l'artiste,
       // dès que la mise en route est finie (armement du micro compris).
       const t0 = Date.now();

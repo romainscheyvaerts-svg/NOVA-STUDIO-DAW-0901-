@@ -9748,6 +9748,13 @@ function Studio() {
     isRecording: state.isRecording,
     isPlaying: state.isPlaying,
     countInBeat,
+    // Lecture seule de l'état du moteur (engine/AudioEngine.ts n'est pas modifié) : la prise tourne déjà.
+    // Avec un décompte, le moteur enregistre déjà pendant le décompte : on attend alors l'état du projet.
+    engineRecording: () => {
+      if (!(audioEngine as unknown as { recordingTrackId?: string | null }).recordingTrackId) return false;
+      if (stateRef.current.isRecording) return true;
+      try { return localStorage.getItem('nova_count_in') === '0'; } catch { return false; }
+    },
     busy: () => recBusyRef.current || cabinStartingRef.current,
     online: () => collabOnlineRef.current.filter(m => m.online !== false),
     position: () => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get()),
