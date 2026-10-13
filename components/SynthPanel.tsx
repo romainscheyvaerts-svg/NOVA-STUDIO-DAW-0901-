@@ -534,6 +534,9 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
                 format={v => `${fr(v, 2)} Hz`} hint="Rapidité du mouvement. 2,5 Hz ≈ une noire à 150 BPM." onChange={v => set(d => { d.lfo.rate = v; })} />
               <Knob size="M" label="Intensité" ariaLabel="Intensité du LFO" paramId="lfo-amount" value={s.lfo.amount} min={0} max={1} defaultValue={0.2} arc="#5eead4" cap="silver"
                 format={fmtPct} hint="Profondeur du mouvement." onChange={v => set(d => { d.lfo.amount = v; })} />
+              <Knob size="M" label="Arrivée" ariaLabel="Arrivée progressive du LFO" paramId="lfo-delay" value={s.lfoDelay ?? 0} min={0} max={3} defaultValue={0} arc="#5eead4" cap="silver"
+                format={v => (v <= 0 ? 'directe' : fmtS(v))} hint="Le mouvement arrive progressivement après le début de la note : vibrato différé des leads, des cuivres et des voix."
+                onChange={v => set(d => { d.lfoDelay = v < 0.01 ? 0 : v; })} />
             </div>
           </Mod>
           <Mod id="play" title="Jeu" className="syn-play" open={!!open.play} onToggle={toggleMod}>
@@ -547,6 +550,12 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
                 format={v => (v <= 0.0005 ? 'non' : fmtS(v))} hint="Portamento : la hauteur glisse d'une note à l'autre." onChange={v => set(d => { d.glide = v < 0.003 ? 0 : v; })} />
               <Knob size="S" label="Vél.→vol" ariaLabel="Vélocité vers le volume" paramId="vel-amp" value={s.velToAmp} min={0} max={1} defaultValue={0.6} cap="graphite"
                 format={fmtPct} hint="0 = toutes les notes au même volume ; 100 % = très dynamique comme un piano." onChange={v => set(d => { d.velToAmp = v; })} />
+              <Knob size="S" label="Env. haut." ariaLabel="Enveloppe de hauteur : départ en demi-tons" paramId="pitchenv-amount" value={s.pitchEnv?.amount ?? 0} min={-24} max={24} step={0.5} defaultValue={0} bipolar arc="#f0abfc" cap="graphite"
+                format={v => (v === 0 ? 'non' : `${v > 0 ? '+' : ''}${fr(v)} dt`)} hint="La note part plus haut (ou plus bas) puis tombe sur sa hauteur : log drum, kick synthé, attaque de cuivres."
+                onChange={v => set(d => { d.pitchEnv = { amount: v, decay: d.pitchEnv?.decay ?? 0.08 }; })} />
+              <Knob size="S" label="Durée" ariaLabel="Enveloppe de hauteur : durée de la chute" paramId="pitchenv-decay" value={s.pitchEnv?.decay ?? 0.08} min={0.02} max={2} curve="log" defaultValue={0.08} cap="graphite"
+                disabled={!s.pitchEnv} format={fmtS} hint="Temps pour que la hauteur rejoigne la note."
+                onChange={v => set(d => { if (d.pitchEnv) d.pitchEnv.decay = v; })} />
             </div>
           </Mod>
           <Mod id="fx" title="Effets" className="syn-fx" open={!!open.fx} onToggle={toggleMod}>
@@ -571,6 +580,9 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
           </Mod>
           <Mod id="out" title="Sortie" className="syn-out" open={!!open.out} onToggle={toggleMod}>
             <div className="syn-knobs">
+              <Knob size="M" label="Saturation" ariaLabel="Saturation" paramId="drive" value={s.drive ?? 0} min={0} max={1} defaultValue={0} arc="#fcd34d" cap="silver"
+                format={v => (v <= 0 ? 'non' : fmtPct(v))} hint="Sature chaque note après le filtre : plus de grain et d'harmoniques (leads rage, log drum, reese)."
+                onChange={v => set(d => { d.drive = v; })} />
               <Knob size="L" label="Volume" ariaLabel="Volume du synthé" paramId="level" value={s.level} min={0} max={1} defaultValue={0.7} arc="#5eead4" cap="silver"
                 format={fmtPct} hint="Volume du son (les sons de la banque sont calibrés au même niveau)." onChange={v => set(d => { d.level = v; })} />
             </div>

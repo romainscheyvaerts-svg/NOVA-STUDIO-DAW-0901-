@@ -74,6 +74,23 @@ export interface NovaSynthSettings {
   };
   /** Volume du préréglage (0 à 1). */
   level: number;
+  /**
+   * Saturation par voix, après le filtre (0 à 1). Absente ou 0 : aucun nœud ajouté,
+   * le son est exactement celui d'avant (ajout du 14/10/2026).
+   */
+  drive?: number;
+  /**
+   * Enveloppe de hauteur : la note part `amount` demi-tons au-dessus (ou en dessous) et
+   * rejoint sa hauteur en `decay` secondes (log drum, kick synthé, attaque de cuivres).
+   * Absente : rien ne change (ajout du 14/10/2026). Durée ≥ 20 ms : en dessous (τ < 5 ms),
+   * la lecture et l'export divergeaient (−25 dB mesurés, qa/synthe_lecture.py).
+   */
+  pitchEnv?: { amount: number; decay: number };
+  /**
+   * Arrivée progressive du LFO (s) : le vibrato ou le trémolo monte de 0 à son intensité
+   * pendant ce temps, comme sur un vrai instrument. Absente : rien ne change (ajout du 14/10/2026).
+   */
+  lfoDelay?: number;
 }
 
 // --- Constantes anti-clic --------------------------------------------------------------
@@ -173,7 +190,21 @@ export function normalizeSynth(raw: unknown): NovaSynthSettings {
       delay: { mix: clamp(dl.mix, 0, 1, 0), time: clamp(dl.time, 0.02, 1.5, d.fx.delay.time), feedback: clamp(dl.feedback, 0, 0.9, d.fx.delay.feedback) },
     },
     level: clamp(r.level, 0, 1, d.level),
+    // Champs facultatifs : écrits seulement quand ils agissent (les réglages et l'empreinte
+    // des sons qui ne s'en servent pas restent identiques).
+    ...(clamp(r.drive, 0, 1, 0) > 0 ? { drive: clamp(r.drive, 0, 1, 0) } : {}),
+    ...(r.pitchEnv && typeof r.pitchEnv === 'object' && clamp(r.pitchEnv.amount, -24, 24, 0) !== 0
+      ? { pitchEnv: { amount: clamp(r.pitchEnv.amount, -24, 24, 0), decay: clamp(r.pitchEnv.decay, 0.02, 2, 0.08) } } : {}),
+    ...(clamp(r.lfoDelay, 0, 3, 0) > 0 ? { lfoDelay: clamp(r.lfoDelay, 0, 3, 0) } : {}),
   };
+}
+
+/** Courbe de saturation douce (tanh), normalisée : ±1 → ±1. drive 0 → 1 : gain d'entrée 1 → 9. */
+export function driveCurve(drive: number, n = 2048): Float32Array {
+  const k = 1 + 8 * Math.min(1, Math.max(0, drive));
+  const c = new Float32Array(n), norm = Math.tanh(k);
+  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(k * x) / norm; }
+  return c;
 }
 
 // --- Calculs du son -----------------------------------------------------------------------

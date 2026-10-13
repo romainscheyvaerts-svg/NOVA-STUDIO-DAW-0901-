@@ -33,6 +33,8 @@ DEMOS = LIVRABLE / "demos"
 DEMOS_ON = "--demos" in sys.argv
 CALIBRER = "--calibrer" in sys.argv
 TOUS = "--tous" in sys.argv  # démos aussi pour les 48 anciens sons
+# --recalibrer=id1,id2 : propose aussi un volume pour ces anciens sons (corrigés d'après les règles de l'art).
+RECALIBRER = {x for a in sys.argv if a.startswith("--recalibrer=") for x in a.split("=", 1)[1].split(",") if x}
 
 LIB = r"""
 window.__synthe = (async () => {
@@ -268,7 +270,7 @@ def main():
         # Clics : pas pire que les sons déjà validés de la banque (attaques percussives : ≤ 1,9 ; relâchement ≤ 1,5).
         if m["clic_attaque"] > 1.9 or m["clic_relachement"] > 1.5: ko.append(f"clic ({m['clic_attaque']} / {m['clic_relachement']})")
         m["defauts"] = ko
-        if CALIBRER and m["nouveau"]:
+        if CALIBRER and (m["nouveau"] or m["id"] in RECALIBRER):
             m["volume_propose"] = round(min(1.0, m["volume"] * 10 ** ((cible - m["niveau_dB"]) / 20)), 3)
     res = {
         "cible_banque_dB": cible,
