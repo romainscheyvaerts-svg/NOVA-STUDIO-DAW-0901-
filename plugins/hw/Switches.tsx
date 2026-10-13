@@ -94,7 +94,12 @@ export const ToggleSwitch: React.FC<{
             <polygon points="17,18.5 28.5,24.5 28.5,36.5 17,42.5 5.5,36.5 5.5,24.5" fill={`url(#${gid}n)`} stroke="#000" strokeOpacity="0.5" strokeWidth="0.6" />
             <circle cx="17" cy="30.5" r="6.2" fill="#2c2e31" stroke="#000" strokeOpacity="0.6" strokeWidth="0.5" />
             {mid ? (
-              <circle cx="17" cy="30.5" r="5.4" fill={`url(#${gid}l)`} stroke="#000" strokeOpacity="0.5" strokeWidth="0.5" />
+              // Position du milieu : levier pointé vers soi (bout du levier vu de face).
+              <g>
+                <ellipse cx="18.2" cy="31.6" rx="5.6" ry="5.2" fill="#000" opacity="0.35" />
+                <ellipse cx="17" cy="29.6" rx="5.3" ry="5.6" fill={`url(#${gid}l)`} stroke="#000" strokeOpacity="0.55" strokeWidth="0.5" />
+                <ellipse cx="15.6" cy="27.8" rx="1.8" ry="1.4" fill="#fff" opacity="0.7" />
+              </g>
             ) : (
               <g>
                 <path d={`M 14.6 30.5 L ${15.4} ${tipY} L ${18.6} ${tipY} L 19.4 30.5 Z`} fill={`url(#${gid}l)`} stroke="#000" strokeOpacity="0.45" strokeWidth="0.5" />
