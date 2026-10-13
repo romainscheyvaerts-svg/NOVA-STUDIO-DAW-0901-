@@ -96,3 +96,29 @@ ne jamais mettre une mesure dans l'état du composant de la façade.
 (chaque réglage), `data-nova-preset`, `h2` (nom du modèle), et ceux propres à
 l'effet (`data-nova-calibrate`, `data-nova-gr-vu`…). Captures : `qa/plugins_hw_captures.py`,
 gestes : `qa/plugins_hw_gestes.py`, banc : `qa/harness/hwPlugins.tsx`.
+
+## Ajouts de la vague 2A (gros effets à écran)
+
+Uniquement des ajouts, dans des fichiers séparés (`screens.tsx`, `ecrans.css`) : aucune brique
+existante ne change de comportement. Clients : Égaliseur (`ProEQ12Plugin.tsx`), Réverbe
+(`ReverbPlugin.tsx`), Écho (`DelayPlugin.tsx`), Nova Tune (`AutoTunePlugin.tsx`).
+
+```tsx
+import { HwPresetSelect, useHwCanvas, hwCtx, fmtHzFr, frNum } from './hw/screens';
+```
+
+| Ajout | Rôle |
+|---|---|
+| `HwPresetSelect` | Préréglages en liste déroulante dans la barre d'outils (trop nombreux pour des pastilles). Affiche celui qui correspond aux réglages, sinon « Personnalisé ». `data-nova-preset-select`, `data-nova-preset` sur chaque option. |
+| `useHwCanvas()` / `hwCtx()` | Canvas net (densité de pixels, ResizeObserver) pour les écrans. On redessine quand un réglage change ; seules les mesures vivantes (spectre de l'EQ) tournent à chaque image, et seulement si elles ont bougé. |
+| `fmtHzFr`, `frNum` | « 4,5 kHz », « 1,5 ». |
+| Finitions `midnight` (EQ), `violet` (Réverbe), `sea` (Écho), `carbon` (Nova Tune) | Dans `ecrans.css`. On garde la finition de base et on ajoute la classe : `<Faceplate finish="black" className="hw-finish-midnight">` (sélecteur à deux classes, il l'emporte). |
+| `.hw-select`, `.hw-screen-label`, `.hw-screen-canvas` | Liste de la barre d'outils, étiquette posée sur la vitre, canvas plein cadre. |
+| `.hw-bands` / `.hw-band` | Sélecteur numéroté à LED (12 bandes ; 6 par rangée au téléphone, cases ≥ 44 px). `--band` = couleur. |
+| `.hw-piano`, `.hw-piano-key` (`-white` / `-black`) | Mini-clavier d'une octave (tonalité) : `aria-checked` = tonique, `data-in` = note de la gamme. |
+| `.hw-push-icon` | Bouton-poussoir avec une petite icône SVG (forme du filtre). |
+| `.hw-led-blink` | LED qui clignote au rythme `--hw-blink` (tempo de l'écho), coupée si « mouvement réduit ». |
+
+Points d'accroche : `data-nova-plugin` = `PROEQ12`, `REVERB`, `DELAY`, `AUTOTUNE` ; `data-nova-param`
+sur chaque bouton ; `data-nova-eq-screen`, `data-nova-tune-screen`, `data-nova-delay-time`,
+`data-nova-mode`, `data-nova-scale`. Banc : `qa/harness/hwPlugins2a.tsx`.

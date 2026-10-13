@@ -21,6 +21,12 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("QA_OUT", r"D:\1 WORK
 os.makedirs(OUT, exist_ok=True)
 EFFETS = [("OPTO_VINTAGE", "opto vintage"), ("FET76", "fet 76"), ("LEVELER2A", "leveler"), ("VOXSTRIP", "vox strip"),
           ("MASTERTRANSIENT", "mastering transient"), ("LIMITER", "nova limiter"), ("DEESSER", "de-esser"), ("VOCALSATURATOR", "saturation")]
+# Vague 2A : gros effets à écran.
+EFFETS += [("PROEQ12", "égaliseur"), ("REVERB", "réverbe"), ("DELAY", "delay"), ("AUTOTUNE", "justesse")]
+# Sous-ensemble : QA_HW_EFFETS=PROEQ12,REVERB (types).
+if os.environ.get("QA_HW_EFFETS"):
+    _keep = os.environ["QA_HW_EFFETS"].split(",")
+    EFFETS = [e for e in EFFETS if e[0] in _keep]
 ok_all = True
 
 
