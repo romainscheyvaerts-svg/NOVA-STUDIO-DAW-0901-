@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspens
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
+import { pickCleanTarget } from './utils/voiceCleanLabels';
 import PanelBoundary from './components/PanelBoundary';
 
 import { audioEngine } from './engine/AudioEngine';
@@ -324,7 +325,7 @@ const AVAILABLE_FX_MENU = [
     { id: 'VOCALSATURATOR', name: 'Vocal Saturator', icon: 'fa-fire' },
     { id: 'PROEQ12', name: 'Pro-EQ 12', icon: 'fa-wave-square' },
     { id: 'AUTOTUNE', name: 'Auto-Tune Pro', icon: 'fa-microphone-alt' },
-    { id: 'DENOISER', name: 'Denoiser', icon: 'fa-broom' },
+    { id: 'DENOISER', name: 'Gate de bruit', icon: 'fa-broom' },
     // Même nom que la fenêtre de l'effet (« Compresseur ») : avant, le menu disait « Leveler ».
     { id: 'COMPRESSOR', name: 'Compresseur', icon: 'fa-compress-alt' },
     { id: 'REVERB', name: 'Spatial Verb', icon: 'fa-mountain-sun' },
@@ -9985,6 +9986,7 @@ function Studio() {
       ...(collab?.role === 'artist' && state.collabGuestRights?.remote ? [a('Collaboration', 'pal.cabin', 'Mode cabine : télécommande REC, lecture et paroles en grand', () => setCabinOpen(true), { keywords: 'cabine télécommande rec téléphone studio' })] : []),
       // Voix
       a('Voix', 'pal.voiceTrack', 'Ajouter une piste voix (armée, prête à enregistrer)', () => { void handleAddVoiceTrack(); }, { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste voix micro enregistrer nouvelle' }),
+      ...(() => { const t = pickCleanTarget(st.tracks, { clipIds: sel.clipIds, trackId: st.selectedTrackId, playhead: playheadStore.get() }); return [a('Voix', 'pal.voiceClean', '✨ Nettoyer la voix (bruit de fond, niveau)', () => openNovaWindow('voice-clean', { targets: t ? [t] : [] }), { keywords: 'nettoyer voix propre bruit souffle ventilo clim rue débruiter denoise voice cleaner bandlab rx réverbe écho pièce niveau', disabledReason: t ? undefined : 'Sélectionne d’abord un clip voix (clic dessus).' })]; })(),
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),

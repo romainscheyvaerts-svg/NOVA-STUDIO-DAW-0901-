@@ -25,6 +25,8 @@ const BatchRenderDialog = lazyWithPreload(() => import('./BatchRenderDialog'));
 const IoNamesDialog = lazyWithPreload(() => import('./IoNamesDialog'));
 // R24 : voix par l'IA locale (retirer la réverbe, transcrire les paroles).
 const VoiceAIDialog = lazyWithPreload(() => import('./VoiceAIDialog'));
+// Lot 1 : nettoyer la voix (bruit, réverbe, niveau), partout.
+const VoiceCleanDialog = lazyWithPreload(() => import('./VoiceCleanDialog'));
 export const PRO_TOOLS_WINDOWS_PRELOAD = [PitchEditor, TrackPresetDialog, StripSilenceDialog, AudioSuiteDialog, TransposeDialog, PitchBatchDialog, AudioToMidiDialog, BounceDialog, WarpMarkers];
 import type { VoiceMode } from './VoiceAIDialog';
 import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
@@ -75,6 +77,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [transpose, setTranspose] = useState<NovaWindowDetail | null>(null);
   const [warp, setWarp] = useState<NovaWindowDetail | null>(null);
   const [voice, setVoice] = useState<{ mode: VoiceMode; targets: { trackId: string; clipId: string }[] } | null>(null);
+  const [voiceClean, setVoiceClean] = useState<{ targets: { trackId: string; clipId: string }[] } | null>(null);
   const tracksRef = React.useRef(tracks);
   tracksRef.current = tracks;
   const say = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
@@ -170,6 +173,10 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'elastic-tce' && d.targets?.length && d.tce) void tceRender(d.targets[0].trackId, d.targets[0].clipId, d.tce);
       // R24 : voix par l'IA locale.
       else if ((d.name === 'voice-deverb' || d.name === 'voice-transcribe') && d.targets?.length) setVoice({ mode: d.name === 'voice-deverb' ? 'deverb' : 'transcribe', targets: d.targets });
+      else if (d.name === 'voice-clean') {
+        if (d.targets?.length) setVoiceClean({ targets: d.targets.slice(0, 1) });
+        else say('✨ Nettoyer la voix : sélectionne d’abord un clip voix (clic dessus), puis relance.');
+      }
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -281,6 +288,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       <MountWhenOpened when={!!batch}><BatchRenderDialog open={!!batch} tracks={tracks} preselected={batch?.trackIds || []} onClose={() => setBatch(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!voice}><VoiceAIDialog request={voice} tracks={tracks} lyrics={lyrics || ''} setState={setState} onClose={() => setVoice(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!voiceClean}><VoiceCleanDialog request={voiceClean} tracks={tracks} setState={setState} onClose={() => setVoiceClean(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!transpose}><TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!warp}><WarpMarkers open={!!warp} trackId={warp?.targets?.[0]?.trackId} clipId={warp?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} setState={setState} onClose={() => setWarp(null)} /></MountWhenOpened>
       {focus && (

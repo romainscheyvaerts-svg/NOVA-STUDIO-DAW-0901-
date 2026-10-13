@@ -28,6 +28,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument("command")
 ap.add_argument("--input"); ap.add_argument("--output"); ap.add_argument("--language"); ap.add_argument("--model")
+ap.add_argument("--no-late", action="store_true")
 a = ap.parse_args()
 mode = (Path(__file__).parent / "mode.txt").read_text().strip()
 JOB = None
@@ -48,6 +49,7 @@ def work(command, language, model, output=None, inp=None):
         time.sleep(0.05 if mode == "slow" else 0)
     if command == "deverb":
         Path(output).write_bytes(Path(inp).read_bytes())  # « traitement » : copie
+        (Path(__file__).parent / "late.txt").write_text("non" if a.no_late else "oui")
         emit(event="done", path=output, device="cpu", seconds=0.1, engine="deepfilternet3")
     else:
         emit(event="done", words=[{"w": "Silence", "s": 0.1, "e": 0.5, "p": 0.9, "b": True}, {"w": "blanc", "s": 0.6, "e": 0.9, "p": 0.8}, {"w": " ", "s": 1, "e": 1}],
@@ -181,6 +183,15 @@ class VoiceServiceTest(unittest.TestCase):
         self.assertEqual(res["sample_rate"], 24000)
         np.testing.assert_allclose(res["audio"], stereo, atol=1e-6)
         self.assertEqual(res["engine"], "deepfilternet3")
+
+    def test_deverb_late_stage_flag(self):
+        """Lot 1 « Nettoyer la voix » : late=False → DeepFilterNet 3 seul (--no-late)."""
+        self.install_fake()
+        deverb_service.deverb(self.svc, "l1", self.audio, 24000)
+        self.assertEqual((self.home / "late.txt").read_text(), "oui")
+        res = deverb_service.deverb(self.svc, "l2", self.audio, 24000, late=False)
+        self.assertEqual((self.home / "late.txt").read_text(), "non")
+        self.assertEqual(res["audio"].shape, self.audio.shape)
 
     def test_too_short_and_bad_language(self):
         self.install_fake()

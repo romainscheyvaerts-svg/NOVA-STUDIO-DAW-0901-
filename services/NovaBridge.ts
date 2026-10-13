@@ -1234,9 +1234,15 @@ class NovaBridgeService {
     }).finally(() => { this.voiceJobs.delete(jobId); });
   }
 
-  /** Voix sans la réverbe de la pièce (100 %, même longueur, mêmes canaux). */
-  async deverbVoice(opts: { jobId: string; channels: Float32Array[]; sampleRate: number }): Promise<DeverbResult> {
-    const r = await this.voiceJob('VOICE_DEVERB', opts.jobId, { sample_rate: Math.round(opts.sampleRate) }, opts.channels);
+  /**
+   * Voix sans la réverbe de la pièce (100 %, même longueur, mêmes canaux).
+   * `late: false` (lot 1 « Nettoyer la voix », réverbe décochée) : DeepFilterNet 3 seul,
+   * c'est-à-dire le débruitage, sans le retrait de la réverbe tardive.
+   */
+  async deverbVoice(opts: { jobId: string; channels: Float32Array[]; sampleRate: number; late?: boolean }): Promise<DeverbResult> {
+    const meta: Record<string, unknown> = { sample_rate: Math.round(opts.sampleRate) };
+    if (opts.late === false) meta.late = false;
+    const r = await this.voiceJob('VOICE_DEVERB', opts.jobId, meta, opts.channels);
     return { channels: r.channels, sampleRate: Number(r.sample_rate) || opts.sampleRate, device: String(r.device || 'cpu'), seconds: Number(r.seconds) || 0,
       ...(Number(r.rt60) > 0 ? { rt60: Number(r.rt60) } : {}) };
   }

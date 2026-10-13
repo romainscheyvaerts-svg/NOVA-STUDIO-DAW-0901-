@@ -1,0 +1,8 @@
+rnnoise.wasm : RNNoise 0.2 (Xiph / Mozilla, licence BSD-3, voir LICENSE-RNNoise-BSD-3.txt),
+compilé en WebAssembly par Jitsi (@jitsi/rnnoise-wasm 0.2.1, licence Apache-2.0, voir
+LICENSE-jitsi-rnnoise-wasm-Apache-2.0.txt). Binaire extrait tel quel de dist/rnnoise-sync.js
+(module WebAssembly en base64), sans modification.
+SHA-256 : 4f513a50613de74378331237886138eab52fa2650e8b1a41eb587d932d9b8850
+
+Chargé à la demande par NOVA (services/VoiceCleanWorker.ts → utils/rnnoise.ts) pour
+« ✨ Nettoyer la voix » (lot 1). Aucune donnée ne quitte le navigateur.
