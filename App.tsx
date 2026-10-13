@@ -9952,7 +9952,7 @@ function Studio() {
     const a = (group: string, id: string, label: string, run: () => void, extra: Partial<PaletteAction> = {}): PaletteAction => ({ id, label, group, run, ...extra });
     return [
       // Fichier et livraison
-      a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer' }),
+      a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer', primary: true }),
       a('Fichier', 'nova.save', 'Sauvegarder le projet', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer save' }),
       a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { pt: 'Open Session (Ctrl+O)', keywords: 'charger load open' }),
       a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),

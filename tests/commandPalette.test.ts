@@ -84,3 +84,16 @@ describe('palette de commandes : rejouer un raccourci', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('palette : action principale', () => {
+  it('« export » propose l’export du mix avant l’export AAF (libellé plus court)', async () => {
+    const { searchActions } = await import('../utils/commandPalette');
+    const run = () => {};
+    const acts = [
+      { id: 'pal.aafExport', label: 'Exporter la séance pour Pro Tools (AAF + BWF)', group: 'Fichier', run },
+      { id: 'nova.export', label: 'Exporter : mix, stems par piste ou par bus, voix seule', group: 'Fichier', run, primary: true },
+    ];
+    expect(searchActions('export', acts)[0].id).toBe('nova.export');
+    expect(searchActions('aaf', acts)[0].id).toBe('pal.aafExport');
+  });
+});

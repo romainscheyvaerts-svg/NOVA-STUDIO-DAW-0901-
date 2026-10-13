@@ -26,6 +26,8 @@ export interface PaletteAction {
   pt?: string;
   /** Ligne de détail sous le libellé (contexte d'un mot chanté, B7). */
   detail?: string;
+  /** Action principale de son domaine : petit bonus de classement (« export » → l'export du mix avant l'export AAF). */
+  primary?: boolean;
   /** Pourquoi l'action est grisée (« sélectionne un clip d'abord »…) ; absente = disponible. */
   disabledReason?: string;
   run: () => void;
@@ -70,6 +72,7 @@ export function searchActions(query: string, actions: PaletteAction[], recent: s
     }
     if (words.every(w => label.includes(w))) s += 8;
     if (a.disabledReason) s -= 5;
+    if (a.primary) s += 2;
     // Récente : départage seulement (une action récente ne passe pas devant une meilleure réponse).
     s += Math.min(3, rank(a) / 6);
     // Libellés courts d'abord à score égal (« Exporter » avant « Exporter les stems par bus »).
