@@ -28,7 +28,12 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 WT = HERE.parent
-VENV_PY = WT / ".venv-aaf" / "Scripts" / "python.exe"
+# Python avec pyaaf2 (lecture de référence des AAF) : variable AAF_VENV_PY, sinon le .venv-aaf
+# de ce worktree, sinon celui du worktree d'origine du chantier AAF.
+VENV_PY = next((p for p in [Path(os.environ["AAF_VENV_PY"])] if p.exists()), None) if os.environ.get("AAF_VENV_PY") else None
+VENV_PY = VENV_PY or next((p for p in (WT / ".venv-aaf" / "Scripts" / "python.exe",
+                                       WT.parent / "NOVA-aaf-wt" / ".venv-aaf" / "Scripts" / "python.exe") if p.exists()),
+                          WT / ".venv-aaf" / "Scripts" / "python.exe")
 REF = Path(r"D:\1 WORK\CONTENU\nova-aaf\reference")
 SR = 48000
 res = {"passage": RUN, "etapes": {}, "mesures": {}}
