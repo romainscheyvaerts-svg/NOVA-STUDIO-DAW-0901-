@@ -504,7 +504,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <span className="text-2xl leading-none" aria-hidden="true">📲</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-black text-white">Extrait 30 s pour les réseaux</span>
-                      <span className="block text-[12px] text-slate-300 mt-0.5">Vidéo ou MP3 avec le tag Make Music, pour Insta, TikTok ou WhatsApp. Gratuit.</span>
+                      <span className="block text-[12px] text-slate-300 mt-0.5">🎬 Clip TikTok / Reels avec tes paroles, vidéo ou MP3 pour Insta ou WhatsApp. Gratuit.</span>
                     </span>
                     <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
                   </button>

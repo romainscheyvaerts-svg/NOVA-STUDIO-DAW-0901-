@@ -45,6 +45,8 @@ const SaveProjectModal = lazyWithPreload(() => import('./components/SaveProjectM
 const LoadProjectModal = lazyWithPreload(() => import('./components/LoadProjectModal'));
 const SessionTemplatesModal = lazyWithPreload(() => import('./components/SessionTemplatesModal'));
 const ExportModal = lazyWithPreload(() => import('./components/ExportModal'));
+// Lot 2a : clip vertical avec les paroles synchronisées (TikTok / Reels).
+const LyricClipModal = lazy(() => import('./components/LyricClipModal'));
 /** « 1:02,5 » : position courte dans les notifications. */
 const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(Math.max(0, t) % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
 const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
@@ -4560,6 +4562,7 @@ function Studio() {
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
   const [shareAuto, setShareAuto] = useState<'demo' | null>(null);
+  const [lyricClipOpen, setLyricClipOpen] = useState(false);
   // Comping : zones où garder une prise (parties du morceau, boucle).
   const compZones = useMemo<CompZone[]>(() => {
     const zones: CompZone[] = [];
@@ -10028,6 +10031,7 @@ function Studio() {
       a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      a('Fichier', 'pal.lyricClip', '🎬 Clip pour TikTok / Reels (paroles synchronisées)', () => setLyricClipOpen(true), { keywords: 'clip vidéo video tiktok reels instagram paroles karaoké lyrics mp4 vertical' }),
       a('Fichier', 'pal.sendStudio', 'Envoyer au studio Make Music (projet, stems, notes, réservation)', () => setStudioSendOpen(true), { keywords: 'studio make music réserver réservation envoyer ingé stems session' }),
       ...(collab?.role === 'artist' && state.collabGuestRights?.remote ? [a('Collaboration', 'pal.cabin', 'Mode cabine : télécommande REC, lecture et paroles en grand', () => setCabinOpen(true), { keywords: 'cabine télécommande rec téléphone studio' })] : []),
       // Voix
@@ -11126,7 +11130,9 @@ function Studio() {
       )}
       {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
-      <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
+      <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenLyricClip={() => { setShareOpen(false); setShareAuto(null); setLyricClipOpen(true); }} />
+      {lyricClipOpen && <PanelBoundary name="le clip vidéo" overlay onClose={() => setLyricClipOpen(false)}><Suspense fallback={null}><LyricClipModal open={lyricClipOpen} onClose={() => setLyricClipOpen(false)} state={state} ownedInstrumentIds={ownedInstruments}
+        onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenExport={() => { setLyricClipOpen(false); setIsExportMenuOpen(true); }} /></Suspense></PanelBoundary>}
       {(() => {
         const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808 && !t.melodicSampler) : undefined;
         if (!st) return null;
