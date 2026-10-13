@@ -78,7 +78,8 @@ Protocole (WebSocket ws://127.0.0.1:8765)
     VOICE_INSTALL feature [variant auto|cpu|cuda]
                                 → installation en arrière-plan (VOICE_EVENT kind=install, feature)
     VOICE_CANCEL job_id | install=true
-    VOICE_DEVERB                trame type 2 {action, req_id, job_id, sample_rate, nch, nframes} + audio
+    VOICE_DEVERB                trame type 2 {action, req_id, job_id, sample_rate, nch, nframes[, late:false]} + audio
+                                  (late:false = DeepFilterNet 3 seul, sans la réverbe tardive : « Nettoyer la voix »)
                                   → trame type 2 {action:"VOICE_DEVERB", req_id, success, nch, nframes,
                                   sample_rate, seconds, device, engine} + voix sans la réverbe (100 %)
     VOICE_TRANSCRIBE            trame type 2 {action, req_id, job_id, sample_rate, nch, nframes,
@@ -1444,8 +1445,10 @@ def _voice_server_methods():
 
             t = time.time()
             if kind == "deverb":
+                # Lot 1 « Nettoyer la voix » : late=false → DeepFilterNet 3 seul (débruitage, sans la réverbe tardive).
+                late = meta.get("late", True) is not False
                 res = await self.loop.run_in_executor(
-                    self.voice_pool, lambda: deverb_service.deverb(self.voice, job_id, audio, sr, on_event))
+                    self.voice_pool, lambda: deverb_service.deverb(self.voice, job_id, audio, sr, on_event, late=late))
                 out = res.pop("audio")
                 logger.info(f"🎙️ Réverbe retirée : {nframes / sr:.1f} s en {time.time() - t:.1f} s")
                 await self._send(ws, build_render_frame({"action": "VOICE_DEVERB", "req_id": req_id, "job_id": job_id,

@@ -50,6 +50,7 @@ import { useAraContext } from './AraDialog';
 import { clipGainWheel, isClipGainWheel } from '../utils/clipGainWheel';
 import { useVoiceAvailability } from './VoiceAIDialog';
 import { DEVERB_TOOLTIP, setTranscriptShown, TRANSCRIBE_TOOLTIP, voiceMenuState } from '../services/VoiceAI';
+import { CLEAN_MENU_LABEL, CLEAN_TOOLTIP } from '../utils/voiceCleanLabels';
 import { clipLyricLabels } from '../utils/voiceLyrics';
 import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
@@ -2589,6 +2590,9 @@ useEffect(() => {
       const tx = voiceMenuState(voiceAvail, TRANSCRIBE_TOOLTIP);
       const many = selTargets().filter(tg => { const x = tracks.find(t => t.id === tg.trackId)?.clips.find(y => y.id === tg.clipId); return !!x && x.type !== TrackType.MIDI && !x.notes; });
       voice.push('separator',
+        // Lot 1 : nettoyage en un clic, partout (site, téléphone, appli).
+        { label: CLEAN_MENU_LABEL, icon: 'fa-wand-magic-sparkles', title: CLEAN_TOOLTIP,
+          onClick: () => { openNovaWindow('voice-clean', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } },
         { label: 'Retirer la réverbe de la pièce…', icon: 'fa-microphone-lines', title: dv.title, disabled: dv.disabled,
           onClick: () => { openNovaWindow('voice-deverb', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } },
         { label: many.length > 1 ? `Transcrire les paroles (${many.length} clips)…` : 'Transcrire les paroles…', icon: 'fa-closed-captioning', title: tx.title, disabled: tx.disabled,

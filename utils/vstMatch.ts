@@ -194,5 +194,5 @@ export const builtinFor = (name: string, vendor = ''): PluginType | null => buil
 export const BUILTIN_LABEL_FR: Partial<Record<PluginType, string>> = {
   PROEQ12: "l'égaliseur NOVA", COMPRESSOR: 'le compresseur NOVA', LIMITER: 'le limiteur NOVA', DEESSER: 'le de-esser NOVA',
   VOCALSATURATOR: 'la saturation NOVA', REVERB: 'la reverb NOVA', DELAY: "l'écho NOVA", AUTOTUNE: "l'autotune NOVA",
-  CHORUS: 'le chorus NOVA', STEREOSPREADER: "l'élargisseur stéréo NOVA", DENOISER: 'la porte de bruit NOVA',
+  CHORUS: 'le chorus NOVA', STEREOSPREADER: "l'élargisseur stéréo NOVA", DENOISER: 'le gate de bruit NOVA',
 };

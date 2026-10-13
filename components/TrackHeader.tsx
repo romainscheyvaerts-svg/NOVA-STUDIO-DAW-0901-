@@ -380,7 +380,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     
     const map: Record<string, string> = { 
       'AUTOTUNE': 'TUNE', 'COMPRESSOR': 'COMP', 'STEREOSPREADER': 'MS', 
-      'DEESSER': 'DS', 'DENOISER': 'NOISE', 'PROEQ12': 'EQ12', 'VOCALSATURATOR': 'SAT',
+      'DEESSER': 'DS', 'DENOISER': 'NGATE', 'PROEQ12': 'EQ12', 'VOCALSATURATOR': 'SAT',
       'MELODIC_SAMPLER': 'KEYS', 'DRUM_SAMPLER': 'DRUM'
     };
     return map[type] || type.substring(0, 4);

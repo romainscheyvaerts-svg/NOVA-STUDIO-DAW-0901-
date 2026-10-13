@@ -42,6 +42,11 @@ function filter(x: Float32Array, f: Biquad): Float32Array {
   return y;
 }
 
+/** Un canal passé dans la pondération K (BS.1770), pour une loudness à court terme (utils/voiceClean). */
+export function kWeighted(x: Float32Array, fs: number): Float32Array {
+  return filter(filter(x, highShelf(fs)), highPass(fs));
+}
+
 /** Loudness intégrée en LUFS (-Infinity si silence). */
 export function integratedLufs(buffer: AudioBuffer): number {
   const fs = buffer.sampleRate;

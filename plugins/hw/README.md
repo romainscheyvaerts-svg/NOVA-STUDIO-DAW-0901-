@@ -51,7 +51,7 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `plum` | prune pailletée `#3b1f4f` | lilas clair `#f4eaff`, accent magenta | Flanger |
 | `forest` | vert forêt mat `#1f3b2d` | crème `#f2ead3`, accent ambre | Doubleur |
 | `midnight` | bleu nuit anodisé `#111a2c` | blanc bleuté `#e6f0ff`, accent cyan | (réservé : Stéréo) |
-| `hammer` | gris martelé `#3a474c` | blanc `#f3f6f6`, accent vert | Anti-bruit |
+| `hammer` | gris martelé `#3a474c` | blanc `#f3f6f6`, accent vert | Gate de bruit |
 | `labgrey` | gris laboratoire `#d4d2cc` | quasi-noir `#1b1c1e`, accent pétrole | (réservé : Master) |
 | `indigo` | indigo `#1e1b4b` | blanc lavande `#eef0ff`, accent rose | Harmoniseur |
 | `vermilion` | émail vermillon `#8a2c1d` | crème `#fff3e3`, accent jaune | Voix grave / aiguë |

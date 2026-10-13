@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { splitInserts } from '../utils/insertRows';
 
 describe('splitInserts (B5 : effets de la console)', () => {
-  const fx = ['Anti-bruit', 'Nova Tune', 'Égaliseur', 'Comp', 'Comp 2', 'De-esser', 'Saturation', 'Doubleur'];
+  const fx = ['Gate de bruit', 'Nova Tune', 'Égaliseur', 'Comp', 'Comp 2', 'De-esser', 'Saturation', 'Doubleur'];
   it('les 8 effets de « Trap autotune » tiennent tous à la souris', () => {
     expect(splitInserts(fx, 8)).toEqual({ shown: fx, hidden: [] });
   });

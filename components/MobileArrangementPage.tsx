@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
+import { CLEAN_TOOLTIP } from '../utils/voiceCleanLabels';
 import PracticeSpeed from './PracticeSpeed';
 import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
@@ -1145,6 +1146,20 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
               <span className="text-[10px] font-semibold text-white/70">REV</span>
             </button>
+
+            {/* Lot 1 : nettoyer la voix (bruit, niveau ; réverbe dans l'appli Windows), en premier des outils voix */}
+            {selectedClip.clip.type !== TrackType.MIDI && !selectedClip.clip.notes && (
+              <button
+                onClick={() => openNovaWindow('voice-clean', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                aria-label="Nettoyer la voix : bruit de fond et niveau"
+                title={CLEAN_TOOLTIP}
+                data-testid="mobile-clip-clean"
+                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 active:bg-cyan-500/30 transition-all"
+              >
+                <i className="fas fa-wand-magic-sparkles text-cyan-300 text-sm mb-0.5" aria-hidden></i>
+                <span className="text-[9px] font-bold text-cyan-100">NETTOYER</span>
+              </button>
+            )}
 
             {/* Justesse (V19) : tout corriger dans la gamme, avec le dosage */}
             {selectedClip.clip.type !== TrackType.MIDI && (

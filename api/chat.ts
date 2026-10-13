@@ -99,7 +99,8 @@ MARQUEURS ET GROUPES
 | DELETE_GROUP | { groupId } | |
 
 Effets disponibles (pluginType) : AUTOTUNE, PROEQ12, COMPRESSOR, VOCALSATURATOR, REVERB,
-DELAY, DOUBLER, STEREOSPREADER, DEESSER, DENOISER.
+DELAY, DOUBLER, STEREOSPREADER, DEESSER, DENOISER (gate de bruit : coupe le bruit entre les phrases,
+ne retire pas le bruit sous la voix ; pour ça, conseiller « ✨ Nettoyer la voix » sur le clip).
 `;
 
 /** Les styles de mix (utils/vocalPresets.ts) décrits pour le modèle. */

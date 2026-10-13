@@ -5,6 +5,9 @@ import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
  * DENOISER PRO - Professional Noise Gate/Expander
+ * Libellé affiché : « Gate de bruit » (lot 1, 14/10/2026) : ce n'est PAS un débruiteur, il coupe
+ * le bruit entre les phrases. Le débruitage d'une prise est « ✨ Nettoyer la voix » (components/VoiceCleanDialog).
+ * Type interne inchangé (DENOISER) : les projets existants s'ouvrent à l'identique.
  * Inspired by Ableton Gate, UAD Precision, Softube
  * Detection et gain dans un AudioWorklet (precis a l'echantillon, identique a l'export)
  */
@@ -37,7 +40,7 @@ const MANUAL = { autoThreshold: false, lowCut: 0, humFilter: false };
 const DENOISER_PRESETS = [
   // Reglage des styles voix : seuil appris sur le bruit de la piece, coupe-bas, anti-ronflette.
   { name: "Voix auto (pièce bruyante)", threshold: -60, range: -30, attack: 0.002, hold: 0.08, release: 0.08, scFreq: 250, flip: false, autoThreshold: true, lowCut: 80, humFilter: true },
-  { name: "Anti-bruit doux", threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, ...MANUAL },
+  { name: "Gate doux", threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, ...MANUAL },
   { name: "Porte voix (net)", threshold: -35, range: -80, attack: 0.001, hold: 0.02, release: 0.1, scFreq: 800, flip: false, ...MANUAL },
   { name: "Porte batterie", threshold: -25, range: -80, attack: 0.0001, hold: 0.01, release: 0.05, scFreq: 100, flip: false, ...MANUAL },
   { name: "Radio / podcast", threshold: -40, range: -30, attack: 0.01, hold: 0.1, release: 0.3, scFreq: 2000, flip: false, ...MANUAL },
@@ -494,7 +497,7 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
     <HwWindow type="DENOISER" width={620} accent={DN_ACCENT} accentInk="#03170e"
       toolbar={<HwPresets presets={DN_PRESETS} current={view as any} onApply={pr => loadPreset(pr.params)} />}
       idleHelp={<>Coupe le souffle et les bruits de la pièce entre tes phrases. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
-      <Faceplate finish="hammer" model="Anti-bruit" kicker="Porte de bruit vocale · seuil appris" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: DN_ACCENT }}>
+      <Faceplate finish="hammer" model="Gate de bruit" kicker="Gate vocal · seuil appris" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: DN_ACCENT }}>
         <div className="flex items-center gap-2.5 mb-2" aria-live="polite" title="Ouverte : ta voix passe. Fermée : le bruit est coupé.">
           <span ref={ledRef} className="hw-led hw-led-lg" data-on="true" style={{ ['--led' as any]: DN_ACCENT }} aria-hidden="true" />
           <span className="hw-lcd"><span ref={stateRef}>Ouverte : ta voix passe</span></span>

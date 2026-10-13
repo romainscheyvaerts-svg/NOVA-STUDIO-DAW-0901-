@@ -23,6 +23,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { patchClip } from '../utils/clipProcess';
 import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
 import { openNovaWindow } from '../utils/novaWindows';
+import { AbPlayer } from '../utils/abPlayer';
 
 export type VoiceMode = 'deverb' | 'transcribe';
 export interface VoiceTarget { trackId: string; clipId: string }
@@ -84,55 +85,7 @@ const ProgressBar: React.FC<{ pct: number; label: string; testid?: string }> = (
   </div>
 );
 
-// --- Écoute avant / après : la voix d'origine et la voix traitée jouent ensemble, le dosage
-// change seulement leurs volumes (bascule instantanée, au même endroit). -------------------
-class AbPlayer {
-  private ctx: AudioContext | null = null;
-  private srcs: AudioBufferSourceNode[] = [];
-  private gO: GainNode | null = null;
-  private gW: GainNode | null = null;
-  onEnd: (() => void) | null = null;
-
-  play(d: DeverbData, amount: number, after: boolean) {
-    this.stop();
-    const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!Ctor) return;
-    if (!this.ctx) this.ctx = new Ctor({ sampleRate: d.sampleRate });
-    const ctx = this.ctx!;
-    const mk = (chs: Float32Array[]) => {
-      const b = ctx.createBuffer(chs.length, chs[0].length, d.sampleRate);
-      chs.forEach((c, i) => b.copyToChannel(c, i));
-      return b;
-    };
-    this.gO = ctx.createGain();
-    this.gW = ctx.createGain();
-    this.gO.connect(ctx.destination);
-    this.gW.connect(ctx.destination);
-    const so = ctx.createBufferSource(); so.buffer = mk(d.orig); so.connect(this.gO);
-    const sw = ctx.createBufferSource(); sw.buffer = mk(d.wet); sw.connect(this.gW);
-    this.set(amount, after);
-    const t = ctx.currentTime + 0.05;
-    so.start(t); sw.start(t);
-    so.onended = () => { if (this.srcs[0] === so) { this.srcs = []; this.onEnd?.(); } };
-    this.srcs = [so, sw];
-    void ctx.resume();
-  }
-
-  set(amount: number, after: boolean) {
-    if (!this.ctx || !this.gO || !this.gW) return;
-    const a = after ? Math.max(0, Math.min(1, amount)) : 0;
-    const now = this.ctx.currentTime;
-    this.gO.gain.setTargetAtTime(1 - a, now, 0.01);
-    this.gW.gain.setTargetAtTime(a, now, 0.01);
-  }
-
-  stop() {
-    this.srcs.forEach(s => { try { s.onended = null; s.stop(); } catch { /* déjà arrêté */ } });
-    this.srcs = [];
-  }
-
-  close() { this.stop(); if (this.ctx) { void this.ctx.close().catch(() => undefined); this.ctx = null; } }
-}
+// Écoute avant / après : utils/abPlayer (partagé avec « Nettoyer la voix », lot 1).
 
 interface Props {
   request: { mode: VoiceMode; targets: VoiceTarget[] } | null;

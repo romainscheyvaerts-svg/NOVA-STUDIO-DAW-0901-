@@ -518,8 +518,9 @@ export interface AudioSuiteInfo {
   /** Décalage du clip dans le son d'origine et dans le son traité, au moment du traitement (retour exact). */
   sourceOffset?: number;
   processedOffset?: number;
-  /** Effets appliqués, dans l'ordre (« AI_DEVERB » : réverbe de la pièce retirée par l'IA du PC, R24). */
-  steps: { type: PluginType | 'AI_DEVERB'; name: string; preset?: string; at: number }[];
+  /** Effets appliqués, dans l'ordre (« AI_DEVERB » : réverbe de la pièce retirée par l'IA du PC, R24 ;
+   *  « AI_VOICE_CLEAN » : voix nettoyée en un clic, bruit / réverbe / niveau, lot 1). */
+  steps: { type: PluginType | 'AI_DEVERB' | 'AI_VOICE_CLEAN'; name: string; preset?: string; at: number }[];
   /** Nom et calage du clip d'origine. */
   sourceName?: string;
   sourceWarp?: WarpSettings;

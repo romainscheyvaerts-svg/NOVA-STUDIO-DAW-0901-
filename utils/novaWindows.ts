@@ -14,7 +14,9 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // Entrées nommées (I/O Setup simplifié, utils/ioNames).
   | 'io-names'
   // R24 : voix par l'IA locale (appli Windows) : retirer la réverbe, transcrire les paroles.
-  | 'voice-deverb' | 'voice-transcribe';
+  | 'voice-deverb' | 'voice-transcribe'
+  // Lot 1 « Voix propre » : nettoyer la voix en un clic (site, téléphone, appli).
+  | 'voice-clean';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;

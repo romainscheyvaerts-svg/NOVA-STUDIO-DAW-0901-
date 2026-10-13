@@ -52,6 +52,8 @@ BATTERIE = [
     ("tarifs", []),
     # Lot 4 BandLab : « Masteriser un morceau » (fichier sans projet) et « Caler sur la référence ».
     ("master_fichier", []),
+    # Lot 1 BandLab (14/10/2026) : « ✨ Nettoyer la voix » sur le site sans pont (RNNoise WASM), bureau et téléphone, thèmes sombre et clair.
+    ("voix_propre", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

@@ -23,8 +23,10 @@ MAX_SECONDS = 20 * 60
 
 
 def deverb(svc: VoiceService, job_id: str, audio: np.ndarray, sr: int,
-           on_event: Optional[Callable[[dict], None]] = None) -> dict:
-    """audio : (canaux, échantillons) float32. Bloquant. Renvoie {audio, sample_rate, seconds, device, engine}."""
+           on_event: Optional[Callable[[dict], None]] = None, late: bool = True) -> dict:
+    """audio : (canaux, échantillons) float32. Bloquant. Renvoie {audio, sample_rate, seconds, device, engine}.
+    `late=False` (lot 1 « Nettoyer la voix », case « Réverbe » décochée) : DeepFilterNet 3 seul,
+    sans le retrait de la réverbe tardive (débruitage)."""
     if audio.ndim != 2 or audio.shape[1] < sr // 2:
         raise VoiceError("Clip trop court (une demi-seconde minimum).")
     if audio.shape[1] > sr * MAX_SECONDS:
@@ -33,7 +35,8 @@ def deverb(svc: VoiceService, job_id: str, audio: np.ndarray, sr: int,
     try:
         src, dst = work / "voix.wav", work / "sans_reverbe.wav"
         stems_service.write_wav_float(src, audio, sr)
-        done = svc.run_job(job_id, "deverb", ["deverb", "--input", src, "--output", dst], on_event)
+        args = ["deverb", "--input", src, "--output", dst] + ([] if late else ["--no-late"])
+        done = svc.run_job(job_id, "deverb", args, on_event)
         out, out_sr = stems_service.read_wav(Path(done.get("path") or dst))
         if out.shape[0] != audio.shape[0]:
             out = np.repeat(out[:1], audio.shape[0], axis=0) if out.shape[0] == 1 else out[: audio.shape[0]]
