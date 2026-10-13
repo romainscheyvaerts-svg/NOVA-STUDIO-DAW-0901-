@@ -3,6 +3,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import type { Marker } from '../types';
 import { autoRegionMap, lyricBlocks, prompterLine, regionAnchors } from '../utils/lyricsTiming';
 import { lineWordTimes, normWord, TimedWord, timedAnchors, wordIndexAt } from '../utils/voiceLyrics';
+import { hitWhere, type TakeWordHit } from '../utils/voiceSearch';
 
 interface LyricsPrompterProps {
   open: boolean;
@@ -29,7 +30,68 @@ interface LyricsPrompterProps {
   bpm?: number;
   /** R24 : mots transcrits des clips voix (temps du morceau) : le texte défile quand il est chanté. */
   timedWords?: TimedWord[];
+  /** B7 : chercher un mot chanté dans les prises transcrites (toutes, même mises de côté). */
+  searchWords?: (query: string) => TakeWordHit[];
+  /** B7 : la tête de lecture va sur le mot choisi. */
+  onJumpToWord?: (hit: TakeWordHit) => void;
+  /** Au moins une prise transcrite dans le projet. */
+  hasTranscripts?: boolean;
 }
+
+/**
+ * B7 · « Trouver un mot chanté » : champ toujours visible en haut du prompteur. Les résultats
+ * (toutes les prises transcrites, même mutées) s'affichent par-dessus le texte ; un clic, ou
+ * Entrée pour le premier, place la tête de lecture sur le mot.
+ */
+const WordSearch: React.FC<{ search: (q: string) => TakeWordHit[]; onJump: (h: TakeWordHit) => void; ready: boolean }> = ({ search, onJump, ready }) => {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const hits = useMemo(() => (q.trim().length >= 2 ? search(q).slice(0, 8) : []), [q, search]);
+  const pick = (h: TakeWordHit | undefined) => { if (!h) return; onJump(h); setOpen(false); };
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5 rounded-lg bg-black/40 border border-white/15 focus-within:border-cyan-400/70 px-2">
+        <i className="fas fa-search text-[11px] text-slate-400" aria-hidden="true" />
+        <input type="search" value={q} data-testid="prompter-word-search"
+          onChange={e => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); pick(hits[0]); }
+            else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (q) { setQ(''); } else (e.target as HTMLInputElement).blur(); setOpen(false); }
+            e.stopPropagation(); // les raccourcis du studio ne partent pas pendant la saisie
+          }}
+          placeholder="Trouver un mot chanté dans les prises (ex. j’arrive)"
+          aria-label="Trouver un mot chanté dans les prises"
+          className="h-9 min-w-0 flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-slate-400" />
+      </div>
+      {open && q.trim().length >= 2 && (
+        <div role="listbox" aria-label="Endroits où le mot est chanté" data-testid="prompter-word-results"
+          className="absolute left-0 right-0 top-full mt-1 z-30 max-h-[min(40vh,260px)] overflow-y-auto rounded-xl border border-white/15 bg-nv-surface shadow-2xl p-1">
+          {hits.length === 0 ? (
+            <p className="px-3 py-3 text-[12px] text-slate-300" role="status">
+              {ready
+                ? <>Aucun endroit chanté « {q.trim()} » dans les prises transcrites. Vérifie l’orthographe, ou transcris les autres prises.</>
+                : <>Aucune prise transcrite pour l’instant. Clic droit sur le clip voix → Voix → « Transcrire les paroles… » (appli Windows), puis cherche ici.</>}
+            </p>
+          ) : hits.map((h, i) => (
+            <button key={h.key} type="button" role="option" aria-selected={i === 0} data-testid="prompter-word-hit"
+              onClick={() => pick(h)}
+              className="w-full text-left rounded-lg px-2.5 py-1.5 min-h-[44px] hover:bg-cyan-500/15 focus:bg-cyan-500/15 outline-none">
+              <span className="block truncate text-[13px] text-white">
+                {h.before && <span className="text-slate-400">… {h.before} </span>}
+                <mark className="bg-cyan-500/30 text-cyan-100 rounded px-0.5">{h.text}</mark>
+                {h.after && <span className="text-slate-400"> {h.after} …</span>}
+              </span>
+              <span className={`block truncate text-[11px] ${h.audible ? 'text-slate-400' : 'text-amber-300/90'}`}>
+                {hitWhere(h)}{h.playlist ? ' · autre playlist' : !h.audible ? ' · prise mise de côté' : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const LINE_H = 1.45; // interligne (em)
 
@@ -181,6 +243,9 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
                 onClick={() => p.onStartChange(p.isPlaying ? audioEngine.getCurrentTime() : p.currentTime)}>⏱ Commencer ici</button>
             )}
           </div>
+        )}
+        {!editing && p.searchWords && p.onJumpToWord && (
+          <WordSearch search={p.searchWords} onJump={p.onJumpToWord} ready={!!p.hasTranscripts} />
         )}
         {!editing && showRegions && !voiceMode && (
           <div className="rounded-xl bg-white/5 border border-white/10 p-2 space-y-1.5 max-h-[38vh] overflow-y-auto">

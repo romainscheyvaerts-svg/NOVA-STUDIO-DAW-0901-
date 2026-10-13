@@ -50,6 +50,7 @@ import { clipGainWheel, isClipGainWheel } from '../utils/clipGainWheel';
 import { useVoiceAvailability } from './VoiceAIDialog';
 import { DEVERB_TOOLTIP, setTranscriptShown, TRANSCRIBE_TOOLTIP, voiceMenuState } from '../services/VoiceAI';
 import { clipLyricLabels } from '../utils/voiceLyrics';
+import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
@@ -682,6 +683,28 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
+  // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
+  const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH });
+  revealRef.current = { zoomH, zoomV, tracksTop, visibleTracks, extraH };
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const d = (ev as CustomEvent<RevealTimeDetail>).detail;
+      const el = scrollContainerRef.current;
+      if (!el || !d || !Number.isFinite(d.time)) return;
+      const r = revealRef.current;
+      const cw = Math.max(1, el.clientWidth - headerWidth);
+      const x = d.time * r.zoomH;
+      if (x < el.scrollLeft + cw * 0.05 || x > el.scrollLeft + cw * 0.9) el.scrollLeft = Math.max(0, x - cw * 0.25);
+      if (d.trackId) {
+        let y = r.tracksTop;
+        for (const t of r.visibleTracks) { if (t.id === d.trackId) break; y += r.zoomV + r.extraH(t); }
+        const ch = el.clientHeight;
+        if (y < el.scrollTop + r.tracksTop || y + r.zoomV > el.scrollTop + ch) el.scrollTop = Math.max(0, y - r.tracksTop - ch * 0.25);
+      }
+    };
+    window.addEventListener(REVEAL_TIME_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_TIME_EVENT, onReveal);
+  }, [headerWidth]);
 
   // Mode avancé (G13) : FX, M, S, envois et R mangeaient le nom (« LEAD C... ») ;
   // colonne un peu plus large sur grand écran, tant que l'utilisateur ne l'a pas réglée.
@@ -893,6 +916,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     // R23 : changer de beat en gardant les voix ; repérer les passages à refaire.
     if (target && target.id === 'instrumental') menuItems.unshift({ label: 'Remplacer l’instru… (garder les voix)', icon: 'fa-random', title: 'Nouveau beat : tes voix sont recalées sur son tempo et transposées dans sa tonalité, en une seule annulation.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'openSwap' }); } });
     if (isVoiceTrack(target) && target.clips.some(c => !c.isMuted)) menuItems.push({ label: 'Repérer les passages à refaire', icon: 'fa-redo', title: 'Justesse, calage sur le temps, niveau, saturation, bruit : les passages qui détonnent passent en rouge, « Refaire » pose le punch.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'findSpots', trackId }); } });
+    // B7 : toutes les prises de la piste transcrites d'un coup (recherche d'un mot, prompteur calé).
+    if (isVoiceTrack(target)) {
+      const takes = target.clips.filter(c => c.type !== TrackType.MIDI && !c.notes && (c.bufferId || c.buffer));
+      if (takes.length) {
+        const tx = voiceMenuState(voiceAvail, TRANSCRIBE_TOOLTIP);
+        menuItems.push({ label: takes.length > 1 ? `Transcrire les paroles de la piste (${takes.length} prises)…` : 'Transcrire les paroles de la piste…', icon: 'fa-closed-captioning',
+          title: tx.title, disabled: tx.disabled,
+          onClick: () => { setContextMenu(null); openNovaWindow('voice-transcribe', { targets: takes.map(c => ({ trackId, clipId: c.id })) }); } });
+      }
+    }
     if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
     // Piste guide (R3) : la voix témoin s'entend pendant la prise, jamais exportée ni mixée.
     if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({

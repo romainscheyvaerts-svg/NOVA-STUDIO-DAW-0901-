@@ -149,7 +149,9 @@ import { playheadStore } from './utils/playheadStore';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
-import { projectTimedWords, withLyricsCorrections } from './utils/voiceLyrics';
+import { projectTimedWords, transcriptValid, withLyricsCorrections } from './utils/voiceLyrics';
+import { hitNotice, hitWhere, REVEAL_TIME_EVENT, searchTakeWords, type RevealTimeDetail, type TakeWordHit } from './utils/voiceSearch';
+import { SELECT_CLIP_EVENT } from './hooks/useEditModes';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
@@ -9583,6 +9585,30 @@ function Studio() {
   }, []);
   // R24 : mots transcrits des clips voix (prompteur calé sur la voix).
   const lyricsTimedWords = useMemo(() => projectTimedWords(state.tracks), [state.tracks]);
+  // B7 : chercher un mot chanté dans les prises (palette Ctrl+K, champ du prompteur) et y sauter.
+  const hasTranscripts = useMemo(() => state.tracks.some(t => t.clips.some(c => transcriptValid(c)) || (t.playlists || []).some(pl => pl.clips?.some(c => transcriptValid(c)))), [state.tracks]);
+  const searchSungWords = useCallback((q: string) => searchTakeWords(stateRef.current.tracks, q, { limit: 30 }), []);
+  const jumpToTakeWord = useCallback((h: TakeWordHit) => {
+    const st = stateRef.current;
+    if (st.isRecording) { setAiNotification('Pendant une prise, la tête de lecture ne bouge pas : arrête d’abord l’enregistrement.'); return; }
+    if (st.currentView !== 'ARRANGEMENT') setState(s => ({ ...s, currentView: 'ARRANGEMENT' }));
+    if (isMobile && activeTabRef.current !== 'ARRANGEMENT') setActiveMobileTab('ARRANGEMENT');
+    handleSeek(Math.max(0, h.t));
+    if (!h.playlist) {
+      setState(s => (s.selectedTrackId === h.trackId ? s : { ...s, selectedTrackId: h.trackId }));
+      window.dispatchEvent(new CustomEvent(SELECT_CLIP_EVENT, { detail: { trackId: h.trackId, clipId: h.clipId } }));
+    }
+    // Après le rendu de la vue d'édition : le mot et sa piste à l'écran.
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent<RevealTimeDetail>(REVEAL_TIME_EVENT, { detail: { time: h.t, trackId: h.trackId } })), 80);
+    setAiNotification(hitNotice(h));
+  }, [handleSeek, isMobile, setAiNotification]);
+  const paletteWordSearch = useCallback((q: string): PaletteAction[] => searchSungWords(q).map(h => ({
+    id: `word:${h.key}`,
+    label: `« ${h.text} » · ${hitWhere(h)}`,
+    group: 'Dans les prises',
+    detail: `${h.before ? `… ${h.before} ` : ''}${h.text}${h.after ? ` ${h.after} …` : ''}${h.playlist ? ' (autre playlist)' : !h.audible ? ' (prise mise de côté)' : ''}`,
+    run: () => jumpToTakeWord(h),
+  })), [searchSungWords, jumpToTakeWord]);
   useEffect(() => { if (shareOpen) track('share_opened'); }, [shareOpen]);
   useEffect(() => { if (isExportMenuOpen) track('export_opened'); }, [isExportMenuOpen]);
   useEffect(() => { if (takeHomeOpen) track('takehome_opened'); }, [takeHomeOpen]);
@@ -10371,6 +10397,9 @@ function Studio() {
         lyrics={state.lyrics || ''}
         onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))}
         timedWords={lyricsTimedWords}
+        searchWords={searchSungWords}
+        onJumpToWord={jumpToTakeWord}
+        hasTranscripts={hasTranscripts}
         start={state.lyricsStart ?? 0}
         onStartChange={t => setState(prev => ({ ...prev, lyricsStart: Math.max(0, t) }))}
         speed={state.lyricsSpeed ?? 16}
@@ -10539,7 +10568,7 @@ function Studio() {
       />
       </MountWhenOpened>
       </PanelBoundary>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteOpen ? buildPaletteActions() : []} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteOpen ? buildPaletteActions() : []} wordSearch={paletteWordSearch} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
       {keymapEditorOpen && !isMobile && <Suspense fallback={null}><KeymapEditor onClose={() => setKeymapEditorOpen(false)} /></Suspense>}
       {layoutsOpen && <Suspense fallback={null}><WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} /></Suspense>}

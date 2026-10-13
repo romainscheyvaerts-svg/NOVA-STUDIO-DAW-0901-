@@ -40,6 +40,8 @@ def deverb(svc: VoiceService, job_id: str, audio: np.ndarray, sr: int,
         n = audio.shape[1]
         out = out[:, :n] if out.shape[1] >= n else np.pad(out, ((0, 0), (0, n - out.shape[1])))
         return {"audio": np.ascontiguousarray(out, dtype=np.float32), "sample_rate": out_sr,
-                "seconds": done.get("seconds"), "device": done.get("device", "cpu"), "engine": done.get("engine", "deepfilternet3")}
+                "seconds": done.get("seconds"), "device": done.get("device", "cpu"), "engine": done.get("engine", "deepfilternet3"),
+                # B7 : durée de réverbération lue sur la prise, réverbe retirée (mesure sans voix sèche)
+                "rt60": done.get("rt60"), "reverb_db": done.get("reverb_db")}
     finally:
         shutil.rmtree(work, ignore_errors=True)

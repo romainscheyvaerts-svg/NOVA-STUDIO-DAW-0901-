@@ -15,7 +15,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DAWState, Track } from '../types';
 import { novaBridge, BridgeState, VoiceError, VoiceFeature, VoiceModuleStatus } from '../services/NovaBridge';
 import {
-  applyTranscriptions, blendDeverb, DEFAULT_LANGUAGE, DEVERB_TOOLTIP, deverbBlock, deverbPatch, deverbRegion, describeVoiceError,
+  applyTranscriptions, blendDeverb, CPU_FALLBACK_NOTE, DEFAULT_DEVERB_AMOUNT, DEFAULT_LANGUAGE, DEVERB_TOOLTIP, deverbBlock, deverbPatch, deverbRegion, describeVoiceError,
   formatBytes, installButtonLabel, LANGUAGE_OPTIONS, LyricsMode, progressLabel, sliceChannels, TranscribedClip,
   TranscribeLanguage, transcribeBlock, transcribeRegion, transcriptionSummary, TRANSCRIBE_TOOLTIP, voiceAvailability,
 } from '../services/VoiceAI';
@@ -27,7 +27,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 export type VoiceMode = 'deverb' | 'transcribe';
 export interface VoiceTarget { trackId: string; clipId: string }
 
-interface DeverbData { trackId: string; clipId: string; clipName: string; from: number; sampleRate: number; orig: Float32Array[]; wet: Float32Array[] }
+interface DeverbData { trackId: string; clipId: string; clipName: string; from: number; sampleRate: number; orig: Float32Array[]; wet: Float32Array[]; rt60?: number }
 
 interface Job {
   id: string;
@@ -151,7 +151,7 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
   const [language, setLanguage] = useState<TranscribeLanguage>(DEFAULT_LANGUAGE);
   const [lyricsMode, setLyricsMode] = useState<LyricsMode>('keep');
   const [showOnClip, setShowOnClip] = useState(true);
-  const [amount, setAmount] = useState(0.8);
+  const [amount, setAmount] = useState(DEFAULT_DEVERB_AMOUNT);
   const [after, setAfter] = useState(true);
   const [playing, setPlaying] = useState(false);
   const player = useRef<AbPlayer | null>(null);
@@ -239,7 +239,7 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
     try {
       const res = await novaBridge.deverbVoice({ jobId: id, channels: orig, sampleRate: r.buffer.sampleRate });
       patchJob(id, { phase: 'ready', pct: 100, seconds: res.seconds, device: res.device,
-        deverb: { trackId: t.trackId, clipId: t.clipId, clipName: r.clip.name, from: reg.from, sampleRate: res.sampleRate, orig, wet: res.channels } });
+        deverb: { trackId: t.trackId, clipId: t.clipId, clipName: r.clip.name, from: reg.from, sampleRate: res.sampleRate, orig, wet: res.channels, ...(res.rt60 ? { rt60: res.rt60 } : {}) } });
     } catch (e) {
       if ((e as VoiceError)?.code === 'cancelled') { setJob(null); return; }
       patchJob(id, { phase: 'error', error: describeVoiceError(e) });
@@ -444,6 +444,7 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
         <p className="text-[11px] text-nv-muted">
           Calcul {running.device === 'cuda' ? 'sur la carte graphique' : 'sur le processeur'} · {Math.round(elapsed)} s écoulées. Tu peux fermer cette fenêtre.
         </p>
+        {running.mode === 'transcribe' && running.device === 'cpu' && <p className="text-[11px] text-amber-500" role="status" data-testid="voice-cpu-fallback">⚠️ {CPU_FALLBACK_NOTE}</p>}
         <div className="flex gap-2">
           <button type="button" onClick={cancel} className={`${secondary} flex-1`}>Annuler</button>
           <button type="button" onClick={onClose} className={`${primary} flex-[2]`}>Continuer en arrière-plan</button>
@@ -454,8 +455,8 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
     const pct = Math.round(amount * 100);
     body = (
       <div className="space-y-3" data-testid="voice-deverb-ready">
-        <p className="text-[12px] text-emerald-500" role="status">✅ Voix analysée en {Math.max(1, Math.round(same.seconds || 0))} s ({same.device === 'cuda' ? 'carte graphique' : 'processeur'}). Règle le dosage et écoute.</p>
-        <label className="block space-y-1" title="0 % : la voix d’origine ; 100 % : toute la réverbe de la pièce retirée. Vers 70-85 %, la voix reste naturelle.">
+        <p className="text-[12px] text-emerald-500" role="status">✅ Voix analysée en {Math.max(1, Math.round(same.seconds || 0))} s ({same.device === 'cuda' ? 'carte graphique' : 'processeur'}){same.deverb.rt60 ? ` · réverbe de la pièce : environ ${same.deverb.rt60.toFixed(1).replace('.', ',')} s` : ''}. Écoute avant / après, puis règle le dosage.</p>
+        <label className="block space-y-1" title="0 % : la voix d’origine ; 100 % : la réverbe de la pièce retirée (environ 13 dB de queue en moins sur nos essais). Si la voix sonne trop sèche ou métallique, baisse vers 80-90 %.">
           <span className="flex items-center justify-between text-[12px] font-bold"><span>Dosage</span><span className="tabular-nums" data-testid="voice-amount-value">{pct} %</span></span>
           <input type="range" min={0} max={100} step={1} value={pct} onChange={e => setAmount(Number(e.target.value) / 100)} className="w-full accent-cyan-500" aria-label="Dosage du retrait de réverbe" data-testid="voice-amount" />
         </label>

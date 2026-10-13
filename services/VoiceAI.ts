@@ -204,6 +204,12 @@ export function setTranscriptShown(c: Clip, show: boolean): Partial<Clip> | null
 /** Résumé après la transcription (notification). */
 export function transcriptionSummary(results: TranscribedClip[], seconds: number, device: string): string {
   const n = results.reduce((a, r) => a + r.words.length, 0);
-  const where = device === 'cuda' ? 'carte graphique' : 'processeur';
-  return `📝 ${n} mot${n > 1 ? 's' : ''} transcrit${n > 1 ? 's' : ''} sur ${results.length} clip${results.length > 1 ? 's' : ''} (${Math.max(1, Math.round(seconds))} s, ${where}). Corrige le texte dans le prompteur : les temps suivent.`;
+  const where = device === 'cuda' ? 'carte graphique' : 'processeur, carte graphique indisponible';
+  return `📝 ${n} mot${n > 1 ? 's' : ''} transcrit${n > 1 ? 's' : ''} sur ${results.length} clip${results.length > 1 ? 's' : ''} (${Math.max(1, Math.round(seconds))} s, ${where}). Corrige le texte dans le prompteur : les temps suivent. Ctrl+K « trouver … » retrouve un mot dans tes prises.`;
 }
+
+/** B7 : la transcription tourne sur le processeur (carte graphique absente, désactivée ou pleine). */
+export const CPU_FALLBACK_NOTE = 'Carte graphique indisponible : calcul sur le processeur, plus lent (environ 1 minute par minute de voix). Vérifie que la carte NVIDIA est activée (mode graphique) pour aller 10 fois plus vite.';
+
+/** B7 : dosage proposé (mesuré : la queue de la pièce baisse de 13 dB en médiane à 100 %). */
+export const DEFAULT_DEVERB_AMOUNT = 1;

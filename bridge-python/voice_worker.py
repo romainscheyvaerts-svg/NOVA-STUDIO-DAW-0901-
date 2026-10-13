@@ -16,7 +16,10 @@ Transcription : faster-whisper (CTranslate2, MIT) et les poids Whisper d'OpenAI 
 convertis (models\\whisper\\<modèle>). Carte graphique NVIDIA si elle répond (cuBLAS
 dans cuda\\), sinon le processeur (int8).
 Déréverbération : DeepFilterNet 3 (MIT / Apache-2.0), exécutable officiel deep-filter
-(tools\\deep-filter.exe), en morceaux traités en parallèle sur le processeur.
+(tools\\deep-filter.exe), en morceaux traités en parallèle sur le processeur, puis
+retrait de la réverbe tardive (B7 : estimateur de Lebart / Habets, code NOVA en numpy) :
+la queue de la pièce qui reste après DeepFilterNet est prédite à partir du son 40 ms plus
+tôt et de la durée de réverbération (RT60) lue sur la prise, puis atténuée (12 dB au plus).
 """
 
 from __future__ import annotations
@@ -280,6 +283,129 @@ def run_transcribe(a) -> int:
 
 DF_SR = 48000
 
+# ─── Réverbe tardive (B7) ────────────────────────────────────────────────────
+LATE_NFFT = 1024
+LATE_HOP = 256
+
+
+def rt60_estimate(x, sr: int, hop_s: float = 0.01):
+    """Durée de réverbération (s) lue sur la prise elle-même : pentes des descentes libres
+    de l'énergie (fins de phrase). Les descentes les plus lentes sont celles de la pièce
+    (la voix qui s'arrête net descend plus vite). Renvoie (RT60, nombre de descentes)."""
+    import numpy as np
+    mono = np.asarray(x, np.float64)
+    if mono.ndim > 1:
+        mono = mono.mean(0)
+    n = max(1, int(hop_s * sr))
+    m = len(mono) // n
+    if m < 30:
+        return 0.5, 0
+    e = 10 * np.log10(np.mean(np.square(mono[: m * n].reshape(m, n)), 1) + 1e-14)
+    top = np.percentile(e, 99)
+    L = 12  # 120 ms
+    t = np.arange(L) * hop_s
+    slopes = []
+    i = 0
+    while i < m - L:
+        seg = e[i: i + L]
+        if seg[0] > top - 30 and np.all(np.diff(seg) < 0.5) and seg[0] - seg[-1] > 6:
+            k = np.polyfit(t, seg, 1)[0]
+            if k < 0:
+                slopes.append(k)
+            i += L
+        else:
+            i += 1
+    if not slopes:
+        return 0.5, 0
+    return float(np.clip(-60.0 / np.percentile(slopes, 70), 0.2, 1.5)), len(slopes)
+
+
+def suppress_late_reverb(y, sr: int, rt60: float, delay_ms: float = 40.0, alpha: float = 0.7,
+                         floor_db: float = -12.0, smooth: float = 0.6):
+    """Atténue la réverbe tardive de `y` (canaux × échantillons) : sa puissance est prédite
+    par la puissance lissée `delay_ms` plus tôt, décrue selon le RT60 (Lebart 2001, Habets
+    2007), puis retirée par un gain spectral (même gain sur tous les canaux : l'image stéréo
+    ne bouge pas), jamais plus bas que `floor_db`. Même longueur en sortie."""
+    import numpy as np
+    y = np.asarray(y, np.float32)
+    if y.ndim == 1:
+        y = y[None]
+    nfft, hop = LATE_NFFT, LATE_HOP
+    n = y.shape[1]
+    if n < nfft * 2:
+        return y.copy()
+    win = np.hanning(nfft + 1)[:-1].astype(np.float32)
+    padded = np.pad(y, ((0, 0), (nfft, nfft + hop)))
+    nfr = 1 + (padded.shape[1] - nfft) // hop
+    idx = np.arange(nfft)[None, :] + hop * np.arange(nfr)[:, None]
+    X = np.fft.rfft(padded[:, idx] * win, axis=2)  # canaux × trames × bandes
+    P = np.mean(np.abs(X) ** 2, axis=0)  # trames × bandes (moyenne des canaux)
+    Ne = max(1, int(round(delay_ms / 1000 * sr / hop)))
+    decay = float(np.exp(-2 * (3 * np.log(10) / (max(0.1, rt60) * sr)) * Ne * hop))
+    Ps = np.empty_like(P)
+    acc = P[0].copy()
+    for l in range(nfr):
+        acc = smooth * acc + (1 - smooth) * P[l]
+        Ps[l] = acc
+    late = np.zeros_like(P)
+    late[Ne:] = decay * Ps[:-Ne]
+    g_floor = 10 ** (floor_db / 20)
+    G = np.maximum(np.maximum(Ps - alpha * late, 0) / (Ps + 1e-12), g_floor)
+    g = G[0].copy()
+    for l in range(nfr):  # gain lissé dans le temps (pas de « gargouillis »)
+        g = 0.4 * g + 0.6 * G[l]
+        G[l] = g
+    frames = np.fft.irfft(X * G[None], n=nfft, axis=2).astype(np.float32) * win
+    out = np.zeros((y.shape[0], padded.shape[1]), np.float32)
+    wsum = np.zeros(padded.shape[1], np.float32)
+    for l in range(nfr):
+        out[:, l * hop: l * hop + nfft] += frames[:, l]
+        wsum[l * hop: l * hop + nfft] += win ** 2
+    out /= np.maximum(wsum, 1e-6)
+    return out[:, nfft: nfft + n]
+
+
+def tail_reduction_db(before, after, sr: int):
+    """Réverbe retirée, mesurée sans voix sèche : aux fins de phrase lues sur `after` (chute
+    de 15 dB), énergie 20 à 250 ms après la fin rapportée aux 250 ms d'avant, avant et après
+    traitement. Renvoie (écart en dB, nombre de fins de phrase) ; (None, 0) sans fin nette."""
+    import numpy as np
+    b = np.asarray(before, np.float64)
+    a = np.asarray(after, np.float64)
+    b = b.mean(0) if b.ndim > 1 else b
+    a = a.mean(0) if a.ndim > 1 else a
+    n = max(1, int(0.01 * sr))
+    m = min(len(a), len(b)) // n
+    if m < 60:
+        return None, 0
+    e = 10 * np.log10(np.mean(np.square(a[: m * n].reshape(m, n)), 1) + 1e-14)
+    top = np.percentile(e, 99)
+    ends = []
+    i = 5
+    while i < m - 30:
+        if e[i - 5: i].mean() > top - 25 and e[i + 10: i + 25].mean() < e[i - 5: i].mean() - 15:
+            ends.append(i * n)
+            i += 30
+            continue
+        i += 1
+
+    def tail(sig):
+        vals = []
+        A, B, C = int(0.25 * sr), int(0.02 * sr), int(0.25 * sr)
+        for p in ends:
+            if p - A < 0 or p + C > len(sig):
+                continue
+            pre = np.mean(sig[p - A: p] ** 2)
+            post = np.mean(sig[p + B: p + C] ** 2)
+            if pre > 0:
+                vals.append(10 * np.log10(post / pre + 1e-14))
+        return vals
+
+    tb, ta = tail(b), tail(a)
+    if not tb or len(tb) != len(ta):
+        return None, 0
+    return round(float(np.mean(ta) - np.mean(tb)), 1), len(tb)
+
 
 def deep_filter_exe() -> Path:
     return HOME / "tools" / ("deep-filter.exe" if os.name == "nt" else "deep-filter")
@@ -301,16 +427,22 @@ def _df_chunk(exe: Path, chunk, workdir: Path, idx: int):
     return y[:, : chunk.shape[1]]
 
 
-def deverb(audio, sr: int, jobs: int = 4, on_progress=None, chunk_s: float = 12.0, preroll_s: float = 1.5, xfade_s: float = 0.05):
+def deverb(audio, sr: int, jobs: int = 4, on_progress=None, chunk_s: float = 12.0, preroll_s: float = 1.5, xfade_s: float = 0.05,
+           late: bool = True, info: dict | None = None):
     """Voix sans la réverbe de la pièce (100 %, même longueur, même fréquence, mêmes canaux).
     Morceaux de ~12 s traités en parallèle ; 1,5 s d'avance pour que le filtre soit
-    « chaud » au début de chaque morceau ; fondu de 50 ms entre deux morceaux."""
+    « chaud » au début de chaque morceau ; fondu de 50 ms entre deux morceaux.
+    `late` : retrait de la réverbe tardive après DeepFilterNet (RT60 lu sur toute la prise).
+    `info` (facultatif) reçoit le RT60 estimé."""
     import numpy as np
     exe = deep_filter_exe()
     if not exe.is_file():
         raise FileNotFoundError("deep-filter introuvable : réinstalle la déréverbération")
     x = resample(audio, sr, DF_SR)
     n = x.shape[1]
+    rt60, n_decays = rt60_estimate(x, DF_SR) if late else (None, 0)
+    if info is not None:
+        info.update({"rt60": None if rt60 is None else round(rt60, 2), "rt60_decays": n_decays})
     step = int(chunk_s * DF_SR)
     pre = int(preroll_s * DF_SR)
     xf = int(xfade_s * DF_SR)
@@ -326,6 +458,8 @@ def deverb(audio, sr: int, jobs: int = 4, on_progress=None, chunk_s: float = 12.
             a, b = bounds[i]
             s0, s1 = max(0, a - pre), min(n, b + xf)
             y = _df_chunk(exe, x[:, s0:s1], work, i)
+            if late:
+                y = suppress_late_reverb(y, DF_SR, rt60)
             done[0] += 1
             if on_progress:
                 on_progress(done[0] / len(bounds))
@@ -370,13 +504,16 @@ def run_deverb(a) -> int:
     def progress(f):
         emit("progress", pct=round(4 + 92 * f, 1), message="Retrait de la réverbe de la pièce")
 
-    y = deverb(audio, sr, jobs=a.jobs, on_progress=progress)
+    info: dict = {}
+    y = deverb(audio, sr, jobs=a.jobs, on_progress=progress, late=not a.no_late, info=info)
+    reduction, n_ends = tail_reduction_db(audio, y, sr)
     out = Path(a.output)
     tmp = out.with_suffix(".partiel.wav")
     sf.write(str(tmp), y.T, sr, subtype="FLOAT")
     os.replace(tmp, out)
-    emit("done", path=str(out), sample_rate=sr, channels=int(y.shape[0]), engine="deepfilternet3",
+    emit("done", path=str(out), sample_rate=sr, channels=int(y.shape[0]), engine="deepfilternet3" + ("" if a.no_late else "+queue"),
          device="cpu", seconds=round(time.time() - t0, 2), duration=round(audio.shape[1] / sr, 3),
+         rt60=info.get("rt60"), reverb_db=reduction, phrase_ends=n_ends,
          rms_in=round(float(np.sqrt(np.mean(audio ** 2))), 6), rms_out=round(float(np.sqrt(np.mean(y ** 2))), 6))
     return 0
 
@@ -419,6 +556,7 @@ def main(argv=None) -> int:
     ap.add_argument("--language", default="fr", choices=list(LANGUAGES))
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    ap.add_argument("--no-late", action="store_true", help="DeepFilterNet seul (sans le retrait de la réverbe tardive)")
     ap.add_argument("--jobs", type=int, default=max(1, min(4, (os.cpu_count() or 4) // 2)))
     a = ap.parse_args(argv)
     try:

@@ -214,7 +214,7 @@ class WorkerChunkingTest(unittest.TestCase):
         progress = []
         with mock.patch.object(voice_worker, "_df_chunk", lambda exe, chunk, work, i: chunk.copy()), \
                 mock.patch.object(voice_worker, "deep_filter_exe", return_value=Path(sys.executable)):
-            y = voice_worker.deverb(x, sr, jobs=3, on_progress=progress.append, chunk_s=2.0, preroll_s=0.5, xfade_s=0.05)
+            y = voice_worker.deverb(x, sr, jobs=3, on_progress=progress.append, chunk_s=2.0, preroll_s=0.5, xfade_s=0.05, late=False)
         self.assertEqual(y.shape, x.shape)
         np.testing.assert_allclose(y, x, atol=1e-6)
         self.assertEqual(progress[-1], 1.0)
@@ -225,7 +225,7 @@ class WorkerChunkingTest(unittest.TestCase):
         x = np.ones((1, int(sr * 4.5)), np.float32)
         progress = []
         with mock.patch.object(voice_worker, "_df_chunk", lambda exe, chunk, work, i: chunk.copy()),                 mock.patch.object(voice_worker, "deep_filter_exe", return_value=Path(sys.executable)):
-            y = voice_worker.deverb(x, sr, jobs=2, on_progress=progress.append, chunk_s=2.0, preroll_s=0.5)
+            y = voice_worker.deverb(x, sr, jobs=2, on_progress=progress.append, chunk_s=2.0, preroll_s=0.5, late=False)
         np.testing.assert_allclose(y, x, atol=1e-6)
         self.assertEqual(len(progress), 2)  # le dernier morceau (0,5 s) rejoint le précédent
 
@@ -242,6 +242,88 @@ class WorkerChunkingTest(unittest.TestCase):
     def test_languages(self):
         self.assertEqual(voice_worker.LANGUAGES["fr"], "fr")
         self.assertIsNone(voice_worker.LANGUAGES["auto"])
+
+
+class LateReverbTest(unittest.TestCase):
+    """B7 : retrait de la réverbe tardive après DeepFilterNet (estimateur de Lebart / Habets).
+    Voix simulée : rafales de bruit coupées net, passées dans une « pièce » (bruit à décroissance
+    exponentielle, RT60 0,6 s)."""
+
+    SR = 48000
+
+    def room(self, rt60=0.6, seed=0):
+        sr = self.SR
+        rng = np.random.default_rng(seed)
+        n = int(sr * 6)
+        dry = np.zeros(n, np.float32)
+        for k in range(5):  # 5 « phrases » de 0,5 s, séparées de 0,7 s de silence
+            a = int(sr * (0.3 + 1.2 * k))
+            dry[a: a + sr // 2] = 0.3 * rng.standard_normal(sr // 2)
+        t = np.arange(int(sr * rt60 * 1.5)) / sr
+        ir = rng.standard_normal(len(t)) * np.exp(-3 * np.log(10) * t / rt60)
+        ir[0] = 6.0  # son direct
+        ir /= np.abs(ir).max()
+        nf = 1 << int(np.ceil(np.log2(n + len(ir))))
+        wet = np.fft.irfft(np.fft.rfft(dry, nf) * np.fft.rfft(ir, nf), nf)[:n].astype(np.float32)
+        return dry, wet / np.abs(wet).max() * 0.5
+
+    def tail_db(self, x, dry):
+        sr = self.SR
+        vals = []
+        for k in range(5):
+            end = int(sr * (0.3 + 1.2 * k)) + sr // 2
+            pre = np.mean(x[end - sr // 4: end] ** 2)
+            post = np.mean(x[end + sr // 50: end + sr // 4] ** 2)
+            vals.append(10 * np.log10(post / pre + 1e-14))
+        return float(np.mean(vals))
+
+    def test_rt60_read_on_the_take(self):
+        _, wet = self.room(0.6)
+        rt, n = voice_worker.rt60_estimate(wet, self.SR)
+        self.assertGreater(n, 0)
+        self.assertGreater(rt, 0.3)
+        self.assertLess(rt, 1.2)
+        self.assertEqual(voice_worker.rt60_estimate(np.zeros(100, np.float32), self.SR), (0.5, 0))
+
+    def test_tail_is_reduced_voice_is_kept(self):
+        dry, wet = self.room(0.6)
+        rt, _ = voice_worker.rt60_estimate(wet, self.SR)
+        y = voice_worker.suppress_late_reverb(wet[None], self.SR, rt)[0]
+        self.assertEqual(y.shape, wet.shape)
+        self.assertTrue(np.isfinite(y).all())
+        # Sur ce bruit très réverbéré, l'étape seule retire ~5 dB de queue (sur de vraies voix
+        # après DeepFilterNet : 4 à 11 dB de plus, mesures dans CONTENU\nova-r24\deverb).
+        drop = self.tail_db(y, dry) - self.tail_db(wet, dry)
+        self.assertLess(drop, -1.5)
+        sr = self.SR
+        post = lambda x: np.mean([np.mean(x[int(sr * (0.8 + 1.2 * k)) + sr // 50: int(sr * (0.8 + 1.2 * k)) + sr // 4] ** 2) for k in range(5)])
+        self.assertLess(10 * np.log10(post(y) / post(wet)), -3.0)
+        # La voix elle-même (pendant les phrases) garde son niveau à 3 dB près.
+        act = np.abs(dry) > 0
+        lvl = 10 * np.log10(np.mean(y[act] ** 2) / np.mean(wet[act] ** 2))
+        self.assertGreater(lvl, -3.0)
+        # Mesure sans voix sèche (renvoyée au pont) : de la réverbe en moins, sur les 5 fins.
+        est, n = voice_worker.tail_reduction_db(wet, y, self.SR)
+        self.assertEqual(n, 5)
+        self.assertLess(est, 0.0)
+
+    def test_stereo_image_and_short_clip(self):
+        _, wet = self.room(0.5, seed=2)
+        st = np.stack([wet, 0.5 * wet])
+        y = voice_worker.suppress_late_reverb(st, self.SR, 0.5)
+        self.assertEqual(y.shape, st.shape)
+        np.testing.assert_allclose(y[1], 0.5 * y[0], atol=1e-5)  # même gain sur les deux canaux
+        short = np.ones((1, 1000), np.float32)
+        np.testing.assert_array_equal(voice_worker.suppress_late_reverb(short, self.SR, 0.5), short)
+
+    def test_chunked_deverb_applies_late_stage(self):
+        _, wet = self.room(0.6, seed=3)
+        with mock.patch.object(voice_worker, "_df_chunk", lambda exe, chunk, work, i: chunk.copy()),                 mock.patch.object(voice_worker, "deep_filter_exe", return_value=Path(sys.executable)):
+            info = {}
+            y = voice_worker.deverb(wet[None], self.SR, jobs=2, chunk_s=2.0, preroll_s=0.5, info=info)
+        self.assertEqual(y.shape, (1, len(wet)))
+        self.assertIsNotNone(info["rt60"])
+        self.assertLess(voice_worker.tail_reduction_db(wet, y[0], self.SR)[0], 0.0)
 
 
 if __name__ == "__main__":

@@ -127,6 +127,8 @@ describe('R24 · voix par l’IA locale (logique)', () => {
 
   it('résumé après la transcription', () => {
     expect(transcriptionSummary([{ trackId: 't', clipId: 'c', from: 0, language: 'fr', model: 'm', words: [{ w: 'a', s: 0, e: 1 }, { w: 'b', s: 1, e: 2 }] }], 3.2, 'cuda'))
-      .toBe('📝 2 mots transcrits sur 1 clip (3 s, carte graphique). Corrige le texte dans le prompteur : les temps suivent.');
+      .toBe('📝 2 mots transcrits sur 1 clip (3 s, carte graphique). Corrige le texte dans le prompteur : les temps suivent. Ctrl+K « trouver … » retrouve un mot dans tes prises.');
+    // B7 : repli sur le processeur dit clairement.
+    expect(transcriptionSummary([{ trackId: 't', clipId: 'c', from: 0, language: 'fr', model: 'm', words: [{ w: 'a', s: 0, e: 1 }] }], 40, 'cpu')).toContain('processeur, carte graphique indisponible');
   });
 });

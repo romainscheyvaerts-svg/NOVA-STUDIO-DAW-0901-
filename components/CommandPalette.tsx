@@ -1,13 +1,16 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keymapActions, rememberAction, recentActions, searchActions, type PaletteAction } from '../utils/commandPalette';
 import { useKeymap } from '../utils/keymapStore';
+import { isExplicitWordQuery, wordQueryText } from '../utils/voiceSearch';
 
 /**
  * Palette de commandes (Ctrl+K, ou la loupe de la barre du haut) : une case de
  * recherche, toutes les actions du studio et tous les raccourcis, lancés au
  * clavier (↑ ↓ Entrée) ou au doigt. Les 8 dernières actions viennent en tête.
+ * B7 : la même case cherche aussi un mot CHANTÉ dans les prises transcrites
+ * (« trouver "j'arrive" ») ; choisir un résultat place la tête de lecture sur le mot.
  */
-const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: PaletteAction[] }> = ({ open, onClose, actions }) => {
+const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: PaletteAction[]; wordSearch?: (query: string) => PaletteAction[] }> = ({ open, onClose, actions, wordSearch }) => {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +33,13 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
     const own = new Set(actions.map(a => a.id));
     return [...actions, ...keymapActions(own, keymap)];
   }, [open, actions, keymap]);
-  const found = useMemo(() => searchActions(query, all, recent).slice(0, 60), [query, all, recent]);
+  // Mots chantés (B7) : en tête si la demande vise des paroles (« trouver … », guillemets), sinon après les actions.
+  const explicitWords = isExplicitWordQuery(query);
+  const sung = useMemo(() => (open && wordSearch && query.trim().length >= 2 ? wordSearch(query) : []), [open, wordSearch, query]);
+  const found = useMemo(() => {
+    const acts = explicitWords ? [] : searchActions(query, all, recent).slice(0, 60);
+    return explicitWords ? sung : [...acts, ...sung];
+  }, [query, all, recent, sung, explicitWords]);
   useEffect(() => { setIndex(0); setNotice(null); }, [query]);
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-palette-index="${index}"]`);
@@ -42,7 +51,7 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
   const launch = (a: PaletteAction | undefined) => {
     if (!a) return;
     if (a.disabledReason) { setNotice(`${a.label} : ${a.disabledReason}`); return; }
-    rememberAction(a.id);
+    if (!a.id.startsWith('word:')) rememberAction(a.id);
     onClose();
     // Après la fermeture : la fenêtre ouverte (ou la touche rejouée) ne doit pas voir la palette.
     window.setTimeout(() => { try { a.run(); } catch (e) { console.warn('[palette]', a.id, e); } }, 0);
@@ -67,8 +76,8 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
         <div className="flex items-center gap-2 border-b border-nv-line/10 px-3">
           <i className="fas fa-search text-[13px] text-nv-muted" aria-hidden="true" />
           <input ref={inputRef} autoFocus value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Chercher une action : exporter, tempo, voix, séparer, Strip Silence…"
-            aria-label="Chercher une action" data-testid="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list"
+            placeholder="Une action ou un mot chanté : exporter, tempo, trouver « j’arrive »…"
+            aria-label="Chercher une action ou un mot chanté" data-testid="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list"
             aria-activedescendant={found[index] ? `palette-${found[index].id}` : undefined}
             className="h-12 min-w-0 flex-1 bg-transparent text-[15px] text-nv-ink outline-none placeholder:text-nv-muted" />
           <button type="button" onClick={onClose} aria-label="Fermer la palette" title="Fermer (Échap)"
@@ -77,8 +86,10 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
         <ul ref={listRef} id="palette-list" role="listbox" aria-label="Actions" className="min-h-0 flex-1 overflow-y-auto p-1.5 custom-scroll">
           {!query && recent.length > 0 && <li className="px-3 pb-1 pt-1.5 text-[10px] font-black uppercase tracking-widest text-nv-muted" role="presentation">Récentes en tête</li>}
           {found.length === 0 && (
-            <li className="px-4 py-8 text-center text-[13px] text-nv-muted" role="presentation">
-              Aucune action pour « {query} ». Essaie un autre mot : « export », « tempo », « voix », « bus », « fondu »…
+            <li className="px-4 py-8 text-center text-[13px] text-nv-muted" role="presentation" data-testid={explicitWords ? 'palette-words-empty' : undefined}>
+              {explicitWords
+                ? <>Aucun endroit chanté « {wordQueryText(query) || query} » dans les prises transcrites. Pas encore transcrites ? Clic droit sur le clip voix → Voix → Transcrire les paroles (appli Windows).</>
+                : <>Aucune action ni parole pour « {query} ». Essaie un autre mot : « export », « tempo », « voix », « bus », « fondu »…</>}
             </li>
           )}
           {found.map((a, i) => (
@@ -91,6 +102,7 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
                 <span className="block truncate text-[13px] font-semibold text-nv-ink">{a.label}</span>
                 {a.disabledReason
                   ? <span className="block truncate text-[11px] text-amber-400">{a.disabledReason}</span>
+                  : a.detail ? <span className="block truncate text-[11px] text-nv-muted">{a.detail}</span>
                   : a.pt ? <span className="block truncate text-[11px] text-nv-muted">Pro Tools : {a.pt}</span> : null}
               </span>
               <span className="hidden shrink-0 text-[10px] font-bold uppercase tracking-wide text-nv-muted sm:inline">{a.group}</span>

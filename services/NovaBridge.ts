@@ -264,6 +264,8 @@ export interface DeverbResult {
   sampleRate: number;
   device: string;
   seconds: number;
+  /** B7 : durée de réverbération de la pièce lue sur la prise (s), si mesurée. */
+  rt60?: number;
 }
 
 /** Erreur de la voix par l'IA : code « not_installed », « cancelled », « error » ou « unavailable ». */
@@ -1235,7 +1237,8 @@ class NovaBridgeService {
   /** Voix sans la réverbe de la pièce (100 %, même longueur, mêmes canaux). */
   async deverbVoice(opts: { jobId: string; channels: Float32Array[]; sampleRate: number }): Promise<DeverbResult> {
     const r = await this.voiceJob('VOICE_DEVERB', opts.jobId, { sample_rate: Math.round(opts.sampleRate) }, opts.channels);
-    return { channels: r.channels, sampleRate: Number(r.sample_rate) || opts.sampleRate, device: String(r.device || 'cpu'), seconds: Number(r.seconds) || 0 };
+    return { channels: r.channels, sampleRate: Number(r.sample_rate) || opts.sampleRate, device: String(r.device || 'cpu'), seconds: Number(r.seconds) || 0,
+      ...(Number(r.rt60) > 0 ? { rt60: Number(r.rt60) } : {}) };
   }
 
   /** Paroles horodatées mot par mot (temps en secondes du son envoyé). */
