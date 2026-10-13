@@ -6,7 +6,9 @@
  *   « synth:<id> »          → généré ici (ex. synth:808, synth:hat-closed)
  *   « synth:808@<midi> »    → 808 accordée sur une note (tonalité du morceau)
  *   « url:<adresse> »        → fichier audio (bibliothèque du studio, plus tard)
+ *   « kit:<id> »             → son des kits NOVA (utils/drumKitLibrary.ts), chargé à la demande
  */
+import { isKitRef, kitSoundLabel, loadKitSound } from './drumKitLibrary';
 
 export interface DrumSoundInfo { id: string; name: string; category: DrumCategory }
 export type DrumCategory = 'kick' | '808' | 'snare' | 'clap' | 'hat-closed' | 'hat-open' | 'perc' | 'cymbal';
@@ -34,6 +36,7 @@ export const DRUM_SOUNDS: DrumSoundInfo[] = [
 ];
 
 export const soundName = (ref: string) => {
+  if (isKitRef(ref)) return kitSoundLabel(ref) || 'Son de kit';
   const id = ref.replace(/^synth:/, '').split('@')[0];
   return DRUM_SOUNDS.find(s => s.id === id)?.name || (ref.startsWith('url:') ? decodeURIComponent(ref.split('/').pop() || 'Sample') : id);
 };
@@ -214,6 +217,8 @@ const cache = new Map<string, Promise<AudioBuffer>>();
  * utilisée par la 808 et le log drum.
  */
 export function loadDrumSound(ref: string, ctx: BaseAudioContext, root = 0): Promise<AudioBuffer> {
+  // Kits NOVA : cache propre (son brouillé en cache disque, décodé en mémoire, 808 réaccordée).
+  if (isKitRef(ref)) return loadKitSound(ref, ctx, root);
   const sr = ctx.sampleRate;
   const id = ref.replace(/^synth:/, '').split('@')[0];
   const tuned = id.startsWith('808') || id === 'perc-log';

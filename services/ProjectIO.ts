@@ -176,7 +176,8 @@ export class ProjectIO {
         // Son du sampler mélodique (R18) : un WAV (les instruments R20 sont des fichiers du site).
         const msId = track.melodicSampler?.sampleId;
         const msBuf = msId ? audioBufferRegistry.get(samplerBufferKey(msId)) : undefined;
-        if (msId && msBuf && sTrack.melodicSampler) {
+        // Son des kits NOVA : seulement la référence (rechargé depuis la bibliothèque à la réouverture).
+        if (msId && msBuf && sTrack.melodicSampler && !track.melodicSampler?.kitRef) {
             const filename = `${samplerBufferKey(msId)}.wav`;
             if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(msBuf)); }
             sTrack.melodicSampler.audioRef = `audio/${filename}`;

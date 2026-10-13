@@ -1335,6 +1335,34 @@ export class AudioEngine {
       this.isPreviewPlaying = false; 
   }
   
+  private auditionVoices: AudioBufferSourceNode[] = [];
+  /**
+   * Pré-écoute de sons de batterie (navigateur de kits) : chaque coup est programmé à `at` secondes
+   * de maintenant (motif calé au tempo). Coupe la pré-écoute précédente. Sortie : bus de pré-écoute.
+   */
+  public auditionBuffers(hits: { buffer: AudioBuffer; at: number; gain?: number }[]): void {
+    if (!this.ctx || !this.previewGain) return;
+    this.stopAudition();
+    const t0 = this.ctx.currentTime + 0.02;
+    this.previewGain.gain.cancelScheduledValues(t0);
+    this.previewGain.gain.setValueAtTime(0.8, t0);
+    for (const h of hits) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = h.buffer;
+      const g = this.ctx.createGain();
+      g.gain.value = h.gain ?? 1;
+      src.connect(g).connect(this.previewGain);
+      src.onended = () => { try { g.disconnect(); } catch { /* */ } this.auditionVoices = this.auditionVoices.filter(v => v !== src); };
+      src.start(t0 + Math.max(0, h.at));
+      this.auditionVoices.push(src);
+    }
+  }
+
+  public stopAudition(): void {
+    for (const v of this.auditionVoices) { v.onended = null; try { v.stop(); v.disconnect(); } catch { /* déjà arrêté */ } }
+    this.auditionVoices = [];
+  }
+
   public getPreviewAnalyzer() { return this.previewAnalyzer; }
   // iOS : l'état peut aussi être « interrupted » (appel, Siri, changement d'app) —
   // ne reprendre que sur « suspended » laissait l'audio muet jusqu'au rechargement.

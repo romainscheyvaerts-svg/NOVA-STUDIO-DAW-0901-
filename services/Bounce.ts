@@ -14,7 +14,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { novaBridge } from './NovaBridge';
 import { renderThroughChain, prepareTracksForOffline } from './VstFreeze';
-import { canBakeTrack, freezeIndex, isFreezeStale, isVst } from '../utils/freeze';
+import { bakeRefusal, canBakeTrack, freezeIndex, isFreezeStale, isVst } from '../utils/freeze';
 import { splitClipsAt, idGenerator } from '../utils/timeSelection';
 import { engineView } from '../utils/trackStructure';
 import { busUpstream, captureGraph, captureIds, trackContentEnd, trackContentStart } from '../utils/commit';
@@ -124,7 +124,7 @@ async function renderCapture(session: Track[], tapId: string, mode: 'pre' | 'pos
  * effets compris. Renvoie le son et l'instant (s) où il commence.
  */
 export async function renderTrackInserts(track: Track, opts: InsertRenderOptions = {}): Promise<{ buffer: AudioBuffer; start: number; upTo: number }> {
-  if (!canBakeTrack(track)) throw new Error("Le beat n'est jamais rendu dans un fichier (licence).");
+  if (!canBakeTrack(track)) throw new Error(bakeRefusal(track)!);
   const all = track.plugins || [];
   const upTo = Math.min(all.length - 1, opts.upTo ?? all.length - 1);
   const plugins = all.slice(0, upTo + 1);
@@ -213,6 +213,10 @@ export async function renderBusPrint(tracks: Track[], busId: string, opts: { tai
   const up = busUpstream(view, busId);
   const end = view.filter(t => up.has(t.id)).reduce((m, t) => Math.max(m, trackContentEnd(t)), 0);
   if (end <= 0) throw new Error(`Rien n'entre dans « ${bus.name} » : aucun son à imprimer.`);
+  // Le beat sous licence et les sons des kits NOVA ne sont jamais imprimés (sinon ils sortiraient
+  // en audio sans licence par la piste imprimée : sauvegarde, AAF, sample de pad…).
+  const refused = tracks.filter(t => up.has(t.id) && !canBakeTrack(t));
+  if (refused.length) throw new Error(`Impression impossible : « ${refused[0].name} » entre dans ce bus. ${bakeRefusal(refused[0])}`);
   opts.onStep?.(`Impression de ${bus.name}…`);
   const r = await renderCapture(tracks, busId, 'post', { from: 0, to: end, tail: Math.max(0, opts.tail ?? DEFAULT_TAIL), onStep: opts.onStep });
   const id = `print-${bus.id}-${Date.now().toString(36)}`;

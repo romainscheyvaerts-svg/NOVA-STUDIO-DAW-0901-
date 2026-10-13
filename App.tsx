@@ -215,6 +215,7 @@ import CommentsPanel, { CommentPins } from './components/CommentsPanel';
 import { useTimelineComments } from './hooks/useTimelineComments';
 import { commentCounts } from './utils/timelineComments';
 import { renderMixBounce } from './services/mixBounce';
+import { exportKeyOf, mixNeedsTag, newExportKey, SHARED_PROJECT_ID } from './utils/exportRights';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 // Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
@@ -228,7 +229,7 @@ import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
 import { liveVstNodes } from './engine/VSTPluginNode';
 import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, hasArtistVst, LIVE_PREVIEW_KINDS, PREVIEW_TAIL, PreviewScheduler, PreviewState, PreviewTracker, previewView, previewWindowOf } from './services/LivePreview';
-import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
+import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment, isExportVoicesUnlocked } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
@@ -263,7 +264,8 @@ const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then
 import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
-import { DrumMachine, makeDrumMachineLib, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { DrumMachine, makeDrumMachineLib, makeDrumMachine, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { KIT_BAKE_REFUSAL, KIT_SOUND_DROP_EVENT, kitIndexIfLoaded, loadKitIndex, setPadKitSound, usesKitSounds } from './utils/drumKitLibrary';
 import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils/drumPatterns';
 import { padLoadKey } from './utils/drumSamples';
 import { loadPadBuffer } from './utils/padBuffers';
@@ -1590,7 +1592,8 @@ function Studio() {
     try {
       const copyName = `${n} (Copy)`;
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
-      const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName };
+      // Une copie est un autre projet : elle n'hérite pas du déblocage de l'export payant.
+      const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName, exportKey: newExportKey() };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
       await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
         setSaveState(s => ({ ...s, progress: Math.max(50, percent), message }));
@@ -3545,7 +3548,7 @@ function Studio() {
     }
 
     if (!canBakeTrack(track)) {
-      notify("Le beat ne peut pas être gelé (licence).");
+      notify(usesKitSounds(track) ? KIT_BAKE_REFUSAL : "Le beat ne peut pas être gelé (licence).");
       return;
     }
     if ((track.clips || []).length === 0) {
@@ -4790,6 +4793,9 @@ function Studio() {
 
   // ===== Batterie Make Music (piste PERCUSSIONS) =====
   const [drumsOpen, setDrumsOpen] = useState(false);
+  // Kits NOVA : ouverture du navigateur depuis l'extérieur du panneau (bouton « Kits »).
+  const [kitsSignal, setKitsSignal] = useState(0);
+  const openKits = useCallback(() => { setDrumsOpen(true); setKitsSignal(n => n + 1); }, []);
   const DRUM_TRACK_ID = 'track-drums';
 
   /** Fin de la boucle de batterie : fin du beat / de la mélodie, au moins 8 mesures. */
@@ -4837,6 +4843,33 @@ function Studio() {
     }));
   }, [setState]);
   applyDrumMachineRef.current = applyDrumMachine;
+
+  // Export payant : un projet sans clé (id local partagé « proj-1 ») en reçoit une à lui.
+  useEffect(() => {
+    if (!state.exportKey && (!state.id || state.id === SHARED_PROJECT_ID)) {
+      setSilently(s => (s.exportKey || (s.id && s.id !== SHARED_PROJECT_ID) ? s : { ...s, exportKey: newExportKey() }));
+    }
+  }, [state.id, state.exportKey, setSilently]);
+
+  // Kits NOVA : un son lâché sur la timeline va sur un nouveau pad de la boîte à rythmes.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      void ensureAudioEngine().then(async () => {
+        const ix = kitIndexIfLoaded() || await loadKitIndex().catch(() => null);
+        const cur = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined) || makeDrumMachine('empty');
+        const r = setPadKitSound(cur, id, null, ix);
+        if (!r) { setAiNotification('30 pads au plus : pose ce son sur un pad existant (bouton « Kits » de la batterie).'); return; }
+        applyDrumMachineRef.current?.(r.dm);
+        setDrumsOpen(true);
+        setAiNotification(`🥁 « ${r.dm.rows[r.rowIndex].name} » ajouté sur un nouveau pad de la batterie : allume ses pas dans la grille.`);
+      });
+    };
+    window.addEventListener(KIT_SOUND_DROP_EVENT, on);
+    return () => window.removeEventListener(KIT_SOUND_DROP_EVENT, on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSetDrumKit = useCallback((kitId?: string) => {
     const st = stateRef.current;
@@ -5692,7 +5725,9 @@ function Studio() {
     bounce: async (step) => {
       const c = collabRef.current;
       if (!c) return null;
-      const r = await renderMixBounce(stateRef.current.tracks, stateRef.current.name || 'Mix', t => step(`rendu du mix… ${t}`));
+      const tag = await mixNeedsTag(stateRef.current, ownedRef.current, { isAdmin: async () => !!(await billingStatus()).admin, isExportPaid: isExportVoicesUnlocked });
+      const r = await renderMixBounce(stateRef.current.tracks, stateRef.current.name || 'Mix', t => step(`rendu du mix… ${t}`), { tag });
+      if (tag) step('version avec le tag Make Music (export du projet pas encore payé)…');
       const id = `mixv-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       audioBufferRegistry.register(r.buffer, id);
       step('envoi du son…');
@@ -8512,6 +8547,8 @@ function Studio() {
   const handleStartMelodyProject = async (inst: any) => {
     track('melody_tried', { melody_id: String(inst?.id ?? ''), title: String(inst?.title || '') });
     setState(produce((draft: DAWState) => {
+      // Nouveau projet « instru sur mélodie » : sa propre clé d'export payant.
+      if (!draft.id || draft.id === SHARED_PROJECT_ID) draft.exportKey = newExportKey();
       draft.projectMode = 'BEATMAKING';
       draft.name = `Instru · ${String(inst.title || 'Mélodie').slice(0, 40)}`;
     }));
@@ -10121,6 +10158,7 @@ function Studio() {
           onAddVoiceTrack={handleAddVoiceTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
           onOpenDrums={() => setDrumsOpen(true)}
+          onOpenKits={openKits}
           onNewMidiTrack={handleNewMidiTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
@@ -10261,6 +10299,7 @@ function Studio() {
                   onAddVoiceTrack={handleAddVoiceTrack}
                   beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
                   onOpenDrums={() => setDrumsOpen(true)}
+                  onOpenKits={openKits}
                   onNewMidiTrack={handleNewMidiTrack}
                   onOpen808={handleOpen808}
                   onOpenVocalTools={() => setVocalToolsOpen(true)}
@@ -10412,7 +10451,7 @@ function Studio() {
             </PanelBoundary>
           )}
         </main>
-        <AafHost getState={() => stateRef.current} />
+        <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>
             <Suspense fallback={null}>
@@ -10658,7 +10697,7 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
+      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={exportKeyOf(state)} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} /></PanelBoundary>}
       {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
       {metronomeDialogOpen && (
@@ -10717,9 +10756,11 @@ function Studio() {
         has808={state.tracks.some(t => t.id === BASS808_TRACK_ID)}
         loopEnd={drumsOpen ? drumLoopEnd(state) : 0}
         markers={state.markers}
-        sessionClips={drumsOpen ? state.tracks.filter(t => t.type === TrackType.AUDIO).flatMap(t => t.clips.filter(c => c.bufferId).map(c => ({ ...c, trackName: t.name }))) : []}
+        sessionClips={drumsOpen ? state.tracks.filter(t => t.type === TrackType.AUDIO && canBakeTrack(t)).flatMap(t => t.clips.filter(c => c.bufferId).map(c => ({ ...c, trackName: t.name }))) : []}
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
+        projectKey={typeof state.projectKey === 'number' ? state.projectKey : null}
+        kitsSignal={kitsSignal}
       />
       </MountWhenOpened>
       </PanelBoundary>

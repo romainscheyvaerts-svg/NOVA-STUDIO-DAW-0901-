@@ -1184,6 +1184,12 @@ export interface DAWState {
   id: string;
   name: string;
   /**
+   * Clé d'export payant propre à CE projet (déblocage « 2 € / export Nova Pro »). Avant, la clé était
+   * l'id du projet, qui vaut « proj-1 » pour tous les projets locaux : un paiement débloquait tout le
+   * monde. Donnée à la naissance du projet, retirée d'une copie.
+   */
+  exportKey?: string;
+  /**
    * Version du format de la session (absent = avant le gel pré-effet).
    * 2 : gel automatique avec photo, journal pré-effet et rendus d'envois VST.
    */

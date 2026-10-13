@@ -70,7 +70,7 @@ async function getTag(sr: number): Promise<AudioBuffer> {
 }
 
 /** Ajoute le tag au rendu : à 2 s puis toutes les 20 s. */
-async function applyTag(mix: AudioBuffer): Promise<AudioBuffer> {
+export async function applyTag(mix: AudioBuffer): Promise<AudioBuffer> {
   const tag = await getTag(mix.sampleRate);
   for (let t = 2; t < mix.duration - 0.5; t += TAG_EVERY) {
     const at = Math.round(t * mix.sampleRate);

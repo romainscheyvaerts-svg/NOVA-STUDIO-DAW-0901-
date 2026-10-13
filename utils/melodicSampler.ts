@@ -21,6 +21,14 @@ export interface MelodicSamplerSettings {
   version: 1;
   /** Sample perso (registre audio : `msample-<id>`). */
   sampleId?: string;
+  /**
+   * Son des kits NOVA (« kit:<id> ») chargé depuis un pad : jamais écrit en audio dans une sauvegarde,
+   * rechargé depuis la bibliothèque NOVA à la réouverture.
+   */
+  kitRef?: string;
+  /** Tonique utilisée pour la 808 du kit (réaccord) et zone jouée du pad d'origine. */
+  kitRoot?: number;
+  kitRegion?: { start?: number; end?: number; fadeIn?: number; fadeOut?: number; reverse?: boolean };
   /** Nom affiché du son (« Voix de Léo », « Pluck guitare »). */
   sampleName?: string;
   /** Durée du son (s), pour l'affichage. */
@@ -85,6 +93,13 @@ export function normalizeSampler(s: Partial<MelodicSamplerSettings> | null | und
     ...(typeof x.sampleName === 'string' ? { sampleName: x.sampleName.slice(0, 48) } : {}),
     ...(typeof x.duration === 'number' && isFinite(x.duration) ? { duration: x.duration } : {}),
     ...(typeof x.instrument === 'string' && /^[a-z0-9-]{1,32}$/.test(x.instrument) ? { instrument: x.instrument } : {}),
+    ...(typeof x.kitRef === 'string' && /^kit:[a-z0-9]+-[0-9a-f]{8}$/.test(x.kitRef) ? { kitRef: x.kitRef } : {}),
+    ...(typeof x.kitRef === 'string' && typeof x.kitRoot === 'number' && isFinite(x.kitRoot) ? { kitRoot: Math.round(x.kitRoot) } : {}),
+    ...(typeof x.kitRef === 'string' && x.kitRegion && typeof x.kitRegion === 'object' ? { kitRegion: {
+      ...(typeof x.kitRegion.start === 'number' ? { start: x.kitRegion.start } : {}), ...(typeof x.kitRegion.end === 'number' ? { end: x.kitRegion.end } : {}),
+      ...(typeof x.kitRegion.fadeIn === 'number' ? { fadeIn: x.kitRegion.fadeIn } : {}), ...(typeof x.kitRegion.fadeOut === 'number' ? { fadeOut: x.kitRegion.fadeOut } : {}),
+      ...(x.kitRegion.reverse ? { reverse: true } : {}),
+    } } : {}),
     rootKey: Math.round(num(x.rootKey, 60, 0, 127)),
     fineTune: num(x.fineTune, 0, -100, 100),
     ...(x.rootAuto ? { rootAuto: true } : {}),

@@ -22,6 +22,8 @@ interface TrackCreationBarProps {
   beatmaking?: boolean;
   onNewMidiTrack?: () => void;
   onOpenDrums?: () => void;
+  /** Kits NOVA : ouvre la batterie sur le navigateur des kits. */
+  onOpenKits?: () => void;
   /** Crée / ouvre la piste 808 (piano roll). */
   onOpen808?: () => void;
   /**
@@ -36,7 +38,7 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAddVoiceTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808, docked }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAddVoiceTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpenKits, onOpen808, docked }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
     <div data-dock-scroll={docked ? '' : undefined} className={docked
@@ -58,6 +60,12 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         <button type="button" onClick={onOpenDrums} aria-label="Batterie" {...(docked ? dockItem(4) : {})} title="Boîte à rythmes : pas, sons, mix de chaque pad"
           className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-orange-400/40 text-orange-200 hover:text-white">
           <span className="text-base leading-none">🥁</span><span data-dock-label className="text-xs font-bold">Batterie</span>
+        </button>
+      )}
+      {beatmaking && onOpenKits && (
+        <button type="button" onClick={onOpenKits} aria-label="Kits de batterie" data-testid="open-kits-bar" {...(docked ? dockItem(4) : {})} title="Kits NOVA : kits prêts à jouer et ~2 000 sons de batterie à écouter puis poser sur les pads"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-cyan-400/40 text-cyan-200 hover:text-white">
+          <i className="fas fa-layer-group text-sm" aria-hidden /><span data-dock-label className="text-xs font-bold">Kits</span>
         </button>
       )}
       {beatmaking && onOpen808 && (

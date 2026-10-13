@@ -6,6 +6,7 @@ import type { AafImportReport } from '../utils/aaf/aafToNova';
 import type { AafZip } from '../utils/aaf/aafApp';
 import { buildProToolsZip, importAafIntoProject, isAafFile, isAudioFile, missingMedia, openAaf, planProjectExport } from '../utils/aaf/aafApp';
 import { saveBlob } from '../utils/saveBlob';
+import { billingStatus } from '../services/Billing';
 import { MEDIA_FOLDER } from '../utils/aaf/aafWrite';
 
 /**
@@ -171,15 +172,19 @@ export const AafImportDialog: React.FC<{ getState: () => DAWState; initialFiles?
 };
 
 // ── Export ───────────────────────────────────────────────────────────────────────────────
-export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () => void }> = ({ getState, onClose }) => {
+export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () => void; getOwned?: () => (string | number)[] }> = ({ getState, onClose, getOwned }) => {
   const [embed, setEmbed] = useState(false);
+  // Licences : beats achetés (ids) ; admin = export libre (confirmé par le serveur).
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => { let alive = true; billingStatus().then(s => { if (alive) setAdmin(!!s.admin); }).catch(() => {}); return () => { alive = false; }; }, []);
+  const owned: (string | number)[] | 'all' = admin ? 'all' : (getOwned?.() || []);
   const [volPan, setVolPan] = useState(true);
   const [muted, setMuted] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<AafZip | null>(null);
   const state = getState();
-  const plan = useMemo(() => planProjectExport(state, { embed, trackVolumePan: volPan, includeMuted: muted }), [state, embed, volPan, muted]);
+  const plan = useMemo(() => planProjectExport(state, { embed, trackVolumePan: volPan, includeMuted: muted, owned }), [state, embed, volPan, muted, admin]);
   const clips = plan.input.tracks.reduce((n, t) => n + t.clips.length, 0);
   const files = plan.input.media.reduce((n, m) => n + Math.min(2, m.channels.length), 0);
 
@@ -187,7 +192,7 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
     setBusy('Fabrication de la séance…'); setError(null);
     try {
       await new Promise(r => setTimeout(r, 30));
-      const z = await buildProToolsZip(getState(), { embed, trackVolumePan: volPan, includeMuted: muted });
+      const z = await buildProToolsZip(getState(), { embed, trackVolumePan: volPan, includeMuted: muted, owned });
       await saveBlob(z.blob, z.fileName);
       setDone(z);
       (window as any).__novaAafLastExport = { fileName: z.fileName, size: z.blob.size, stats: z.result.stats };
