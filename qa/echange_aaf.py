@@ -352,6 +352,18 @@ def scenario_reference(page):
     ok("référence 25 i/s : rapport signale le débit vidéo", "débit d'édition vidéo (25 images/s)" in report, report[:400])
 
 
+def _billing_admin(route, request):
+    if request.method == "OPTIONS":
+        return route.fulfill(status=204, headers={"access-control-allow-origin": "*", "access-control-allow-headers": "*"})
+    try: action = json.loads(request.post_data or "{}").get("action")
+    except Exception: action = None
+    body = {"status": {"plans": [], "admin": True},
+            "export_access": {"unlocked": True, "via": "admin", "reason": None, "missing": [], "items": [], "kits": False, "pro": None}}.get(action)
+    if body is None:
+        return route.fulfill(status=400, content_type="application/json", headers={"access-control-allow-origin": "*"}, body=json.dumps({"error": "Action inconnue"}))
+    route.fulfill(status=200, content_type="application/json", headers={"access-control-allow-origin": "*"}, body=json.dumps(body))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -360,6 +372,9 @@ def main():
         for name, fn in (("export", None), ("reference", scenario_reference)):
             log = Log(f"aaf_{name}")
             ctx, page = new_page(b, "pc", log)
+            # Grille du 14/10 : la séance Pro Tools (AAF + BWF) est un export, débloqué par le serveur
+            # (licence, projet payé, Nova Pro, admin). Ici : compte du studio (admin), comme avant.
+            page.route(re.compile(r"^https://[a-z0-9-]+\.supabase\.co/functions/v1/nova-billing"), _billing_admin)
             try:
                 if name == "export":
                     exported = scenario_export(page)

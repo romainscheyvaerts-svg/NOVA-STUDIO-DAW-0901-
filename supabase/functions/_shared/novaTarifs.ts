@@ -154,10 +154,12 @@ export type RaisonRefus = "catalogue_non_achete" | "paiement";
  * - admin : tout ;
  * - une instru / mélodie du catalogue NON achetée dans le mix → refusé, même pour un abonné
  *   (« mes pistes seules », sans l'instru, reste possible) ;
+ * - toutes les instrus / mélodies du projet achetées → export offert (« licence »), SAUF si
+ *   le projet utilise les kits de batterie NOVA (jamais d'export gratuit avec les kits).
+ *   Passe avant Nova Pro : après un achat, le compte est aussi Pro (cadeau), mais la raison
+ *   affichée reste « licence achetée : export offert » ;
  * - Nova Pro (payé ou offert) → exports illimités ;
  * - projet déjà payé (1,99 €) → exports illimités de ce projet ;
- * - toutes les instrus / mélodies du projet achetées → export offert, SAUF si le projet
- *   utilise les kits de batterie NOVA (jamais d'export gratuit avec les kits) ;
  * - sinon → 1,99 € ou Nova Pro.
  */
 export function decisionExport(i: {
@@ -166,9 +168,9 @@ export function decisionExport(i: {
   const missing = i.catalogue.filter(c => !c.owned);
   if (i.admin) return { unlocked: true, via: "admin", missing: [] };
   if (i.portee === "mix" && missing.length) return { unlocked: false, reason: "catalogue_non_achete", missing };
+  if (i.catalogue.length > 0 && missing.length === 0 && !i.kits) return { unlocked: true, via: "licence", missing };
   if (i.pro) return { unlocked: true, via: "pro", missing };
   if (i.projetPaye) return { unlocked: true, via: "achat", missing };
-  if (i.catalogue.length > 0 && missing.length === 0 && !i.kits) return { unlocked: true, via: "licence", missing };
   return { unlocked: false, reason: "paiement", missing };
 }
 

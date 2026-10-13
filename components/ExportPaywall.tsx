@@ -21,11 +21,15 @@ interface Props {
   onProActive: () => void;
   /** Bouton « Acheter la licence » (la fenêtre d'export a déjà le sien). */
   showBuy?: boolean;
+  /** Réponse du serveur pour « mes pistes seules » (sans l'instru), quand l'instru n'est pas achetée. */
+  voix?: ExportAccess | null;
 }
 
 const box = 'rounded-2xl border px-4 py-3 text-[12px]';
+/** 30 → « 1 mois » ; 60 → « 2 mois » ; 7 → « 7 jours ». */
+export const dureeOfferte = (jours: number) => (jours >= 30 && jours % 30 === 0 ? `${jours / 30} mois` : `${jours} jours`);
 
-const ExportPaywall: React.FC<Props> = ({ access, grille, status, paying, onPayExport, onCancelPay, onBuyLicence, onRetry, onProActive, showBuy = false }) => {
+const ExportPaywall: React.FC<Props> = ({ access, grille, status, paying, onPayExport, onCancelPay, onBuyLicence, onRetry, onProActive, showBuy = false, voix = null }) => {
   const [showPro, setShowPro] = useState(false);
   if (!access) {
     return <p className={`${box} border-white/10 bg-white/[0.03] text-slate-300`} role="status" data-testid="export-paywall" data-state="loading"><i className="fas fa-circle-notch fa-spin mr-1" />Vérification de l'export de ce projet…</p>;
@@ -38,10 +42,11 @@ const ExportPaywall: React.FC<Props> = ({ access, grille, status, paying, onPayE
     <p className="mt-1 text-[11px] text-amber-200" role="note">ℹ️ Les nouveaux tarifs ne sont pas encore actifs sur le serveur : prix actuels affichés.</p>
   );
   const giftDays = access.pro?.source === 'cadeau' ? access.pro.days_left : 0;
+  const giftTotal = access.pro?.source === 'cadeau' ? access.pro.total_days || 0 : 0;
 
   if (access.unlocked) {
     const texte = access.via === 'admin' ? null
-      : access.via === 'licence' ? <>✅ <b>Licence achetée : export offert</b>{cadeauInstru ? <> + {cadeauInstru} offert</> : null}.</>
+      : access.via === 'licence' ? <>✅ <b>Licence achetée : export offert</b>{giftTotal > 0 ? <> + <b>{dureeOfferte(giftTotal)} de Nova Pro offert{giftTotal > 31 ? 's' : ''}</b> ({joursOffertsLabel(giftDays)})</> : null}.</>
       : access.via === 'achat' ? <>✅ <b>Export de ce projet payé</b> : refais ton mix et réexporte autant que tu veux.</>
       : giftDays > 0 ? <>🎁 <b>Nova Pro offert</b> ({joursOffertsLabel(giftDays)}) : exports illimités.</>
       : <>⭐ <b>Nova Pro</b> : exports illimités.</>;
@@ -73,6 +78,11 @@ const ExportPaywall: React.FC<Props> = ({ access, grille, status, paying, onPayE
             🛒 Acheter la licence {melodie ? 'de la mélodie' : "de l'instru"}
           </button>
         )}
+        {voix && (voix.unlocked
+          ? <p className="text-[11px] text-amber-100/90">🎤 Tes pistes seules (sans l'instru) s'exportent déjà (Nova Pro ou projet payé).</p>
+          : voix.reason === 'paiement' && prixExport
+            ? <p className="text-[11px] text-amber-100/90">🎤 Tes pistes seules, sans l'instru, restent exportables : {prixExport} pour ce projet, ou incluses dans Nova Pro.</p>
+            : null)}
         {access.login_required && <p className="text-[11px] text-amber-200">Déjà achetée ? Connecte-toi avec ton compte Make Music : tes licences sont reconnues toutes seules.</p>}
         {legacyNote}
       </div>

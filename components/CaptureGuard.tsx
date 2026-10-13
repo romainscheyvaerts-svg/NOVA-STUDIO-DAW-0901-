@@ -47,12 +47,18 @@ const CaptureGuard: React.FC<Props> = ({ tracks, owned, isPlaying, onBuyBeat }) 
   const bloque = !admin && recorders.length > 0 && nonAchetees.length > 0;
 
   // Lecture coupée dès qu'elle démarre (ou dès que l'enregistrement commence pendant la lecture).
+  // (Répété tant que la lecture continue : la 1re demande peut arriver avant que l'état
+  // « en lecture » soit validé par le transport.)
   useEffect(() => {
-    if (bloque && isPlaying) window.dispatchEvent(new Event('nova:transport-pause'));
+    if (!bloque || !isPlaying) return;
+    const stop = () => window.dispatchEvent(new Event('nova:transport-pause'));
+    const t0 = window.setTimeout(stop, 0);
+    const id = window.setInterval(stop, 250);
+    return () => { window.clearTimeout(t0); window.clearInterval(id); };
   }, [bloque, isPlaying]);
 
   if (!bloque) return null;
-  const quoi = nonAchetees.length > 1 ? 'les instrus non achetées' : `« ${nonAchetees[0]?.name || "l'instru"} » (pas encore achetée)`;
+  const quoi = nonAchetees.length > 1 ? 'les instrus non achetées' : `« ${nonAchetees[0]?.clips?.[0]?.name || nonAchetees[0]?.name || "l'instru"} » (pas encore achetée)`;
   return (
     <div className="fixed inset-x-0 bottom-20 z-[640] flex justify-center px-4 pointer-events-none" role="alert" data-testid="capture-guard">
       <div className="pointer-events-auto max-w-md rounded-2xl border border-red-500/40 bg-[#1a0d0f]/95 p-3 text-[12px] text-red-100 shadow-2xl">

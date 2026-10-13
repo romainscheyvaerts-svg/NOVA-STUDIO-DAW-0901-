@@ -214,7 +214,9 @@ export interface ExportAccess {
   missing: { id: string; title: string | null; kind: string }[];
   login_required: boolean;
   kits: boolean;
-  pro: { active: boolean; source: string | null; days_left: number; until: string | null } | null;
+  pro: { active: boolean; source: string | null; days_left: number; total_days?: number; until: string | null } | null;
+  /** Instrus / mélodies du catalogue du projet, vues par le serveur. */
+  items?: { id: string; title: string | null; kind: string; owned: boolean }[];
   legacy: boolean;
   message?: string;
 }
@@ -244,7 +246,7 @@ export async function exportAccess(q: ExportQuery): Promise<ExportAccess> {
     const d = await billing<any>('export_access', { project_key: q.projectKey, catalog_ids: q.catalogIds, kits: q.kits, scope: q.scope });
     r = {
       unlocked: !!d.unlocked, via: d.via || null, reason: d.reason || null, missing: Array.isArray(d.missing) ? d.missing : [],
-      login_required: !!d.login_required, kits: !!d.kits, pro: d.pro || null, legacy: false,
+      login_required: !!d.login_required, kits: !!d.kits, pro: d.pro || null, items: Array.isArray(d.items) ? d.items : [], legacy: false,
     };
   } catch (e) {
     if (!estActionInconnue(e)) {

@@ -521,7 +521,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         <div className={`${advanced ? 'p-8' : 'p-6'} flex flex-col space-y-6`}>
 
             {!admin && !adminPending && (
-              <ExportPaywall access={acces} grille={grille} status={compte} paying={payWait}
+              <ExportPaywall access={accesMix?.reason === 'catalogue_non_achete' ? accesMix : acces} voix={accesMix?.reason === 'catalogue_non_achete' ? accesVoix : null}
+                grille={grille} status={compte} paying={payWait}
                 onPayExport={() => { void payVoices(); }} onCancelPay={() => { payCancelled.current = true; setPayWait(false); }}
                 onBuyLicence={() => openBuyBeat(projectState.tracks)} onRetry={recheckAccess}
                 onProActive={() => { void billingStatus().then(setCompte); recheckAccess(); setLoudnessReport('⭐ Nova Pro actif : exports illimités.'); }} />
@@ -953,7 +954,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               <span className="text-2xl leading-none" aria-hidden="true">🎚️</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px] font-black text-white">Séance pour Pro Tools (AAF + BWF)</span>
-                <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Gratuit.</span>
+                <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Comprise dans l'export de ce projet (licence, export payé ou Nova Pro).</span>
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
             </button>

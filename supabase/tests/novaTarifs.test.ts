@@ -114,6 +114,8 @@ describe('source unique des prix (_shared/novaTarifs.ts)', () => {
     expect(decisionExport({ ...off, pro: true, catalogue: [] })).toMatchObject({ unlocked: true, via: 'pro' });
     expect(decisionExport({ ...off, projetPaye: true, catalogue: [] })).toMatchObject({ unlocked: true, via: 'achat' });
     expect(decisionExport({ ...off, catalogue: [{ id: 'b', owned: true }] })).toMatchObject({ unlocked: true, via: 'licence' });
+    expect(decisionExport({ ...off, pro: true, catalogue: [{ id: 'b', owned: true }] }).via).toBe('licence'); // la licence se dit avant Pro
+    expect(decisionExport({ ...off, pro: true, kits: true, catalogue: [{ id: 'b', owned: true }] }).via).toBe('pro');
     expect(decisionExport({ ...off, kits: true, catalogue: [{ id: 'b', owned: true }] })).toMatchObject({ unlocked: false, reason: 'paiement' });
     // Mes pistes seules (sans l'instru) : possible en payant même si l'instru n'est pas achetée.
     expect(decisionExport({ ...off, portee: 'voix', catalogue: [{ id: 'b', owned: false }] }).reason).toBe('paiement');
@@ -177,8 +179,9 @@ describe('nova-billing · grille du 14/10', () => {
   it('instru achetée : export du projet offert + 1 mois de Nova Pro (les mois se cumulent)', async () => {
     buy('u-artiste', 'beat-1', 'lic-basic', 29, 3600_000);
     const r = await access({ catalog_ids: ['beat-1'] }, 'jwt.artiste.ok');
-    // Le mois offert rend aussi Pro : la voie « pro » prime, l'export est offert dans tous les cas.
-    expect(r.json.unlocked).toBe(true);
+    // Licence achetée : la raison affichée est « licence » (le compte est aussi Pro offert).
+    expect(r.json).toMatchObject({ unlocked: true, via: 'licence', pro: { source: 'cadeau', days_left: 30, total_days: 30 } });
+    expect(r.json.items).toEqual([{ id: 'beat-1', title: 'Nuit blanche', kind: 'beat', owned: true }]);
     let st = (await call(novaBilling, { action: 'status' }, { token: 'jwt.artiste.ok' })).json;
     expect(st.pro).toMatchObject({ active: true, source: 'cadeau', paid: false });
     expect(st.pro.cadeau).toMatchObject({ active: true, days_left: 30, total_days: 30 });

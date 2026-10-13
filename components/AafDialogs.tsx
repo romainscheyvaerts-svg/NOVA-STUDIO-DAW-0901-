@@ -7,6 +7,9 @@ import type { AafZip } from '../utils/aaf/aafApp';
 import { buildProToolsZip, importAafIntoProject, isAafFile, isAudioFile, missingMedia, openAaf, planProjectExport } from '../utils/aaf/aafApp';
 import { saveBlob } from '../utils/saveBlob';
 import { MEDIA_FOLDER } from '../utils/aaf/aafWrite';
+import { useExportGate } from '../hooks/useExportGate';
+import ExportPaywall from './ExportPaywall';
+import { openBuyBeat } from '../utils/studioLinks';
 
 /**
  * Échange de séance avec Pro Tools (chantier 14) :
@@ -180,10 +183,14 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
   const [done, setDone] = useState<AafZip | null>(null);
   const state = getState();
   const plan = useMemo(() => planProjectExport(state, { embed, trackVolumePan: volPan, includeMuted: muted }), [state, embed, volPan, muted]);
+  // La séance contient les sons du projet (instru comprise) : même verrou que l'export, décidé
+  // par le serveur (licence achetée, projet payé, Nova Pro, admin).
+  const gate = useExportGate(true, state.id, state.tracks);
   const clips = plan.input.tracks.reduce((n, t) => n + t.clips.length, 0);
   const files = plan.input.media.reduce((n, m) => n + Math.min(2, m.channels.length), 0);
 
   const go = async () => {
+    if (!gate.unlocked) { setError(gate.access?.reason === 'erreur' ? (gate.access.message || 'Vérification impossible.') : "Débloque d'abord l'export de ce projet (ci-dessus)."); return; }
     setBusy('Fabrication de la séance…'); setError(null);
     try {
       await new Promise(r => setTimeout(r, 30));
@@ -201,6 +208,12 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
       hint="Pro Tools : Fichier › Ouvrir (AAF) ou Fichier › Importer › Données de session">
       {error && <p role="alert" className="rounded-lg border border-red-400/40 bg-red-500/10 p-2 text-[12px] text-red-300">⚠️ {error}</p>}
       {busy && <p className="p-2 text-center text-[13px] text-nv-muted" role="status"><i className="fas fa-circle-notch fa-spin mr-2" />{busy}</p>}
+      {!done && !busy && !gate.admin && !gate.unlocked && (
+        <ExportPaywall access={gate.access} grille={gate.grille} status={gate.status} paying={gate.paying}
+          onPayExport={() => { void gate.pay(); }} onCancelPay={gate.cancelPay} onBuyLicence={() => openBuyBeat(state.tracks)}
+          onRetry={gate.recheck} onProActive={gate.recheck} showBuy />
+      )}
+      {gate.message && <p role="status" className="text-[12px] text-amber-300">{gate.message}</p>}
       {!done && !busy && (
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
           <p className="text-[12px] text-nv-muted">Un dossier .zip à ouvrir dans Pro Tools : la séance (.aaf) et un fichier BWF 24 bits horodaté par son, dans {MF}. Une piste par piste audio, avec les clips, leur gain et leurs fondus.</p>
@@ -225,7 +238,7 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
           {!plan.input.tracks.length && <p className="text-[12px] text-amber-300">Aucune piste audio à exporter.</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className={btn} onClick={onClose} data-testid="aaf-cancel">Annuler</button>
-            <button type="button" className={btnMain} disabled={!plan.input.tracks.length} onClick={() => void go()} data-testid="aaf-export-go">Exporter la séance</button>
+            <button type="button" className={btnMain} disabled={!plan.input.tracks.length || !gate.unlocked} onClick={() => void go()} data-testid="aaf-export-go">{gate.unlocked ? 'Exporter la séance' : (gate.access ? 'Export à débloquer' : 'Vérification…')}</button>
           </div>
         </div>
       )}

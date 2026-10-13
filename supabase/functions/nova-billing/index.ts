@@ -279,13 +279,14 @@ async function handle(body: any, user: User | null) {
       reason: d.reason || null,
       login_required: !user && !d.unlocked,
       missing: d.missing.map(m => ({ id: m.id, title: m.title || null, kind: m.kind || "beat" })),
+      items: catalogue.map(m => ({ id: m.id, title: m.title || null, kind: m.kind || "beat", owned: m.owned })),
       kits,
       offers: d.unlocked ? null : {
         export_cents: d.reason === "paiement" ? TARIFS.export_cents : null,
         pro_mois_cents: d.reason === "paiement" ? TARIFS.pro_mois_cents : null,
         pro_an_cents: d.reason === "paiement" ? TARIFS.pro_an_cents : null,
       },
-      pro: st ? { active: st.active, source: st.source, days_left: st.cadeau.days_left, until: st.until } : null,
+      pro: st ? { active: st.active, source: st.source, days_left: st.cadeau.days_left, total_days: st.cadeau.total_days, until: st.until } : null,
     };
   }
 
