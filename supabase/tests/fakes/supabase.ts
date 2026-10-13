@@ -34,6 +34,7 @@ const UPSERT_KEYS: Record<string, string[]> = {
 const UNIQUE: Record<string, string[][]> = {
   daw_session_invites: [['code']],
   nova_export_uses: [['user_id', 'project_key']],
+  studio_booking_requests: [['package_id']],
 };
 
 type Filter = (row: any) => boolean;

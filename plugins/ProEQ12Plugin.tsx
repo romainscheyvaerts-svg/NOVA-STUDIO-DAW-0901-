@@ -85,13 +85,25 @@ const SETTLE_MS = 160;
  * retirée de la chaîne ; une bande active n'a qu'un filtre câblé ; une fois les
  * fondus finis, les réglages sont figés (valeurs fixes, calcul par bloc).
  * Le son est identique : une bande neutre est strictement transparente.
+ *
+ * Séances de 64 à 128 pistes (chantier 13) : une fois les fondus finis, la chaîne est
+ * « compacte » : entrée -> analyse -> filtres actifs -> sortie, sans les gains d'aiguillage de
+ * chaque bande (tous à 1 : copie exacte). L'analyseur du spectre (sortie) n'est branché, en
+ * dérivation, que pendant que la fenêtre le lit. L'analyseur d'entrée RESTE en série : la
+ * source muette de la piste (ConstantSource à 0) sort un bloc marqué « silence », que Chrome
+ * propage ; l'analyseur réécrit ce bloc et les filtres le voient « actif ». Sans lui, Chrome
+ * arrête les filtres après leur queue et la lecture ne retombe plus sur l'export (mesuré :
+ * 0,8 LSB16 au début d'une phrase après un silence). Son identique au bit près.
  */
 export class ProEQ12Node {
   private ctx: BaseAudioContext;
   public input: GainNode;
   public output: GainNode;
+  /** Analyse d'entrée, en série (garde la chaîne « active », voir l'en-tête de la classe). */
   public preAnalyzer: AnalyserNode;
-  public postAnalyzer: AnalyserNode;
+  private postAn: AnalyserNode;
+  /** Analyseur après l'égaliseur (spectre de la fenêtre) : branché à la lecture, débranché 3 s après. */
+  public get postAnalyzer(): AnalyserNode { this.readPost(); return this.postAn; }
   private voices: EqBandVoice[] = [];
   private params: ProEQ12Params;
   private readonly createdAt: number;
@@ -138,14 +150,12 @@ export class ProEQ12Node {
     this.preAnalyzer = ctx.createAnalyser();
     this.preAnalyzer.fftSize = 4096;
     this.preAnalyzer.smoothingTimeConstant = 0.85;
-    this.postAnalyzer = ctx.createAnalyser();
-    this.postAnalyzer.fftSize = 4096;
-    this.postAnalyzer.smoothingTimeConstant = 0.85;
+    this.postAn = ctx.createAnalyser();
+    this.postAn.fftSize = 4096;
+    this.postAn.smoothingTimeConstant = 0.85;
 
-    // Cablage : entree -> analyse -> bandes actives en serie -> analyse -> sortie
-    this.input.connect(this.preAnalyzer);
+    // Cablage : entree -> bandes actives en serie -> sortie (analyse du spectre en dérivation).
     for (let i = 0; i < 12; i++) this.voices.push(this.createVoice(this.params.bands[i].type));
-    this.postAnalyzer.connect(this.output);
     // Chaque réglage d'une bande pilote ses DEUX filtres (A/B) : le changement de type reste sans clic.
     const nyq = ctx.sampleRate / 2;
     this.voices.forEach((v, i) => {
@@ -217,17 +227,57 @@ export class ProEQ12Node {
     v.conn[k] = on;
   }
 
-  /** Chaîne en série des seules bandes actives. */
+  /** Chaîne compacte (filtres reliés directement, voir l'en-tête de la classe). */
+  private compactOn = false;
+  /** Réglages au moment de la dernière mise au repos (un appel sans changement ne défait rien). */
+  private settledKey = '';
+  private links: [AudioNode, AudioNode][] = [];
+  private tail: AudioNode | null = null;
+  private postTapOn = false;
+  private postReadAt = 0;
+  private postTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Chaîne en série des seules bandes actives. Seuls les liens qui changent sont refaits
+   * (un lien gardé n'est jamais coupé, même un instant).
+   */
   private relink() {
-    try { this.preAnalyzer.disconnect(); } catch (e) { /* */ }
+    const next: [AudioNode, AudioNode][] = [];
+    const next0: [AudioNode, AudioNode] = [this.input, this.preAnalyzer];
+    next.push(next0);
     let last: AudioNode = this.preAnalyzer;
     for (const v of this.voices) {
-      try { v.out.disconnect(); } catch (e) { /* */ }
       if (!v.inChain) continue;
-      last.connect(v.input);
-      last = v.out;
+      if (this.compactOn) { const f = v.filters[v.slot]; next.push([last, f]); last = f; }
+      else { next.push([last, v.input]); last = v.out; }
     }
-    last.connect(this.postAnalyzer);
+    next.push([last, this.output]);
+    const has = (arr: [AudioNode, AudioNode][], l: [AudioNode, AudioNode]) => arr.some(x => x[0] === l[0] && x[1] === l[1]);
+    for (const l of this.links) if (!has(next, l)) { try { l[0].disconnect(l[1]); } catch (e) { /* déjà coupé */ } }
+    for (const l of next) if (!has(this.links, l)) l[0].connect(l[1]);
+    this.links = next;
+    if (this.tail !== last && this.postTapOn) {
+      try { this.tail?.disconnect(this.postAn); } catch (e) { /* */ }
+      last.connect(this.postAn);
+    }
+    this.tail = last;
+  }
+
+  private readPost() {
+    this.postReadAt = Date.now();
+    if (this.disposed || this.postTapOn || !this.tail) return;
+    this.postTapOn = true;
+    this.tail.connect(this.postAn);
+    if (!this.postTimer) this.postTimer = setInterval(() => {
+      if (Date.now() - this.postReadAt > 3000 || this.disposed) {
+        if (this.postTapOn) { this.postTapOn = false; try { this.tail?.disconnect(this.postAn); } catch (e) { /* */ } }
+        if (this.postTimer) { clearInterval(this.postTimer); this.postTimer = null; }
+      }
+    }, 1000);
+  }
+
+  private paramsKey(): string {
+    return JSON.stringify([this.params.bands, this.params.masterGain, this.params.isEnabled, [...this.automated]]);
   }
 
   private bandActive(i: number): boolean {
@@ -240,6 +290,10 @@ export class ProEQ12Node {
   /** immediate : valeurs posees sans lissage (creation, premier reglage). */
   private applyAll(immediate = false) {
     if (this.disposed) return;
+    // Rien n'a changé depuis la mise au repos : la chaîne compacte reste telle quelle.
+    if (this.compactOn && !this.firstApply && this.paramsKey() === this.settledKey) return;
+    // Un réglage change : chaîne complète (gains d'aiguillage, fondus) le temps des fondus.
+    if (this.compactOn) { this.compactOn = false; this.relink(); }
     const now = this.ctx.currentTime;
     const smooth = !immediate && now > this.createdAt;
     const set = (prm: AudioParam, v: number, tau: number, soft = smooth) => {
@@ -356,6 +410,11 @@ export class ProEQ12Node {
     });
     const mg = Number.isFinite(this.params.masterGain) ? Math.max(0, this.params.masterGain) : 1;
     fixKey('masterGain', mg);
+    // Au repos, chaque bande active n'a plus qu'un filtre câblé, gain d'aiguillage à 1 :
+    // chaîne compacte (filtres reliés directement), son identique.
+    const simple = this.voices.every((v, i) => !v.inChain || (this.targets[i]?.wet === 1 && v.conn[v.slot] && !v.conn[v.slot === 0 ? 1 : 0] && !v.conn[2]));
+    if (simple && !this.compactOn) { this.compactOn = true; relink = true; }
+    this.settledKey = this.paramsKey();
     if (relink) this.relink();
   }
 
@@ -395,9 +454,10 @@ export class ProEQ12Node {
   public dispose() {
     this.disposed = true;
     if (this.settleTimer) { clearTimeout(this.settleTimer); this.settleTimer = null; }
+    if (this.postTimer) { clearInterval(this.postTimer); this.postTimer = null; }
     try { this.input.disconnect(); } catch (e) {}
     try { this.preAnalyzer.disconnect(); } catch (e) {}
-    try { this.postAnalyzer.disconnect(); } catch (e) {}
+    try { this.postAn.disconnect(); } catch (e) {}
     for (const v of this.voices) {
       for (const n of [v.input, v.out, v.dry, ...v.filters, ...v.gains]) {
         try { n.disconnect(); } catch (e) {}

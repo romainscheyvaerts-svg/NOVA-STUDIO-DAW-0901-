@@ -208,6 +208,9 @@ import {
 import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
 import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, guestCanEditContent, guestCanMix, guestOpVerdict, guestRefusalText, isLimitedGuest, sanitizeGuestRights } from './utils/guestRights';
 import GuestStudio from './components/GuestStudio';
+import CabinRemote from './components/CabinRemote';
+import SendToStudioModal from './components/SendToStudioModal';
+import { useCabinHost, useCabinPhone } from './hooks/useCabinRemote';
 import CommentsPanel, { CommentPins } from './components/CommentsPanel';
 import { useTimelineComments } from './hooks/useTimelineComments';
 import { commentCounts } from './utils/timelineComments';
@@ -3847,6 +3850,12 @@ function Studio() {
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
   const freezeTrackRef = useRef(handleFreezeTrack);
   freezeTrackRef.current = handleFreezeTrack;
+  // Console : « geler cette piste » depuis la charge processeur d'une tranche (TrackCpuBadge).
+  useEffect(() => {
+    const onFreeze = (e: Event) => { const id = (e as CustomEvent).detail?.trackId; if (id) void freezeTrackRef.current(id); };
+    window.addEventListener('nova:freeze-track', onFreeze);
+    return () => window.removeEventListener('nova:freeze-track', onFreeze);
+  }, []);
 
   // --- Surcharge processeur (compteur CPU de la barre de transport, mode sécurité) ---------
   // engine/dspMonitor mesure les sous-régimes du contexte audio et les retards du
@@ -3864,7 +3873,8 @@ function Studio() {
       getContext: () => audioEngine.ctx,
       isActive: () => audioEngine.isTransportRunning(),
       getLateTicks: () => audioEngine.getSchedulerLateTicks(),
-      getEstimatedLoad: () => estimatedDspLoadPct(stateRef.current.tracks),
+      // Pistes en veille (effets au repos, engine/effectSleep) : seule leur base compte.
+      getEstimatedLoad: () => estimatedDspLoadPct(stateRef.current.tracks, undefined, new Set(audioEngine.getSleepStats()?.asleepIds || [])),
     });
     const off = dspMonitor.onEpisode(e => {
       if (e.type !== 'overload' || !safeModeStore.get()) return;
@@ -7282,9 +7292,13 @@ function Studio() {
   const peerSyncRef = useRef(peerSync);
   peerSyncRef.current = peerSync;
   const onEphemeralRef = useRef<((ev: string, payload: any) => void) | null>(null);
+  /** Chantier 17 : messages de la télécommande de cabine (renvoie true s'ils étaient pour elle). */
+  const cabinEventRef = useRef<((ev: string, payload: unknown) => boolean) | null>(null);
   onEphemeralRef.current = (ev, payload) => {
     const c = collabRef.current;
     if (!c || !payload || typeof payload !== 'object') return;
+    // Télécommande de cabine (utils/cabinRemote) : ingé d'un côté, téléphone en cabine de l'autre.
+    if (cabinEventRef.current?.(ev, payload)) return;
     const meKey = c.client.memberKey;
     if (ev === 'tp') { followTransportRef.current(payload as TransportMsg & { by?: string }); return; }
     if (ev === 'ping') { if (payload.from !== meKey) c.client.broadcast('pong', { to: payload.from, from: meKey, t: payload.t }); return; }
@@ -9753,6 +9767,99 @@ function Studio() {
   };
   const guestEngineerView = collabPeerViews.find(v => v.role === 'engineer' && !v.me) || null;
 
+  // ===== Chantier 17 · Studio Make Music connecté : télécommande de cabine (utils/cabinRemote) =====
+  // Chez l'ingé : les commandes du téléphone de l'artiste (REC, lecture, stop, début), si l'ingé l'a permis.
+  const cabinWire = () => { const c = collabRef.current; return c ? { memberKey: c.client.memberKey, broadcast: (e: any, pl: Record<string, unknown>) => c.client.broadcast(e, pl) } : null; };
+  /**
+   * REC venu de la cabine : la prise est faite AU STUDIO, sur une piste de l'ingé. En séance
+   * partagée, « Voix lead » appartient au rôle artiste (utils/collabPeers) : l'ingé ne peut pas y
+   * enregistrer (les autres refuseraient sa prise). Si aucune piste armée n'est à lui, NOVA crée
+   * « Cabine · Nina » (à l'ingé, même sortie et même entrée que la piste préparée), l'arme, et
+   * la prise part dessus ; les suivantes aussi.
+   */
+  const cabinStartingRef = useRef(false);
+  const cabinRecord = async (by: { key: string; name: string }) => {
+    const c = collabRef.current;
+    if (!c || c.role !== 'engineer' || cabinStartingRef.current) return;
+    cabinStartingRef.current = true;
+    try { await cabinRecordInner(c, by); } finally { cabinStartingRef.current = false; }
+  };
+  const cabinRecordInner = async (c: NonNullable<typeof collabRef.current>, by: { key: string; name: string }) => {
+    const st = stateRef.current;
+    const armed = st.tracks.filter(t => t.isTrackArmed);
+    if (!armed.some(t => !collabRecGuardRef.current(t.id))) {
+      const label = `Cabine · ${(by.name || 'artiste').slice(0, 30)}`;
+      let cab = st.tracks.find(t => t.type === TrackType.AUDIO && t.collabOwnerKey === c.key && t.name === label);
+      if (!cab) {
+        const tpl = armed[0];
+        const id = `track-cab-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        const make = (d: DAWState) => {
+          const t: Track = {
+            id, name: label, type: TrackType.AUDIO, color: tpl?.color || c.color, isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+            volume: 1, pan: 0, outputTrackId: tpl?.outputTrackId || 'master', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0,
+            ...(tpl?.recordInput !== undefined ? { recordInput: tpl.recordInput } : {}),
+            collabOwner: 'engineer', collabOwnerKey: c.key, collabOwnerName: c.name, collabOwnerColor: c.color,
+          };
+          const at = tpl ? d.tracks.findIndex(x => x.id === tpl.id) + 1 : d.tracks.findIndex(x => x.type === TrackType.BUS || x.type === TrackType.SEND || x.id === 'master');
+          d.tracks.splice(at > 0 ? at : d.tracks.length, 0, t);
+        };
+        stateRef.current = produce(stateRef.current, make);
+        setState(produce(make));
+        cab = stateRef.current.tracks.find(t => t.id === id);
+        setAiNotification(`🎛️ ${by.name || "L'artiste"} a lancé REC depuis la cabine. Ses prises partent sur « ${label} », ta piste (en séance partagée, ${tpl ? `« ${tpl.name} »` : 'la voix'} appartient à l'artiste). Monte-les comme tu veux.`);
+      }
+      if (!cab) return;
+      const disarm = (d: DAWState) => { d.tracks.forEach(t => { t.isTrackArmed = t.id === cab!.id; }); d.selectedTrackId = cab!.id; };
+      stateRef.current = produce(stateRef.current, disarm);
+      if (!(await armForRecording(cab.id))) return;
+    }
+    await handleToggleRecord();
+  };
+  const cabinHost = useCabinHost({
+    wire: cabinWire,
+    role: collab?.role ?? null,
+    name: collab?.name || '',
+    rights: state.collabGuestRights,
+    isRecording: state.isRecording,
+    isPlaying: state.isPlaying,
+    countInBeat,
+    // Lecture seule de l'état du moteur (engine/AudioEngine.ts n'est pas modifié) : la prise tourne déjà.
+    // Avec un décompte, le moteur enregistre déjà pendant le décompte : on attend alors l'état du projet.
+    engineRecording: () => {
+      if (!(audioEngine as unknown as { recordingTrackId?: string | null }).recordingTrackId) return false;
+      if (stateRef.current.isRecording) return true;
+      try { return localStorage.getItem('nova_count_in') === '0'; } catch { return false; }
+    },
+    busy: () => recBusyRef.current || cabinStartingRef.current,
+    online: () => collabOnlineRef.current.filter(m => m.online !== false),
+    position: () => (stateRef.current.isPlaying || stateRef.current.isRecording ? audioEngine.getCurrentTime() : playheadStore.get()),
+    armedName: () => stateRef.current.tracks.filter(t => t.isTrackArmed && !collabRecGuardRef.current(t.id)).map(t => t.name).join(' + ') || null,
+    record: (by) => { void cabinRecord(by); },
+    play: () => { void handleTogglePlay(); },
+    stop: () => { void handleStop(); },
+    home: () => { handleSeek(0); },
+    notify: (text) => setAiNotification(text),
+  });
+  // Chez l'artiste : le téléphone en cabine.
+  const [cabinOpen, setCabinOpen] = useState(false);
+  // « Envoyer au studio » : projet + stems + notes horodatées + demande de réservation (components/SendToStudioModal).
+  const [studioSendOpen, setStudioSendOpen] = useState(false);
+  const cabinAllowed = !!collab && collab.role === 'artist' && !!state.collabGuestRights?.remote;
+  const cabinEngineer = (() => {
+    if (!collab) return null;
+    const list = collabOnline.filter(m => m.role === 'engineer' && m.online !== false && m.member_key !== collab.client.memberKey);
+    return list.find(m => m.host) || list[0] || null;
+  })();
+  const cabinPhone = useCabinPhone({
+    wire: cabinWire,
+    engineerKey: cabinEngineer?.member_key ?? null,
+    engineerName: cabinEngineer?.display_name || guestEngineerView?.name || state.collabHost?.name || "l'ingé",
+    open: cabinOpen,
+    onRetry: () => { void collabRef.current?.client.retryNow(); },
+  });
+  cabinEventRef.current = (ev, payload) => (collab?.role === 'engineer' ? cabinHost.onEvent(ev, payload) : cabinPhone.onEvent(ev, payload));
+  useEffect(() => { if (!collab) setCabinOpen(false); }, [collab]);
+
   // B3 : envoi de ma dernière prise, prises reçues en direct, test de connexion.
   const ltLastSend = (() => { const all = collab ? ltSenderRef.current!.allProgress().filter(p => !p.cancelled) : []; return all[all.length - 1] || null; })();
   const ltTo = guestMode
@@ -9862,6 +9969,8 @@ function Studio() {
       a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      a('Fichier', 'pal.sendStudio', 'Envoyer au studio Make Music (projet, stems, notes, réservation)', () => setStudioSendOpen(true), { keywords: 'studio make music réserver réservation envoyer ingé stems session' }),
+      ...(collab?.role === 'artist' && state.collabGuestRights?.remote ? [a('Collaboration', 'pal.cabin', 'Mode cabine : télécommande REC, lecture et paroles en grand', () => setCabinOpen(true), { keywords: 'cabine télécommande rec téléphone studio' })] : []),
       // Voix
       a('Voix', 'pal.voiceTrack', 'Ajouter une piste voix (armée, prête à enregistrer)', () => { void handleAddVoiceTrack(); }, { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste voix micro enregistrer nouvelle' }),
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
@@ -9947,6 +10056,7 @@ function Studio() {
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)}
+          onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
@@ -10847,6 +10957,7 @@ function Studio() {
           notice={aiNotice}
           takeSend={ltSendNode}
           netTest={ltNetNode}
+          cabin={cabinAllowed ? { onOpen: () => setCabinOpen(true) } : null}
           onLeave={() => {
             const eng = guestEngineerView?.name || state.collabHost?.name || "l'ingé";
             setGuestLeft({ sessionName: cloudSession?.name || state.name || 'Séance', engineer: eng, name: collab.name });
@@ -10861,6 +10972,37 @@ function Studio() {
           )}
           reviewBadge={reviewCounts.open + reviewsWaiting}
         />
+        </PanelBoundary>
+      )}
+      {studioSendOpen && (
+        <PanelBoundary name="l'envoi au studio" overlay onClose={() => setStudioSendOpen(false)}>
+          <SendToStudioModal open onClose={() => setStudioSendOpen(false)} state={state} owned={user?.owned_instruments || []}
+            signedIn={!!user && user.id !== 'guest'} defaultName={(user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : '') || collab?.name || ''}
+            onLogin={() => { setStudioSendOpen(false); setIsAuthOpen(true); }} sampleRate={audioEngine.getProjectSampleRate()} />
+        </PanelBoundary>
+      )}
+      {cabinOpen && collab && collab.role === 'artist' && (
+        <PanelBoundary name="le mode cabine" overlay onClose={() => setCabinOpen(false)}>
+          <CabinRemote
+            engineerName={cabinEngineer?.display_name || guestEngineerView?.name || state.collabHost?.name || "l'ingé"}
+            engineerHere={!!cabinEngineer}
+            allowed={cabinAllowed}
+            state={cabinPhone.state}
+            receivedAt={cabinPhone.receivedAt}
+            pending={cabinPhone.pending}
+            last={cabinPhone.last}
+            onCommand={(cmd, tapAt) => { cabinPhone.send(cmd, tapAt); }}
+            onRetry={() => { void collabRef.current?.client.retryNow(); cabinPhone.ask(); }}
+            lyrics={state.lyrics || ''}
+            lyricsStart={state.lyricsStart ?? 0}
+            lyricsSpeed={state.lyricsSpeed ?? 16}
+            regions={state.markers.filter(m => m.type === 'REGION' && (m.endTime ?? 0) > m.time)}
+            regionMap={state.lyricsRegions || {}}
+            talkOn={talkOn}
+            onTalk={(on) => { void setTalk(on); }}
+            talking={collabTalking}
+            onClose={() => setCabinOpen(false)}
+          />
         </PanelBoundary>
       )}
       {guestMode && guestShowSession && (
