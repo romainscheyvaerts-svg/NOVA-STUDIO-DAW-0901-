@@ -90,6 +90,8 @@ interface TransportProps {
   
   onExportMix?: () => void; 
   onShareProject?: () => void;
+  /** Chantier 17 : « Envoyer au studio » (projet, stems, notes, réservation). */
+  onSendToStudio?: () => void;
 
   // Engine Props
   onOpenAudioEngine?: () => void;
@@ -219,7 +221,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -747,6 +749,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
                     <span>Partager</span>
+                  </button>
+                )}
+                {onSendToStudio && (
+                  <button onClick={() => { onSendToStudio(); setIsMobileMenuOpen(false); }} data-testid="menu-send-studio" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-amber-300 fas fa-house-signal" aria-hidden="true"></i>
+                    <span>Envoyer au studio</span>
                   </button>
                 )}
                 <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />

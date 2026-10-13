@@ -32,6 +32,8 @@ BATTERIE = [
     ("seance_inge", []), ("restes_pro3", []), ("console_telephone", []),
     # 1.4.6-1.4.7 : fréquence par projet, artiste invité, collaboration (prise en direct, commentaires, lien d'écoute).
     ("frequence_preuve", []), ("collab_artiste", []), ("prise_directe", []), ("commentaires_versions", []), ("lien_ecoute", []),
+    # Chantier 17 : studio Make Music connecté (télécommande de cabine, « Envoyer au studio » sur un studio-inbox simulé, port libre).
+    ("studio_connecte", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
 ]

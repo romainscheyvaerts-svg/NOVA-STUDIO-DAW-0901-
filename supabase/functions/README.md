@@ -107,3 +107,34 @@ SQL Editor `drop table if exists public.daw_listen_links;`.
 
 Toute modification de ces fonctions se fait **ici** (et se recopie dans le dépôt du site tant
 que celui-ci déploie aussi), avec ses tests, puis attend un GO pour le déploiement.
+
+## `studio-inbox` (13/10/2026, chantier 17 « Envoyer au studio ») — PAS DÉPLOYÉE
+
+NOVA regroupe le projet (.zip), les stems (FLAC 24 bits), les notes horodatées et une
+**demande** de réservation, et les dépose au studio Make Music. Compte connecté obligatoire.
+Actions : `package_init` (adresses d'envoi signées, stockage privé `studio-packages`),
+`package_resign` (reprise d'un envoi coupé), `package_submit` (vérifie que chaque fichier est
+arrivé à la bonne taille, puis crée la demande de réservation, statut `demande` ; deux envois du
+même paquet rendent la même réservation), `package_status`, `studio_list` (boîte du studio,
+comptes listés dans le secret `STUDIO_ADMIN_EMAILS`). **Aucun message n'est envoyé** (ni mail,
+ni SMS) : le studio lit sa boîte ; brancher une notification sera une décision à part.
+Règles communes à NOVA et au serveur : `studio-inbox/rules.ts`.
+
+Tests : `npx vitest run supabase/tests/studio-inbox.test.ts` ; QA de bout en bout sur un serveur
+simulé qui fait tourner ce code tel quel : `qa/studio_connecte.py` (+ `qa/harness/studio_inbox_serveur.mjs`).
+
+Déploiement (seulement avec le GO de Romain) :
+
+```powershell
+cd "D:\1 WORK\CODE\NOVA-studio-wt"            # ou le dépôt NOVA principal après fusion
+npx supabase link --project-ref mxdrxpzxbgybchzzvpkf
+# 1. Tables + bucket privé, AVANT la fonction :
+#    tableau de bord → SQL Editor → contenu de supabase\migrations\20261013120000_studio_packages.sql → Run
+# 2. Qui voit la boîte du studio (adresses séparées par des virgules) :
+npx supabase secrets set STUDIO_ADMIN_EMAILS="romain.scheyvaerts@gmail.com" --project-ref mxdrxpzxbgybchzzvpkf
+# 3. La fonction (vérifie elle-même le compte, comme daw-session : 401 sans compte) :
+npx supabase functions deploy studio-inbox --project-ref mxdrxpzxbgybchzzvpkf --no-verify-jwt
+```
+
+Retour arrière : `npx supabase functions delete studio-inbox --project-ref mxdrxpzxbgybchzzvpkf`,
+puis le bloc « Retour arrière » en tête de la migration.

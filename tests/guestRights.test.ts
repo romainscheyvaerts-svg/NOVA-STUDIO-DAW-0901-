@@ -32,14 +32,14 @@ const v = (kind: string, op: Record<string, any>, existing?: Track, rights = sim
 
 describe('droits de l’invité : valeur reçue', () => {
   it('mode simple par défaut, mix et repères à l’ingé', () => {
-    expect(DEFAULT_GUEST_RIGHTS).toEqual({ limited: true, ownMix: false, markers: false });
+    expect(DEFAULT_GUEST_RIGHTS).toEqual({ limited: true, ownMix: false, markers: false, remote: false });
   });
   it('vérifie ce qui arrive (illisible : ignoré)', () => {
     expect(sanitizeGuestRights(null)).toBeNull();
     expect(sanitizeGuestRights({})).toBeNull();
     expect(sanitizeGuestRights({ limited: 'oui' })).toBeNull();
     expect(sanitizeGuestRights({ limited: true, ownMix: 1, markers: true, by: 'Max'.repeat(30), at: 5 }))
-      .toEqual({ limited: true, ownMix: false, markers: true, by: 'Max'.repeat(30).slice(0, 40), at: 5 });
+      .toEqual({ limited: true, ownMix: false, markers: true, remote: false, by: 'Max'.repeat(30).slice(0, 40), at: 5 });
   });
   it('seuls les artistes sont concernés', () => {
     expect(isLimitedGuest('artist', simple)).toBe(true);

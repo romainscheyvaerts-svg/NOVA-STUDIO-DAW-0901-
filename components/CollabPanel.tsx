@@ -533,6 +533,10 @@ const CollabPanel: React.FC<Props> = (p) => {
                 </>
               )}
               {!p.guestRights.value.limited && <p className="text-[11px] text-amber-200">{GUEST_RIGHTS_HELP.free}</p>}
+              <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2">
+                <input type="checkbox" data-testid="guest-rights-remote" checked={!!p.guestRights.value.remote} onChange={e => p.guestRights!.onChange({ remote: e.target.checked })} className="mt-0.5 h-5 w-5 accent-red-400" />
+                <span className="text-[12px] leading-snug text-slate-200">🎛️ {GUEST_RIGHTS_HELP.remote}{p.guestRights.value.remote ? ' · tu es prévenu à chaque commande.' : ''}</span>
+              </label>
             </div>
           )}
           {p.audio && (

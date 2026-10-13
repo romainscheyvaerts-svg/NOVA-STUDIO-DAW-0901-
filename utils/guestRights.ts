@@ -32,6 +32,11 @@ export interface GuestRights {
   ownMix?: boolean;
   /** Il peut poser des repères partagés. */
   markers?: boolean;
+  /**
+   * Télécommande de cabine (utils/cabinRemote) : depuis son téléphone, en cabine,
+   * il lance REC, la lecture, STOP et le retour au début sur le PC de l'ingé.
+   */
+  remote?: boolean;
   /** Qui a décidé (nom de l'ingé) et quand (ms). */
   by?: string;
   at?: number;
@@ -41,14 +46,14 @@ export interface GuestRights {
 export const GUEST_RIGHTS_KIND = 'guest_rights';
 
 /** Ce que l'ingé met par défaut en ouvrant sa séance : l'artiste enregistre, le mix reste à l'ingé. */
-export const DEFAULT_GUEST_RIGHTS: GuestRights = { limited: true, ownMix: false, markers: false };
+export const DEFAULT_GUEST_RIGHTS: GuestRights = { limited: true, ownMix: false, markers: false, remote: false };
 
 /** Valeur reçue vérifiée (null : illisible, ignorée). */
 export function sanitizeGuestRights(raw: unknown): GuestRights | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.limited !== 'boolean') return null;
-  const out: GuestRights = { limited: r.limited, ownMix: r.ownMix === true, markers: r.markers === true };
+  const out: GuestRights = { limited: r.limited, ownMix: r.ownMix === true, markers: r.markers === true, remote: r.remote === true };
   if (typeof r.by === 'string') out.by = r.by.slice(0, 40);
   if (typeof r.at === 'number' && Number.isFinite(r.at)) out.at = r.at;
   return out;
@@ -163,6 +168,7 @@ export const GUEST_RIGHTS_HELP = {
   free: "Mode libre : l'artiste peut aussi toucher aux autres pistes de voix, au tempo, à l'ordre des pistes…",
   ownMix: 'Il peut régler le son de sa voix (volume, effets)',
   markers: 'Il peut poser des repères (« couplet 2 ici »)',
+  remote: 'Télécommande de cabine : depuis son téléphone, il lance REC, la lecture et STOP sur ton PC (micro du studio)',
   comments: 'Il peut toujours commenter la timeline (« 1:12 le "s" siffle »), répondre, et valider tes versions',
 } as const;
 
