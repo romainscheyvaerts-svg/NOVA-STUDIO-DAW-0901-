@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
-import { paramFr, termHelp } from '../utils/pluginUi';
+import { termHelp } from '../utils/pluginUi';
+import { Faceplate, HwSection, HwWindow, Knob, PushButton, ToggleSwitch } from './hw';
 
 /**
  * PROFESSIONAL DIMENSION CHORUS v3.0
@@ -351,44 +351,27 @@ export class ChorusNode {
   }
 }
 
-const ChorusKnob: React.FC<{ 
-  label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number, color?: string 
-}> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5, color = '#00f2ff' }) => {
-  const safeValue = Number.isFinite(value) ? value : defaultValue || 0.5;
-  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, defaultValue });
-
-
-  const rotation = (safeValue * 270) - 135;
-
-  return (
-    <div className="flex flex-col items-center space-y-2 select-none group touch-none">
-      <div 
-        {...knob.bind}
-        className="w-12 h-12 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl relative"
-      >
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75"
-          style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}` }}
-        />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5">
-          <span className="text-[8px] font-mono font-bold" style={{ color }}>
-            {Math.round(safeValue * factor * 10) / 10}{suffix}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
+const CHORUS_DEFAULTS: ChorusParams = { rate: 1.2, depth: 0.35, spread: 0.8, mix: 0.4, feedback: 0, lowCut: 100, highCut: 12000, mode: 'CLASSIC', lfoShape: 'SINE', voices: 2, isEnabled: true };
+const CHORUS_ACCENT = '#0f766e';
+const MODES: { id: ChorusMode; label: string; help: string }[] = [
+  { id: 'CLASSIC', label: 'Classique', help: 'Classique : 2 voix en quadrature, le chorus de base.' },
+  { id: 'TRI_CHORUS', label: 'Tri', help: 'Tri-chorus : 3 voix décalées de 120°, plus large et plus doux.' },
+  { id: 'DIMENSION', label: 'Dimension', help: 'Dimension : 4 voix très larges en stéréo, effet d’espace sans ondulation marquée.' },
+  { id: 'ENSEMBLE', label: 'Ensemble', help: 'Ensemble : façon section de cordes, épais et mouvant.' },
+  { id: 'VIBRATO', label: 'Vibrato', help: 'Vibrato : 100 % d’effet, la hauteur ondule (plus de son d’origine).' },
+];
+const SHAPES: { v: number; id: LFOShape; label: string }[] = [{ v: 0, id: 'SINE', label: 'Sinus' }, { v: 1, id: 'TRIANGLE', label: 'Triangle' }, { v: 2, id: 'RANDOM', label: 'Aléatoire' }];
+const pct = (v: number) => `${Math.round(v * 100)} %`;
+const hzFr = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',')} kHz` : `${Math.round(v)} Hz`);
+/** Réglages complétés par les valeurs du moteur (un projet ancien n'a pas tous les champs). */
+const withDefaults = <T extends object>(defaults: T, p: any): T => ({ ...defaults, ...Object.fromEntries(Object.entries(p || {}).filter(([, v]) => v !== undefined && !(typeof v === 'number' && !Number.isFinite(v)))) }) as T;
 
 export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusParams, onParamsChange?: (p: ChorusParams) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState(initialParams);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const view = withDefaults(CHORUS_DEFAULTS, params);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const handleParamChange = useCallback((key: keyof ChorusParams, value: any) => {
     const newParams = { ...params, [key]: value };
@@ -397,219 +380,105 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
     if (onParamsChange) onParamsChange(newParams);
   }, [params, node, onParamsChange]);
 
-  // Visualization
+  // Image des voix : animée sur le canvas seul (la façade ne se redessine pas à chaque image).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    let frame: number;
-
+    let frame = 0;
     const draw = () => {
-      const w = canvas.width;
-      const h = canvas.height;
+      const w = canvas.width, h = canvas.height;
       ctx.clearRect(0, 0, w, h);
-
-      // Grid
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(w/2, 0);
-      ctx.lineTo(w/2, h);
-      ctx.moveTo(0, h/2);
-      ctx.lineTo(w, h/2);
+      ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+      ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
       ctx.stroke();
-
-      if (params.isEnabled) {
-        const time = Date.now() * 0.001;
-        const { rate, depth, spread, voices, mode } = params;
-        const safeDepth = Number.isFinite(depth) ? depth : 0.35;
-        const safeRate = Number.isFinite(rate) ? rate : 1.0;
-        const safeSpread = Number.isFinite(spread) ? spread : 0.8;
-        const numVoices = voices || 2;
-
-        const centerX = w/2;
-        const centerY = h/2;
-        
-        // Draw each voice as a separate Lissajous pattern
-        const colors = ['#00f2ff', '#ff6b6b', '#a855f7', '#10b981'];
-        const phaseOffsets = mode === 'TRI_CHORUS' 
-          ? [0, 2.094, 4.188, 6.283] // 120° spacing
-          : [0, 1.571, 3.142, 4.712]; // 90° spacing
-        
-        for (let v = 0; v < Math.min(numVoices, 4); v++) {
-          ctx.beginPath();
-          ctx.strokeStyle = colors[v];
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.7;
-          
-          const voiceRate = safeRate * (1 + v * 0.03);
-          const voicePhase = phaseOffsets[v];
-          
-          for (let i = 0; i < 100; i++) {
-            const t = time + i * 0.01;
-            const lMod = Math.sin(t * voiceRate * Math.PI * 2);
-            const rMod = Math.sin(t * voiceRate * Math.PI * 2 + (safeSpread * Math.PI) + voicePhase);
-            
-            const x = centerX + (lMod * safeDepth * 80);
-            const y = centerY + (rMod * safeDepth * 35);
-            
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-          }
-          ctx.stroke();
+      const { rate, depth, spread, voices, mode } = viewRef.current;
+      const time = Date.now() * 0.001;
+      const colors = ['#5eead4', '#fda4af', '#c4b5fd', '#86efac'];
+      const phaseOffsets = mode === 'TRI_CHORUS' ? [0, 2.094, 4.188, 6.283] : [0, 1.571, 3.142, 4.712];
+      for (let v = 0; v < Math.min(voices || 2, 4); v++) {
+        ctx.beginPath();
+        ctx.strokeStyle = colors[v];
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.8;
+        const voiceRate = rate * (1 + v * 0.03);
+        for (let i = 0; i < 100; i++) {
+          const t = time + i * 0.01;
+          const x = w / 2 + Math.sin(t * voiceRate * Math.PI * 2) * depth * 80;
+          const y = h / 2 + Math.sin(t * voiceRate * Math.PI * 2 + spread * Math.PI + phaseOffsets[v]) * depth * 35;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
-        
-        ctx.globalAlpha = 1;
-        
-        // Draw center dot
-        ctx.beginPath();
-        ctx.fillStyle = '#fff';
-        ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
-        ctx.fill();
-        
-      } else {
-        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-        ctx.beginPath();
-        ctx.moveTo(0, h/2);
-        ctx.lineTo(w, h/2);
         ctx.stroke();
       }
-
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.fillStyle = '#fff';
+      ctx.arc(w / 2, h / 2, 3, 0, Math.PI * 2);
+      ctx.fill();
       frame = requestAnimationFrame(draw);
     };
-    
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [params]);
+  }, []);
 
+  const modeIdx = Math.max(0, MODES.findIndex(m => m.id === view.mode));
+  const shape = SHAPES.find(s => s.id === view.lfoShape) || SHAPES[0];
   return (
-    <div className="w-[580px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
-            <i className="fas fa-layer-group text-xl"></i>
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight leading-none">Chorus</h2>
-            <p className="text-[11px] text-slate-400 mt-1">Épaissit la voix avec de légères copies qui ondulent.</p>
-          </div>
-        </div>
-        <button data-plugin-power 
-          onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-        >
-          <i className="fas fa-power-off"></i>
-        </button>
-      </div>
-
-      {/* Mode Selector */}
-      <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-        {(['CLASSIC', 'TRI_CHORUS', 'DIMENSION', 'ENSEMBLE', 'VIBRATO'] as ChorusMode[]).map(m => (
-          <button 
-            key={m}
-            onClick={() => handleParamChange('mode', m)}
-            className={`flex-1 py-2 rounded-lg text-[7px] font-black uppercase transition-all ${params.mode === m ? 'bg-cyan-500 text-black shadow-lg' : 'text-slate-500 hover:text-white'}`}
-          >
-            {m.replace('_', ' ')}
-          </button>
-        ))}
-      </div>
-
-      {/* Visualization */}
-      <div className="h-32 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden shadow-inner">
-        <div className="absolute top-3 left-5 text-[7px] font-black text-slate-600 uppercase tracking-widest">Image des voix</div>
-        <canvas ref={canvasRef} width={520} height={128} className="w-full h-full" />
-        <div className="absolute bottom-3 right-5 flex items-center space-x-2">
-          <span className="text-[7px] font-mono text-slate-600">{params.voices || 2} VOICES</span>
-        </div>
-      </div>
-
-      {/* Main Controls */}
-      <div className="grid grid-cols-5 gap-4">
-        <ChorusKnob label="Vitesse" value={(params.rate || 1.2) / 8} factor={8} suffix="Hz" onChange={v => handleParamChange('rate', v * 8)} defaultValue={0.15} />
-        <ChorusKnob label="Profondeur" value={params.depth || 0.35} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.35} />
-        <ChorusKnob label="Spread" value={params.spread || 0.8} factor={100} suffix="%" onChange={v => handleParamChange('spread', v)} defaultValue={0.8} />
-        <ChorusKnob label="Retour" value={params.feedback || 0} factor={100} suffix="%" onChange={v => handleParamChange('feedback', v * 0.95)} defaultValue={0} color="#f59e0b" />
-        <ChorusKnob label="Mix" value={params.mix || 0.4} factor={100} suffix="%" onChange={v => handleParamChange('mix', v)} defaultValue={0.4} color="#fff" />
-      </div>
-
-      {/* LFO Shape & Voices */}
-      <div className="flex items-center justify-between pt-4 border-t border-white/5">
-        <div className="flex items-center space-x-4">
-          <div>
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">Forme de l’ondulation</span>
-            <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
-              {(['SINE', 'TRIANGLE', 'RANDOM'] as LFOShape[]).map(s => (
-                <button 
-                  key={s}
-                  onClick={() => handleParamChange('lfoShape', s)}
-                  className={`px-3 py-1.5 rounded-md text-[7px] font-black uppercase transition-all ${params.lfoShape === s ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`}
-                >
-                  {s}
-                </button>
-              ))}
+    <HwWindow type="CHORUS" width={600} accent="#2dd4bf" accentInk="#03201c"
+      idleHelp={<>Épaissit la voix avec de légères copies qui ondulent. <span style={{ color: '#cbd2dc' }}>{MODES[modeIdx].help}</span> <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish="seafoam" model="Chorus" kicker="Ensemble stéréo · 1 à 4 voix" modelStyle="serif" className="hw-touch" style={{ ['--hw-accent' as any]: CHORUS_ACCENT }}>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="hw-screen flex-[1_1_260px] min-w-0">
+            <div className="hw-screen-glass" style={{ height: 118 }}>
+              <div className="absolute top-2 left-3 hw-silk" style={{ color: '#94a3b8', zIndex: 1 }}>Image des voix</div>
+              <canvas ref={canvasRef} width={440} height={128} className="w-full h-full block" aria-label="Image des voix du chorus" />
             </div>
           </div>
-          
-          <div>
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">Voix</span>
-            <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
+          <div className="flex-[0_1_auto] mx-auto" style={{ padding: '0 34px' }}>
+            <Knob paramId="mode" label="Mode" ariaLabel="Mode du chorus" size="L" cap="chicken" min={0} max={MODES.length - 1} step={1} value={modeIdx} defaultValue={0}
+              detents={MODES.map((m, i) => ({ v: i, label: m.label }))} onChange={v => handleParamChange('mode', MODES[Math.round(v)]?.id || 'CLASSIC')}
+              format={v => MODES[Math.round(v)]?.label || ''} hint="Caractère du chorus : nombre de voix et largeur. Le détail du mode choisi s'affiche dans la ligne d'info." />
+          </div>
+        </div>
+        <div className="hw-rule" />
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+          <Knob paramId="rate" label="Vitesse" size="M" cap="black" min={0} max={8} step={0.01} value={view.rate} defaultValue={1.2} onChange={v => handleParamChange('rate', v)}
+            format={v => `${v.toFixed(2).replace('.', ',')} Hz`} hint={termHelp('Vitesse') || "Vitesse de l'ondulation (lente = douce, rapide = vibrato)."}
+            scale={[{ v: 0, label: '0' }, { v: 4, label: '4' }, { v: 8, label: '8' }]} />
+          <Knob paramId="depth" label="Profondeur" size="L" cap="black" min={0} max={1} step={0.01} value={view.depth} defaultValue={0.35} onChange={v => handleParamChange('depth', v)}
+            format={pct} hint={termHelp('Profondeur') || "Amplitude de l'ondulation."} scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]} />
+          <Knob paramId="spread" label="Ouverture" size="M" cap="black" min={0} max={1} step={0.01} value={view.spread} defaultValue={0.8} onChange={v => handleParamChange('spread', v)}
+            format={pct} hint={termHelp('Ouverture') || 'Largeur stéréo des voix.'} scale={[{ v: 0, label: '0' }, { v: 1, label: '100' }]} />
+          <Knob paramId="feedback" label="Retour" size="M" cap="black" min={0} max={0.95} step={0.01} value={view.feedback} defaultValue={0} onChange={v => handleParamChange('feedback', v)}
+            format={pct} hint={termHelp('Retour') || 'Réinjection : vers le flanger quand on monte.'} ticks={11} />
+          <Knob paramId="mix" label="Mélange" size="M" cap="black" min={0} max={1} step={0.01} value={view.mix} defaultValue={0.4} onChange={v => handleParamChange('mix', v)}
+            format={pct} hint={termHelp('Mélange') || "Part de l'effet mélangée au son d'origine."} scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]} />
+        </div>
+        <div className="hw-rule" />
+        <div className="flex flex-wrap items-start justify-around gap-x-4 gap-y-3">
+          <ToggleSwitch label="Ondulation" paramId="lfoShape" value={shape.v} onChange={v => handleParamChange('lfoShape', SHAPES[v]?.id || 'SINE')}
+            hint="Forme de l'ondulation : sinus (douce), triangle (plus régulière), aléatoire (plus naturelle)." options={SHAPES.map(s => ({ v: s.v, label: s.label }))} />
+          <HwSection title="Voix">
+            <div className="flex gap-1.5" role="radiogroup" aria-label="Nombre de voix" data-nova-param="voices">
               {[1, 2, 3, 4].map(v => (
-                <button 
-                  key={v}
-                  onClick={() => handleParamChange('voices', v)}
-                  className={`w-8 py-1.5 rounded-md text-[8px] font-black transition-all ${(params.voices || 2) === v ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`}
-                >
-                  {v}
-                </button>
+                <PushButton key={v} role="radio" active={(view.voices || 2) === v} onClick={() => handleParamChange('voices', v)} text={String(v)} led={CHORUS_ACCENT}
+                  ariaLabel={`${v} voix`} hint="Nombre de copies qui ondulent autour de la voix." />
               ))}
             </div>
-          </div>
-        </div>
-
-        {/* Advanced Toggle */}
-        <button 
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center space-x-1 text-[7px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
-        >
-          <span>{showAdvanced ? 'Less' : 'More'}</span>
-          <i className={`fas fa-chevron-${showAdvanced ? 'up' : 'down'} text-[6px]`}></i>
-        </button>
-      </div>
-
-      {/* Advanced Controls */}
-      {showAdvanced && (
-        <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/5">
-          <ChorusKnob label="Coupe-bas" value={(params.lowCut || 100) / 500} factor={500} suffix="Hz" onChange={v => handleParamChange('lowCut', Math.max(20, v * 500))} defaultValue={0.2} color="#f43f5e" />
-          <ChorusKnob label="Coupe-haut" value={(params.highCut || 12000) / 20000} factor={20} suffix="kHz" onChange={v => handleParamChange('highCut', Math.max(2000, v * 20000))} defaultValue={0.6} color="#f43f5e" />
-          <div className="flex flex-col items-center justify-center">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">À propos du mode</span>
-            <div className="bg-black/40 px-3 py-2 rounded-lg border border-white/5 text-center">
-              <span className="text-[8px] font-mono text-cyan-400">
-                {params.mode === 'TRI_CHORUS' && '3-Voice 120° Phase'}
-                {params.mode === 'DIMENSION' && '4-Voice Wide Stereo'}
-                {params.mode === 'ENSEMBLE' && 'String Ensemble'}
-                {params.mode === 'VIBRATO' && '100% Wet Pitch Mod'}
-                {params.mode === 'CLASSIC' && '2-Voice Quadrature'}
-              </span>
+          </HwSection>
+          <HwSection title="Filtres de l'effet">
+            <div className="flex gap-1">
+              <Knob paramId="lowCut" label="Coupe-bas" size="S" cap="black" curve="log" min={20} max={500} step={1} value={view.lowCut} defaultValue={100}
+                onChange={v => handleParamChange('lowCut', v)} format={hzFr} hint={termHelp('Coupe-bas') || "Retire les graves de l'effet (la basse reste nette)."} ticks={7} />
+              <Knob paramId="highCut" label="Coupe-haut" size="S" cap="black" curve="log" min={2000} max={20000} step={10} value={view.highCut} defaultValue={12000}
+                onChange={v => handleParamChange('highCut', v)} format={hzFr} hint={termHelp('Coupe-haut') || "Adoucit les aigus de l'effet."} ticks={7} />
             </div>
-          </div>
+          </HwSection>
         </div>
-      )}
-
-      {/* Footer */}
-      <div className="pt-4 border-t border-white/5 flex justify-between items-center">
-        <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Moteur</span>
-          <span className="text-[9px] font-black text-slate-400">{params.mode?.replace('_', ' ') || 'CLASSIC'}</span>
-        </div>
-        <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-cyan-500 shadow-[0_0_10px_#00f2ff] animate-pulse' : 'bg-slate-800'}`} />
-          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">
-            {(params.voices || 2)} Voice{(params.voices || 2) > 1 ? 's' : ''} Active
-          </span>
-        </div>
-      </div>
-    </div>
+      </Faceplate>
+    </HwWindow>
   );
 };

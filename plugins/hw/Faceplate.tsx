@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { HwHelpProvider, InfoBar } from './help';
 
-export type HwFinish = 'cream' | 'black' | 'silver' | 'burgundy' | 'graphite' | 'bronze' | 'steel' | 'slate';
+export type HwFinish = 'cream' | 'black' | 'silver' | 'burgundy' | 'graphite' | 'bronze' | 'steel' | 'slate'
+  // Vague 2B
+  | 'seafoam' | 'plum' | 'forest' | 'midnight' | 'hammer' | 'labgrey' | 'indigo' | 'vermilion' | 'mustard' | 'concrete' | 'jade' | 'cobalt' | 'avocado';
 
 /** Logo NOVA (étoile à quatre branches + mot), à l'encre de la façade. */
 export const NovaLogo: React.FC<{ className?: string; size?: number }> = ({ className, size = 13 }) => (

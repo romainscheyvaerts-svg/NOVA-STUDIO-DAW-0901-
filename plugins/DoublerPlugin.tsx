@@ -1,9 +1,9 @@
 
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 import React, { useEffect, useRef, useState } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
+import { Faceplate, HwWindow, Knob, PushButton } from './hw';
 
 /**
  * MODULE FX_10 : VOCAL DOUBLER
@@ -208,95 +208,38 @@ export class VocalDoublerNode {
   }
 }
 
-const DoublerKnob: React.FC<{ 
-  label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number 
-}> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5 }) => {
-  const safeValue = Number.isFinite(value) ? value : defaultValue || 0;
-  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, defaultValue, sensitivity: 150 });
-
-
-
-  const rotation = (safeValue * 270) - 135;
-
-  return (
-    <div className="flex flex-col items-center space-y-2 select-none group touch-none" title={termHelp(label) || undefined}>
-      <div 
-        {...knob.bind}
-        className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-violet-500/50 transition-all shadow-xl relative"
-      >
-        <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75"
-          style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: '#a855f7', boxShadow: '0 0 10px #a855f7' }}
-        />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[45px]">
-          <span className="text-[9px] font-mono font-bold text-violet-400">
-            {Math.round(safeValue * factor)}{suffix}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
+const DOUBLER_DEFAULTS: DoublerParams = { detune: 0.4, width: 0.8, gainL: 0.7, gainR: 0.7, directOn: true, isEnabled: true };
+const DOUBLER_ACCENT = '#f2b84b';
+const pct = (v: number) => `${Math.round(v * 100)} %`;
 
 export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: DoublerParams, onParamsChange?: (p: DoublerParams) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState(initialParams);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const view: DoublerParams = { ...DOUBLER_DEFAULTS, ...Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v !== undefined && !(typeof v === 'number' && !Number.isFinite(v)))) } as DoublerParams;
 
+  // Image stéréo : redessinée seulement quand un réglage change (plus de boucle à chaque image).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    let frame: number;
-
-    const draw = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-
-      if (params.isEnabled) {
-        const { width, gainL, gainR, directOn } = params;
-        const centerX = w / 2;
-        const centerY = h - 20;
-
-        ctx.lineWidth = 4;
-        ctx.lineCap = 'round';
-
-        if (directOn) {
-          ctx.beginPath();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(centerX, 30);
-          ctx.stroke();
-        }
-
-        ctx.beginPath();
-        ctx.strokeStyle = `rgba(168, 85, 247, ${gainL})`;
-        ctx.moveTo(centerX, centerY);
-        const lx = centerX - (width * (w / 2.5));
-        ctx.lineTo(lx, 40);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.strokeStyle = `rgba(168, 85, 247, ${gainR})`;
-        ctx.moveTo(centerX, centerY);
-        const rx = centerX + (width * (w / 2.5));
-        ctx.lineTo(rx, 40);
-        ctx.stroke();
-
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#a855f7';
-      }
-
-      frame = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(frame);
-  }, [params]);
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const { width, gainL, gainR, directOn } = view;
+    const cx = w / 2, cy = h - 18;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = DOUBLER_ACCENT;
+    if (directOn) {
+      ctx.beginPath(); ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.moveTo(cx, cy); ctx.lineTo(cx, 26); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.strokeStyle = `rgba(242, 184, 75, ${Math.max(0.08, gainL)})`;
+    ctx.moveTo(cx, cy); ctx.lineTo(cx - width * (w / 2.5), 34); ctx.stroke();
+    ctx.beginPath(); ctx.strokeStyle = `rgba(242, 184, 75, ${Math.max(0.08, gainR)})`;
+    ctx.moveTo(cx, cy); ctx.lineTo(cx + width * (w / 2.5), 34); ctx.stroke();
+    ctx.shadowBlur = 0;
+  }, [view.width, view.gainL, view.gainR, view.directOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleParamChange = (key: keyof DoublerParams, value: any) => {
     const newParams = { ...params, [key]: value };
@@ -306,53 +249,38 @@ export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: D
   };
 
   return (
-    <div className="w-[500px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-5">
-          <div className="w-14 h-14 rounded-2xl bg-violet-500/10 flex items-center justify-center text-violet-400 border border-violet-500/20 shadow-lg shadow-violet-500/5">
-            <i className="fas fa-people-arrows text-2xl"></i>
+    <HwWindow type="DOUBLER" width={560} accent={DOUBLER_ACCENT} accentInk="#1d1403"
+      idleHelp={<>Simule une 2e prise à gauche et à droite : la voix s'élargit. Doublures décalées de 16 ms à gauche et 24 ms à droite. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      <Faceplate finish="forest" model="Doubleur" kicker="Double prise · gauche / droite" modelStyle="serif" className="hw-touch" style={{ ['--hw-accent' as any]: DOUBLER_ACCENT }}>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="hw-screen flex-[1_1_240px] min-w-0">
+            <div className="hw-screen-glass" style={{ height: 110 }}>
+              <div className="absolute top-2 left-3 hw-silk" style={{ color: '#94a3b8', zIndex: 1 }}>Image stéréo</div>
+              <canvas ref={canvasRef} width={400} height={110} className="w-full h-full block" aria-label="Image stéréo des doublures" />
+              <div className="absolute bottom-1.5 left-3 right-3 flex justify-between hw-silk" style={{ color: '#94a3b8' }}><span>Gauche</span><span>Centre</span><span>Droite</span></div>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight leading-none">Doubleur</h2>
-            <p className="text-[12px] text-slate-400 mt-2">Simule une 2e prise à gauche et à droite : la voix s'élargit.</p>
+          <div className="mx-auto">
+            <PushButton active={!!view.directOn} onClick={() => handleParamChange('directOn', !view.directOn)} text="Voix d'origine" label="Au centre" led={DOUBLER_ACCENT}
+              hint="Entendre la voix d'origine au centre en plus des doublures (relevé = seulement les doublures)." valueText={view.directOn ? 'gardée' : 'coupée'} />
           </div>
         </div>
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => handleParamChange('directOn', !params.directOn)}
-            aria-pressed={params.directOn}
-            title="Voix d'origine : l'entendre au centre en plus des doublures (coupée = seulement les doublures)"
-            className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-all border ${params.directOn ? 'bg-white/10 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
-          >
-            Voix d'origine : {params.directOn ? 'oui' : 'non'}
-          </button>
-          <button data-plugin-power 
-            onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
-            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-violet-500 border-violet-400 text-black shadow-lg shadow-violet-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-          >
-            <i className="fas fa-power-off"></i>
-          </button>
+        <div className="hw-rule" />
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+          <Knob paramId="detune" label="Désaccord" size="L" cap="cream" min={0} max={1} step={0.01} value={view.detune} defaultValue={0.4}
+            onChange={v => handleParamChange('detune', v)} format={v => `±${Math.round(v * 15)} cents`} hint={termHelp('Désaccord') || "Petite différence de justesse des doublures (jusqu'à ±15 cents)."}
+            scale={[{ v: 0, label: '0' }, { v: 0.5, label: '7' }, { v: 1, label: '15' }]} />
+          <Knob paramId="width" label="Écart G/D" size="L" cap="cream" min={0} max={1} step={0.01} value={view.width} defaultValue={0.8}
+            onChange={v => handleParamChange('width', v)} format={pct} hint={termHelp('Écart G/D') || 'Écart des doublures entre la gauche et la droite.'}
+            scale={[{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }]} />
+          <div className="flex gap-x-2">
+          <Knob paramId="gainL" label="Gauche" ariaLabel="Volume gauche" size="M" cap="cream" min={0} max={1} step={0.01} value={view.gainL} defaultValue={0.7}
+            onChange={v => handleParamChange('gainL', v)} format={pct} hint="Volume de la doublure de gauche." ticks={11} />
+          <Knob paramId="gainR" label="Droite" ariaLabel="Volume droite" size="M" cap="cream" min={0} max={1} step={0.01} value={view.gainR} defaultValue={0.7}
+            onChange={v => handleParamChange('gainR', v)} format={pct} hint="Volume de la doublure de droite." ticks={11} />
+          </div>
         </div>
-      </div>
-
-      <div className="h-32 bg-black/60 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group">
-        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Image stéréo</div>
-        <canvas ref={canvasRef} width={400} height={128} className="w-full h-full opacity-60" />
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-16 text-[6px] font-black text-slate-700 uppercase">
-           <span>Gauche</span>
-           <span>Centre</span>
-           <span>Droite</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-4 px-2">
-        <DoublerKnob label="Désaccord" value={params.detune} factor={15} suffix="ct" onChange={v => handleParamChange('detune', v)} defaultValue={0.4} />
-        <DoublerKnob label="Écart G/D" value={params.width} factor={100} suffix="%" onChange={v => handleParamChange('width', v)} defaultValue={0.8} />
-        <DoublerKnob label="Volume gauche" value={params.gainL} factor={100} suffix="%" onChange={v => handleParamChange('gainL', v)} defaultValue={0.7} />
-        <DoublerKnob label="Volume droite" value={params.gainR} factor={100} suffix="%" onChange={v => handleParamChange('gainR', v)} defaultValue={0.7} />
-      </div>
-
-      <p className="pt-4 border-t border-white/5 text-[11px] text-slate-400" title="Effet Haas : doublures décalées de 16 ms (gauche) et 24 ms (droite)">Doublures décalées de 16 ms à gauche et 24 ms à droite.</p>
-    </div>
+      </Faceplate>
+    </HwWindow>
   );
 };

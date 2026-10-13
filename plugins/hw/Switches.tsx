@@ -20,7 +20,8 @@ export const PushButton: React.FC<{
   led?: string | false;
   hint?: string;
   dark?: boolean;
-  role?: 'button' | 'radio';
+  /** 'checkbox' (ajout vague 2B) : case à cocher (aria-checked), pour les options marche / arrêt d'un module. */
+  role?: 'button' | 'radio' | 'checkbox';
   ariaLabel?: string;
   disabled?: boolean;
   className?: string;
@@ -34,7 +35,7 @@ export const PushButton: React.FC<{
   const help = useHwHelp(uid, name, hint, valueText ?? (active ? 'enfoncé' : 'relevé'));
   return (
     <button type="button" className={`hw-push${dark ? ' hw-push-dark' : ''}${className ? ` ${className}` : ''}`} onClick={onClick} disabled={disabled}
-      role={role === 'radio' ? 'radio' : undefined} aria-checked={role === 'radio' ? active : undefined} aria-pressed={role === 'button' ? active : undefined}
+      role={role === 'radio' || role === 'checkbox' ? role : undefined} aria-checked={role === 'radio' || role === 'checkbox' ? active : undefined} aria-pressed={role === 'button' ? active : undefined}
       aria-label={ariaLabel} title={hint ? `${name} : ${hint}` : name || undefined} {...(dataAttrs || {})}
       onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave} onFocus={help.onFocus} onBlur={help.onBlur}>
       {led !== false && <Led on={active} color={led || undefined} />}
