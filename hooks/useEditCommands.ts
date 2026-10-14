@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { produce } from 'immer';
 import { Clip, CrossfadeCurve, DAWState, TrackType } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
-import { applyGainEvents, autoCrossfadePatches, clipGainEvents, DEFAULT_XFADE_SEC, FADE_CURVE_INFO, fadesForRange, makeCrossfade, handlesOf, nudgeSeconds, NudgeUnit, NUDGE_UNITS } from '../utils/fades';
+import { applyGainEvents, autoCrossfadePatches, clipGainEvents, DEFAULT_XFADE_SEC, frameTime, FADE_CURVE_INFO, fadesForRange, makeCrossfade, handlesOf, nudgeSeconds, NudgeUnit, NUDGE_UNITS } from '../utils/fades';
 import { editPrefsStore, editSelectionStore, requestSelectionExport } from '../utils/editSelection';
 import {
   ClipsByTrack, consolidatePlan, ConsolidatePiece, copyRange, cutRange, deleteRange, duplicateRange, idGenerator, makeSelection,
@@ -164,8 +164,8 @@ async function renderPieces(pieces: ConsolidatePiece[], length: number): Promise
     const g = ctx.createGain();
     s.connect(g); g.connect(ctx.destination);
     // Même gain et mêmes fondus qu'à la lecture (utils/fades).
-    applyGainEvents(g.gain, clipGainEvents(p.clip, p.from), p.at - p.from);
-    s.start(p.at, (p.clip.offset || 0) + p.from, p.to - p.from);
+    applyGainEvents(g.gain, clipGainEvents(p.clip, p.from), p.at - p.from, ctx.sampleRate);
+    s.start(frameTime(p.at, ctx.sampleRate), (p.clip.offset || 0) + p.from, p.to - p.from);
   });
   return ctx.startRendering();
 }

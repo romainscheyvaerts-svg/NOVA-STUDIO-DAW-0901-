@@ -18,6 +18,7 @@ import { ProEQ12Node } from '../plugins/ProEQ12Plugin';
 import { VocalSaturatorNode } from '../plugins/VocalSaturatorPlugin';
 import { MasterSyncNode } from '../plugins/MasterSyncPlugin';
 import { EffectSleepManager, SLEEP_SAFE, type SleepStats } from './effectSleep';
+import { createKeepAlive } from './keepAlive';
 import { Synthesizer } from './Synthesizer';
 import { NovaSynthNode } from './NovaSynthNode';
 
@@ -79,7 +80,7 @@ import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
 import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
-import { applyGainEvents, clipGainEvents } from '../utils/fades';
+import { applyGainEvents, clipGainEvents, frameTime } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
 import { Scrubber, type ScrubStats } from './Scrubber';
@@ -1507,11 +1508,8 @@ export class AudioEngine {
       // dernier clip de la piste est fini et coupe net leur résonance : un léger
       // clic, et un rendu (bounce, commit) ne retombait plus sur l'export.
       // (une seule source muette pour tout le rendu : même signal, un nœud au lieu d'un par piste)
-      if (!offlineKeepAlive) {
-        offlineKeepAlive = offlineCtx.createConstantSource();
-        offlineKeepAlive.offset.value = 0;
-        offlineKeepAlive.start(0);
-      }
+      // Offset 0 tenu par une automation, comme en lecture : engine/keepAlive.
+      if (!offlineKeepAlive) offlineKeepAlive = createKeepAlive(offlineCtx);
       offlineKeepAlive.connect(input);
       const gain = offlineCtx.createGain();
       const panner = offlineCtx.createStereoPanner();
@@ -1807,8 +1805,9 @@ export class AudioEngine {
         if (remainingDuration > 0 && offsetIntoClip < buffer.duration) {
           // Fondus et crossfades : même plan de gain qu'en lecture (utils/fades),
           // calé sur la position réelle dans le clip (export d'une boucle compris).
-          applyGainEvents(clipGain.gain, clipGainEvents(clip, playedSoFar), startTime - playedSoFar);
-          source.start(startTime, offsetIntoClip, remainingDuration);
+          applyGainEvents(clipGain.gain, clipGainEvents(clip, playedSoFar), startTime - playedSoFar, offlineCtx.sampleRate);
+          // Départ posé pile sur un échantillon, comme en lecture (utils/fades frameTime).
+          source.start(frameTime(startTime, offlineCtx.sampleRate), offsetIntoClip, remainingDuration);
         }
 
         processedClips++;
@@ -4158,11 +4157,13 @@ export class AudioEngine {
         // Courbes de fondu (linéaire, puissance égale, exponentielle, en S) et
         // crossfades : même plan de gain qu'à l'export (utils/fades).
         const clipZero = when - playedSoFar;               // instant où le clip serait à 0
-        applyGainEvents(gainNode.gain, clipGainEvents({ ...clip, gain: clipGain }, playedSoFar), clipZero);
+        applyGainEvents(gainNode.gain, clipGainEvents({ ...clip, gain: clipGain }, playedSoFar), clipZero, this.ctx.sampleRate);
         
         if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
-            source.start(when, offsetIntoClip, actualDuration);
+            // Départ posé pile sur un échantillon (utils/fades frameTime) : sinon Chrome interpole
+            // tout le clip avec une fraction tirée de l'horloge absolue (≠ export, ≠ lecture suivante).
+            source.start(frameTime(when, this.ctx.sampleRate), offsetIntoClip, actualDuration);
             
             const endAt = when + actualDuration;
             this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId, end: endAt });
@@ -4293,11 +4294,10 @@ export class AudioEngine {
     // Une seule source muette pour toutes les pistes (chantier 13) : même signal (des zéros),
     // un nœud calculé par bloc au lieu d'un par piste.
     try {
+      // Offset 0 tenu par une automation : un 0 fixe rendait des blocs « silencieux » et les
+      // filtres s'arrêtaient quand même, à un instant différent à chaque lecture (engine/keepAlive).
       if (!this.sharedKeepAlive || this.sharedKeepAlive.context !== this.ctx) {
-        const ka = this.ctx.createConstantSource();
-        ka.offset.value = 0;
-        ka.start();
-        this.sharedKeepAlive = ka;
+        this.sharedKeepAlive = createKeepAlive(this.ctx);
       }
       this.sharedKeepAlive.connect(dsp.input);
       dsp.keepAlive = this.sharedKeepAlive;

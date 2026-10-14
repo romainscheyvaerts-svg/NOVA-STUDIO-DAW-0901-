@@ -188,15 +188,86 @@ export interface GainParamLike {
   linearRampToValueAtTime?(v: number, t: number): unknown;
 }
 
+/** Avance de la valeur de départ d'une courbe (≈ 5 échantillons à 48 kHz). */
+const PRE_CURVE_SEC = 1e-4;
+/** Au-delà (en échantillons), une courbe garde ses points d'origine (mémoire). */
+export const FRAME_CURVE_MAX = 1 << 17;
+
+/**
+ * Échantillon le plus proche d'un instant, demi-échantillon toujours vers le haut. Le seuil est
+ * décalé de 1e-4 échantillon : un instant qui tombe pile sur un demi-échantillon (fondu de 5 ms
+ * à 44,1 kHz = 220,5) ne bascule plus d'un côté ou de l'autre selon le bruit de calcul (lecture
+ * à plusieurs minutes d'horloge, export à 0). Mesuré : 6,4 LSB16 d'écart avec Math.round.
+ */
+export const nearestFrame = (t: number, sampleRate: number): number => Math.floor(t * sampleRate + 0.5 + 1e-4);
+
+const f64 = new Float64Array(1);
+const i64 = new BigInt64Array(f64.buffer);
+/** Flottant voisin de x (un ulp) dans le sens `dir` (+1 vers +∞, −1 vers −∞). */
+function nextAfter(x: number, dir: 1 | -1): number {
+  if (x === 0) return dir * Number.MIN_VALUE;
+  f64[0] = x;
+  i64[0] += BigInt((x > 0 ? 1 : -1) * dir);
+  return f64[0];
+}
+
+/**
+ * Instant (s) posé EXACTEMENT sur l'échantillon le plus proche : t × fréquence donne un entier,
+ * au bit près (un ulp près, f / fréquence ne le garantit pas). Départ d'une source : un instant
+ * entre deux échantillons fait interpoler tout le clip par Chrome, avec une fraction calculée sur
+ * l'horloge absolue, différente en lecture et à l'export (et d'une lecture à l'autre) : écarts
+ * d'un ulp sur le son du clip, amplifiés par les effets (0,7 à 1,5 LSB16 mesurés, 14/10/2026).
+ */
+export function frameTime(t: number, sampleRate: number): number {
+  if (!(sampleRate > 0) || !Number.isFinite(t)) return t;
+  const f = nearestFrame(t, sampleRate);
+  let x = f / sampleRate;
+  for (let k = 0; k < 8 && x * sampleRate !== f; k++) x = nextAfter(x, x * sampleRate < f ? 1 : -1);
+  return x;
+}
+
+/**
+ * Courbe recalée sur la grille des échantillons : début et fin sur un échantillon, UN point
+ * par échantillon (interpolation linéaire des points d'origine, comme le fait le navigateur).
+ *
+ * Pourquoi (mesuré le 14/10/2026, qa/veille_fidelite.py) : Chrome interpole une courbe
+ * setValueCurveAtTime à partir du temps ABSOLU du contexte. Une même courbe de fondu
+ * (un point toutes les 2 ms) tombait donc entre ses points à des positions qui différaient
+ * de quelques 1e-9 échantillon entre la lecture (horloge à plusieurs minutes) et l'export
+ * (horloge à 0), et d'une lecture à l'autre ; l'arrondi 32 bits du gain basculait alors
+ * d'un ulp sur quelques échantillons du fondu. L'EQ (filtres récursifs) portait cet écart
+ * à 0,03 LSB16, le compresseur et la saturation à 0,4–1,4 LSB16 : lecture ≠ export, et
+ * deux lectures du même morceau différentes. Avec un point par échantillon, l'indice
+ * d'interpolation tombe sur un entier (à 1e-9 près) et le gain est le point lui-même,
+ * identique en lecture et à l'export (0,02 LSB16 mesuré au lieu de 0,14 à 1,4).
+ */
+export function frameAlignedCurve(values: Float32Array, at: number, d: number, sampleRate: number): { values: Float32Array; at: number; d: number } | null {
+  const n = values.length;
+  if (!(sampleRate > 0) || n < 2 || !(d > 0)) return null;
+  const fs = nearestFrame(at, sampleRate), fe = nearestFrame(at + d, sampleRate);
+  const m = fe - fs;
+  if (m < 1 || m > FRAME_CURVE_MAX) return null;
+  const out = new Float32Array(m + 1);
+  for (let j = 0; j <= m; j++) {
+    const x = (j / m) * (n - 1);
+    const i0 = Math.min(n - 1, Math.floor(x)), i1 = Math.min(n - 1, i0 + 1);
+    out[j] = values[i0] + (values[i1] - values[i0]) * (x - i0);
+  }
+  const at0 = frameTime(fs / sampleRate, sampleRate), end = frameTime(fe / sampleRate, sampleRate);
+  // Fin jamais après l'échantillon de fin (une courbe suivante peut commencer pile là : Chrome
+  // refuse deux évènements qui se chevauchent, même d'un ulp).
+  let dd = end - at0;
+  for (let k = 0; k < 4 && at0 + dd > end; k++) dd = nextAfter(dd, -1);
+  return { values: out, at: at0, d: dd };
+}
+
 /**
  * Programme le plan de gain sur un AudioParam. `clipZero` = instant (horloge du
  * contexte) où le clip serait à sa position 0. Repli sur des rampes linéaires
- * par morceaux si le navigateur refuse une courbe.
+ * par morceaux si le navigateur refuse une courbe. `sampleRate` (fréquence du contexte) :
+ * courbes recalées sur les échantillons (frameAlignedCurve), même gain en lecture et à l'export.
  */
-/** Avance de la valeur de départ d'une courbe (≈ 5 échantillons à 48 kHz). */
-const PRE_CURVE_SEC = 1e-4;
-
-export function applyGainEvents(param: GainParamLike, events: GainEvent[], clipZero: number): void {
+export function applyGainEvents(param: GainParamLike, events: GainEvent[], clipZero: number, sampleRate?: number): void {
   // La source peut démarrer un échantillon avant la courbe (arrondi à
   // l'échantillon) : sans valeur posée juste avant, ce premier échantillon
   // passait au gain par défaut (1) → un clic au début d'un fondu d'entrée.
@@ -206,7 +277,9 @@ export function applyGainEvents(param: GainParamLike, events: GainEvent[], clipZ
     const at = clipZero + e.t;
     if (e.kind === 'set') { param.setValueAtTime(e.v, at); continue; }
     try {
-      param.setValueCurveAtTime(e.values, at, e.d);
+      const fa = sampleRate ? frameAlignedCurve(e.values, at, e.d, sampleRate) : null;
+      if (fa) param.setValueCurveAtTime(fa.values, fa.at, fa.d);
+      else param.setValueCurveAtTime(e.values, at, e.d);
     } catch {
       // Repli : segments linéaires (même forme à 2 ms près).
       const n = e.values.length;
