@@ -11,20 +11,28 @@
  * R14 · Multipiste : en mode « discret » (option `channels`), le même enregistreur
  * capte K canaux à la fois (une ou deux par piste armée) : UN seul n° de premier
  * échantillon pour toutes les pistes, donc des prises alignées à l'échantillon.
+ *
+ * Horloge : une fois la prise commencée, CHAQUE bloc de rendu (128 échantillons)
+ * est écrit, même quand l'entrée ne porte aucun canal (source débranchée ou
+ * inactive) : du silence à sa place, jamais un raccourcissement. Mesuré
+ * (qa/prise_horloge.py) : le mode mono sautait ces blocs, la suite de la prise
+ * arrivait jusqu'à 50 ms trop tôt après 2 coupures de 0,3 s.
  */
 
 import { retireWorkletNode } from './workletGuard';
 
-const WORKLET = `
+/** Code de l'AudioWorklet (exporté pour tests/novaRecorderClock.test.ts). */
+export const NOVA_RECORDER_WORKLET = `
 class NovaRecorder extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const o = (options && options.processorOptions) || {};
     // k > 0 : K canaux gardés séparés (multipiste) ; sinon mono (moyenne des canaux).
     this.k = Math.max(0, Math.min(32, o.channels || 0));
-    // keepClock : un bloc sans entrée (flux qui cale, source pas encore active) devient du
-    // silence au lieu d'être sauté ; sinon la suite de la prise glisse plus tôt sur l'horloge.
-    this.keepClock = !!o.keepClock;
+    // keepClock (par défaut) : un bloc sans entrée après le début de la prise devient du
+    // silence au lieu d'être sauté ; sinon la suite de la prise glisserait plus tôt sur
+    // l'horloge. keepClock: false = ancien comportement (gardé pour les tests de mesure).
+    this.keepClock = o.keepClock !== false;
     this.on = false;
     this.first = -1;
     this.chunk = new Float32Array(8192);
@@ -94,7 +102,7 @@ const loaded = new WeakMap<BaseAudioContext, Promise<void>>();
 export async function ensureRecorderModule(ctx: AudioContext): Promise<void> {
   let p = loaded.get(ctx);
   if (!p) {
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    const url = URL.createObjectURL(new Blob([NOVA_RECORDER_WORKLET], { type: 'application/javascript' }));
     p = ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
     loaded.set(ctx, p);
     p.catch(() => loaded.delete(ctx));
@@ -118,13 +126,14 @@ export class NovaRecorderSession {
   /** N° (horloge du contexte) du 1er échantillon capté, connu dès le 1er morceau (-1 avant). */
   public firstFrame = -1;
 
+  /** `keepClock: false` : ancien comportement (blocs sans entrée sautés), pour la mesure seulement. */
   constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number; keepClock?: boolean } = {}) {
     this.channels = Math.max(0, Math.min(32, Math.floor(opts.channels || 0)));
     const k = this.channels;
     this.node = new AudioWorkletNode(ctx, 'nova-recorder', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
       ...(k > 0 ? { channelCount: k, channelCountMode: 'explicit' as ChannelCountMode, channelInterpretation: 'discrete' as ChannelInterpretation, processorOptions: { channels: k } }
-        : opts.keepClock ? { processorOptions: { keepClock: true } } : {}),
+        : opts.keepClock === false ? { processorOptions: { keepClock: false } } : {}),
     });
     this.donePromise = new Promise(r => { this.resolveDone = r; });
     this.node.port.onmessage = (e) => {
