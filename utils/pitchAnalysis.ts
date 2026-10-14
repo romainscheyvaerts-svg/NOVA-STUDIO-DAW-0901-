@@ -396,3 +396,46 @@ export function segmentNotes(track: PitchTrack, opts: SegmentOptions = {}): Pitc
   }
   return notes;
 }
+
+export interface FramePitch {
+  /** Hauteur (Hz). */
+  hz: number;
+  /** Netteté de la périodicité (1 = parfaitement périodique, 0 = bruit). */
+  clarity: number;
+  /** Niveau de la trame analysée (dBFS). */
+  rmsDb: number;
+}
+
+/**
+ * Hauteur d'UNE trame (accordeur, échauffement : lecture en direct du micro).
+ * Même chaîne que `analyzePitch` (YIN sur le signal réduit à ~12 kHz, puis
+ * affinage de la période à pleine résolution), centrée sur le milieu de `x`.
+ * Il faut au moins 2 périodes de `fmin` de part et d'autre du centre :
+ * 4096 échantillons à 48 kHz suffisent jusqu'à ~45 Hz, 8192 jusqu'à ~25 Hz.
+ * Renvoie null si la trame est trop faible (`minDb`) ou pas périodique.
+ */
+export function pitchOfFrame(x: Float32Array, sr: number, opts: AnalyzeOptions & { minDb?: number } = {}): FramePitch | null {
+  const o = { ...DEFAULTS, ...opts };
+  let s = 0;
+  for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+  const rms = x.length ? Math.sqrt(s / x.length) : 0;
+  const rmsDb = rms > 1e-9 ? 20 * Math.log10(rms) : -180;
+  if (rmsDb < (opts.minDb ?? -60)) return null;
+  const f = Math.max(1, Math.round(sr / 12000));
+  const y = decimate(x, f);
+  const ysr = sr / f;
+  const tauMin = Math.max(2, Math.floor(ysr / o.fmax));
+  // La fenêtre doit tenir dans la trame : on remonte fmin si la trame est trop courte.
+  let tauMax = Math.ceil(ysr / o.fmin);
+  const fit = (t: number) => Math.max(t + 32, Math.round(0.03 * ysr)) + t + 2 < y.length;
+  while (tauMax > tauMin + 4 && !fit(tauMax)) tauMax = Math.floor(tauMax * 0.9);
+  if (!fit(tauMax)) return null;
+  const W = Math.max(tauMax + 32, Math.round(0.03 * ysr));
+  const d = new Float32Array(tauMax + 2);
+  const r = yinCoarse(y, y.length / 2, W, tauMin, tauMax, o.threshold, d);
+  if (!r) return null;
+  const T = refinePeriod(x, x.length / 2, r.tau * f, f + 1.5);
+  const hz = sr / T;
+  if (!(hz >= o.fmin * 0.9 && hz <= o.fmax * 1.1)) return null;
+  return { hz, clarity: Math.max(0, Math.min(1, 1 - r.ap)), rmsDb };
+}

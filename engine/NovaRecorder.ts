@@ -22,6 +22,9 @@ class NovaRecorder extends AudioWorkletProcessor {
     const o = (options && options.processorOptions) || {};
     // k > 0 : K canaux gardés séparés (multipiste) ; sinon mono (moyenne des canaux).
     this.k = Math.max(0, Math.min(32, o.channels || 0));
+    // keepClock : un bloc sans entrée (flux qui cale, source pas encore active) devient du
+    // silence au lieu d'être sauté ; sinon la suite de la prise glisse plus tôt sur l'horloge.
+    this.keepClock = !!o.keepClock;
     this.on = false;
     this.first = -1;
     this.chunk = new Float32Array(8192);
@@ -70,6 +73,11 @@ class NovaRecorder extends AudioWorkletProcessor {
         this.chunk[this.n++] = inp.length > 1 ? v / inp.length : v;
         if (this.n === this.chunk.length) this.flush();
       }
+    } else if (this.on && this.first >= 0 && this.keepClock) {
+      for (let i = 0; i < 128; i++) {
+        this.chunk[this.n++] = 0;
+        if (this.n === this.chunk.length) this.flush();
+      }
     } else if (this.on && this.first < 0) {
       // Entrée pas encore alimentée : l'horloge avance quand même
     }
@@ -110,12 +118,13 @@ export class NovaRecorderSession {
   /** N° (horloge du contexte) du 1er échantillon capté, connu dès le 1er morceau (-1 avant). */
   public firstFrame = -1;
 
-  constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number } = {}) {
+  constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number; keepClock?: boolean } = {}) {
     this.channels = Math.max(0, Math.min(32, Math.floor(opts.channels || 0)));
     const k = this.channels;
     this.node = new AudioWorkletNode(ctx, 'nova-recorder', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-      ...(k > 0 ? { channelCount: k, channelCountMode: 'explicit' as ChannelCountMode, channelInterpretation: 'discrete' as ChannelInterpretation, processorOptions: { channels: k } } : {}),
+      ...(k > 0 ? { channelCount: k, channelCountMode: 'explicit' as ChannelCountMode, channelInterpretation: 'discrete' as ChannelInterpretation, processorOptions: { channels: k } }
+        : opts.keepClock ? { processorOptions: { keepClock: true } } : {}),
     });
     this.donePromise = new Promise(r => { this.resolveDone = r; });
     this.node.port.onmessage = (e) => {

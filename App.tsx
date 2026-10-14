@@ -55,6 +55,7 @@ const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(M
 const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazyWithPreload(() => import('./components/MasterAssistantPanel'));
 const QuickMasterPage = lazy(() => import('./components/QuickMasterPage'));
+const VocalWarmup = lazy(() => import('./components/VocalWarmup'));
 
 const AudioSettingsPanel = lazyWithPreload(() => import('./components/AudioSettingsPanel'));
 const CueMixPanel = lazy(() => import('./components/CueMixPanel'));
@@ -1041,6 +1042,8 @@ function Studio() {
   const [masterNovaOpen, setMasterNovaOpen] = useState(false);
   // « Masteriser un morceau » (lot 4a) : depuis l'accueil, la palette, le menu du téléphone ou le lien ?masteriser.
   const [quickMasterOpen, setQuickMasterOpen] = useState(() => { try { return new URLSearchParams(window.location.search).has('masteriser'); } catch { return false; } });
+  // « Voix et flow » (lot 11) : échauffement, accordeur. Barre, palette, menu du téléphone, liens ?echauffement / ?accordeur.
+  const [vocalCoach, setVocalCoach] = useState<null | 'echauffement' | 'accordeur'>(() => { try { const q = new URLSearchParams(window.location.search); return q.has('accordeur') ? 'accordeur' : q.has('echauffement') ? 'echauffement' : null; } catch { return null; } });
   const quickMasterNode = quickMasterOpen ? <Suspense fallback={null}><QuickMasterPage onClose={() => setQuickMasterOpen(false)} /></Suspense> : null;
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(initialSidebarOpen);
@@ -1175,6 +1178,7 @@ function Studio() {
   };
 
   const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, beginUndoGroup, endUndoGroup, canUndo, canRedo } = useUndoRedo(initialState);
+  const vocalCoachNode = vocalCoach ? <PanelBoundary name="Voix et flow" overlay onClose={() => setVocalCoach(null)}><Suspense fallback={null}><VocalWarmup initialTab={vocalCoach} onClose={() => setVocalCoach(null)} projectKey={state.projectKey} projectScale={state.projectScale} preferredInputId={state.tracks.find(t => t.isTrackArmed)?.inputDeviceId || null} /></Suspense></PanelBoundary> : null;
   
   // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
   const { theme } = useTheme();
@@ -10026,6 +10030,7 @@ function Studio() {
         onOpenQuickMaster={() => setQuickMasterOpen(true)}
       />
       {quickMasterNode}
+      {vocalCoachNode}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
@@ -10106,6 +10111,8 @@ function Studio() {
       a('Pistes', 'pal.groups', 'Groupes de pistes', () => setR12Panel({ panel: 'groups' }), { pt: 'Groups List', keywords: 'groupe' }),
       a('Pistes', 'pal.time', 'Insérer ou supprimer du temps', () => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } }), { keys: k('pt.insertTime'), pt: 'Insert Silence / Insert Time' }),
       a('Mix', 'pal.masterNova', 'Master Nova : mastering en un clic', () => setMasterNovaOpen(true), { pt: 'Mastering Assistant (Logic)', keywords: 'master mastering spotify loudness' }),
+      a('Voix', 'pal.warmup', '🎤 Échauffement voix et flow (sirènes, gammes, virelangues, flow 80 → 140 BPM)', () => setVocalCoach('echauffement'), { keywords: 'échauffement echauffement voix flow rap vocalise sirène trille gamme diction virelangue souffle respiration tessiture voicetrainer bandlab' }),
+      a('Voix', 'pal.tuner', '🎯 Accordeur (voix, guitare, basse)', () => setVocalCoach('accordeur'), { keywords: 'accordeur tuner accorder guitare basse justesse note cents' }),
       a('Mix', 'pal.quickMaster', '🎚️ Masteriser un morceau (un fichier WAV / MP3, sans projet)', () => setQuickMasterOpen(true), { keywords: 'masteriser master mastering fichier wav mp3 flac référence bandlab express' }),
       a('Mix', 'pal.loudness', 'Loudness du master (LUFS, true peak)', () => loudnessPanel.set(true), { keywords: 'lufs loudness true peak mètres metre' }),
       a('Mix', 'pal.cue', 'Mixes casque (cue) des artistes', () => setCueMixesOpen(true), { keywords: 'casque cue retour headphone' }),
@@ -10177,6 +10184,7 @@ function Studio() {
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)} onOpenQuickMaster={() => setQuickMasterOpen(true)}
+          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')}
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
@@ -11190,6 +11198,7 @@ function Studio() {
       {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
       {quickMasterNode}
+      {vocalCoachNode}
       <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenLyricClip={() => { setShareOpen(false); setShareAuto(null); setLyricClipOpen(true); }} />
       {lyricClipOpen && <PanelBoundary name="le clip vidéo" overlay onClose={() => setLyricClipOpen(false)}><Suspense fallback={null}><LyricClipModal open={lyricClipOpen} onClose={() => setLyricClipOpen(false)} state={state} ownedInstrumentIds={ownedInstruments}
         onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenExport={() => { setLyricClipOpen(false); setIsExportMenuOpen(true); }} /></Suspense></PanelBoundary>}
