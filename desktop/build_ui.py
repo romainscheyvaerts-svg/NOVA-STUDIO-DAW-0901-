@@ -33,7 +33,10 @@ import ui_bundle  # noqa: E402
 OUT = os.path.join(HERE, "build", "ui-bundle")
 UA = "NovaStudioDesktop-build"
 # Inutile pour construire le site (et lourd) : exclu de l'instantané git.
-ARCHIVE_EXCLUDES = ["public/downloads", "desktop", "bridge-python", "nova-vst-host", "supabase", "tests",
+# supabase/ n'est pas exclu en bloc : le DAW importe des règles partagées avec les fonctions
+# serveur (supabase/functions/*/rules.ts, _shared/…), comme le build Vercel qui voit tout le dépôt.
+ARCHIVE_EXCLUDES = ["public/downloads", "desktop", "bridge-python", "nova-vst-host", "supabase/migrations",
+                    "supabase/tests", "supabase/schema-site", "supabase/*.sql", "tests",
                     "test", "e2e", "android", "ios"]
 SECRET_ENV = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|PRIVATE)", re.I)
 SECRET_PATTERNS = [

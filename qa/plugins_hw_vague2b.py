@@ -32,7 +32,11 @@ ARGS = [a for a in ARGS if a != "--reel"]
 OUT = ARGS[0] if ARGS else r"D:\1 WORK\CONTENU\nova-plugins-design\vague2b"
 TOUS = ["CHORUS", "FLANGER", "DOUBLER", "STEREOSPREADER", "DENOISER", "MASTERSYNC", "HARMONIZER", "VOICESHIFT",
         "TIMEFX", "GATEFX", "GATE", "DJFILTER", "LOFI"]
-KINDS = ARGS[1:] or TOUS
+# Stéréo et Master gardent l'ancienne fenêtre (façade à la version suivante) : pas de
+# data-nova-plugin, donc hors de la liste par défaut (sinon la fenêtre restée ouverte
+# bloque les clics suivants au téléphone).
+PAS_ENCORE = {"STEREOSPREADER", "MASTERSYNC"}
+KINDS = ARGS[1:] or [k for k in TOUS if k not in PAS_ENCORE]
 os.makedirs(OUT, exist_ok=True)
 
 # Recherche dans le menu « Ajouter un effet » (mode --reel).
