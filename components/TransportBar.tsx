@@ -33,6 +33,9 @@ interface TransportProps {
   onOpenMasterNova?: () => void;
   /** Ouvre « Masteriser un morceau » (un fichier, sans projet, lot 4a). */
   onOpenQuickMaster?: () => void;
+  /** « Voix et flow » (lot 11) : échauffement de la voix et du flow, accordeur. */
+  onOpenWarmup?: () => void;
+  onOpenTuner?: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -223,7 +226,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -498,6 +501,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
             </button>
           )}
+          {onOpenWarmup && (
+            <button {...barItem('voix-flow', 21)} type="button" onClick={onOpenWarmup} data-testid="open-warmup" aria-label="Voix et flow : échauffement et accordeur"
+              title="Voix et flow : échauffement de la voix et du flow (80 → 140 BPM), accordeur, progrès"
+              className="nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-slate-400 hover:text-white hover:bg-white/10">
+              <i className="fas fa-microphone-alt text-xs" aria-hidden="true"></i>
+            </button>
+          )}
           {guide && guide.count > 0 && onToggleGuide && onGuideLevel && (
             <div {...barItem('guide', 29)} className="hidden md:flex"><GuideControl count={guide.count} muted={guide.muted} level={guide.level} onToggle={onToggleGuide} onLevel={onGuideLevel} /></div>
           )}
@@ -657,6 +667,16 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               {onOpenQuickMaster && (
                 <button onClick={() => { onOpenQuickMaster(); setIsMobileMenuOpen(false); }} data-testid="menu-quick-master" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                   <span className="w-5 text-center" aria-hidden="true">🎚️</span><span className="flex-1">Masteriser un morceau</span><span className="text-[10px] font-normal text-slate-400">un fichier, sans projet</span>
+                </button>
+              )}
+              {onOpenWarmup && (
+                <button onClick={() => { onOpenWarmup(); setIsMobileMenuOpen(false); }} data-testid="menu-warmup" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎤</span><span className="flex-1">Échauffement voix et flow</span>
+                </button>
+              )}
+              {onOpenTuner && (
+                <button onClick={() => { onOpenTuner(); setIsMobileMenuOpen(false); }} data-testid="menu-tuner" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎯</span><span className="flex-1">Accordeur</span>
                 </button>
               )}
             </div>
