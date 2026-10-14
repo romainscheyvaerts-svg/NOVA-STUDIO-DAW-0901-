@@ -11230,7 +11230,8 @@ function Studio() {
       <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenLyricClip={() => { setShareOpen(false); setShareAuto(null); setLyricClipOpen(true); }} />
       {lyricClipOpen && <PanelBoundary name="le clip vidéo" overlay onClose={() => setLyricClipOpen(false)}><Suspense fallback={null}><LyricClipModal open={lyricClipOpen} onClose={() => setLyricClipOpen(false)} state={state} ownedInstrumentIds={ownedInstruments}
         onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenExport={() => { setLyricClipOpen(false); setIsExportMenuOpen(true); }} /></Suspense></PanelBoundary>}
-      {(videoTakeOpen || state.tracks.some(t => t.isTrackArmed && t.type === TrackType.AUDIO)) && <PanelBoundary name="la caméra" overlay onClose={() => setVideoTakeOpen(false)}><Suspense fallback={null}><VideoTakeDock open={videoTakeOpen} onOpen={() => setVideoTakeOpen(true)} onClose={() => setVideoTakeOpen(false)}
+      {/* Écran invité (téléphone en cabine) : pas de pastille flottante, elle couvrait « Envoyer » du chat. */}
+      {(videoTakeOpen || (!guestMode && state.tracks.some(t => t.isTrackArmed && t.type === TrackType.AUDIO))) && <PanelBoundary name="la caméra" overlay onClose={() => setVideoTakeOpen(false)}><Suspense fallback={null}><VideoTakeDock open={videoTakeOpen} onOpen={() => setVideoTakeOpen(true)} onClose={() => setVideoTakeOpen(false)}
         state={state} inCollab={!!collab} ownedInstrumentIds={ownedInstruments} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} onOpenExport={() => setIsExportMenuOpen(true)}
         onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))} /></Suspense></PanelBoundary>}
       {(() => {
