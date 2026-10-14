@@ -197,6 +197,7 @@ import { applyBeatSwapOp, BeatSwapOp, hasVoicesToKeep } from './utils/beatSwap';
 import { currentBeatClip } from './services/beatSwapRun';
 import { openSessionPanel, openImportSession, useSessionPanel } from './utils/r21Bus';
 import AafHost from './components/AafHost';
+import DistributionHost from './components/DistributionHost';
 import { openAafExport, openAafImport } from './utils/aaf/aafBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
@@ -10525,6 +10526,7 @@ function Studio() {
           )}
         </main>
         <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
+        <DistributionHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>
             <Suspense fallback={null}>
