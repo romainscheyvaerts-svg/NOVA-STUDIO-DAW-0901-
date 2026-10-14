@@ -264,6 +264,27 @@ export async function runExport(allTracks: Track[], s: ExportSettings, projectMa
   return { download: { name: zipName, blob }, files, report };
 }
 
+/**
+ * Lot 12 (« Prêt pour la distribution ») : le mix rendu EXACTEMENT comme l'export « Mix »
+ * (mêmes pistes sans guides, même queue, même conversion de fréquence), mais rendu en canaux
+ * flottants, sans volume final ni encodage : la fenêtre de distribution le mesure, le corrige,
+ * puis l'encode elle-même. `renderFrames` (longueur au rythme du moteur) : impose la longueur
+ * d'un premier rendu (instrumental et a cappella calés au bit près sur le master).
+ */
+export async function renderMixChannels(allTracks: Track[], s: Pick<ExportSettings, 'start' | 'end' | 'tail' | 'sampleRate' | 'format'>,
+  onProgress: Progress = () => {}, renderFrames?: number): Promise<{ ch: Float32Array[]; sampleRate: number; renderFrames: number }> {
+  const tracks = withoutGuides(allTracks);
+  const span = exportSpan(s.start, s.end, s.tail);
+  const raw = await render(tracks, s as ExportSettings, span.renderDuration, p => onProgress(Math.min(95, p), 'Mixage du morceau…'));
+  const rr = renderRate();
+  const length = renderFrames ?? finalLength(raw, rr, span.end - span.start, s.tail);
+  const tailed = applyTail(raw, length, s.tail.mode);
+  const sr = outputRate(s);
+  const ch = resampleChannels(tailed, rr, sr);
+  onProgress(100, 'Mix rendu');
+  return { ch, sampleRate: sr, renderFrames: length };
+}
+
 export function deliveryNote(s: ExportSettings, files: ExportedFile[], r: ExportReport): string {
   const fmt = s.format === 'MP3' ? `MP3 ${s.mp3Kbps} kbps` : `${s.format} ${outputBits(s) === 32 ? '32 bits flottant' : `${outputBits(s)} bits`}`;
   const lines = [

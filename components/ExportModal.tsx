@@ -11,6 +11,7 @@ import { consumeSelectionExport, editSelectionStore } from '../utils/editSelecti
 import { simpleModeStore } from '../utils/simpleMode';
 import { MidiExportRow } from './MidiFileMenu';
 import { openAafExport } from '../utils/aaf/aafBus';
+import { openDistribution } from '../utils/distributionBus';
 import { runExport, outputBits, outputRate, type ExportSettings, type ExportFormat, type ExportSource } from '../services/ExportPipeline';
 import { exportQueue } from '../services/ExportQueue';
 import { reportLine } from './ExportQueueToast';
@@ -952,6 +953,16 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             )}
 
 
+            {/* Lot 12 : contrôle avant distribution et paquet « Livraison » (fenêtre séparée) */}
+            <button type="button" data-testid="export-distribution" onClick={() => { onClose(); openDistribution(); }} disabled={isRendering}
+              className="w-full min-h-12 px-4 py-3 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] text-left flex items-center gap-3">
+              <span className="text-2xl leading-none" aria-hidden="true">🚀</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-black text-white">Prêt pour Spotify / Apple / TikTok&nbsp;?</span>
+                <span className="block text-[12px] text-slate-400">Contrôle avant distribution (volume, crête, blancs, licence, infos) et paquet .zip à envoyer à DistroKid, TuneCore…</span>
+              </span>
+              <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
+            </button>
             {/* Notes MIDI en .mid (V25) */}
             <MidiExportRow tracks={projectState.tracks} />
             {/* Séance pour Pro Tools : AAF + BWF horodatés (chantier 14) */}

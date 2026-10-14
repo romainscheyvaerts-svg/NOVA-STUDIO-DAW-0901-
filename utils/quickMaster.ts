@@ -242,7 +242,7 @@ export function limiterFor(style: QmStyleId, target: QmTarget): QmLimiterParams 
   return { ceilingDb: target.ceiling - 0.2, releaseMs: styleOf(style).release, lookaheadMs: 3, oversample: 4 };
 }
 
-async function limitPass(ch: Float32Array[], sampleRate: number, lim: QmLimiterParams, gainDb: number, ctl: QmControl, label: string, p0: number, p1: number): Promise<Float32Array[]> {
+export async function limitPass(ch: Float32Array[], sampleRate: number, lim: QmLimiterParams, gainDb: number, ctl: QmControl, label: string, p0: number, p1: number): Promise<Float32Array[]> {
   const core = createLimiterCore(sampleRate);
   core.setParams({ ...lim, inputGainDb: gainDb });
   const [L, R] = stereo(ch);
