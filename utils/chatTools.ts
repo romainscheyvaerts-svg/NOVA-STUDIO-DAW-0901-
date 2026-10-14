@@ -308,13 +308,13 @@ export const KNOWN_ACTIONS = new Set([
   'RUN_COMMAND',
 ]);
 
-/** Confirmation obligatoire : pourquoi (affiché à l'artiste). */
+/** Confirmation obligatoire : ce qui va se passer, à l'infinitif (affiché au-dessus de « Oui, fais-le »). */
 const CONFIRM_ACTIONS: Record<string, string> = {
-  DELETE_TRACK: 'supprime une piste', DELETE_CLIP: 'supprime un clip', RESET_FX: 'retire des effets', CLEAR_AUTOMATION: "efface de l'automation",
-  DELETE_MARKER: 'supprime un repère', DELETE_GROUP: 'supprime un groupe', REMOVE_DRUMS: 'retire la batterie', VST_REMOVE: 'retire un plugin',
-  REMOVE_PLUGIN: 'retire un effet', OPEN_EXPORT: "ouvre l'export (payant selon ton offre)", OPEN_SHARE: 'partage en dehors du studio',
-  OPEN_STUDIO_OFFER: 'ouvre une page d’achat ou de réservation', CLEAN_MIX: 'remet tous les volumes et pans à zéro', LOAD_BEAT: 'remplace le beat',
-  LOAD_DAILY_CHALLENGE: 'remplace le beat',
+  DELETE_TRACK: 'Supprimer une piste', DELETE_CLIP: 'Supprimer un clip', RESET_FX: 'Retirer des effets', CLEAR_AUTOMATION: "Effacer de l'automation",
+  DELETE_MARKER: 'Supprimer un repère', DELETE_GROUP: 'Supprimer un groupe', REMOVE_DRUMS: 'Retirer la batterie', VST_REMOVE: 'Retirer un plugin du PC',
+  REMOVE_PLUGIN: 'Retirer un effet', OPEN_EXPORT: "Ouvrir l'export (payant selon ton offre, prix affiché dans la fenêtre)", OPEN_SHARE: 'Partager en dehors du studio',
+  OPEN_STUDIO_OFFER: 'Ouvrir une page d’achat ou de réservation du studio', CLEAN_MIX: 'Remettre tous les volumes et pans à zéro', LOAD_BEAT: 'Remplacer le beat',
+  LOAD_DAILY_CHALLENGE: 'Remplacer le beat par celui du défi du jour',
 };
 
 /** Le chat ne paie jamais : ces actions sont refusées d'office. */
@@ -403,7 +403,7 @@ export function resolveTrack(st: DAWState, ref: any): Track | undefined {
 }
 
 /** Paramètres d'un effet : bornés selon sa fiche, raccourcis d'ingé traduits (EQ, dB, ms). */
-export function normalizePluginParams(type: string, params: Record<string, any>, current: Record<string, any> | undefined, notes: string[]): Record<string, any> {
+export function normalizePluginParams(type: string, params: Record<string, any>, current: Record<string, any> | undefined, notes: string[], touched: number[] = []): Record<string, any> {
   const p: Record<string, any> = { ...(params || {}) };
   const out: Record<string, any> = {};
   // Raccourcis en unités d'ingé.
@@ -424,11 +424,13 @@ export function normalizePluginParams(type: string, params: Record<string, any>,
         const hz = hpf === false || hpf === 0 ? 0 : clampNum(hpf, [20, 1000], notes, 'Coupe-bas');
         const i = bands.findIndex(b => b.type === 'highpass'); const k = i >= 0 ? i : 0;
         bands[k] = hz ? { ...bands[k], type: 'highpass', frequency: hz, isEnabled: true } : { ...bands[k], isEnabled: false };
+        touched.push(k);
       }
       if (lpf !== undefined) {
         const hz = lpf === false || lpf === 0 ? 0 : clampNum(lpf, [1000, 22000], notes, 'Coupe-haut');
         const i = bands.findIndex(b => b.type === 'lowpass'); const k = i >= 0 ? i : bands.length - 1;
         bands[k] = hz ? { ...bands[k], type: 'lowpass', frequency: hz, isEnabled: true } : { ...bands[k], isEnabled: false };
+        touched.push(k);
       }
       for (const bell of bells.slice(0, 6)) {
         const f = clampNum(bell?.freq ?? bell?.frequency, [20, 20000], notes, 'Fréquence');
@@ -436,6 +438,7 @@ export function normalizePluginParams(type: string, params: Record<string, any>,
         const peaks = bands.map((b, i) => ({ b, i })).filter(x => x.b.type !== 'highpass' && x.b.type !== 'lowpass');
         if (!peaks.length) continue;
         const near = peaks.reduce((a, x) => (Math.abs(Math.log(x.b.frequency / f)) < Math.abs(Math.log(a.b.frequency / f)) ? x : a));
+        touched.push(near.i);
         bands[near.i] = { ...near.b, type: 'peaking', frequency: f, gain: clampNum(bell.gain ?? bell.db ?? 0, [-18, 18], notes, 'Gain') ?? 0,
           q: clampNum(bell.q ?? near.b.q ?? 1, [0.1, 18], notes, 'Q') ?? 1, isEnabled: true };
       }
@@ -469,6 +472,16 @@ export function normalizePluginParams(type: string, params: Record<string, any>,
     else if (typeof v === 'boolean') out[k] = v;
   }
   return out;
+}
+
+/** Bandes d'EQ modifiées (type, fréquence, gain, Q, marche) par rapport à l'EQ d'avant. */
+function changedBands(before: any[] | undefined, after: any[], touched: number[] = []): any[] {
+  if (!Array.isArray(before)) return after;
+  return after.filter((b, i) => {
+    if (touched.includes(i)) return true;
+    const a = before[i];
+    return !a || a.type !== b.type || a.frequency !== b.frequency || (a.gain || 0) !== (b.gain || 0) || (a.q ?? 1) !== (b.q ?? 1) || (a.isEnabled !== false) !== (b.isEnabled !== false);
+  });
 }
 
 /** Résumé des réglages posés, pour le compte rendu. */
@@ -534,11 +547,11 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
     case 'RUN_COMMAND': {
       const id = String(p.id || p.commandId || '').trim();
       const cmd = ctx.commands.find(c => c.id === id);
-      if (!cmd) return reject(`commande « ${id || '?'} » inconnue (elle n'est pas dans la palette Ctrl+K)`);
+      if (!cmd) return reject(`commande « ${id || '?'} » inconnue (elle n'est pas dans la palette Ctrl+K)`, desc || 'Commande demandée');
       if (cmd.blocked) return reject('je ne lance jamais de paiement : c’est toi qui payes, dans la fenêtre prévue', cmd.label);
       if (!cmd.ok) return reject(cmd.why || 'indisponible pour l’instant', cmd.label);
       p.id = cmd.id;
-      return ok(cmd.label, cmd.sensitive ? `« ${cmd.label} »` : undefined);
+      return ok(cmd.label, cmd.sensitive ? `Lancer « ${cmd.label} »` : undefined);
     }
     case 'SET_VOLUME': {
       if (p.volumeDb !== undefined || p.db !== undefined) {
@@ -576,13 +589,15 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
         if (!CHAT_PLUGINS.has(type)) return reject(`effet « ${type || '?'} » inconnu de NOVA`);
         p.pluginType = type; delete p.type;
         const current = existing?.params || ctx.pluginDefaults?.(type);
-        p.params = normalizePluginParams(type, p.params || {}, current, notes);
+        const touched: number[] = [];
+        p.params = normalizePluginParams(type, p.params || {}, current, notes, touched);
         if (voice && RATIO_2_ON_VOICE.has(type) && p.params.ratio !== undefined && p.params.ratio !== 2) {
           notes.push(`ratio ${fmtNum(p.params.ratio)}:1 ramené à 2:1 (règle maison : compresseur voix toujours en 2:1, sur deux étages)`);
           p.params.ratio = 2;
         }
         if (voice && RATIO_2_ON_VOICE.has(type) && !existing && p.params.ratio === undefined) p.params.ratio = 2;
-        const what = describeParams(type, p.params);
+        // EQ : seulement les bandes touchées (pas le coupe-haut d'usine à 18 kHz qu'on n'a pas demandé).
+        const what = describeParams(type, Array.isArray(p.params.bands) ? { ...p.params, bands: changedBands(current?.bands, p.params.bands, touched) } : p.params);
         const label = PLUGIN_LABELS[type] || type;
         const timeFx = (type === 'REVERB' || type === 'DELAY') && track!.type !== TrackType.SEND && track!.id !== 'master' && !existing;
         return ok(`${label} ${existing ? 'réglé' : timeFx ? 'en envoi' : 'ajouté'} sur ${tn}${what ? ` : ${what}` : ''}`);
@@ -592,12 +607,13 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       const label = PLUGIN_LABELS[existing.type] || existing.type;
       if (name === 'SET_PLUGIN_PARAM') {
         const param = String(p.param || '');
-        const n = normalizePluginParams(existing.type, { [param]: p.value }, existing.params, notes);
+        const touched: number[] = [];
+        const n = normalizePluginParams(existing.type, { [param]: p.value }, existing.params, notes, touched);
         const keys = Object.keys(n);
         if (!keys.length) return reject(`réglage « ${param} » inconnu sur ${label}`);
         // Raccourci traduit (hpf → bandes) : passer par UPDATE_PLUGIN.
         if (keys[0] !== param) {
-          const lbl = `${label} réglé sur ${tn} : ${describeParams(existing.type, n)}`;
+          const lbl = `${label} réglé sur ${tn} : ${describeParams(existing.type, Array.isArray(n.bands) ? { ...n, bands: changedBands(existing.params?.bands, n.bands, touched) } : n)}`;
           return { action: { action: 'UPDATE_PLUGIN' as any, payload: { trackId: track!.id, pluginType: existing.type, params: n }, description: desc }, label: lbl, notes };
         }
         if (voice && RATIO_2_ON_VOICE.has(existing.type) && param === 'ratio' && n.ratio !== 2) { notes.push('ratio ramené à 2:1 (règle maison sur la voix)'); n.ratio = 2; }
@@ -607,7 +623,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       if (name === 'BYPASS_PLUGIN') return ok(`${label} de ${tn} ${p.isEnabled === false ? 'contourné' : p.isEnabled === true ? 'réactivé' : 'basculé'}`);
       if (name === 'OPEN_PLUGIN') return ok(`Fenêtre ${label} de ${tn} ouverte`);
       if (name === 'MOVE_PLUGIN') { p.toIndex = Math.max(0, Math.min(track!.plugins.length - 1, Math.round(Number(p.toIndex) || 0))); return ok(`${label} déplacé en position ${p.toIndex + 1} sur ${tn}`); }
-      return ok(`${label} retiré de ${tn}`, CONFIRM_ACTIONS.REMOVE_PLUGIN);
+      return ok(`${label} retiré de ${tn}`, `Retirer ${label} de ${tn}`);
     }
     case 'SET_AUTOMATION': {
       const param = String(p.parameter || 'volume');
@@ -659,13 +675,17 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
     case 'RENAME_TRACK': { if (!p.name) return reject('nouveau nom manquant'); p.name = String(p.name).slice(0, 40); return ok(`${tn} renommée « ${p.name} »`); }
     case 'CREATE_TRACK': case 'ADD_TRACK': return ok(`Piste ${p.name ? `« ${String(p.name).slice(0, 40)} » ` : ''}créée`);
     case 'DUPLICATE_TRACK': return ok(`${tn} dupliquée`);
-    case 'DELETE_TRACK': return ok(`Piste ${tn} supprimée`, `supprime la piste ${tn}${track!.clips.length ? ` et ses ${track!.clips.length} clip(s)` : ''}`);
-    case 'DELETE_CLIP': return ok(`Clip supprimé sur ${tn}`, CONFIRM_ACTIONS.DELETE_CLIP);
-    case 'RESET_FX': return ok(track ? `Effets retirés de ${tn}` : 'Effets retirés de toutes les pistes', track ? `retire tous les effets de ${tn}` : 'retire TOUS les effets du projet');
-    case 'CLEAR_AUTOMATION': return ok(`Automation effacée sur ${tn}`, CONFIRM_ACTIONS.CLEAR_AUTOMATION);
+    case 'DELETE_TRACK': {
+      const n = numberedTracks(st).findIndex(t => t.id === track!.id) + 1;
+      const clips = track!.clips.length;
+      return ok(`Piste ${tn} supprimée`, `Supprimer la piste ${n > 0 ? `${n} ` : ''}(${tn})${clips ? ` et ${clips === 1 ? 'son clip' : `ses ${clips} clips`}` : ''}`);
+    }
+    case 'DELETE_CLIP': return ok(`Clip supprimé sur ${tn}`, `Supprimer un clip de ${tn}`);
+    case 'RESET_FX': return ok(track ? `Effets retirés de ${tn}` : 'Effets retirés de toutes les pistes', track ? `Retirer tous les effets de ${tn}` : 'Retirer TOUS les effets du projet');
+    case 'CLEAR_AUTOMATION': return ok(`Automation effacée sur ${tn}`, `Effacer l'automation de ${tn}`);
     case 'OPEN_EXPORT': {
       const fmt = typeof p.format === 'string' ? p.format.toUpperCase() : '';
-      return ok(`Fenêtre d’export ouverte${fmt ? ` (${fmt} demandé)` : ''}`, CONFIRM_ACTIONS.OPEN_EXPORT);
+      return ok(`Fenêtre d’export ouverte${fmt ? ` (${fmt} demandé)` : ''}`, `Ouvrir l'export${fmt ? ` en ${fmt}` : ''} (payant selon ton offre, prix affiché dans la fenêtre)`);
     }
     case 'APPLY_MIX_STYLE': return ok(`Style de mix « ${p.style || '?'} » appliqué`);
     default: {

@@ -523,7 +523,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                     <p className="text-[12px] font-bold text-amber-100">{msg.pendingState === 'done' ? 'Confirmé' : msg.pendingState === 'refused' ? 'Annulé, rien n’a été touché' : 'Je préfère te demander avant :'}</p>
                     <ul className="mt-1 space-y-0.5">
                       {msg.pending.map((p, i) => (
-                        <li key={i} className="text-[12px] text-amber-50/90">⚠️ {p.label}{p.confirm ? <span className="text-amber-200/70"> ({p.confirm})</span> : null}</li>
+                        <li key={i} className="text-[12px] text-amber-50/90">⚠️ {p.confirm || p.label}</li>
                       ))}
                     </ul>
                     {(msg.pendingState === 'asked' || msg.pendingState === 'running') && (

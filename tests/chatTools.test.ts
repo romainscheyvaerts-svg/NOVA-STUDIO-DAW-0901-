@@ -214,6 +214,13 @@ describe('validation des appels d’outils', () => {
     expect(plan.run[0].label).toBe('EQ ajouté sur Backs : coupe-bas 200 Hz, coupe-haut 15 kHz, 320 Hz −3 dB');
   });
 
+  it('EQ d’usine (coupe-bas 80 Hz, coupe-haut 18 kHz) : le compte rendu dit seulement ce qui a été demandé', () => {
+    const usine = { bands: [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000].map((f, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: f, gain: 0, q: 1, isEnabled: true })) };
+    const c = { ...ctx(), pluginDefaults: (t: string) => (t === 'PROEQ12' ? usine : undefined) };
+    const plan = planChatCalls([{ action: 'UPDATE_PLUGIN', payload: { trackId: 'Lead', pluginType: 'PROEQ12', params: { hpf: 80 } } }], c);
+    expect(plan.run[0].label).toBe('EQ ajouté sur Lead : coupe-bas 80 Hz');
+  });
+
   it('réverbe demandée sur une voix : annoncée en envoi', () => {
     const plan = planChatCalls([{ action: 'UPDATE_PLUGIN', payload: { trackId: 'track-rec-main', pluginType: 'REVERB', params: { decay: 1.4, mix: 0.2 } } }], ctx());
     expect(plan.run[0].label).toBe('Réverbe en envoi sur Lead : 1,4 s, mix 20 %');
@@ -251,7 +258,9 @@ describe('confirmation obligatoire des actions sensibles', () => {
     expect(plan.rejected).toHaveLength(0);
     expect(plan.ask).toHaveLength(sensibles.length);
     expect(plan.ask[0].label).toBe('Piste Lead 2 supprimée');
-    expect(plan.ask[0].confirm).toBe('supprime la piste Lead 2');
+    expect(plan.ask[0].confirm).toBe('Supprimer la piste 3 (Lead 2)');
+    expect(plan.ask[3].confirm).toBe("Ouvrir l'export en MP3 (payant selon ton offre, prix affiché dans la fenêtre)");
+    expect(plan.ask[6].confirm).toBe('Lancer « Exporter : mix, stems par piste ou par bus, voix seule »');
     expect(plan.ask[0].action.payload.trackId).toBe('track-lead-2');
   });
 
