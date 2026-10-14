@@ -7,22 +7,40 @@
  * endroit que le clip, nommées « Voix (stem) », « Batterie (stem) »…, et le clip
  * d'origine est coupé (M pour le réentendre) pour ne pas doubler le son.
  *
+ * Lot 6 (BandLab Splitter) : 6 stems (voix, batterie, basse, guitare, piano, autres ;
+ * Demucs htdemucs_6s) et voix lead / chœurs (UVR-MDX-NET Karaoke 2), modèles téléchargés
+ * à la première séparation qui les demande ; un stem (basse, piano, guitare, voix) peut
+ * ensuite devenir une piste MIDI par « Audio → MIDI ».
+ *
+ * Licence des beats : un stem garde les règles du clip d'où il vient (stemsRightsFor). Beat
+ * du catalogue non acheté : pas de séparation (comme l'export) ; beat sous licence ou beat
+ * de la piste BEAT : les stems restent « beat » (jamais gelés, rendus, samplés ni envoyés à
+ * l'ingé, comme canBakeTrack le veut pour le beat) et aucun WAV n'est gardé sur le PC.
+ *
  * Ce fichier ne contient que la logique (testée par vitest) ; l'interface est dans
  * components/StemSeparationDialog.tsx.
  */
 import type { Clip, Track } from '../types';
 import { TrackType } from '../types';
-import type { BridgeState } from './NovaBridge';
+import type { BridgeState, StemsModuleStatus } from './NovaBridge';
+import type { ExportAccess } from './Billing';
 
-export type StemCount = 2 | 4;
-export type StemKey = 'vocals' | 'instrumental' | 'drums' | 'bass' | 'other';
+/** Jeu de stems : 2, 4 ou 6 pistes, ou « leadback » (voix lead / chœurs / instru). */
+export type StemSet = 2 | 4 | 6 | 'leadback';
+/** Ancien nom (2 ou 4 seulement avant le lot 6). */
+export type StemCount = StemSet;
+export type StemKey = 'vocals' | 'instrumental' | 'drums' | 'bass' | 'other' | 'guitar' | 'piano' | 'lead_vocals' | 'backing_vocals';
 
 export const STEM_TRACK_NAMES: Record<StemKey, string> = {
   vocals: 'Voix (stem)',
   instrumental: 'Instru (stem)',
   drums: 'Batterie (stem)',
   bass: 'Basse (stem)',
+  guitar: 'Guitare (stem)',
+  piano: 'Piano (stem)',
   other: 'Autres (stem)',
+  lead_vocals: 'Voix lead (stem)',
+  backing_vocals: 'Chœurs (stem)',
 };
 
 export const STEM_COLORS: Record<StemKey, string> = {
@@ -30,17 +48,117 @@ export const STEM_COLORS: Record<StemKey, string> = {
   instrumental: '#38bdf8',
   drums: '#f59e0b',
   bass: '#a78bfa',
+  guitar: '#fb923c',
+  piano: '#60a5fa',
   other: '#34d399',
+  lead_vocals: '#f472b6',
+  backing_vocals: '#e879f9',
 };
 
-export const STEM_SETS: Record<StemCount, StemKey[]> = {
+export const STEM_SETS: Record<string, StemKey[]> = {
   2: ['vocals', 'instrumental'],
   4: ['vocals', 'drums', 'bass', 'other'],
+  6: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'],
+  leadback: ['lead_vocals', 'backing_vocals', 'instrumental'],
 };
+
+export const STEM_SET_ORDER: StemSet[] = [2, 4, 6, 'leadback'];
+
+/** Les choix de la fenêtre, dans l'ordre (titre, pistes obtenues, à quoi ça sert). */
+export const STEM_SET_CHOICES: Record<string, { title: string; detail: string; uses: string; note?: string }> = {
+  2: { title: 'Voix + instru (2 stems)', detail: 'Voix (stem) et Instru (stem).', uses: 'Enlever la voix d’une instru (karaoké, beat), isoler la voix d’un morceau de référence.' },
+  4: { title: 'Voix, batterie, basse, autres (4 stems)', detail: 'Une piste par famille d’instruments.', uses: 'Refaire un sample, récupérer une batterie ou une ligne de basse.' },
+  6: {
+    title: '6 stems : + guitare et piano', detail: 'Voix, batterie, basse, guitare, piano, autres.',
+    uses: 'Sample de soul, de jazz ou de variété : isoler la guitare ou le piano.',
+    note: 'Le piano est le stem le moins propre (le modèle le reconnaît moins bien).',
+  },
+  leadback: {
+    title: 'Voix lead / chœurs', detail: 'Voix lead (stem), Chœurs (stem) et Instru (stem).',
+    uses: 'Garder les chœurs et refaire la lead, ou l’inverse ; isoler les doubles et les backs d’une référence.',
+  },
+};
+
+/** Crédit demandé par Ultimate Vocal Remover (licence MIT) pour son modèle voix lead / chœurs. */
+export const LEADBACK_CREDIT = 'Voix lead / chœurs : modèle UVR-MDX-NET Karaoke 2 d’Ultimate Vocal Remover (Anjok07, aufr33), licence MIT.';
 
 /** Infobulle commune (équivalents dans les autres logiciels). */
 export const STEMS_TOOLTIP =
-  'Sépare la voix, la batterie, la basse et le reste du clip, comme Stem Splitter dans Logic ou Stem Separation dans FL Studio. Calcul gratuit sur ton PC (appli Windows).';
+  'Sépare la voix, la batterie, la basse, la guitare, le piano et le reste du clip (ou la voix lead des chœurs), comme Stem Splitter dans Logic, Stem Separation dans FL Studio ou Splitter dans BandLab. Calcul gratuit sur ton PC (appli Windows).';
+
+/** « 55 Mo », « 1,2 Go ». */
+export function formatBytes(n: number): string {
+  if (!isFinite(n) || n <= 0) return '0 Mo';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace('.', ',')} Go`;
+  return `${Math.max(1, Math.round(n / 1e6))} Mo`;
+}
+
+/**
+ * Ce qu'il faut télécharger, la première fois, pour ce jeu de stems (null : rien).
+ * Le pont donne la taille exacte ; sans elle, l'ordre de grandeur annoncé.
+ */
+export function stemSetDownload(set: StemSet, module: Pick<StemsModuleStatus, 'sets' | 'variant'> | null): string | null {
+  if (set === 2 || set === 4) return null;
+  const info = module?.sets?.[String(set) as '6' | 'leadback'];
+  if (info) return info.ready ? null : `+${formatBytes(info.downloadBytes)} à télécharger la 1re fois`;
+  const guess = set === 6 ? 55e6 : (module?.variant === 'cuda' ? 270e6 : 68e6);
+  return `+${formatBytes(guess)} à télécharger la 1re fois`;
+}
+
+// --- Droits : un stem garde la licence du clip séparé ---------------------------------
+
+/** D'où vient le son : fichier de l'utilisateur, piste BEAT, ou beat du catalogue. */
+export type StemsRights = { kind: 'own' } | { kind: 'beat' } | { kind: 'catalogue'; catalogId: string };
+
+export function stemsRightsFor(track: { id: string; instrumentId?: string | number | null; beatStem?: boolean } | null | undefined): StemsRights {
+  if (!track) return { kind: 'own' };
+  const id = track.instrumentId;
+  if (id !== undefined && id !== null && id !== '') return { kind: 'catalogue', catalogId: String(id) };
+  if (track.id === 'instrumental' || track.beatStem) return { kind: 'beat' };
+  return { kind: 'own' };
+}
+
+/**
+ * Le serveur (export_access, comme l'export du mix) autorise-t-il à séparer ce beat du
+ * catalogue ? Oui seulement si la licence est achetée (ou compte admin). Un export payé ou
+ * Nova Pro ne suffit pas : ils n'ouvrent jamais l'instru seule.
+ */
+export function catalogueStemsAllowed(access: Pick<ExportAccess, 'unlocked' | 'via' | 'reason' | 'missing' | 'items'> | null, catalogId: string, admin = false): boolean {
+  if (admin) return true;
+  if (!access) return false;
+  if (access.items?.some(i => String(i.id) === catalogId && i.owned)) return true;
+  if (access.missing.some(m => String(m.id) === catalogId)) return false;
+  if (access.reason === 'catalogue_non_achete') return false;
+  return access.unlocked && (access.via === 'licence' || access.via === 'admin');
+}
+
+/** Message (et suite possible) quand le beat du catalogue n'est pas encore acheté. */
+export const CATALOGUE_STEMS_REFUSAL =
+  'Ce beat du catalogue n’est pas encore à toi : comme pour l’export, achète sa licence pour le séparer en stems. Tes propres sons (voix, samples, beats importés) se séparent librement.';
+
+/** Champs posés sur les pistes de stems d'un beat : mêmes règles que le beat lui-même. */
+export function licensedStemFields(rights: StemsRights): { beatStem?: true; instrumentId?: string } {
+  if (rights.kind === 'catalogue') return { beatStem: true, instrumentId: rights.catalogId };
+  if (rights.kind === 'beat') return { beatStem: true };
+  return {};
+}
+
+// --- Stem → MIDI (réutilise « Audio → MIDI ») -------------------------------------------
+
+export interface StemMidiConversion { mode: 'melody' | 'drums' | 'harmony'; instrument?: '808' | 'piano' | 'lead' | 'pad'; label: string; tip: string; /** Source grave : hauteur cherchée dès 30 Hz. */ low?: boolean }
+
+/** Conversion MIDI proposée pour un stem (null : rien d'utile). */
+export function stemMidiConversion(key: string): StemMidiConversion | null {
+  switch (key) {
+    case 'bass': return { mode: 'melody', instrument: '808', low: true, label: 'Basse → MIDI', tip: 'La ligne de basse devient une piste MIDI (808 ou basse du synthé NOVA), avec aperçu avant de valider.' };
+    case 'piano': return { mode: 'harmony', label: 'Piano → MIDI', tip: 'Les accords du piano deviennent des accords MIDI (et, au choix, la piste d’accords).' };
+    case 'guitar': return { mode: 'harmony', label: 'Guitare → MIDI', tip: 'Les accords de la guitare deviennent des accords MIDI.' };
+    case 'vocals':
+    case 'lead_vocals': return { mode: 'melody', instrument: 'lead', label: 'Voix → MIDI', tip: 'La mélodie chantée devient une piste MIDI (lead, piano ou nappe du synthé NOVA).' };
+    case 'drums': return { mode: 'drums', label: 'Batterie → MIDI', tip: 'Kick, snare et hi-hat deviennent un motif de la boîte à rythmes.' };
+    default: return null;
+  }
+}
 
 export const STEMS_INSTALL_LABEL = 'Installer la séparation de stems (~2 Go, une fois)';
 
@@ -82,8 +200,9 @@ export interface StemForTracks {
  * exactement le même début, la même découpe (offset, durée), les fondus, le gain et
  * le sens de lecture que le clip d'origine : tout reste aligné.
  */
-export function buildStemTracks(source: { track: Pick<Track, 'id' | 'outputTrackId'>; clip: Clip }, stems: StemForTracks[], uid: string): Track[] {
+export function buildStemTracks(source: { track: Pick<Track, 'id' | 'outputTrackId'>; clip: Clip }, stems: StemForTracks[], uid: string, rights: StemsRights = { kind: 'own' }): Track[] {
   const c = source.clip;
+  const licence = licensedStemFields(rights);
   return stems.map((s, i) => {
     const key = s.key as StemKey;
     const color = STEM_COLORS[key] || '#94a3b8';
@@ -112,6 +231,7 @@ export function buildStemTracks(source: { track: Pick<Track, 'id' | 'outputTrack
       isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
       volume: 1.0, pan: 0, outputTrackId: source.track.outputTrackId || 'master',
       sends: [], clips: [clip], plugins: [], automationLanes: [], totalLatency: 0,
+      ...licence,
     } as Track;
   });
 }

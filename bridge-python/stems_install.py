@@ -11,6 +11,9 @@ Installé à la demande, une seule fois, hors de l'installateur de Nova Studio
         python\\              Python 3.12 autonome (python-build-standalone)
         env\\                 environnement : torch, torchaudio, demucs, soundfile
         models\\hub\\         poids du modèle Demucs (htdemucs, ~80 Mo)
+        models\\hub\\…\\5c90dfd2-34c22ccb.th   6 pistes (htdemucs_6s, ~55 Mo), à la demande
+        models\\uvr\\UVR_MDXNET_KARA_2.onnx    voix lead / chœurs (UVR, ~53 Mo), à la demande,
+                              avec onnxruntime (CPU ~13 Mo, GPU ~215 Mo) dans env\\
         stems_worker.py       moteur de séparation (lancé par le pont)
         installed.json        présent = module prêt (versions, CPU/GPU, taille)
         install.log           journal complet
@@ -58,6 +61,51 @@ TORCH_INDEX = {
 # barre de progression. Les ~2,6 Go de .lib
 # inutiles sont supprimés à la fin (voir prune) : il reste ~0,8 Go (CPU).
 TORCH_GROWTH = {"cpu": 6_400_000_000, "cuda": 11_000_000_000}
+# Modèles en plus, téléchargés à la première séparation qui les demande (voir install_addon).
+HTDEMUCS_6S_FILE = "5c90dfd2-34c22ccb.th"
+HTDEMUCS_6S_BYTES = 54_996_327
+KARAOKE_FILE = "UVR_MDXNET_KARA_2.onnx"
+KARAOKE_BYTES = 52_786_726
+ORT_PACKAGES = {"cpu": "onnxruntime==1.22.1", "cuda": "onnxruntime-gpu==1.22.0"}
+ORT_BYTES = {"cpu": 12_690_910 + 2_000_000, "cuda": 214_923_964 + 2_000_000}  # roue + petites dépendances
+
+
+def addon_files(home: Path) -> dict:
+    return {"6": home / "models" / "hub" / "checkpoints" / HTDEMUCS_6S_FILE,
+            "leadback": home / "models" / "uvr" / KARAOKE_FILE}
+
+
+def ort_installed(home: Path) -> bool:
+    sp = home / "env" / ("Lib/site-packages" if os.name == "nt" else "lib")
+    return any(sp.glob("onnxruntime*/__init__.py")) or any(sp.glob("python*/site-packages/onnxruntime/__init__.py"))
+
+
+def addon_ready(home: Path, name: str) -> bool:
+    """Le jeu de stems « name » (« 6 » ou « leadback ») peut-il tourner sans rien télécharger ?"""
+    if name in ("2", "4"):
+        return True
+    f = addon_files(home).get(name)
+    if f is None or not f.is_file():
+        return False
+    size = HTDEMUCS_6S_BYTES if name == "6" else KARAOKE_BYTES
+    if f.stat().st_size != size:
+        return False
+    return ort_installed(home) if name == "leadback" else True
+
+
+def addon_download_bytes(home: Path, name: str, variant: str) -> int:
+    """Taille à télécharger pour ce jeu de stems (0 s'il est prêt)."""
+    if addon_ready(home, name):
+        return 0
+    if name == "6":
+        return HTDEMUCS_6S_BYTES
+    if name == "leadback":
+        files = addon_files(home)
+        total = 0 if files["leadback"].is_file() and files["leadback"].stat().st_size == KARAOKE_BYTES else KARAOKE_BYTES
+        return total + (0 if ort_installed(home) else ORT_BYTES.get(variant, ORT_BYTES["cpu"]))
+    return 0
+
+
 UV_URL = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
 
@@ -142,7 +190,8 @@ class Installer:
 
     # --- outils ----------------------------------------------------------------
 
-    def run(self, cmd, step: str, pct_from: float, pct_to: float, message: str, expect_bytes: float = 1e8):
+    def run(self, cmd, step: str, pct_from: float, pct_to: float, message: str, expect_bytes: float = 1e8,
+            show_total: bool = False):
         """Lance une commande cachée ; pendant qu'elle tourne, la progression suit
         la taille du dossier (téléchargements de PyTorch : plusieurs centaines de Mo)."""
         self.check_cancel()
@@ -157,8 +206,8 @@ class Installer:
             while not stop.wait(2.0):
                 grown = max(0, dir_size(self.home) - start_size)
                 frac = min(0.97, grown / max(1.0, expect_bytes))
-                self.progress(pct_from + (pct_to - pct_from) * frac, step,
-                              f"{message} ({grown / 1e6:.0f} Mo)")
+                done_mb = f"{min(grown, expect_bytes) / 1e6:.0f} / {expect_bytes / 1e6:.0f} Mo" if show_total else f"{grown / 1e6:.0f} Mo"
+                self.progress(pct_from + (pct_to - pct_from) * frac, step, f"{message} ({done_mb})")
 
         watcher = threading.Thread(target=watch, daemon=True)
         watcher.start()
@@ -280,6 +329,51 @@ class Installer:
         self.emit("done", pct=100, info=info, message="Séparation de stems installée")
         return info
 
+    def install_addon(self, name: str, pct_from: float = 0.0, pct_to: float = 100.0):
+        """Ajoute un jeu de stems au module déjà installé : « 6 » (modèle htdemucs_6s) ou
+        « leadback » (onnxruntime + modèle UVR Karaoke 2, puis un essai qui prépare la carte
+        graphique). Progression de pct_from à pct_to ; annulable (cancel)."""
+        if name not in ("6", "leadback"):
+            raise ValueError(f"Jeu de stems inconnu : {name}")
+        py = env_python(self.home)
+        if not py.is_file():
+            raise RuntimeError("Module stems absent : installe d'abord la séparation de stems")
+        self.copy_worker()
+        worker = self.home / "stems_worker.py"
+        span = pct_to - pct_from
+        if name == "6":
+            self.run([py, "-I", worker, "--download-model", "--model", "htdemucs_6s"], "model6",
+                     pct_from, pct_to, "Téléchargement du modèle 6 pistes",
+                     HTDEMUCS_6S_BYTES, show_total=True)
+        else:
+            if not ort_installed(self.home):
+                uv = self.find_uv()
+                ort_pkg = ORT_PACKAGES["cuda" if self.variant == "cuda" else "cpu"]
+                self.run([uv, "pip", "install", "--python", py, ort_pkg, "numpy<2.4"], "onnxruntime",
+                         pct_from, pct_from + span * 0.55,
+                         "Installation du moteur ONNX " + ("GPU" if self.variant == "cuda" else "CPU")
+                         + f", ~{ORT_BYTES['cuda' if self.variant == 'cuda' else 'cpu'] / 1e6:.0f} Mo à télécharger",
+                         ORT_BYTES["cuda" if self.variant == "cuda" else "cpu"] * 1.6)
+                shutil.rmtree(self.home / "cache", ignore_errors=True)
+            self.run([py, "-I", worker, "--download-karaoke"], "karaoke", pct_from + span * 0.55,
+                     pct_from + span * 0.85, "Téléchargement du modèle voix lead / chœurs",
+                     KARAOKE_BYTES, show_total=True)
+            # Premier passage : vérifie le modèle et, sur une carte NVIDIA récente, compile
+            # les noyaux de calcul une fois pour toutes (jusqu'à ~1 min).
+            self.run([py, "-I", worker, "--self-test", "--stems", "leadback", "--device", "auto"], "check",
+                     pct_from + span * 0.85, pct_to,
+                     "Vérification (la 1re fois sur la carte graphique : jusqu'à 1 min)", 1)
+        self.check_cancel()
+        info_path = self.home / "installed.json"
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+            info.setdefault("addons", {})[name] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            info["size_bytes"] = dir_size(self.home)
+            info_path.write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+        self.log(f"jeu de stems {name} prêt")
+
     def prune(self):
         """PyTorch pour Windows livre ~2,6 Go de bibliothèques statiques (.lib) et
         d'en-têtes C++ qui ne servent qu'à compiler des extensions : inutiles ici."""
@@ -332,9 +426,15 @@ def main(argv=None):
     ap.add_argument("--home", default=None)
     ap.add_argument("--variant", default="cpu", choices=["cpu", "cuda", "auto"])
     ap.add_argument("--model", default="htdemucs")
+    ap.add_argument("--addon", choices=["6", "leadback"], default=None,
+                    help="ajoute un jeu de stems au module déjà installé")
     a = ap.parse_args(argv)
     inst = Installer(Path(a.home) if a.home else default_home(), a.variant, a.model)
     try:
+        if a.addon:
+            inst.install_addon(a.addon)
+            inst.emit("done", pct=100, message="Prêt")
+            return 0
         inst.install()
         return 0
     except InstallCancelled:

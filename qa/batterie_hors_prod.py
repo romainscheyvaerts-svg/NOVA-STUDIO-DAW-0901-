@@ -77,6 +77,9 @@ BATTERIE = [
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).
     ("voix_ia_locale", []),
+    # Lot 6 BandLab (14/10/2026) : 6 stems, voix lead / chœurs, stem → MIDI, licence des beats, premier
+    # téléchargement de modèle (pont de test 8806 + module stems installé ; bureau et téléphone).
+    ("stems6", []),
 ]
 
 

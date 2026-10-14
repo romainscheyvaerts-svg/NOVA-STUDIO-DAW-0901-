@@ -297,8 +297,8 @@ import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
-import StemSeparationDialog, { StemTarget } from './components/StemSeparationDialog';
-import { buildStemTracks, insertStemTracks } from './services/StemSeparation';
+import StemSeparationDialog, { AppliedStem, StemTarget } from './components/StemSeparationDialog';
+import { buildStemTracks, insertStemTracks, stemsRightsFor } from './services/StemSeparation';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
@@ -9680,11 +9680,17 @@ function Studio() {
     const clip = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
     if (clip) setStemTarget({ trackId, clipId, clipName: clip.name || 'Clip' });
   });
+  // Ouvrir « Séparer en stems » sur un clip depuis n'importe où (téléphone, message, scénario de test).
+  useEffect(() => {
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.trackId && d?.clipId) onSeparateStemsStable(d.trackId, d.clipId); };
+    window.addEventListener('nova:separate-stems', on);
+    return () => window.removeEventListener('nova:separate-stems', on);
+  }, [onSeparateStemsStable]);
   const getStemClipBuffer = useCallback((trackId: string, clipId: string): AudioBuffer | null => {
     const clip = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
     return clip?.buffer || (clip?.bufferId ? audioBufferRegistry.get(clip.bufferId) || null : null);
   }, []);
-  const applyStems = useCallback((target: StemTarget, res: SeparationResult): string[] | null => {
+  const applyStems = useCallback((target: StemTarget, res: SeparationResult): AppliedStem[] | null => {
     const track = stateRef.current.tracks.find(t => t.id === target.trackId);
     const clip = track?.clips.find(c => c.id === target.clipId);
     const ctx = audioEngine.ctx;
@@ -9697,10 +9703,11 @@ function Studio() {
       const bufferId = audioBufferRegistry.register(buf, `stem-${uid}-${s.key}`);
       return { key: s.key, bufferId };
     });
-    const stemTracks = buildStemTracks({ track, clip }, stems, uid);
+    // Lot 6 : les stems d'un beat gardent la licence du beat (stemsRightsFor).
+    const stemTracks = buildStemTracks({ track, clip }, stems, uid, stemsRightsFor(track));
     // Piste et clip vérifiés juste au-dessus : la mise à jour (différée par React) les retrouve.
     setState(produce((draft: DAWState) => { insertStemTracks(draft, target.trackId, target.clipId, stemTracks); }));
-    return stemTracks.map(t => t.name);
+    return stemTracks.map((t, i) => ({ key: stems[i].key, name: t.name, trackId: t.id, clipId: t.clips[0].id }));
   }, [setState]);
   const onArrangementAudioDrop = useLatestCallback((trackId: string, url: string, name: string, time: number) => {
     // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
@@ -11347,7 +11354,9 @@ function Studio() {
       </div>
       
       <StemSeparationDialog target={stemTarget} projectName={state.name || 'Projet'} getClipBuffer={getStemClipBuffer}
-        onApply={applyStems} onClose={() => setStemTarget(null)} />
+        onApply={applyStems} onClose={() => setStemTarget(null)}
+        rights={stemsRightsFor(stemTarget ? state.tracks.find(t => t.id === stemTarget.trackId) : null)}
+        projectKey={exportKeyOf(state) || undefined} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
       
       {rateConfirm && <ProjectRateConfirm {...rateConfirm} onConfirm={confirmRateChange} onCancel={() => setRateConfirm(null)} />}
