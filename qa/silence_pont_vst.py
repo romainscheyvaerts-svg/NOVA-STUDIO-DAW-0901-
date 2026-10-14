@@ -88,8 +88,12 @@ async ({ SR, path, name, sets }) => {
       d.tracks = [v, r, ...(m ? [{ ...m, plugins: [], sends: [] }] : [])];
     });
     const t0 = performance.now();
-    while (!S.node()?.getSlotId() && performance.now() - t0 < 240000) await new Promise(r => setTimeout(r, 100));
-    if (!S.node()?.getSlotId()) return { erreur: 'plugin pas chargé' };
+    // Attente du chargement ; un échec du pont (hôte natif absent, licence…) arrête tout de suite.
+    while (!S.node()?.getSlotId() && S.node()?.getInfo().status !== 'error' && performance.now() - t0 < 240000) await new Promise(r => setTimeout(r, 100));
+    if (!S.node()?.getSlotId()) {
+      const i = S.node()?.getInfo();
+      return { erreur: 'plugin pas chargé sur le pont' + (i ? ` (état ${i.status}${i.error ? ' : ' + i.error : ''})` : ' (aucun nœud VST)') };
+    }
     const r1 = await novaBridge.setParams(S.node().getSlotId(), sets);
     await new Promise(r => setTimeout(r, 1500));
     return { reglages: (r1.results || []).map(x => ({ nom: x.name, texte: x.text ?? null, ok: x.ok })), latence_ms: Math.round(S.node().latency * 1e5) / 100, adaptatif: adaptive };
@@ -169,7 +173,9 @@ async ({ SR, path, name, sets }) => {
     };
     if (withExport) {
       const { prepareTracksForOffline } = await M('/services/VstFreeze.ts');
-      const st = await novaBridge.getPluginState(S.node().getSlotId());
+      const slot = S.node()?.getSlotId();
+      if (!slot) throw new Error('export : plugin plus chargé sur le pont (' + JSON.stringify(S.info()) + ')');
+      const st = await novaBridge.getPluginState(slot);
       const tr = S.tracks().map(t => ({ ...t, plugins: (t.plugins || []).map(p => p.id === S.plugId ? { ...p, params: { ...p.params, stateB64: st } } : p) }));
       const prep = await prepareTracksForOffline(tr);
       let ex;
@@ -206,7 +212,21 @@ def port_free(port):
         return True
 
 
+def built(key, r):
+    """Mise en place d'une phase : son erreur (plugin pas chargé…) arrête le scénario, avec sa cause."""
+    if isinstance(r, dict) and r.get("erreur"):
+        raise RuntimeError(f"installation {key} : {r['erreur']}")
+    return r
+
+
 def main():
+    # Hôte natif absent (les exes ne sont pas suivis par git) : le pont démarrerait sans moteur VST
+    # (« moteur VST : none ») et rien ne se chargerait. On le dit tout de suite.
+    if not os.path.isfile(EXE):
+        print(f"ÉCHEC : hôte VST natif absent : {EXE}\n"
+              "  Les exes ne sont pas suivis par git : copie native-host\\build\\NovaVSTHost_artefacts\\Release\\ "
+              "depuis un worktree qui l'a construit, ou indique-le par NOVA_VST_HOST_EXE.")
+        return 2
     port = next((p for p in (8797, 8798) if port_free(p)), None)
     if port is None:
         print("ports 8797 et 8798 occupés")
@@ -288,17 +308,17 @@ def main():
                 return r
 
             # 0) Pont normal, tampon adaptatif (réglage par défaut).
-            res["phases_installation"] = {"0": pg.evaluate("() => window.__silence.build(true)")}
+            res["phases_installation"] = {"0": built("0", pg.evaluate("() => window.__silence.build(true)"))}
             p0 = phase("0_pont_normal", 6)
             # A) Pont ralenti, tampon FIXE : le comportement d'avant (silence).
             pg.evaluate("(o) => window.__silence.slow(o)", SLOW)
-            res["phases_installation"]["A"] = pg.evaluate("() => window.__silence.build(false)")
+            res["phases_installation"]["A"] = built("A", pg.evaluate("() => window.__silence.build(false)"))
             pA = phase("A_ralenti_tampon_fixe", 6, export=False, shots=[(3.5, "A_alerte_tampon_fixe")])
             # B) Pont ralenti, tampon ADAPTATIF : 1re écoute (agrandissement en cours d'écoute).
             def build_b():
                 pg.evaluate("() => window.__novaTest.update(d => { d.tracks = d.tracks.filter(t => !t.id.startsWith('silence-')); })")
                 pg.wait_for_timeout(1500)
-                res["phases_installation"]["B"] = pg.evaluate("() => window.__silence.build(true)")
+                res["phases_installation"]["B"] = built("B", pg.evaluate("() => window.__silence.build(true)"))
                 pg.wait_for_timeout(1500)   # mise en route du plugin passée
             build_b()
             pB = phase("B_ralenti_adaptatif_1re_ecoute", 8, shots=[(3.5, "B_alerte_tampon_agrandi")], rebuild=build_b)

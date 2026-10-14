@@ -197,6 +197,7 @@ import transcribe_service
 import voice_service
 import vst_automation
 import vst_host
+import vst_native
 import vst_sidechain
 import vst_probe
 import plugin_guard
@@ -391,6 +392,8 @@ class NovaBridgeServer:
                          ping_interval=20, ping_timeout=20):
             logger.info(f"✅ Pont VST prêt sur ws://{HOST}:{PORT}  (moteur VST : {vst_host.ENGINE})")
             logger.info("   Laisse cette fenêtre ouverte pendant ta session.")
+            if not vst_host.HAS_VST:
+                logger.warning(f"⚠ {vst_native.missing_engine_message()}")
             await asyncio.Future()
 
     def _check_origin(self, connection, request):

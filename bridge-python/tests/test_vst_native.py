@@ -133,6 +133,30 @@ class TestEngine(unittest.TestCase):
                 os.environ["NOVA_VST_ENGINE"] = old
 
 
+    def test_missing_host_message(self):
+        """Hôte natif absent (worktree sans build, installation abîmée) : le chargement dit ce qui
+        manque et où il a été cherché, plus « pedalboard n'est pas installé » (trompeur)."""
+        from unittest import mock
+        import vst_host
+        old = os.environ.get("NOVA_VST_HOST_EXE")
+        try:
+            os.environ["NOVA_VST_HOST_EXE"] = r"Z:\absent\NovaVSTHost.exe"
+            msg = vn.missing_engine_message()
+            if vn.IS_WINDOWS:
+                self.assertIn("NovaVSTHost.exe", msg)
+                self.assertIn(r"Z:\absent\NovaVSTHost.exe", msg)
+            self.assertNotIn("pedalboard", msg)
+            with mock.patch.object(vst_host, "NATIVE", False), mock.patch.object(vst_host, "HAS_PEDALBOARD", False):
+                with self.assertRaises(RuntimeError) as cm:
+                    vst_host._open_plugin(r"C:\x\Pro-C 3.vst3", None)
+            self.assertEqual(str(cm.exception), vn.missing_engine_message())
+        finally:
+            if old is None:
+                os.environ.pop("NOVA_VST_HOST_EXE", None)
+            else:
+                os.environ["NOVA_VST_HOST_EXE"] = old
+
+
 PROC3 = r"C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-C 3.vst3"
 
 

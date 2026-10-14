@@ -84,18 +84,35 @@ class HostCrashed(RuntimeError):
 def find_host_exe() -> Optional[str]:
     """NovaVSTHost.exe : NOVA_VST_HOST_EXE, à côté de l'exécutable figé, ou le build du dépôt."""
     env = os.environ.get("NOVA_VST_HOST_EXE")
-    if env and os.path.isfile(env):
-        return env
+    for c in host_exe_candidates():
+        if os.path.isfile(c):
+            return c if c == env else os.path.abspath(c)
+    return None
+
+
+def host_exe_candidates() -> List[str]:
+    """Chemins où NovaVSTHost.exe est cherché, dans l'ordre (pour un message d'erreur exact)."""
+    out = []
+    env = os.environ.get("NOVA_VST_HOST_EXE")
+    if env:
+        out.append(env)
     here = os.path.dirname(os.path.abspath(__file__))
-    cands = []
     if getattr(sys, "frozen", False):
         base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-        cands += [os.path.join(base, EXE_NAME), os.path.join(os.path.dirname(sys.executable), EXE_NAME)]
-    cands.append(os.path.join(here, "..", "native-host", "build", "NovaVSTHost_artefacts", "Release", EXE_NAME))
-    for c in cands:
-        if os.path.isfile(c):
-            return os.path.abspath(c)
-    return None
+        out += [os.path.join(base, EXE_NAME), os.path.join(os.path.dirname(sys.executable), EXE_NAME)]
+    out.append(os.path.abspath(os.path.join(here, "..", "native-host", "build", "NovaVSTHost_artefacts", "Release", EXE_NAME)))
+    return out
+
+
+def missing_engine_message() -> str:
+    """Aucun moteur VST (moteur « none ») : ce qui manque et où il a été cherché.
+    Remplace l'ancien « pedalboard n'est pas installé », trompeur depuis que l'hôte natif est le
+    moteur par défaut (pedalboard n'est plus livré)."""
+    if not IS_WINDOWS:
+        return "Les VST du PC ne se chargent que sous Windows (hôte natif NovaVSTHost)."
+    return ("Hôte VST natif introuvable (" + EXE_NAME + ") : le pont ne peut charger aucun VST. "
+            "Réinstalle le pont NOVA. Cherché : "
+            + " ; ".join({os.path.normcase(os.path.abspath(c)): c for c in host_exe_candidates()}.values()))
 
 
 def pedalboard_requested() -> bool:
