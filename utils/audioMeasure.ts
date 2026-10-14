@@ -4,7 +4,7 @@
  * `utils/loudness.ts`), crête vraie (dBTP) par suréchantillonnage à sinus
  * cardinal long, dynamique (PLR) et étendue de loudness (LRA simplifiée).
  */
-import { integratedLufs } from './loudness';
+import { integratedLufs, truePeakChannels } from './loudness';
 
 type Chans = Float32Array[];
 
@@ -18,46 +18,8 @@ const asBuffer = (ch: Chans, sampleRate: number) => ({
 /** Loudness intégrée (LUFS) ; -Infinity sur un silence. */
 export const lufsOf = (ch: Chans, sampleRate: number): number => integratedLufs(asBuffer(ch, sampleRate));
 
-/**
- * Crête vraie en dBTP. Par défaut ×8 avec 64 coefficients par phase
- * (plus exigeant que les 4 phases × 12 coefficients de la norme BS.1770) :
- * c'est l'arbitre des preuves du limiteur.
- */
-export function truePeakOf(ch: Chans, oversample = 8, taps = 64): number {
-  const half = taps / 2;
-  const phases: Float64Array[] = [];
-  const i0 = (x: number) => { let s = 1, t = 1; for (let k = 1; k < 200; k++) { const h = x / (2 * k); t *= h * h; s += t; if (t < 1e-14 * s) break; } return s; };
-  const beta = 9, ib = i0(beta);
-  for (let k = 1; k < oversample; k++) {
-    const frac = k / oversample, h = new Float64Array(taps);
-    let sum = 0;
-    for (let j = 0; j < taps; j++) {
-      const t = (j - half + 1) - frac;
-      const sinc = t === 0 ? 1 : Math.sin(Math.PI * t) / (Math.PI * t);
-      const r = t / (half + 0.5);
-      h[j] = Math.abs(r) >= 1 ? 0 : sinc * i0(beta * Math.sqrt(1 - r * r)) / ib;
-      sum += h[j];
-    }
-    for (let j = 0; j < taps; j++) h[j] /= sum;
-    phases.push(h);
-  }
-  let pk = 0;
-  for (const x of ch) {
-    const n = x.length;
-    for (let m = 0; m < n; m++) {
-      const a = Math.abs(x[m]); if (a > pk) pk = a;
-      if (m < half - 1 || m + half >= n) continue;
-      // Fenêtre rapide : inutile d'interpoler loin sous la crête courante.
-      if (Math.abs(x[m]) < pk * 0.5 && Math.abs(x[m + 1]) < pk * 0.5) continue;
-      for (const h of phases) {
-        let v = 0;
-        for (let j = 0; j < taps; j++) v += h[j] * x[m + j - half + 1];
-        const av = Math.abs(v); if (av > pk) pk = av;
-      }
-    }
-  }
-  return 20 * Math.log10(Math.max(pk, 1e-12));
-}
+/** Crête vraie en dBTP (polyphase, voir utils/loudness.ts). */
+export const truePeakOf = truePeakChannels;
 
 /** Crête échantillon (dBFS). */
 export function samplePeakOf(ch: Chans): number {

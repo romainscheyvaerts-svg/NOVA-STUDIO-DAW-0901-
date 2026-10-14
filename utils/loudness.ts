@@ -73,22 +73,56 @@ export function integratedLufs(buffer: AudioBuffer): number {
   return lufs(gated.reduce((a, b) => a + b, 0) / gated.length);
 }
 
-/** Crête vraie estimée (dBTP) : suréchantillonnage ×4 par interpolation cubique. */
-export function truePeakDb(buffer: AudioBuffer): number {
+/**
+ * Crête vraie en dBTP. Par défaut ×8 avec 64 coefficients par phase
+ * (plus exigeant que les 4 phases × 12 coefficients de la norme BS.1770) :
+ * c'est l'arbitre des preuves du limiteur.
+ */
+export function truePeakChannels(ch: Float32Array[], oversample = 8, taps = 64): number {
+  const half = taps / 2;
+  const phases: Float64Array[] = [];
+  const i0 = (x: number) => { let s = 1, t = 1; for (let k = 1; k < 200; k++) { const h = x / (2 * k); t *= h * h; s += t; if (t < 1e-14 * s) break; } return s; };
+  const beta = 9, ib = i0(beta);
+  for (let k = 1; k < oversample; k++) {
+    const frac = k / oversample, h = new Float64Array(taps);
+    let sum = 0;
+    for (let j = 0; j < taps; j++) {
+      const t = (j - half + 1) - frac;
+      const sinc = t === 0 ? 1 : Math.sin(Math.PI * t) / (Math.PI * t);
+      const r = t / (half + 0.5);
+      h[j] = Math.abs(r) >= 1 ? 0 : sinc * i0(beta * Math.sqrt(1 - r * r)) / ib;
+      sum += h[j];
+    }
+    for (let j = 0; j < taps; j++) h[j] /= sum;
+    phases.push(h);
+  }
   let pk = 0;
-  for (let c = 0; c < buffer.numberOfChannels; c++) {
-    const d = buffer.getChannelData(c);
-    for (let i = 1; i < d.length - 2; i++) {
-      const p0 = d[i - 1], p1 = d[i], p2 = d[i + 1], p3 = d[i + 2];
-      const a = Math.abs(p1); if (a > pk) pk = a;
-      for (let k = 1; k < 4; k++) {
-        const t = k / 4;
-        const v = 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-        const av = v < 0 ? -v : v; if (av > pk) pk = av;
+  for (const x of ch) {
+    const n = x.length;
+    for (let m = 0; m < n; m++) {
+      const a = Math.abs(x[m]); if (a > pk) pk = a;
+      if (m < half - 1 || m + half >= n) continue;
+      // Fenêtre rapide : inutile d'interpoler loin sous la crête courante.
+      if (Math.abs(x[m]) < pk * 0.5 && Math.abs(x[m + 1]) < pk * 0.5) continue;
+      for (const h of phases) {
+        let v = 0;
+        for (let j = 0; j < taps; j++) v += h[j] * x[m + j - half + 1];
+        const av = Math.abs(v); if (av > pk) pk = av;
       }
     }
   }
-  return 20 * Math.log10(Math.max(pk, 1e-9));
+  return 20 * Math.log10(Math.max(pk, 1e-12));
+}
+
+/**
+ * Crête vraie (dBTP) d'un AudioBuffer : polyphase ×4, 16 coefficients (norme BS.1770).
+ * Avant : interpolation cubique, qui lisait −1,07 dBTP une crête réelle de 0 dBTP placée entre deux
+ * échantillons (un export « −1 dBTP » pouvait sortir vers 0 dBTP).
+ */
+export function truePeakDb(buffer: AudioBuffer): number {
+  const ch: Float32Array[] = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) ch.push(buffer.getChannelData(c));
+  return truePeakChannels(ch, 4, 16);
 }
 
 export interface LoudnessResult { before: number; after: number; truePeak: number; gainDb: number; limitedByPeak: boolean }
