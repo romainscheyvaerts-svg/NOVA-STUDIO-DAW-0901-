@@ -107,6 +107,10 @@ def stop_bridge(p):
 def prepare(page, port=None, desktop=True):
     """port : redirige ws://127.0.0.1:8765 vers le vrai pont lancé sur ce port
     (l'appli Nova Studio installée peut occuper 8765)."""
+    # Navigateur headless (rendu logiciel) : avec 6 à 10 pistes de formes d'onde à l'écran,
+    # un appel Playwright peut attendre plus de 15 s alors que la page répond (aucune tâche
+    # longue mesurée dans la page, lot 6) : délai porté à 60 s.
+    page.set_default_timeout(60000)
     if desktop:
         page.add_init_script(DESKTOP_INIT)
         fake_login(page)
@@ -150,19 +154,25 @@ def dismiss_popups(page, wait_ms=5000):
 
 def open_stems_menu(page, label):
     dismiss_popups(page)
-    # Les clips sont dessinés (pas de texte dans la page) : on vise la piste « Beat »,
-    # à droite de son en-tête, sous la ligne de gain du clip (début du clip : 2 s).
-    y = None
+    # Les clips sont dessinés (pas de texte dans la page) : on vise la piste « Beat », à
+    # droite de son en-tête, sous la ligne de gain du clip (début du clip : 2 s). L'en-tête
+    # n'est pas au même endroit dans l'appli et sur le site (et « Beat » apparaît aussi dans
+    # le Beat Store) : on essaie chaque « Beat » à gauche jusqu'au menu qui propose les stems.
+    ys = []
     for _ in range(40):
-        y = page.evaluate("""() => { for (const e of document.querySelectorAll('span, div')) {
-            if (e.children.length || (e.textContent || '').trim() !== 'Beat') continue;
-            const r = e.getBoundingClientRect(); if (r.x > 320 && r.x < 620 && r.height) return r.y; } return null; }""")
-        if y:
+        ys = page.evaluate("""() => [...document.querySelectorAll('span, div')]
+            .filter(e => !e.children.length && (e.textContent || '').trim() === 'Beat')
+            .map(e => e.getBoundingClientRect()).filter(r => r.x >= 0 && r.x < 620 && r.height).map(r => r.y)""")
+        if ys:
             break
         page.wait_for_timeout(500)
-    page.mouse.click(900, y + 60, button="right")
-    page.wait_for_timeout(400)
-    menu_open_for(page, "Séparer en stems")  # sous-menu « Traitement »
+    for y in sorted(ys):
+        page.mouse.click(900, y + 60, button="right")
+        page.wait_for_timeout(400)
+        if menu_open_for(page, "Séparer en stems"):  # sous-menu « Traitement »
+            break
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
     item = page.get_by_role("menuitem", name=re.compile("Séparer en stems")).first
     title = item.get_attribute("title")
     shot(page, f"{label}_menu")
@@ -219,7 +229,7 @@ def wait_done(page, timeout=600):
 
 def stem_headers(page):
     """Nombre de pistes « … (stem) » du projet (état de NOVA, pas seulement celles à l'écran)."""
-    return page.evaluate("""() => (window.__novaEdit.getState().tracks || []).filter(t => /\(stem\)$/.test(t.name || '')).length""")
+    return page.evaluate("""() => (window.__novaEdit.getState().tracks || []).filter(t => /\\(stem\\)$/.test(t.name || '')).length""")
 
 
 def scenario_separation(page, log, res, vp):

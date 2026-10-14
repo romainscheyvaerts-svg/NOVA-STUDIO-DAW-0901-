@@ -865,6 +865,8 @@ export interface Track {
   inputDeviceId?: string; 
   outputTrackId: string;  
   instrumentId?: string | number; 
+  /** (lot 6) Stem séparé d'un beat (piste BEAT ou beat du catalogue) : mêmes règles que le beat (jamais rendu en fichier, jamais samplé ni envoyé à l'ingé). */
+  beatStem?: boolean;
   sends: TrackSend[];
   clips: Clip[];
   plugins: PluginInstance[];

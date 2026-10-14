@@ -15,6 +15,7 @@
  *   autotune du PC réglé sur la gamme du beat, mix piloté par Nova.
  * - v8 : séparation de stems (module optionnel Demucs installé à la demande sur le
  *   PC) : STEMS_STATUS / STEMS_INSTALL / STEMS_CANCEL / STEMS_SEPARATE.
+ *   Lot 6 : HELLO.stems_sets (2, 4, 6, « leadback »), STEMS_STATUS.sets, keep_files.
  * - v12 (R24) : voix par l'IA locale (module optionnel) : retirer la réverbe de la
  *   pièce (DeepFilterNet) et transcrire les paroles (Whisper) : VOICE_STATUS /
  *   VOICE_INSTALL / VOICE_CANCEL / VOICE_DEVERB / VOICE_TRANSCRIBE.
@@ -108,6 +109,8 @@ export interface BridgeState {
   paramsText?: boolean;
   /** (v8) Le pont sait séparer un clip en stems (module optionnel, installé à la demande). */
   stems?: boolean;
+  /** (lot 6) Jeux de stems connus du pont : 2 et 4 (v8), puis 6 et « leadback » (voix lead / chœurs). */
+  stemSets?: string[];
   /** (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost. */
   ara?: boolean;
   /** (v12) Melodyne / VocAlign en insert sur une piste, comme Pro Tools (document de la piste, lecture en direct). */
@@ -177,6 +180,8 @@ export interface StemsModuleStatus {
   variant: 'cpu' | 'cuda' | null;
   sizeBytes: number | null;
   outputRoot: string | null;
+  /** (lot 6) Par jeu de stems : prêt, ou taille à télécharger à la première séparation. */
+  sets: Partial<Record<'2' | '4' | '6' | 'leadback', { ready: boolean; downloadBytes: number }>> | null;
 }
 
 /** Événement du pont (STEMS_EVENT) : installation ou séparation en cours. */
@@ -188,14 +193,16 @@ export interface StemsEvent {
   message?: string;
   step?: string;
   device?: string;
+  /** « download » : téléchargement du modèle avant la séparation (6 pistes, voix lead / chœurs). */
+  phase?: string;
 }
 
 export interface SeparatedStem {
-  key: 'vocals' | 'instrumental' | 'drums' | 'bass' | 'other' | string;
+  key: 'vocals' | 'instrumental' | 'drums' | 'bass' | 'other' | 'guitar' | 'piano' | 'lead_vocals' | 'backing_vocals' | string;
   label: string;
   channels: Float32Array[];
   sampleRate: number;
-  /** WAV écrit sur le PC (Documents\Nova Studio\Stems\…). */
+  /** WAV écrit sur le PC (Documents\Nova Studio\Stems\…) ; vide pour un beat sous licence (rien gardé). */
   path: string;
 }
 
@@ -204,6 +211,8 @@ export interface SeparationResult {
   seconds: number;
   device: string;
   outdir: string;
+  /** false : aucun WAV gardé sur le PC (beat sous licence). */
+  kept?: boolean;
 }
 
 /** Erreur de séparation : code « not_installed », « cancelled » ou « error ». */
@@ -502,6 +511,7 @@ class NovaBridgeService {
             instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
+            stemSets: Array.isArray(hello.stems_sets) ? hello.stems_sets.map(String) : (hello.stems ? ['2', '4'] : []),
             ara: !!hello.ara && (Number(hello.version) || 0) >= BRIDGE_ARA_VERSION,
             araInsert: !!hello.ara_insert && (Number(hello.version) || 0) >= BRIDGE_ARA_INSERT_VERSION,
             calibrateGr: !!hello.calibrate_gr && (Number(hello.version) || 0) >= BRIDGE_CALIBRATE_VERSION,
@@ -1005,7 +1015,7 @@ class NovaBridgeService {
     const e: StemsEvent = {
       kind: msg.kind === 'install' ? 'install' : 'separate', event: String(msg.event || 'progress'),
       jobId: msg.job_id ?? null, pct: typeof msg.pct === 'number' ? msg.pct : undefined,
-      message: msg.message, step: msg.step, device: msg.device,
+      message: msg.message, step: msg.step, device: msg.device, ...(msg.phase ? { phase: String(msg.phase) } : {}),
     };
     // Une séparation qui avance n'a pas expiré : on repousse son délai.
     const reqId = e.jobId ? this.stemsJobs.get(e.jobId) : undefined;
@@ -1046,16 +1056,26 @@ class NovaBridgeService {
     return !!r.cancelled;
   }
 
-  /** Sépare un buffer (voix / instru ou 4 stems). Rejette avec StemsError. */
+  /** Le pont connecté connaît ce jeu de stems (6 pistes, voix lead / chœurs : Nova Studio à jour). */
+  supportsStemSet(set: 2 | 4 | 6 | 'leadback'): boolean {
+    return !!this.state.stems && (this.state.stemSets || ['2', '4']).includes(String(set));
+  }
+
+  /**
+   * Sépare un buffer (voix / instru, 4 ou 6 stems, voix lead / chœurs). Rejette avec StemsError.
+   * keepFiles=false (beat sous licence) : le pont ne garde aucun WAV sur le disque.
+   */
   async separateStems(opts: {
-    jobId: string; channels: Float32Array[]; sampleRate: number; stems: 2 | 4; project?: string; clip?: string;
+    jobId: string; channels: Float32Array[]; sampleRate: number; stems: 2 | 4 | 6 | 'leadback'; project?: string; clip?: string; keepFiles?: boolean;
   }): Promise<SeparationResult> {
     this.requireStems();
+    if (!this.supportsStemSet(opts.stems)) throw new StemsError('Mets à jour Nova Studio pour Windows pour ce choix de stems.', 'unavailable');
     const ws = this.ws!;
     const req_id = this.nextId++;
     const buf = buildType2Frame({
       action: 'STEMS_SEPARATE', req_id, job_id: opts.jobId, stems: opts.stems,
       sample_rate: Math.round(opts.sampleRate), project: opts.project || 'Projet', clip: opts.clip || 'clip',
+      keep_files: opts.keepFiles !== false,
     }, opts.channels);
     this.stemsJobs.set(opts.jobId, req_id);
     try {
@@ -1068,7 +1088,7 @@ class NovaBridgeService {
         this.pending.set(req_id, { resolve, reject, timer });
         ws.send(buf);
       });
-      return { stems: res.stems, seconds: Number(res.seconds) || 0, device: String(res.device || 'cpu'), outdir: String(res.outdir || '') };
+      return { stems: res.stems, seconds: Number(res.seconds) || 0, device: String(res.device || 'cpu'), outdir: String(res.outdir || ''), kept: res.kept !== false };
     } finally {
       this.stemsJobs.delete(opts.jobId);
     }
@@ -1437,6 +1457,9 @@ function parseStemsStatus(r: any): StemsModuleStatus {
     variant: r.variant === 'cuda' ? 'cuda' : r.variant === 'cpu' ? 'cpu' : null,
     sizeBytes: typeof r.size_bytes === 'number' ? r.size_bytes : null,
     outputRoot: r.output_root || null,
+    sets: r.sets && typeof r.sets === 'object'
+      ? Object.fromEntries(Object.entries(r.sets).map(([k, v]: [string, any]) => [k, { ready: !!v?.ready, downloadBytes: Number(v?.download_bytes) || 0 }]))
+      : null,
   };
 }
 

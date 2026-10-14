@@ -326,6 +326,8 @@ export const lastVstIndex = (t: Track): number => {
  */
 export const canBakeTrack = (t: Track): boolean =>
   t.id !== 'instrumental' && (t.instrumentId === undefined || t.instrumentId === null || t.instrumentId === '')
+  // Stems d'un beat (lot 6) : le beat séparé reste le beat.
+  && !t.beatStem
   // Sons des kits NOVA : jamais en fichier audio non plus (ils resteraient dans la sauvegarde).
   && !usesKitSounds(t);
 

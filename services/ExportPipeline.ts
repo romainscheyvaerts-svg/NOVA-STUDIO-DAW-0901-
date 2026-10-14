@@ -214,7 +214,7 @@ export async function runExport(allTracks: Track[], s: ExportSettings, projectMa
       if (!plan.length) throw new Error('Aucune piste à exporter (pistes vides ou muettes).');
       parts = plan.map(p => ({ label: p.label, tracks: p.tracks }));
     } else {
-      const estBeat = (t: Track) => t.id === 'instrumental' || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
+      const estBeat = (t: Track) => t.id === 'instrumental' || !!t.beatStem || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
       const sansBeat = tracks.filter(t => !estBeat(t));
       const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK' || !!t.bass808) && !t.isMuted && t.clips.some(c => !c.isMuted));
       if (!voix.length) throw new Error('Aucune de tes pistes (voix, batterie) à exporter.');

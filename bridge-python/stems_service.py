@@ -11,7 +11,9 @@ stems_worker.py dans un sous-processus caché, avec progression et annulation.
     svc.status()                                   → installé ? installation en cours ? taille, CPU/GPU
     svc.start_install(on_event, variant="cpu")     → installation en arrière-plan (thread)
     svc.cancel_install()
-    svc.separate(job_id, wav_in, outdir, stems=2|4, on_event=...)   (bloquant : à lancer dans un thread)
+    svc.separate(job_id, wav_in, outdir, stems=2|4|6|"leadback", on_event=...)   (bloquant : dans un thread)
+        6 pistes et voix lead / chœurs : le modèle manquant (55 Mo, ou 53 Mo + onnxruntime)
+        est téléchargé d'abord, dans la même progression, annulable.
     svc.cancel(job_id)
 
 Erreurs : StemsNotInstalled (module absent), StemsCancelled (annulé),
@@ -41,8 +43,16 @@ STEM_LABELS = {
     "instrumental": "Instru",
     "drums": "Batterie",
     "bass": "Basse",
+    "guitar": "Guitare",
+    "piano": "Piano",
     "other": "Autres",
+    "lead_vocals": "Voix lead",
+    "backing_vocals": "Chœurs",
 }
+# Jeux de stems : 2 (voix / instru), 4, 6 (htdemucs_6s) et voix lead / chœurs.
+STEM_SETS = ("2", "4", "6", "leadback")
+# Part de la barre de progression prise par un téléchargement de modèle avant la séparation.
+DOWNLOAD_SHARE = 25.0
 MAX_SECONDS = 20 * 60  # au-delà, mieux vaut couper le morceau
 
 
@@ -137,6 +147,7 @@ class StemsService:
         self.output_root = Path(output_root) if output_root else default_output_root()
         self.lock = threading.Lock()
         self.jobs: Dict[str, subprocess.Popen] = {}
+        self.addon_jobs: Dict[str, stems_install.Installer] = {}
         self.cancelled: set = set()
         self.installer: Optional[stems_install.Installer] = None
         self.install_thread: Optional[threading.Thread] = None
@@ -164,6 +175,11 @@ class StemsService:
 
     def status(self) -> dict:
         info = self.info() if self.installed() else None
+        variant = (info or {}).get("variant") or "cpu"
+        sets = None
+        if info is not None:
+            sets = {k: {"ready": stems_install.addon_ready(self.home, k),
+                        "download_bytes": stems_install.addon_download_bytes(self.home, k, variant)} for k in STEM_SETS}
         return {
             "installed": info is not None,
             "installing": self.installing(),
@@ -173,7 +189,8 @@ class StemsService:
             "variant": (info or {}).get("variant"),
             "model": (info or {}).get("model"),
             "size_bytes": (info or {}).get("size_bytes"),
-            "busy": len(self.jobs),
+            "busy": len(self.jobs) + len(self.addon_jobs),
+            "sets": sets,
         }
 
     # --- installation ------------------------------------------------------------
@@ -232,22 +249,76 @@ class StemsService:
         stamp = time.strftime("%Y-%m-%d %H-%M-%S")
         return self.output_root / safe_name(project, "Projet") / f"{safe_name(clip)} {stamp}"
 
-    def separate(self, job_id: str, wav_in: Path, outdir: Path, stems: int = 4,
+    def _ensure_addon(self, job_id: str, stem_set: str, emit: Callable[[dict], None]) -> bool:
+        """Télécharge le modèle d'un jeu de stems s'il manque (dans la progression de la
+        séparation). True si un téléchargement a eu lieu."""
+        if stems_install.addon_ready(self.home, stem_set):
+            return False
+        info = self.info() or {}
+        variant = info.get("variant") or "cpu"
+        what = "6 pistes" if stem_set == "6" else "voix lead / chœurs"
+        size = stems_install.addon_download_bytes(self.home, stem_set, variant)
+        emit({"event": "progress", "pct": 0.5, "phase": "download",
+              "message": f"Premier usage : téléchargement du modèle {what} (~{size / 1e6:.0f} Mo, une seule fois)"})
+
+        def relay(ev: dict):
+            if ev.get("event") == "progress":
+                emit({"event": "progress", "phase": "download", "message": ev.get("message") or "Téléchargement",
+                      "pct": round(DOWNLOAD_SHARE * float(ev.get("pct") or 0) / 100.0, 1)})
+
+        inst = stems_install.Installer(self.home, variant, info.get("model") or "htdemucs", on_event=relay)
+        with self.lock:
+            if job_id in self.cancelled:
+                inst.close()
+                raise StemsCancelled()
+            self.addon_jobs[job_id] = inst
+        try:
+            inst.install_addon(stem_set)
+        except stems_install.InstallCancelled:
+            raise StemsCancelled()
+        except Exception as e:
+            if job_id in self.cancelled:
+                raise StemsCancelled()
+            raise StemsError(f"Téléchargement du modèle {what} impossible : {str(e)[:200]}. "
+                             "Vérifie ta connexion Internet puis réessaie (rien n'est perdu).")
+        finally:
+            with self.lock:
+                self.addon_jobs.pop(job_id, None)
+            inst.close()
+        return True
+
+    def separate(self, job_id: str, wav_in: Path, outdir: Path, stems=4,
                  on_event: Optional[Callable[[dict], None]] = None, device: str = "auto",
                  model: Optional[str] = None) -> dict:
         """Bloquant. Renvoie {stems:[{key,label,path,rms}], seconds, device}."""
-        if stems not in (2, 4):
-            raise StemsError("Choisis 2 stems (voix / instru) ou 4 stems")
+        stem_set = str(stems)
+        if stem_set not in STEM_SETS:
+            raise StemsError("Choisis 2 stems (voix / instru), 4, 6 ou voix lead / chœurs")
         if not self.installed():
             raise StemsNotInstalled()
         if self.installing():
             raise StemsError("Installation de la séparation de stems en cours : attends la fin")
         self._refresh_worker()
-        info = self.info() or {}
+        self.cancelled.discard(job_id)
+
+        def emit(ev: dict):
+            if on_event is not None:
+                try:
+                    on_event(ev)
+                except Exception:
+                    pass
+
         outdir = Path(outdir)
+        try:
+            downloaded = self._ensure_addon(job_id, stem_set, emit)
+        except StemsCancelled:
+            self.cancelled.discard(job_id)
+            self._drop_cancelled(wav_in, outdir)
+            raise
+        info = self.info() or {}
         outdir.mkdir(parents=True, exist_ok=True)
         cmd = [str(self.python()), "-I", str(self.worker()), "--input", str(wav_in), "--outdir", str(outdir),
-               "--stems", str(stems), "--model", model or info.get("model") or "htdemucs", "--device", device]
+               "--stems", stem_set, "--model", model or info.get("model") or "htdemucs", "--device", device]
         env = dict(os.environ)
         env.update({"TORCH_HOME": str(self.home / "models"), "PYTHONIOENCODING": "utf-8"})
         env.pop("PYTHONPATH", None)
@@ -255,7 +326,10 @@ class StemsService:
         with self.lock:
             if job_id in self.jobs:
                 raise StemsError("Séparation déjà en cours pour ce clip")
-            self.cancelled.discard(job_id)
+            if job_id in self.cancelled:  # annulé juste après le téléchargement du modèle
+                self.cancelled.discard(job_id)
+                self._drop_cancelled(wav_in, outdir)
+                raise StemsCancelled()
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                                     creationflags=NO_WINDOW, cwd=str(self.home))
             self.jobs[job_id] = proc
@@ -282,28 +356,17 @@ class StemsService:
                     done = ev
                 elif kind == "error":
                     error = ev.get("message")
-                elif on_event is not None:
-                    try:
-                        on_event(ev)
-                    except Exception:
-                        pass
+                else:
+                    if downloaded and kind == "progress" and isinstance(ev.get("pct"), (int, float)):
+                        ev = {**ev, "pct": round(DOWNLOAD_SHARE + (100 - DOWNLOAD_SHARE) * ev["pct"] / 100.0, 1)}
+                    emit(ev)
             rc = proc.wait()
         finally:
             with self.lock:
                 self.jobs.pop(job_id, None)
         if job_id in self.cancelled:
             self.cancelled.discard(job_id)
-            shutil.rmtree(outdir / ".partiel", ignore_errors=True)
-            try:
-                # Le clip envoyé (Original.wav, écrit par le pont dans ce dossier) ne sert plus :
-                # sans lui, une séparation annulée laissait un dossier « Original.wav » seul
-                # dans Documents\Nova Studio\Stems à chaque annulation.
-                if Path(wav_in).parent.resolve() == outdir.resolve():
-                    Path(wav_in).unlink(missing_ok=True)
-                if not any(outdir.iterdir()):
-                    outdir.rmdir()
-            except OSError:
-                pass
+            self._drop_cancelled(wav_in, outdir)
             raise StemsCancelled()
         if rc != 0 or done is None:
             raise StemsError(friendly_error(error or " | ".join(err_tail[-3:]) or f"code {rc}"))
@@ -318,15 +381,35 @@ class StemsService:
                 dst = src
             result.append({"key": s["key"], "label": label, "path": str(dst), "rms": s.get("rms")})
         return {"stems": result, "seconds": done.get("seconds"), "device": done.get("device"),
-                "outdir": str(outdir)}
+                "outdir": str(outdir), "set": stem_set, "model": done.get("model"),
+                "karaoke_device": done.get("karaoke_device")}
+
+    @staticmethod
+    def _drop_cancelled(wav_in: Path, outdir: Path):
+        outdir = Path(outdir)
+        shutil.rmtree(outdir / ".partiel", ignore_errors=True)
+        try:
+            # Le clip envoyé (Original.wav, écrit par le pont dans ce dossier) ne sert plus :
+            # sans lui, une séparation annulée laissait un dossier « Original.wav » seul
+            # dans Documents\Nova Studio\Stems à chaque annulation.
+            if Path(wav_in).parent.resolve() == outdir.resolve():
+                Path(wav_in).unlink(missing_ok=True)
+            if outdir.is_dir() and not any(outdir.iterdir()):
+                outdir.rmdir()
+        except OSError:
+            pass
 
     def cancel(self, job_id: str) -> bool:
         with self.lock:
+            inst = self.addon_jobs.get(job_id)
             proc = self.jobs.get(job_id)
-            if proc is None:
+            if proc is None and inst is None:
                 return False
             self.cancelled.add(job_id)
-        stems_install.kill_tree(proc.pid)
+        if inst is not None:
+            inst.cancel()
+        if proc is not None:
+            stems_install.kill_tree(proc.pid)
         return True
 
 

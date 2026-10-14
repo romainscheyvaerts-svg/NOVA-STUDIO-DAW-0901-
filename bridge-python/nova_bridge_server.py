@@ -65,8 +65,13 @@ Protocole (WebSocket ws://127.0.0.1:8765)
     STEMS_STATUS                → installed, installing, install (dernier événement), variant, size_bytes
     STEMS_INSTALL [variant]     → installation en arrière-plan (événements STEMS_EVENT kind=install)
     STEMS_CANCEL job_id | install=true
-    STEMS_SEPARATE              en trame binaire type 2 : {action, req_id, job_id, stems:2|4,
-                                  sample_rate, nch, nframes, project, clip} + float32 entrelacés.
+    STEMS_SEPARATE              en trame binaire type 2 : {action, req_id, job_id, stems:2|4|6|"leadback",
+                                  sample_rate, nch, nframes, project, clip, keep_files} + float32 entrelacés.
+                                  (lot 6) 6 = voix, batterie, basse, guitare, piano, autres ; « leadback » =
+                                  voix lead, chœurs, instru ; modèle manquant téléchargé d'abord (même
+                                  progression). keep_files=false (beat sous licence) : aucun WAV ne reste
+                                  sur le disque (dossier temporaire effacé après l'envoi).
+                                  HELLO annonce stems_sets ; STEMS_STATUS donne sets {ready, download_bytes}.
                                   Progression : STEMS_EVENT {kind:"separate", job_id, event, pct, message}.
                                   Puis une trame type 2 par stem : {action:"STEMS_STEM", req_id, job_id,
                                   key, label, index, count, nch, nframes, sample_rate, path} + audio,
@@ -177,11 +182,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import struct
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -619,6 +627,8 @@ class NovaBridgeServer:
                               "instruments": vst_host.HAS_VST,
                               "license_events": license_watch.IS_WINDOWS,
                               "params_text": True, "stems": True, "calibrate_gr": vst_host.HAS_VST,
+                              # (lot 6) jeux de stems : 2, 4, 6 pistes, voix lead / chœurs
+                              "stems_sets": list(stems_service.STEM_SETS),
                               # (v12, R24) voix par l'IA locale : retirer la réverbe, transcrire les paroles
                               "voice": True,
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
@@ -1237,6 +1247,7 @@ def _stems_server_methods():
     async def _stems_separate(self, ws, meta: dict, data):
         req_id = meta.get("req_id")
         job_id = str(meta.get("job_id") or req_id)
+        temp_dirs = []
         try:
             nch = max(1, min(2, int(meta.get("nch") or 2)))
             nframes = int(meta.get("nframes") or (data.size // nch))
@@ -1247,8 +1258,17 @@ def _stems_server_methods():
                 raise stems_service.StemsError("Clip trop long (20 minutes maximum) : coupe-le avant de le séparer.")
             if not self.stems.installed():
                 raise stems_service.StemsNotInstalled()
+            stem_set = str(meta.get("stems") or 4)
+            if stem_set not in stems_service.STEM_SETS:
+                raise stems_service.StemsError("Jeu de stems inconnu : mets à jour Nova Studio.")
+            keep = meta.get("keep_files", True) is not False
             audio = data[: nframes * nch].reshape(nframes, nch).T
-            outdir = self.stems.output_dir(str(meta.get("project") or "Projet"), str(meta.get("clip") or "clip"))
+            if keep:
+                outdir = self.stems.output_dir(str(meta.get("project") or "Projet"), str(meta.get("clip") or "clip"))
+            else:
+                # Beat sous licence : séparé dans un dossier temporaire effacé juste après l'envoi.
+                outdir = Path(tempfile.mkdtemp(prefix="nova-stems-"))
+                temp_dirs.append(outdir)
             outdir.mkdir(parents=True, exist_ok=True)
             src = outdir / "Original.wav"
             stems_service.write_wav_float(src, audio, sr)
@@ -1259,16 +1279,18 @@ def _stems_server_methods():
 
             t = time.time()
             res = await self.loop.run_in_executor(
-                self.stems_pool, lambda: self.stems.separate(job_id, src, outdir, int(meta.get("stems") or 4), on_event))
+                self.stems_pool, lambda: self.stems.separate(job_id, src, outdir, stem_set, on_event))
             logger.info(f"🎚️ Stems ({len(res['stems'])}) : {nframes / sr:.1f} s séparées en {time.time() - t:.1f} s ({res['device']})")
             for i, s in enumerate(res["stems"]):
                 audio_s, sr_s = await self.loop.run_in_executor(self.misc_pool, stems_service.read_wav, s["path"])
                 head = {"action": "STEMS_STEM", "req_id": req_id, "job_id": job_id, "key": s["key"],
                         "label": s["label"], "index": i, "count": len(res["stems"]), "nch": int(audio_s.shape[0]),
-                        "nframes": int(audio_s.shape[1]), "sample_rate": sr_s, "path": s["path"]}
+                        "nframes": int(audio_s.shape[1]), "sample_rate": sr_s, "path": s["path"] if keep else ""}
                 await self._send(ws, build_render_frame(head, audio_s.T.reshape(-1)))
+            if not keep:
+                res = {**res, "outdir": "", "stems": [{**s, "path": ""} for s in res["stems"]]}
             await self._send(ws, build_render_frame({"action": "STEMS_SEPARATE", "req_id": req_id, "job_id": job_id,
-                                                     "success": True, "nch": 0, "nframes": 0, **res}, None))
+                                                     "success": True, "nch": 0, "nframes": 0, "kept": keep, **res}, None))
         except Exception as e:
             code = ("not_installed" if isinstance(e, stems_service.StemsNotInstalled)
                     else "cancelled" if isinstance(e, stems_service.StemsCancelled) else "error")
@@ -1276,6 +1298,9 @@ def _stems_server_methods():
                 logger.error(f"STEMS_SEPARATE : {e}")
             await self._send(ws, build_render_frame({"action": "STEMS_SEPARATE", "req_id": req_id, "job_id": job_id,
                                                      "success": False, "error": str(e), "code": code}, None))
+        finally:
+            for d in temp_dirs:  # beat sous licence : rien ne reste sur le disque
+                shutil.rmtree(d, ignore_errors=True)
 
     for fn in (_a_stems_status, _a_stems_install, _a_stems_cancel, _stems_separate):
         setattr(NovaBridgeServer, fn.__name__, fn)

@@ -56,6 +56,14 @@ autres), en nouvelles pistes calées sur le clip.
   caché (CREATE_NO_WINDOW), progression JSON, annulation (processus tué), erreurs claires.
 - WAV écrits dans `Documents\Nova Studio\Stems\<projet>\<clip> <date>\`
   (`Original.wav`, `Voix.wav`, `Instru.wav` ou `Batterie.wav`, `Basse.wav`, `Autres.wav`).
+- **Lot 6 (BandLab Splitter)** : 6 stems (voix, batterie, basse, guitare, piano, autres ;
+  modèle `htdemucs_6s`, 55 Mo) et voix lead / chœurs (Demucs pour la voix, puis
+  « UVR-MDX-NET Karaoke 2 » en ONNX, 53 Mo + onnxruntime). Ces modèles se téléchargent
+  à la première séparation qui les demande (`StemsService._ensure_addon` →
+  `Installer.install_addon`), dans la même barre de progression, annulable. HELLO annonce
+  `stems_sets`, STEMS_STATUS donne `sets` (prêt / taille à télécharger). `keep_files=false`
+  (beat sous licence) : séparation dans un dossier temporaire effacé après l'envoi.
+  Licences vérifiées : `LICENCES_MODELES.md`.
 - Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_stems*.py"`.
 - Licences : Demucs (code et modèles pré-entraînés publiés avec) MIT, Meta Platforms ;
   PyTorch BSD-3 ; torchaudio BSD-2 ; uv MIT/Apache-2.0 ; python-build-standalone

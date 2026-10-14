@@ -24,7 +24,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 for a in ("--input", "--outdir", "--model", "--device"):
     ap.add_argument(a)
-ap.add_argument("--stems", type=int)
+ap.add_argument("--stems")
 a = ap.parse_args()
 mode = (Path(__file__).parent / "mode.txt").read_text().strip()
 def emit(**kw):
@@ -41,7 +41,9 @@ for i in range(steps):
     emit(event="progress", pct=5 + 90 * (i + 1) / steps, message="Séparation en cours")
     time.sleep(0.05 if mode == "slow" else 0)
 out = Path(a.outdir)
-keys = ["vocals", "instrumental"] if a.stems == 2 else ["vocals", "drums", "bass", "other"]
+keys = {"2": ["vocals", "instrumental"], "4": ["vocals", "drums", "bass", "other"],
+        "6": ["vocals", "drums", "bass", "guitar", "piano", "other"],
+        "leadback": ["lead_vocals", "backing_vocals", "instrumental"]}[a.stems]
 res = []
 for k in keys:
     p = out / (k + ".wav")
@@ -111,6 +113,12 @@ class StemsServiceTest(unittest.TestCase):
         self.install_fake("ok")
         with self.assertRaises(StemsError):
             self.svc.separate("j3", self.wav, self.out / "c", 3)
+
+    def test_separation_strings_and_ints_alike(self):
+        self.install_fake("ok")
+        a = self.svc.separate("j3a", self.wav, self.out / "ca", "4")
+        b = self.svc.separate("j3b", self.wav, self.out / "cb", 4)
+        self.assertEqual([s["key"] for s in a["stems"]], [s["key"] for s in b["stems"]])
 
     # --- erreurs ---------------------------------------------------------------------
 
@@ -204,6 +212,138 @@ class StemsServiceTest(unittest.TestCase):
     def test_safe_name(self):
         self.assertEqual(stems_service.safe_name('Beat: "test"/v2?'), "Beat test v2")
         self.assertEqual(stems_service.safe_name("   "), "clip")
+
+
+class StemSetsTest(unittest.TestCase):
+    """Lot 6 : 6 pistes et voix lead / chœurs (modèle téléchargé à la première séparation)."""
+
+    def setUp(self):
+        import stems_install
+        self.si = stems_install
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.home = root / "stems"
+        self.out = root / "out"
+        self.home.mkdir()
+        self.svc = StemsService(self.home, self.out, python_exe=Path(sys.executable))
+        self.svc._refresh_worker = lambda: None
+        (self.home / "stems_worker.py").write_text(FAKE_WORKER, encoding="utf-8")
+        (self.home / "mode.txt").write_text("ok")
+        (self.home / "installed.json").write_text(json.dumps({"variant": "cuda", "model": "htdemucs"}))
+        self.wav = root / "in.wav"
+        sr = 8000
+        t = np.arange(sr) / sr
+        stems_service.write_wav_float(self.wav, np.stack([np.sin(2 * np.pi * 440 * t)] * 2).astype("float32"), sr)
+        self.ready = set()
+        self.calls = []
+        self.dl_mode = "ok"
+        self._orig = (self.si.addon_ready, self.si.Installer.install_addon)
+        test = self
+
+        def fake_ready(home, name):
+            return name in ("2", "4") or name in test.ready
+
+        def fake_install(inst, name, pct_from=0.0, pct_to=100.0):
+            test.calls.append((name, inst.variant))
+            steps = 400 if test.dl_mode == "slow" else 5
+            for i in range(1, steps + 1):
+                inst.check_cancel()
+                inst.progress(min(100.0, 100 * i / 5), "model", "Téléchargement du modèle")
+                time.sleep(0.02)
+            if test.dl_mode == "fail":
+                raise RuntimeError("urlopen error [Errno 11001] getaddrinfo failed")
+            test.ready.add(name)
+
+        self.si.addon_ready = fake_ready
+        self.si.Installer.install_addon = fake_install
+
+    def tearDown(self):
+        self.si.addon_ready, self.si.Installer.install_addon = self._orig
+        self.tmp.cleanup()
+
+    def test_status_lists_sets_with_download_size(self):
+        st = self.svc.status()
+        self.assertEqual(set(st["sets"]), {"2", "4", "6", "leadback"})
+        self.assertTrue(st["sets"]["4"]["ready"])
+        self.assertFalse(st["sets"]["6"]["ready"])
+        self.assertEqual(st["sets"]["4"]["download_bytes"], 0)
+
+    def test_download_size_real_rules(self):
+        si = self.si
+        si.addon_ready = self._orig[0]
+        self.assertEqual(si.addon_download_bytes(self.home, "6", "cpu"), si.HTDEMUCS_6S_BYTES)
+        self.assertEqual(si.addon_download_bytes(self.home, "leadback", "cpu"), si.KARAOKE_BYTES + si.ORT_BYTES["cpu"])
+        self.assertEqual(si.addon_download_bytes(self.home, "leadback", "cuda"), si.KARAOKE_BYTES + si.ORT_BYTES["cuda"])
+        self.assertEqual(si.addon_download_bytes(self.home, "4", "cpu"), 0)
+        # Fichier tronqué (téléchargement coupé) : pas prêt.
+        f = si.addon_files(self.home)["6"]
+        f.parent.mkdir(parents=True)
+        f.write_bytes(b"x" * 10)
+        self.assertFalse(si.addon_ready(self.home, "6"))
+
+    def test_six_stems_downloads_model_then_separates(self):
+        events = []
+        res = self.svc.separate("s6", self.wav, self.out / "six", 6, events.append)
+        self.assertEqual([s["label"] for s in res["stems"]], ["Voix", "Batterie", "Basse", "Guitare", "Piano", "Autres"])
+        self.assertEqual(self.calls, [("6", "cuda")])
+        pcts = [e["pct"] for e in events if e.get("event") == "progress"]
+        self.assertEqual(pcts, sorted(pcts))  # la barre ne recule jamais
+        dl = [e for e in events if e.get("phase") == "download"]
+        self.assertTrue(dl and all(e["pct"] <= stems_service.DOWNLOAD_SHARE for e in dl))
+        self.assertIn("6 pistes", dl[0]["message"])
+        self.assertIn("Mo", dl[0]["message"])
+        self.assertGreater(max(pcts), stems_service.DOWNLOAD_SHARE)
+        # 2e fois : rien à télécharger.
+        self.calls.clear()
+        self.svc.separate("s6b", self.wav, self.out / "six2", "6")
+        self.assertEqual(self.calls, [])
+
+    def test_leadback_labels(self):
+        self.ready.add("leadback")
+        res = self.svc.separate("lb", self.wav, self.out / "lb", "leadback")
+        self.assertEqual([s["label"] for s in res["stems"]], ["Voix lead", "Chœurs", "Instru"])
+        self.assertEqual(res["set"], "leadback")
+        for s in res["stems"]:
+            self.assertTrue(Path(s["path"]).is_file())
+
+    def test_unknown_set(self):
+        for bad in (3, "8", "karaoke"):
+            with self.assertRaises(StemsError):
+                self.svc.separate("bad", self.wav, self.out / "bad", bad)
+
+    def test_download_failure_is_actionable(self):
+        self.dl_mode = "fail"
+        with self.assertRaises(StemsError) as cm:
+            self.svc.separate("f6", self.wav, self.out / "f6", 6)
+        self.assertNotIsInstance(cm.exception, StemsCancelled)
+        self.assertIn("connexion", str(cm.exception))
+        self.assertEqual(self.svc.status()["busy"], 0)
+
+    def test_cancel_during_download_leaves_nothing(self):
+        self.dl_mode = "slow"
+        outdir = self.out / "Projet" / "clip dl"
+        outdir.mkdir(parents=True)
+        src = outdir / "Original.wav"
+        src.write_bytes(self.wav.read_bytes())
+        got, started = {}, threading.Event()
+
+        def run():
+            try:
+                self.svc.separate("c6", src, outdir, "leadback", lambda e: started.set())
+            except Exception as e:  # noqa: BLE001
+                got["e"] = e
+
+        th = threading.Thread(target=run)
+        th.start()
+        self.assertTrue(started.wait(15))
+        time.sleep(0.1)
+        self.assertTrue(self.svc.cancel("c6"))
+        th.join(20)
+        self.assertFalse(th.is_alive())
+        self.assertIsInstance(got.get("e"), StemsCancelled)
+        self.assertFalse(outdir.exists())
+        self.assertNotIn("leadback", self.ready)
+        self.assertEqual(self.svc.status()["busy"], 0)
 
 
 class InstallerCancelTest(unittest.TestCase):
