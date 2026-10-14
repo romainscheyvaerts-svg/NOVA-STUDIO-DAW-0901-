@@ -377,9 +377,9 @@ export const VOICE_PRESET_CALIB: Record<string, VoicePresetCalib> = {
   "head2": 0,
   "busOut": -9,
   "busGain": 21,
-  "outLufs": -16.33,
-  "spreadDb": 1.27,
-  "truePeakDb": -3.99
+  "outLufs": -16.15,
+  "spreadDb": 1.72,
+  "truePeakDb": -3.81
  },
  "bus-voix-punch": {
   "thr1": -40.8,
@@ -389,8 +389,8 @@ export const VOICE_PRESET_CALIB: Record<string, VoicePresetCalib> = {
   "gr2": 0,
   "head2": 0,
   "busOut": -9.8,
-  "outLufs": -16.21,
-  "spreadDb": 1.31,
-  "truePeakDb": -4.06
+  "outLufs": -16.07,
+  "spreadDb": 1.27,
+  "truePeakDb": -3.69
  }
 };

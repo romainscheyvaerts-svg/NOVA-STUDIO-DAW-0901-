@@ -199,9 +199,12 @@ export function presetChain(p: PresetDef, calib: VoicePresetCalib = NEUTRAL_CALI
   if (p.denoise) out.push({ type: 'DENOISER', params: { ...DENOISE_PARAMS } });
   if (p.tune) out.push({ type: 'AUTOTUNE', params: { speed: tuneSpeedFromMs(p.tune.ms), humanize: p.tune.humanize, mix: p.tune.mix ?? 1 } });
   if (p.shift) out.push({ type: 'VOICESHIFT', params: { ...V21_DEFAULTS.VOICESHIFT(), link: 0, output: 0, ...p.shift } });
-  // Toujours un égaliseur (coupe-bas de la règle maison, bandes des macros du One Knob).
-  const eq = p.eq || { hp: p.role === 'lead' ? HOUSE_RULES.leadHighpassHz : HOUSE_RULES.otherHighpassHz };
-  out.push({ type: 'PROEQ12', params: { masterGain: 1, bands: buildEqBands(eq) } });
+  // Toujours un égaliseur sur une voix (coupe-bas de la règle maison, bandes des macros du One Knob) ;
+  // jamais sur un bus voix (son coupe-bas couperait le grave du lead).
+  if (!p.bus) {
+    const eq = p.eq || { hp: p.role === 'lead' ? HOUSE_RULES.leadHighpassHz : HOUSE_RULES.otherHighpassHz };
+    out.push({ type: 'PROEQ12', params: { masterGain: 1, bands: buildEqBands(eq) } });
+  }
   if (p.comp1) {
     out.push({
       type: 'COMPRESSOR',

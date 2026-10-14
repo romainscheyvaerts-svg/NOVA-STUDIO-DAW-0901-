@@ -97,7 +97,12 @@ def main():
                 res[pid] = r
                 print(json.dumps(r, ensure_ascii=False), flush=True)
                 (OUT / "calage_en_cours.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
-            (OUT / "calage.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+            # Fusion avec le calage précédent (un recalage partiel garde les autres presets).
+            prev = {}
+            try: prev = json.loads((OUT / "calage.json").read_text(encoding="utf-8"))
+            except Exception: pass
+            prev.update(res)
+            (OUT / "calage.json").write_text(json.dumps(prev, ensure_ascii=False, indent=1), encoding="utf-8")
         if a.mesurer:
             rows = {}
             for pid in ids:
@@ -128,7 +133,7 @@ def main():
         browser.close()
     # Écrit APRÈS la fermeture : modifier un module de l'appli recharge la page (Vite).
     if a.caler:
-        write_calib({pid: r["calib"] for pid, r in json.loads((OUT / "calage.json").read_text(encoding="utf-8")).items()})
+        write_calib({pid: r["calib"] for pid, r in json.loads((OUT / "calage.json").read_text(encoding="utf-8")).items() if pid in ids})
     errs = log.errors()
     (OUT / "journal_labo.json").write_text(json.dumps({"secs": round(time.time() - t0), "erreurs": errs[:50]}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"fini en {round(time.time() - t0)} s, {len(errs)} erreurs console")

@@ -22,6 +22,11 @@ describe('chat (Nova ingé son) : chaîne voix', () => {
     expect(b.track?.voiceChain?.amounts?.presence).toBeCloseTo(0.4);
     expect(runVoiceChatAction('ONE_KNOB', { macro: 'volume', amount: 1 }, all[0], { allTracks: all }).track).toBeNull();
     expect(runVoiceChatAction('APPLY_VOICE_PRESET', { preset: 'inexistant' }, all[0], { allTracks: all }).track).toBeNull();
+    // Règle maison : FET 76 / Leveler 2A sur un bus, jamais sur une piste.
+    expect(runVoiceChatAction('APPLY_VOICE_PRESET', { preset: 'bus-voix-maison' }, all[0], { allTracks: all }).message).toMatch(/bus voix, pas sur une piste/);
+    const bus = t({ id: 'bv', name: 'Bus voix', type: TrackType.BUS });
+    const rb = runVoiceChatAction('APPLY_VOICE_PRESET', { preset: 'bus-voix-maison' }, bus, { allTracks: [...all, bus] });
+    expect(rb.track?.plugins.map(p => p.type)).toEqual(['FET76', 'LEVELER2A']);
   });
   it('validation du chat : actions connues, piste obligatoire, preset et macro vérifiés', () => {
     for (const a of ['DESCRIBE_SOUND', 'APPLY_VOICE_PRESET', 'ONE_KNOB']) expect(KNOWN_ACTIONS.has(a)).toBe(true);

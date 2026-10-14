@@ -4,7 +4,7 @@
  * Poser un preset ou une description = UNE modification de la piste (un Ctrl+Z).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { Track } from '../../types';
+import { TrackType, type Track } from '../../types';
 import {
   VOICE_PRESETS, ROLE_NAMES, STYLE_NAMES, applyVoicePreset, describeVoicePreset, findVoicePreset, roleFromTrackName,
   type VoicePreset, type VoicePresetRole, type VoicePresetStyle,
@@ -70,7 +70,18 @@ const VoicePresetsDialog: React.FC<Props> = ({ track, allTracks, projectKey, pro
     ? 'aucune prise sur la piste : trim laissé tel quel, il se calera quand tu reposeras le preset après la prise'
     : `trim ${fmtDb(trimDb)} (ta prise : ${String(lufs).replace('.', ',')} LUFS)`;
 
+  /** Bus où sort la piste (les presets « Bus voix » s'y posent, jamais sur une piste : règle maison). */
+  const outBus = allTracks.find(t => t.id === track.outputTrackId && t.type === TrackType.BUS && t.id !== 'master');
+
   const applyPreset = async (p: VoicePreset) => {
+    if (p.role === 'bus') {
+      if (!outBus) { setStatus({ kind: 'error', text: 'Les presets « Bus voix » se posent sur un bus : envoie d’abord tes voix dans un bus (Sortie de la tranche).' }); return; }
+      const r = applyVoicePreset(outBus, p, { ...ctx, keepFader: true });
+      const msg = `✅ « ${p.name} » posé sur le bus ${outBus.name} (FET 76 : 5 dB max${p.bus?.leveler ? ', Leveler 2A : 2 dB max' : ''}) · Ctrl+Z pour revenir`;
+      onApply(r.track, msg);
+      setStatus({ kind: 'ok', text: msg });
+      return;
+    }
     setBusy(true);
     try {
       const lufs = await measure();
@@ -199,11 +210,19 @@ const VoicePresetsDialog: React.FC<Props> = ({ track, allTracks, projectKey, pro
                   <p className="mt-1 text-[11px] text-nv-muted">{describeVoicePreset(p)}</p>
                   <p className="mt-1 text-[10px] text-nv-muted" title={sourcesText(p)}><i className="fas fa-book-open mr-1" aria-hidden="true" />Recettes : {sourcesShort(p) || 'règles du studio'}{p.sources.includes('M') ? ' · règles Make Music' : ''}</p>
                   <div className="mt-2 flex-1" />
-                  <button type="button" disabled={busy} onClick={() => void applyPreset(p)} data-testid="voice-preset-apply"
-                    title={`Remplace la chaîne de « ${track.name} » (un seul Ctrl+Z pour revenir)`}
-                    className={`${btn} ${on ? 'border border-cyan-400 text-cyan-500' : 'bg-cyan-500 text-black hover:bg-cyan-400'}`}>
-                    {on ? 'Reposer (recaler sur ma prise)' : `Poser sur ${track.name}`}
-                  </button>
+                  {p.role === 'bus' ? (
+                    <button type="button" disabled={busy || !outBus} onClick={() => void applyPreset(p)} data-testid="voice-preset-apply"
+                      title={outBus ? `Remplace la chaîne du bus « ${outBus.name} » (un seul Ctrl+Z pour revenir)` : 'Envoie d’abord tes voix dans un bus (Sortie de la tranche) : ces presets ne se posent jamais sur une piste.'}
+                      className={`${btn} ${outBus ? 'bg-cyan-500 text-black hover:bg-cyan-400' : 'border border-nv-line text-nv-muted'}`}>
+                      {outBus ? `Poser sur le bus ${outBus.name}` : 'Pour un bus voix : sortie de la piste vers un bus'}
+                    </button>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => void applyPreset(p)} data-testid="voice-preset-apply"
+                      title={`Remplace la chaîne de « ${track.name} » (un seul Ctrl+Z pour revenir)`}
+                      className={`${btn} ${on ? 'border border-cyan-400 text-cyan-500' : 'bg-cyan-500 text-black hover:bg-cyan-400'}`}>
+                      {on ? 'Reposer (recaler sur ma prise)' : `Poser sur ${track.name}`}
+                    </button>
+                  )}
                 </li>
               );
             })}

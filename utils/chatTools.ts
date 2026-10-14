@@ -708,6 +708,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
     case 'APPLY_VOICE_PRESET': {
       const pr = findVoicePreset(String(p.preset || p.presetId || p.name || ''));
       if (!pr) return reject(`preset voix « ${p.preset || p.presetId || p.name || '?'} » inconnu`);
+      if ((pr.role === 'bus') !== (track!.type === TrackType.BUS)) return reject(pr.role === 'bus' ? `« ${pr.name} » se pose sur un bus voix (règle maison), pas sur une piste` : `« ${pr.name} » se pose sur une piste voix, pas sur un bus`);
       p.preset = pr.id;
       return ok(`Preset voix « ${pr.name} » posé sur ${tn}`);
     }

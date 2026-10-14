@@ -89,7 +89,7 @@ def make_project(path: Path):
     for tid, nm, f, pk in (("lead", "Lead", "REC_220.wav", -8), ("back1", "Back 1", "REC_70.wav", -14), ("adlib", "Adlib", "REC_201.wav", -11)):
         data, dur = take(f, 12, pk)
         audio[tid] = data
-        tracks.append({**base, "id": tid, "name": nm, "type": "AUDIO", "color": "#a78bfa",
+        tracks.append({**base, "id": tid, "name": nm, "type": "AUDIO", "color": "#a78bfa", "outputTrackId": "bus-voix" if tid == "back1" else "master",
                        "clips": [{"id": f"c-{tid}", "name": nm, "type": "AUDIO", "audioRef": f"audio/{tid}.wav", "color": "#a78bfa",
                                   "fadeIn": 0, "fadeOut": 0, "gain": 1.0, "start": 0, "offset": 0.0, "duration": round(dur, 3)}]})
 
@@ -99,6 +99,7 @@ def make_project(path: Path):
         ret("send-delay", "Écho 1/4", {"id": "d1", "type": "DELAY", "name": "DELAY", "isEnabled": True, "latency": 0, "params": {"division": "1/4", "feedback": 0.35, "mix": 1, "bpm": 140}}),
         ret("send-verb-short", "Réverbe courte", {"id": "v1", "type": "REVERB", "name": "REVERB", "isEnabled": True, "latency": 0, "params": {"decay": 1.2, "preDelay": 0.02, "mix": 1, "size": 0.4, "mode": "PLATE"}}),
         ret("send-verb-long", "Réverbe longue", {"id": "v2", "type": "REVERB", "name": "REVERB", "isEnabled": True, "latency": 0, "params": {"decay": 3.5, "preDelay": 0.05, "mix": 1, "size": 0.9, "mode": "HALL"}}),
+        {**base, "id": "bus-voix", "name": "Bus voix", "type": "BUS", "color": "#fbbf24", "volume": 1, "clips": []},
         {**base, "id": "master", "name": "MASTER", "type": "BUS", "volume": 1, "outputTrackId": "", "clips": []},
     ]
     state = {"id": "qa-presets-voix", "name": "Presets voix (lot 8)", "bpm": 140, "timeSignature": {"numerator": 4, "denominator": 4},
@@ -183,6 +184,10 @@ def run_pc(page, theme, zpath):
     check(f"{tag} · envois réverbe et écho posés (effets temporels en envoi)", {s["id"] for s in t["sends"] if s["level"] > 0} >= {"send-delay", "send-verb-short"}, t["sends"])
     check(f"{tag} · Nova Tune dans la tonalité du projet (F# mineur)", next(p for p in t["plugins"] if p["type"] == "AUTOTUNE")["params"].get("rootKey") == 6)
     shot(page, f"{tag}_04_trap_lead_pose")
+    # Presets « Bus voix » : jamais sur une piste (Lead sort sur le master : bouton grisé, raison dite)
+    page.locator("[data-testid=voice-role-bus]").click(); page.wait_for_timeout(200)
+    bb = page.locator("[data-testid=voice-preset-card][data-preset-id=bus-voix-maison] [data-testid=voice-preset-apply]")
+    check(f"{tag} · presets de bus grisés sur une piste qui sort au master, raison dite", bb.is_disabled() and "bus" in bb.inner_text(), bb.inner_text())
     page.keyboard.press("Escape"); page.wait_for_timeout(300)
     # Macro Brillance à 100 %
     page.locator("[data-testid=one-knob-macros] [data-macro=brillance]").click(); page.wait_for_timeout(150)
@@ -230,6 +235,14 @@ def run_pc(page, theme, zpath):
     check(f"{tag} · Backs : coupe-bas ≥ 200 Hz, coupe-haut ≤ 15 kHz, ouverts sur un côté, plus bas", eq[0]["frequency"] >= 200 and eq[11]["isEnabled"] and eq[11]["frequency"] <= 15000
           and abs(tb["pan"]) > 0.3 and tb["volume"] < 0.6, [eq[0]["frequency"], eq[11]["frequency"], tb["pan"], tb["volume"]])
     shot(page, f"{tag}_08_backs")
+    # Back 1 sort dans « Bus voix » : le preset de bus s'y pose (FET 76 puis Leveler 2A, rien sur la piste)
+    page.locator("[data-testid=voice-role-bus]").click(); page.wait_for_timeout(200)
+    apply_preset(page, "bus", "bus-voix-maison", tag)
+    page.locator("[data-testid=voice-presets-status]", has_text=re.compile("sur le bus")).wait_for(timeout=10000)
+    bus = track(page, "bus-voix")
+    check(f"{tag} · « Bus voix (règle maison) » posé sur le bus : FET 76 puis Leveler 2A", [p["type"] for p in bus["plugins"]] == ["FET76", "LEVELER2A"], [p["type"] for p in bus["plugins"]])
+    check(f"{tag} · la piste Back 1 garde sa chaîne de voix", [p["type"] for p in track(page, "back1")["plugins"]][-1] == "OPTO_VINTAGE")
+    shot(page, f"{tag}_09_bus_voix")
     ov = overflow_report(page)
     check(f"{tag} · aucun débordement horizontal", not [o for o in ov if o["kind"] in ("page-hscroll", "off-right")], ov[:3])
 

@@ -6,7 +6,7 @@
  * Pur : renvoie la piste modifiée et la phrase de compte rendu ; App.tsx branche (une
  * modification de piste, donc un Ctrl+Z avec le reste du message).
  */
-import type { OneKnobMacro, Track } from '../types';
+import { TrackType, type OneKnobMacro, type Track } from '../types';
 import { decrireTonSon } from './describeSound';
 import { applyOneKnob, MACRO_ORDER, macroDef } from './oneKnob';
 import { applyVoicePreset, findVoicePreset, SEND_IDS, type ApplyVoicePresetOptions } from './voicePresets';
@@ -38,6 +38,7 @@ export function runVoiceChatAction(name: string, payload: Record<string, any>, t
   if (name === 'APPLY_VOICE_PRESET') {
     const p = findVoicePreset(String(payload.preset || payload.presetId || payload.name || ''));
     if (!p) return { track: null, message: `Preset voix « ${payload.preset} » inconnu.` };
+    if ((p.role === 'bus') !== (track.type === TrackType.BUS)) return { track: null, message: p.role === 'bus' ? `« ${p.name} » se pose sur un bus voix, pas sur une piste.` : `« ${p.name} » se pose sur une piste voix, pas sur un bus.` };
     const r = applyVoicePreset(track, p, opts);
     return { track: r.track, message: `✅ « ${p.name} » posé sur ${track.name}${r.notes.length ? ` · ${r.notes.join(' · ')}` : ''}` };
   }
