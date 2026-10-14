@@ -28,6 +28,16 @@ export interface ClipEncodeInput {
   width?: number;
   height?: number;
   fps?: number;
+  /**
+   * Lot 2b · Instant exact de chaque image (s depuis le début, croissant ; WebCodecs seulement).
+   * La vidéo est alors à fréquence variable, comme celle d'un téléphone : chaque image de la
+   * caméra garde SON instant, sans arrondi sur une grille de 30 images/s.
+   */
+  frameTimes?: number[];
+  /** Appelé avant de dessiner l'image i (ex. : décoder l'image filmée). */
+  prepareFrame?: (index: number) => Promise<void>;
+  /** Débit vidéo (b/s), 8 Mb/s par défaut. */
+  bitrate?: number;
 }
 
 export interface ClipEncodeResult {
@@ -128,7 +138,8 @@ async function encodeWebCodecs(input: ClipEncodeInput, videoCodec: string): Prom
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
     target,
-    video: { codec: 'avc', width: W, height: H, frameRate: fps },
+    // Fréquence variable : base de temps fine (1/57 600 s), sinon les instants seraient arrondis à 1/30 s.
+    video: input.frameTimes ? { codec: 'avc', width: W, height: H } : { codec: 'avc', width: W, height: H, frameRate: fps },
     audio: { codec: 'aac', numberOfChannels: 2, sampleRate: sr },
     fastStart: 'in-memory',
     // Même décalage pour les deux pistes : le calage son / image reste exact.
@@ -136,7 +147,7 @@ async function encodeWebCodecs(input: ClipEncodeInput, videoCodec: string): Prom
   });
   let failure: unknown = null;
   const venc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failure = e; } });
-  venc.configure({ codec: videoCodec, width: W, height: H, bitrate: VIDEO_BITRATE, framerate: fps, avc: { format: 'avc' }, latencyMode: 'quality' } as VideoEncoderConfig);
+  venc.configure({ codec: videoCodec, width: W, height: H, bitrate: input.bitrate ?? VIDEO_BITRATE, framerate: fps, avc: { format: 'avc' }, latencyMode: 'quality' } as VideoEncoderConfig);
   const aenc = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: e => { failure = e; } });
   aenc.configure({ codec: AAC, sampleRate: sr, numberOfChannels: 2, bitrate: AUDIO_BITRATE });
   const check = () => {
@@ -159,17 +170,24 @@ async function encodeWebCodecs(input: ClipEncodeInput, videoCodec: string): Prom
     }
     check();
     // Images : dessinées et encodées une par une.
-    const frames = Math.max(1, Math.round(input.duration * fps));
+    const ft = input.frameTimes;
+    const frames = ft ? ft.length : Math.max(1, Math.round(input.duration * fps));
     const canvas = makeCanvas(W, H);
     const g = (canvas.getContext('2d', { alpha: false }) || canvas.getContext('2d')) as Ctx;
     const frameDur = Math.round(1e6 / fps);
     let drawMs = 0;
+    let lastKey = -Infinity;
     for (let i = 0; i < frames; i++) {
+      if (input.prepareFrame) { await input.prepareFrame(i); check(); }
+      const t = ft ? ft[i] : i / fps;
       const d0 = performance.now();
-      input.drawFrame(g, i / fps, i);
+      input.drawFrame(g, t, i);
       drawMs += performance.now() - d0;
-      const frame = new VideoFrame(canvas as any, { timestamp: Math.round((i * 1e6) / fps), duration: frameDur });
-      venc.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      const dur = ft ? Math.max(1, Math.round(((i + 1 < frames ? ft[i + 1] : input.duration) - t) * 1e6)) : frameDur;
+      const frame = new VideoFrame(canvas as any, { timestamp: Math.round(t * 1e6), duration: dur });
+      const key = ft ? t - lastKey >= 2 : i % (fps * 2) === 0;
+      if (key) lastKey = t;
+      venc.encode(frame, { keyFrame: key });
       frame.close();
       while (venc.encodeQueueSize > 6) { await new Promise(r => setTimeout(r, 2)); check(); }
       if (i % 6 === 0) { input.onProgress?.(i / frames); await tick(); check(); }

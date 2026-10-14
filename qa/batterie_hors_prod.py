@@ -70,6 +70,9 @@ BATTERIE = [
     # 14/10/2026 : prise et horloge : entrée trouée, débranchée, coupée, fil principal bloqué, rendu affamé, page masquée :
     # chaque clic reste à sa place dans la prise (0 échantillon), mesure du recalage du flux MediaStream de Chrome.
     ("prise_horloge", []),
+    # Lot 2b BandLab (14/10/2026) : caméra pendant la prise (fausse caméra de Chrome, flash + clic au même instant), vidéo de la
+    # performance (mix + image, MP4 mesuré par ffprobe / ffmpeg : écart ≤ 1 image), stockage plein, prise audio identique ; bureau et téléphone.
+    ("video_prise", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).
