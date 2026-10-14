@@ -123,8 +123,11 @@ async ({ rate, cfg }) => {
   e.setSafetyLimiter(false);
   await new Promise(r => setTimeout(r, 1500));   // worklets chargés, IR de la reverb prête
 
-  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.port.onmessage = (e) => { this.on = !!e.data; }; }
-    process(inputs) { const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([currentFrame, i[0].slice(), (i[1] || i[0]).slice()]); return true; } }
+  // Horloge de l'enregistreur : jamais en arrière. Sous charge, Chrome livre parfois plusieurs blocs
+  // avec le même currentFrame (en retard de 128 ou 256) : placé tel quel, un bloc en écrasait un autre
+  // et laissait un trou de 128 (écart de milliers de LSB, 100 % des échantillons « reçus »). Voir engine/blockClock.ts.
+  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.next = -1; this.port.onmessage = (e) => { this.on = !!e.data; }; }
+    process(inputs) { const late = this.next >= 0 && currentFrame < this.next; const f = late ? this.next : currentFrame; this.next = f + 128; const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([f, i[0].slice(), (i[1] || i[0]).slice(), late ? 1 : 0]); return true; } }
     registerProcessor('nova-qa-rec-fidel', R);`;
   if (window.__qaRecFidel !== e.ctx) { await e.ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([recSrc], { type: 'application/javascript' }))); window.__qaRecFidel = e.ctx; }
 
@@ -169,7 +172,7 @@ async ({ rate, cfg }) => {
       const prof = []; const W = Math.round(0.25 * SR);
       for (let a = 0; a < n; a += W) { let m = 0; for (let i = a; i < Math.min(n, a + W); i++) m = Math.max(m, Math.abs(L[i] - EL[i]), Math.abs(Rr[i] - ER[i])); prof.push(+(20 * Math.log10(m + 1e-30)).toFixed(0)); }
       return { attente_silence_ms, echantillons: got, attendus: n, ecart_max_lsb16: +(maxd * 32768).toFixed(4), ecart_max_dbfs: +(20 * Math.log10(maxd + 1e-30)).toFixed(1),
-        a_s: +(from + at_ / SR).toFixed(4), crete: +peak.toFixed(4), crete_lecture: +peakL.toFixed(4), decalage_clic_ech: decal, profil_dbfs_par_quart_de_seconde: prof };
+        a_s: +(from + at_ / SR).toFixed(4), crete: +peak.toFixed(4), crete_lecture: +peakL.toFixed(4), decalage_clic_ech: decal, etiquettes_en_retard: blocks.reduce((s, b) => s + (b[3] || 0), 0), profil_dbfs_par_quart_de_seconde: prof };
     };
     const essais = [];
     for (let k = 0; k < 3; k++) { const c = await capture(); essais.push(c); if (c.ecart_max_lsb16 <= 1 && c.echantillons >= c.attendus * 0.999) break; }
@@ -296,8 +299,11 @@ async ({ path, SR, name, sets, change }) => {
     try { const b = await e.renderProject(prep.tracks, DUR, 0, SR); return [b.getChannelData(0).slice(), b.getChannelData(1).slice()]; }
     finally { prep.cleanup?.(); }
   };
-  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.port.onmessage = (e) => { this.on = !!e.data; }; }
-    process(inputs) { const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([currentFrame, i[0].slice(), (i[1] || i[0]).slice()]); return true; } }
+  // Horloge de l'enregistreur : jamais en arrière. Sous charge, Chrome livre parfois plusieurs blocs
+  // avec le même currentFrame (en retard de 128 ou 256) : placé tel quel, un bloc en écrasait un autre
+  // et laissait un trou de 128 (écart de milliers de LSB, 100 % des échantillons « reçus »). Voir engine/blockClock.ts.
+  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.next = -1; this.port.onmessage = (e) => { this.on = !!e.data; }; }
+    process(inputs) { const late = this.next >= 0 && currentFrame < this.next; const f = late ? this.next : currentFrame; this.next = f + 128; const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([f, i[0].slice(), (i[1] || i[0]).slice(), late ? 1 : 0]); return true; } }
     registerProcessor('nova-qa-rec-fidel-vst', R);`;
   if (window.__qaRecFidelVst !== e.ctx) { await e.ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([recSrc], { type: 'application/javascript' }))); window.__qaRecFidelVst = e.ctx; }
   const capture = async () => {

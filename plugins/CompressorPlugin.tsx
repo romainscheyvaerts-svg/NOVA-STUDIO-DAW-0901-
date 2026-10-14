@@ -3,6 +3,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule, fadeInOnInsert, isOfflineContext } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { blockClockSource } from '../engine/blockClock';
 import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 
@@ -63,7 +64,7 @@ export interface CompressorParams {
  *    crete isolee se relache vite ; effet plus discret en VCA ;
  *  - makeupGain est desormais le gain de compensation REEL (plus de gain cache).
  */
-const COMP_WORKLET_CODE = `
+const COMP_WORKLET_CODE = `${blockClockSource()}
 class VocalCompressorProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
@@ -100,7 +101,7 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     this.msg = 0; this.grPeak = 0;
     this.gen = 0; this.fresh = true;
     // Veille (engine/effectSleep) : entrée muette depuis quietRun échantillons, cœur au repos.
-    this.quietRun = 0; this.rest = false; this.lastFrame = -1;
+    this.quietRun = 0; this.rest = false; this.clock = { next: -1 };
     this.aQdnLog = Math.log(Math.exp(-1 / (2.5 * sampleRate)));
   }
   setCfg(c) {
@@ -230,10 +231,10 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
     const listen = useKey && cfg.keyListen >= 0.5;
     // Bloc(s) sauté(s) : la chaîne dormait (veille). Les détecteurs et la « charge »
-    // évoluent comme si les blocs muets avaient été calculés (voir catchUp).
-    const fr = currentFrame;
-    if (this.lastFrame >= 0 && fr > this.lastFrame + n) this.catchUp(fr - this.lastFrame - n);
-    this.lastFrame = fr;
+    // évoluent comme si les blocs muets avaient été calculés (voir catchUp). Une étiquette
+    // currentFrame en retard (Chrome sous charge) n'est pas un saut : engine/blockClock.
+    const skipped = framesSkipped(this.clock, currentFrame, n);
+    if (skipped > 0) this.catchUp(skipped);
     if (p.resetGen && p.resetGen[0] !== this.gen) { this.gen = p.resetGen[0]; this.reset(); }
     if (cfg.scHpFreq !== this.lastFc) this.setHighpass(cfg.scHpFreq);
     const T = p.threshold[0];

@@ -72,8 +72,11 @@ async ({ rate, veille, fx }) => {
   tracks.forEach(t => e.updateTrack(t, tracks));
   e.setSafetyLimiter(false);
   await new Promise(r => setTimeout(r, 1500));
-  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.port.onmessage = (e) => { this.on = !!e.data; }; }
-    process(inputs) { const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([currentFrame, i[0].slice(), (i[1] || i[0]).slice()]); return true; } }
+  // Horloge de l'enregistreur : jamais en arrière. Sous charge, Chrome livre parfois plusieurs blocs
+  // avec le même currentFrame (en retard de 128 ou 256) : placé tel quel, un bloc en écrasait un autre
+  // et laissait un trou de 128 (écart de milliers de LSB, 100 % des échantillons « reçus »). Voir engine/blockClock.ts.
+  const recSrc = `class R extends AudioWorkletProcessor { constructor() { super(); this.on = false; this.next = -1; this.port.onmessage = (e) => { this.on = !!e.data; }; }
+    process(inputs) { const late = this.next >= 0 && currentFrame < this.next; const f = late ? this.next : currentFrame; this.next = f + 128; const i = inputs[0]; if (this.on && i && i.length) this.port.postMessage([f, i[0].slice(), (i[1] || i[0]).slice(), late ? 1 : 0]); return true; } }
     registerProcessor('nova-qa-rec-veille', R);`;
   if (window.__qaRecVeille !== e.ctx) { await e.ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([recSrc], { type: 'application/javascript' }))); window.__qaRecVeille = e.ctx; }
   const n = Math.round(DUR * SR);
@@ -108,7 +111,7 @@ async ({ rate, veille, fx }) => {
     let maxd = 0, at_ = -1, peak = 0;
     for (let i = 0; i < n; i++) { const d = Math.max(Math.abs(L[i] - EL[i]), Math.abs(Rr[i] - ER[i])); if (d > maxd) { maxd = d; at_ = i; } peak = Math.max(peak, Math.abs(EL[i])); }
     return { echantillons: got, attendus: n, ecart_max_lsb16: +(maxd * 32768).toFixed(4), ecart_max_dbfs: +(20 * Math.log10(maxd + 1e-30)).toFixed(1), a_s: +(at_ / SR).toFixed(4),
-      crete: +peak.toFixed(3), mises_en_veille: s1.sleeps - s0.sleeps, reveils: s1.wakes - s0.wakes, pistes_en_veille_max: maxAsleep };
+      crete: +peak.toFixed(3), etiquettes_en_retard: blocks.reduce((s, b) => s + (b[3] || 0), 0), mises_en_veille: s1.sleeps - s0.sleeps, reveils: s1.wakes - s0.wakes, pistes_en_veille_max: maxAsleep };
   };
   const essais = [];
   for (let k = 0; k < 3; k++) { const c = await capture(); essais.push(c); if (c.ecart_max_lsb16 <= 1 && c.echantillons >= c.attendus * 0.999) break; }

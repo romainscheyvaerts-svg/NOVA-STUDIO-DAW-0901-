@@ -3,6 +3,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { loadWorkletModule } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { createDeesserCore } from '../engine/deesserCore';
+import { blockClockSource } from '../engine/blockClock';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { Faceplate, HwWindow, Knob, SegmentMeter, ToggleSwitch } from './hw';
 
@@ -80,8 +81,7 @@ const LISTEN_LABELS = [
   { label: 'Ce qui est retiré', help: 'Écoute uniquement ce que le de-esser enlève : on doit n’y entendre que des « s ».' },
 ];
 
-const WORKLET_CODE = `
-const createDeesserCore = (${createDeesserCore.toString()});
+const WORKLET_CODE = `${blockClockSource()}const createDeesserCore = (${createDeesserCore.toString()});
 const __ap = ${JSON.stringify(DEESS_AP)};
 class NovaDeesserProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -98,7 +98,7 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     this.core = createDeesserCore(sampleRate);
     this.core.setParams(this.params);
     this.dirty = false;
-    this.lastFrame = -1;
+    this.clock = { next: -1 };
     this.zero = new Float32Array(128);
     this.blocks = 0;
     this.port.onmessage = (e) => {
@@ -109,9 +109,9 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
   }
   process(inputs, outputs, parameters) {
     // Bloc(s) sauté(s) : la chaîne dormait (veille), le cœur rattrape les blocs muets.
-    const fr = currentFrame;
-    if (this.lastFrame >= 0 && fr > this.lastFrame + 128) this.core.catchUp(fr - this.lastFrame - 128);
-    this.lastFrame = fr;
+    // Étiquette currentFrame en retard (Chrome sous charge) : pas un saut (engine/blockClock).
+    const skipped = framesSkipped(this.clock, currentFrame, 128);
+    if (skipped > 0) this.core.catchUp(skipped);
     // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
     if (parameters.__resetGen && parameters.__resetGen[0] !== (this.gen || 0)) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     // Réglages automatisables : l'AudioParam fait foi (automation programmée au bloc près).
