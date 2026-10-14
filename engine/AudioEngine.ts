@@ -1491,9 +1491,30 @@ export class AudioEngine {
     // attend qu'ils soient prets avant de lancer le rendu.
     const pendingPlugins: Promise<unknown>[] = [];
 
-    // Pistes qui reçoivent du son d'autres pistes (sortie ou envoi) : bus, retours d'effets.
-    const feeders = new Set<string>();
-    tracks.forEach(t => { if (t.outputTrackId) feeders.add(t.outputTrackId); (t.sends || []).forEach(sd => { if (sd.id) feeders.add(sd.id); }); });
+    // Pistes qui portent vraiment du son : un clip joué, une piste d'instrument, une piste gelée,
+    // ou une sortie / un envoi venant d'une telle piste (de proche en proche). Un retour d'effets
+    // ou un bus qui ne reçoit QUE des pistes vides ne rend que des zéros, en lecture comme ici :
+    // on ne le calcule pas. Sans ça, depuis la source muette « tenue » (engine/keepAlive), les
+    // réverbes et échos d'un modèle de séance (pistes voix encore vides) calculaient du silence
+    // pendant tout le rendu : export et mesures 5 fois plus lents (163 s rendues en 55 s au lieu de 10).
+    const audible = new Set<string>();
+    for (const t of tracks) {
+      if (isTrackFrozen(t) || (t.type !== TrackType.AUDIO && t.type !== TrackType.BUS && t.type !== TrackType.SEND) || this.getPlayableClips(t, tracks).some(c => !c.isMuted)) audible.add(t.id);
+    }
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const t of tracks) {
+        if (!audible.has(t.id)) continue;
+        // Mêmes envois que ceux câblés plus bas : un envoi coupé, à zéro (sans automation) ou muet n'apporte rien.
+        const liveSends = (t.sends || []).filter(sd => {
+          const auto = playedLanes(t).some(l => l.parameterName === `send::${sd.id}` && l.points.length > 0);
+          return sd.id && sd.isEnabled && (auto || (sd.level > 0 && !sd.isMuted)) && sd.id !== t.id && !isFeedCovered(t, sd.id, tracks);
+        });
+        for (const dest of [t.outputTrackId, ...liveSends.map(sd => sd.id)]) {
+          if (dest && !audible.has(dest)) { audible.add(dest); changed = true; }
+        }
+      }
+    }
 
     // --- 1. Une chaine par piste : input -> [plugins] -> gain -> panner -> output
     for (const track of tracks) {
@@ -1526,8 +1547,8 @@ export class AudioEngine {
       // rendraient que du silence (ou le souffle d'un Lo-fi). Le Mix auto pose 8 effets,
       // dont l'Auto-Tune, sur chaque piste voix, même vide : la démo MP3 d'un artiste
       // (1 prise, 4 pistes vides) prenait ~4 min au lieu d'environ 1 (audit UX du 08/10).
-      const silentTrack = !frozen && (track.type === TrackType.AUDIO || track.type === TrackType.BUS) && !feeders.has(track.id)
-        && !this.getPlayableClips(track, tracks).some(c => !c.isMuted);
+      // (bus et retours d'effets compris quand rien d'audible n'y entre : voir « audible » plus haut)
+      const silentTrack = !audible.has(track.id);
       const prePlugins = silentTrack ? [] : frozen ? ((uncoveredClips(track).length > 0 || isFrozenBus(track)) ? preFreezePlugins(track) : []) : (track.plugins || []);
       const postPlugins = frozen ? postFreezePlugins(track) : [];
       let offlineLatency = 0;
