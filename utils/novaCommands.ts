@@ -3,6 +3,8 @@ import { findVocalMixStyle } from './vocalPresets';
 import { listTakes, selectTakeActions } from './takes';
 import { parseVstCommand } from './novaVstCommands';
 import { novaBridge } from '../services/NovaBridge';
+import { getVocalRole } from './vocalRoles';
+import { numberedTracks } from './chatTools';
 
 /**
  * Commandes de Nova comprises SANS l'IA : exécution immédiate, même hors
@@ -31,6 +33,27 @@ function voiceTrack(st: DAWState, msg: string): Track | undefined {
   if (/ad.?lib/.test(msg)) return byName(/ad.?lib/);
   const sel = voices.find(t => t.id === st.selectedTrackId);
   return sel || voices.find(t => t.id === 'track-rec-main') || voices[0];
+}
+
+/**
+ * Pistes voix visées par un geste d'ingé : « les leads » (toutes), « la lead », « les backs »,
+ * « les harmonies », « les ad-libs », « toutes les voix » ; sinon la voix sélectionnée.
+ */
+function voiceTargets(st: DAWState, msg: string): Track[] {
+  const voices = st.tracks.filter(isVoice);
+  const role = (r: string) => voices.filter(t => getVocalRole(t) === r);
+  if (/\b(toutes les voix|les voix|tout le monde)\b/.test(msg)) return voices;
+  if (/\bleads\b/.test(msg)) return role('lead');
+  if (/\bbacks?\b|\bdoubles?\b/.test(msg)) return role('back');
+  if (/harmo/.test(msg)) return role('harmony');
+  if (/ad ?libs?/.test(msg)) return role('adlib');
+  if (/\blead\b|voix principale/.test(msg)) {
+    const leads = role('lead');
+    const main = leads.find(t => t.id === st.selectedTrackId) || leads.find(t => t.id === 'track-rec-main') || leads[0];
+    return main ? [main] : [];
+  }
+  const v = voiceTrack(st, msg);
+  return v ? [v] : [];
 }
 
 const pct = (v: number) => `${Math.round(v * 100)} %`;
@@ -133,6 +156,42 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   // Seulement une demande d'annulation explicite : « annule la boucle » ou
   // « annule l'autotune » déclenchaient Ctrl+Z (et pouvaient retirer une prise).
   if (/^(annule|annule ca|annule ca stp|annule la derniere (action|modif|modification)|ctrl z|reviens en arriere|defais|defais ca)[ !.?]*$/.test(msg)) return say('↩️ Annulé.', { action: 'UNDO', payload: {} });
+
+  // --- Gestes d'ingé (sans l'IA, même hors ligne) ---
+  // « supprime la piste 3 » : numéro tel qu'affiché (sans les retours d'effets ni le master). Confirmation dans le chat.
+  const delTrack = msg.match(/\b(supprime|efface|vire|enleve|retire)\b.*\bpiste (\d{1,3})\b/);
+  if (delTrack) {
+    const list = numberedTracks(st);
+    const n = parseInt(delTrack[2], 10);
+    const t = list[n - 1];
+    if (!t) return say(`Il n'y a pas de piste ${n} : ta séance en compte ${list.length}.`);
+    return say(`🗑 Piste ${n} (${t.name}) : je la supprime dès que tu confirmes (Ctrl+Z la ramène).`,
+      { action: 'DELETE_TRACK', payload: { trackId: t.id }, description: `Supprimer la piste ${n} (${t.name})` });
+  }
+  // « coupe-bas à 80 sur les leads », « coupe-haut à 15k sur les backs » : EQ de la piste (F6 / Pro-Q chez Romain).
+  const hpf = msg.match(/\b(coupe bas|passe haut|hpf|high ?pass|low ?cut)\b\D{0,12}(\d{2,5}(?:[.,]\d)?)\s*(k|khz)?\b/);
+  const lpf = msg.match(/\b(coupe haut|passe bas|lpf|low ?pass|high ?cut)\b\D{0,12}(\d{1,5}(?:[.,]\d)?)\s*(k|khz)?\b/);
+  if (hpf || lpf) {
+    const hz = (m: RegExpMatchArray | null) => {
+      if (!m) return undefined;
+      const v = parseFloat(m[2].replace(',', '.'));
+      return Math.round(m[3] || v < 30 ? v * 1000 : v);
+    };
+    const targets = voiceTargets(st, msg);
+    if (!targets.length) return say("Je ne trouve pas de piste voix pour poser l'EQ : crée ou sélectionne la piste d'abord.");
+    const params: Record<string, number> = {};
+    if (hpf) params.hpf = hz(hpf)!;
+    if (lpf) params.lpf = hz(lpf)!;
+    const what = [params.hpf ? `coupe-bas à ${params.hpf} Hz` : '', params.lpf ? `coupe-haut à ${params.lpf >= 1000 ? `${params.lpf / 1000} kHz` : `${params.lpf} Hz`}` : ''].filter(Boolean).join(' et ');
+    return say(`🎛️ EQ : ${what} sur ${targets.map(t => t.name).join(', ')}.`,
+      ...targets.map(t => ({ action: 'UPDATE_PLUGIN', payload: { trackId: t.id, pluginType: 'PROEQ12', params } } as AIAction)));
+  }
+  // « exporte en MP3 » : ouvre l'export (payant selon l'offre, prix affiché dans la fenêtre). Confirmation dans le chat.
+  if (/\b(export\w*|bounce)\b/.test(msg) && !/\b(aaf|pro ?tools|omf)\b/.test(msg)) {
+    const fmt = /\bmp3\b/.test(msg) ? 'mp3' : /\bwav\b/.test(msg) ? 'wav' : undefined;
+    return say(`📦 Je t'ouvre l'export${fmt ? ` (${fmt.toUpperCase()})` : ''} dès que tu confirmes. L'export suit ton offre (instru achetée, export du projet ou Nova Pro) : le prix s'affiche dans la fenêtre et c'est toi qui valides le paiement.`,
+      { action: 'OPEN_EXPORT', payload: fmt ? { format: fmt } : {}, description: `Ouvrir l'export${fmt ? ` en ${fmt.toUpperCase()}` : ''}` });
+  }
 
   // --- Prises ---
   if (/\b(supprime|efface|vire|enleve)\b.*\b(derniere )?prise\b/.test(msg) && voice) {

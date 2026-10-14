@@ -8,7 +8,21 @@ import { novaAttention, tipPillLabel } from '../utils/novaAttention';
 
 /** Bouton de réponse rapide affiché sous un message de Nova. */
 interface ChatChoice { label: string; action?: AIAction; actions?: AIAction[]; message?: string }
-type ChatMessage = AIChatMessage & { choices?: ChatChoice[] };
+
+/** Compte rendu de ce que Nova a fait pour un message (App.tsx, runChatActions). */
+export interface ChatRunReport {
+  results: { ok: boolean; text: string; reason?: string; notes?: string[] }[];
+  /** Actions sensibles en attente de « Oui, fais-le » (supprimer, exporter, publier…). */
+  pending: { action: AIAction; label: string; confirm: string }[];
+}
+
+type ChatMessage = AIChatMessage & {
+  choices?: ChatChoice[];
+  results?: ChatRunReport['results'];
+  pending?: ChatRunReport['pending'];
+  /** Réponse de l'artiste à la confirmation. */
+  pendingState?: 'asked' | 'running' | 'done' | 'refused';
+};
 
 /** Les styles de mix, proposés en boutons : fonctionne même sans IA. */
 const MIX_STYLE_CHOICES: ChatChoice[] = VOCAL_MIX_STYLES.map(s => ({
@@ -19,8 +33,14 @@ const MIX_STYLE_CHOICES: ChatChoice[] = VOCAL_MIX_STYLES.map(s => ({
 const MIX_GUIDE_TEXT = "Quel son tu veux pour ta voix ? Choisis un style ci-dessous : je règle les effets, la réverb et le volume du beat. Lance la lecture et change de style pour comparer. Si tu hésites, dis-moi le genre de ton morceau (rap, trap, drill, chant…) et je te conseille.";
 
 interface ChatAssistantProps {
-  onSendMessage: (msg: string) => Promise<any>;
+  /** `history` : les derniers échanges (le modèle comprend « oui, la 2 » après sa question). */
+  onSendMessage: (msg: string, history?: { role: string; content: string }[]) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
+  /**
+   * Exécute les actions d'un message : validées, groupées en une étape d'annulation, sensibles
+   * mises de côté pour confirmation. Absent : ancien comportement (une par une, sans contrôle).
+   */
+  onRunActions?: (actions: AIAction[], opts?: { confirmed?: boolean }) => Promise<ChatRunReport>;
   externalNotification?: string | null;
   /** Change à chaque annonce, même si le texte est identique. */
   externalNotificationId?: number;
@@ -46,7 +66,7 @@ interface ChatAssistantProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen, onOpenChange, quiet }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, onRunActions, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen, onOpenChange, quiet }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   // Bandeau quand le chat est fermé : sinon les messages du studio passaient inaperçus.
   const [toast, setToast] = useState<{ id: number; text: string; hasChoices: boolean } | null>(null);
@@ -76,6 +96,27 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: '1', role: 'assistant', content: "Salut ! Je suis Nova, ton ingé son. On fait ta session ensemble : ta voix principale d'abord, puis les backs et les harmonies, et je te dis quoi régler dans ton mix. Suis l'étape au-dessus, ou parle-moi quand tu veux.", timestamp: Date.now() }
   ]);
+
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  /** « Oui, fais-le » / « Non » sous une demande de confirmation. */
+  const answerPending = async (msgId: string, yes: boolean) => {
+    const msg = messagesRef.current.find(m => m.id === msgId);
+    if (!msg?.pending?.length || msg.pendingState !== 'asked') return;
+    if (!yes || !onRunActions) {
+      setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, pendingState: 'refused' } : m)));
+      setMessages(prev => [...prev, { id: `no-${Date.now()}`, role: 'assistant', content: "OK, je n'y touche pas.", timestamp: Date.now() }]);
+      return;
+    }
+    setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, pendingState: 'running' } : m)));
+    setIsSyncing(true);
+    let report: ChatRunReport = { results: [], pending: [] };
+    try { report = await onRunActions(msg.pending.map(p => p.action), { confirmed: true }); }
+    catch (e: any) { report = { results: [{ ok: false, text: 'Action confirmée', reason: e?.message || 'erreur' }], pending: [] }; }
+    finally { setIsSyncing(false); }
+    setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, pendingState: 'done', results: [...(m.results || []), ...report.results] } : m)));
+  };
 
   const pushMixGuide = () => {
     setMessages(prev => [...prev, { id: `mix-${Date.now()}`, role: 'assistant', content: MIX_GUIDE_TEXT, timestamp: Date.now(), choices: MIX_STYLE_CHOICES }]);
@@ -165,16 +206,38 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       timestamp: Date.now()
     };
 
+    // Les échanges précédents (texte seulement) : le modèle comprend une réponse à sa question.
+    const history = messagesRef.current.filter(m => m.id !== '1').slice(-8).map(m => ({ role: m.role, content: m.content }));
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     setIsTyping(true);
 
     try {
-      const response = await onSendMessage(msgToSend);
+      const response = await onSendMessage(msgToSend, history);
       setIsTyping(false);
-      
+
       const responseText = typeof response === 'string' ? response : (response.text || "");
       const responseActions = response.actions || [];
+
+      if (onRunActions) {
+        // Validé, groupé (un Ctrl+Z), sensible → confirmation ; compte rendu ligne par ligne.
+        let report: ChatRunReport = { results: [], pending: [] };
+        if (responseActions.length) {
+          setIsSyncing(true);
+          try { report = await onRunActions(responseActions); } finally { setIsSyncing(false); }
+        }
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: responseText || (report.results.length ? 'Voilà.' : "Je t'écoute."),
+          timestamp: Date.now(),
+          results: report.results.length ? report.results : undefined,
+          pending: report.pending.length ? report.pending : undefined,
+          pendingState: report.pending.length ? 'asked' : undefined,
+          choices: response?.offerStyles ? MIX_STYLE_CHOICES : undefined,
+        }]);
+        return;
+      }
 
       if (responseActions && responseActions.length > 0) {
         setIsSyncing(true);
@@ -442,6 +505,41 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                         {c.label}
                       </button>
                     ))}
+                  </div>
+                )}
+                {msg.results && msg.results.length > 0 && (
+                  <ul className="mt-2 ml-1 space-y-1 max-w-[90%]" data-testid="chat-results" aria-label="Ce que Nova a fait">
+                    {msg.results.map((r, i) => (
+                      <li key={i} data-testid="chat-result" data-ok={r.ok ? '1' : '0'}
+                        className={`text-[12px] leading-snug rounded-xl px-3 py-1.5 border ${r.ok ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-100' : 'border-red-500/30 bg-red-500/[0.08] text-red-100'}`}>
+                        <span aria-hidden="true">{r.ok ? '✅ ' : '❌ '}</span>{r.text}{!r.ok && r.reason ? ` : ${r.reason}` : ''}
+                        {r.notes?.length ? <span className="block text-[11px] text-slate-400 mt-0.5">ℹ️ {r.notes.join(' ; ')}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {msg.pending && msg.pending.length > 0 && (
+                  <div className="mt-2 ml-1 max-w-[90%] rounded-2xl border border-amber-400/40 bg-amber-500/[0.08] px-3 py-2.5" data-testid="chat-pending" data-state={msg.pendingState}>
+                    <p className="text-[12px] font-bold text-amber-100">{msg.pendingState === 'done' ? 'Confirmé' : msg.pendingState === 'refused' ? 'Annulé, rien n’a été touché' : 'Je préfère te demander avant :'}</p>
+                    <ul className="mt-1 space-y-0.5">
+                      {msg.pending.map((p, i) => (
+                        <li key={i} className="text-[12px] text-amber-50/90">⚠️ {p.confirm || p.label}</li>
+                      ))}
+                    </ul>
+                    {(msg.pendingState === 'asked' || msg.pendingState === 'running') && (
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" data-testid="chat-confirm-yes" disabled={msg.pendingState === 'running'}
+                          onClick={() => void answerPending(msg.id, true)}
+                          className="h-10 px-4 rounded-xl bg-amber-400 text-black text-[12px] font-black disabled:opacity-60">
+                          {msg.pendingState === 'running' ? 'Je m’en occupe…' : 'Oui, fais-le'}
+                        </button>
+                        <button type="button" data-testid="chat-confirm-no" disabled={msg.pendingState === 'running'}
+                          onClick={() => void answerPending(msg.id, false)}
+                          className="h-10 px-4 rounded-xl bg-white/10 text-white text-[12px] font-bold">
+                          Non
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {msg.executedAction && (

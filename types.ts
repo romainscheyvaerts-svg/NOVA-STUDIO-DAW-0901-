@@ -1348,6 +1348,8 @@ export interface AIChatMessage {
 }
 
 export type AIActionType = 
+  | 'SELECT_TRACK'
+  | 'RUN_COMMAND'
   | 'UPDATE_PLUGIN' 
   | 'UPDATE_TRACK' 
   | 'ADD_TRACK'

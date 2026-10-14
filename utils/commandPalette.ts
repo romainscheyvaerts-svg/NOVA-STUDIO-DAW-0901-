@@ -145,3 +145,13 @@ export function keymapActions(skip: Set<string>, map: ShortcutDef[] = activeKeym
     },
   }));
 }
+
+/**
+ * TOUTES les actions de la palette : celles du studio (App.tsx) puis les raccourcis de la table
+ * qu'elles ne couvrent pas. Source unique de la palette Ctrl+K ET du chat (utils/chatTools) :
+ * une action ajoutée ici est aussitôt cherchable au clavier et pilotable par Nova.
+ */
+export function allPaletteActions(own: PaletteAction[], map: ShortcutDef[] = activeKeymap()): PaletteAction[] {
+  const ids = new Set(own.map(a => a.id));
+  return [...own, ...keymapActions(ids, map)];
+}
