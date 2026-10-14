@@ -1,0 +1,39 @@
+/*
+ * One Knob (lot 8c) : finition propre, posée par-dessus la base « black » du kit plugins/hw
+ * (même procédé que plugins/hw/ecrans.css : <Faceplate finish="black" className="hw-finish-onyx">).
+ * Onyx : noir violacé, encre blanc lavande (contraste ≥ 7:1), accent mauve.
+ */
+.hw-face.hw-finish-onyx {
+  --hw-face-solid: #1b1822;
+  --hw-face:
+    radial-gradient(120% 70% at 50% -10%, rgba(200, 160, 255, 0.12), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #221e2b 0%, #1b1822 55%, #141119 100%);
+  --hw-ink: #f3eefc;
+  --hw-ink-soft: #bdb2d3;
+  --hw-accent: #c4a1ff;
+  --hw-rule: rgba(243, 238, 252, 0.14);
+  --hw-edge-hi: rgba(210, 180, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.32);
+}
+
+.ok-layout { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; justify-content: center; }
+.ok-macros { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; min-width: 196px; }
+.ok-macros .hw-push { width: 100%; }
+.ok-macros .hw-push-cap { font-size: 10.5px; }
+.ok-center { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ok-readout {
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #b7f7c4; background: #0c1410;
+  border: 1px solid rgba(183, 247, 196, 0.18); border-radius: 6px; padding: 4px 10px; min-width: 150px; text-align: center;
+}
+.ok-drives { font-size: 10px; color: var(--hw-ink-soft); max-width: 240px; text-align: center; line-height: 1.35; }
+@media (max-width: 639px) {
+  .ok-layout { flex-direction: column; }
+  .ok-macros { grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; min-width: 0; order: 2; }
+  .ok-macros .hw-push { min-height: 44px; }
+  .ok-center { order: 1; }
+}
+
+/* Tranche de la console : petit bouton + macro (suit le thème de la console, hors façade). */
+.ok-strip { display: flex; align-items: center; gap: 6px; }
+.ok-strip-knob { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; }
+@media (pointer: coarse) { .ok-strip-knob { width: 44px; height: 44px; } }

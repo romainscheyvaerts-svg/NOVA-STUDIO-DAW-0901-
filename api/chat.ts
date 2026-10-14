@@ -56,6 +56,9 @@ CLIPS ET PRISES
 SESSION VOIX
 | PREPARE_PART | { part } | "lead", "back", "harmony", "adlib" : piste, micro armé, calage |
 | APPLY_MIX_STYLE | { style } | "rap-clair", "trap-autotune", "drill", "chant-rnb", "voix-brute", "telephone" |
+| DESCRIBE_SOUND | { trackId, text } | « Décris ton son » sur UNE piste voix : la phrase de l'artiste (« plus brillante, un peu d'écho ») devient preset + macros, sans IA |
+| APPLY_VOICE_PRESET | { trackId, preset } | preset voix (2 compresseurs 2:1 calés) : trap-lead, autotune-robot, drill-lead, conscient-lead, rnb-doux-lead, afro-lead, pop-lead, melodique-lead, rage-lead, lofi-lead, telephone-lead, radio-lead, podcast-voix, back-trap, back-rnb, double-serre, double-octave, adlib-trap, adlib-telephone, adlib-grave, harmonie-refrain, bus-voix-maison… |
+| ONE_KNOB | { trackId, macro, amount } | One Knob 0-100 : presence, chaleur, brillance, compression (100 = 5 dB max), espace, autotune, largeur, saturation |
 | ANALYZE_MIX | {} | écoute les niveaux réels et liste les corrections |
 | HIGHLIGHT | { target, text } | montre un réglage : "vol-<trackId>", "track-<trackId>", "rec", "mix-auto" |
 | OPEN_LYRICS / OPEN_SHARE / OPEN_EXPORT { format } / OPEN_MIX_STYLES | | |

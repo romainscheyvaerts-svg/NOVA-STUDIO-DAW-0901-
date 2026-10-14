@@ -30,6 +30,10 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
   }
   function coef(ms: number) { return ms <= 0 ? 1 : 1 - Math.exp(-1 / (ms * 0.001 * SR)); }
   function biquad(kindB: string, fc: number, q: number, gainDb: number): number[] {
+    // Filtres mesurés à 48 kHz : une fréquence au-delà de Nyquist (passe-bas du Vox Strip à
+    // 23,5 kHz) rendait le filtre instable à 44,1 kHz (sortie infinie dès le 15e échantillon).
+    // Bornée juste sous Nyquist (0,49 × fréquence d'échantillonnage : rien ne change à 48 kHz).
+    if (kindB !== 'ap1' && kindB !== 'hp1') fc = Math.min(fc, 0.49 * SR);
     var w0 = 2 * Math.PI * fc / SR, cw = Math.cos(w0), sw = Math.sin(w0), al = sw / (2 * q), A = Math.pow(10, gainDb / 40);
     var b: number[], a: number[];
     if (kindB === 'hp') { b = [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2]; a = [1 + al, -2 * cw, 1 - al]; }

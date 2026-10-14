@@ -30,6 +30,9 @@ import { dropModeOf, INSERT_MIME, insertCopyMenuItems, SEND_MIME, transferInsert
 import { keymapStore } from '../utils/keymapStore';
 import { applyTracks } from '../utils/structureBus';
 import SendFader from './SendFader';
+import { OneKnobStrip } from './voice/OneKnob';
+import { isVoiceTrack } from '../utils/vocalRoles';
+import { projectKey } from '../utils/voiceProjectKey';
 import { sendTransferMenuItems } from '../utils/sendFader';
 
 /**
@@ -462,6 +465,11 @@ const ChannelStrip: React.FC<{
         )}
         {!isMaster && (
             <div className="mb-2 px-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
+        )}
+
+        {/* Lot 8c : One Knob des pistes voix (8 macros, presets voix, Décris ton son). */}
+        {!isMaster && isVoiceTrack(track) && (
+            <div className="mb-2"><OneKnobStrip track={track} allTracks={allTracks} onUpdate={onUpdate} projectKey={projectKey().key} projectScale={projectKey().scale} /></div>
         )}
 
         {/* Tête de tranche (R11) : Ø, mono, trim d'entrée, largeur (avant les inserts). */}

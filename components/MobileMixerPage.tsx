@@ -8,6 +8,9 @@ import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
 import { MobileSoloMuteBar, MobileSoloMuteButtons } from './MobileSoloMute';
 import MobileSends from './MobileSends';
+import { OneKnobStrip } from './voice/OneKnob';
+import { isVoiceTrack } from '../utils/vocalRoles';
+import { projectKey } from '../utils/voiceProjectKey';
 
 interface MobileMixerPageProps {
   tracks: Track[];
@@ -239,6 +242,10 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
             <button type="button" onClick={() => loudnessPanel.toggle()} aria-label="Ouvrir la fenêtre Loudness"
               className="h-11 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-[11px] font-bold text-cyan-300"><i className="fas fa-wave-square mr-1" />LUFS</button>
           </div>
+          {/* Lot 8c : One Knob de la piste voix (8 macros, presets voix, Décris ton son). */}
+          {isVoiceTrack(current) && (
+            <div className="mb-3"><OneKnobStrip track={current} allTracks={tracks} onUpdate={onUpdateTrack} projectKey={projectKey().key} projectScale={projectKey().scale} /></div>
+          )}
           {/* Envois réglés au doigt comme un fader (components/MobileSends). */}
           <MobileSends track={current} tracks={tracks} onUpdateTrack={onUpdateTrack} />
           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
