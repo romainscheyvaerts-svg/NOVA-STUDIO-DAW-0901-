@@ -64,6 +64,9 @@ BATTERIE = [
     # (flow 80/90/140 BPM à 0, 20 et 50 ms, diction, gammes, tenue, trilles, souffle, sirène, tessiture), micro simulé,
     # historique, micro rendu ; bureau et téléphone, sombre et clair.
     ("echauffement", []),
+    # 14/10/2026 : prise et horloge : entrée trouée, débranchée, coupée, fil principal bloqué, rendu affamé, page masquée :
+    # chaque clic reste à sa place dans la prise (0 échantillon), mesure du recalage du flux MediaStream de Chrome.
+    ("prise_horloge", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).
