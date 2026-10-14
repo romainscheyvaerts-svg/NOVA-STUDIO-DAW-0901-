@@ -48,6 +48,8 @@ export interface AudioToMidiRequest {
   instrument?: HumInstrument;
   /** Version simple (téléphone, bouton « Fredonne → 808 »). */
   simple?: boolean;
+  /** Source grave (stem de basse, 808) : hauteur cherchée dès 30 Hz (65 Hz pour une voix). */
+  low?: boolean;
 }
 
 interface Props {
@@ -278,7 +280,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
     setStatus('analyzing');
     const run = async () => {
       if (mode === 'melody') {
-        const analysis = await analyzeRegion(buffer, off, end);
+        const analysis = await analyzeRegion(buffer, off, end, request?.low ? { fmin: 30, fmax: 700 } : undefined);
         if (!alive) return;
         setMelody({ analysis, timeOffset: clip.start, audio: { buffer, offset: off, duration: end - off } });
         setStatus(analysis.notes.length ? 'ready' : 'empty');
@@ -299,7 +301,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
     run().catch(e => { if (alive) { setStatus('error'); setError(`Analyse impossible : ${e?.message || e}`); } });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, source && source !== 'mic' ? `${source.trackId}/${source.clipId}` : source, mode, mode === 'drums' ? sens : 0]);
+  }, [open, source && source !== 'mic' ? `${source.trackId}/${source.clipId}` : source, mode, mode === 'drums' ? sens : 0, !!request?.low]);
 
   // Gamme : celle du projet, sinon devinée sur la mélodie chantée (comme l'éditeur de justesse).
   const key = useMemo<{ root: number; scale: string; guessed?: boolean } | null>(() => {

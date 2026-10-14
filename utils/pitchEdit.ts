@@ -151,12 +151,12 @@ export interface AnalysisResult {
 }
 
 export type PitchJob =
-  | { kind: 'analyze'; channels: Float32Array[]; sr: number }
+  | { kind: 'analyze'; channels: Float32Array[]; sr: number; opts?: { fmin?: number; fmax?: number } }
   | { kind: 'render'; channels: Float32Array[]; track: PitchTrack; curve: Float32Array; formant?: Float32Array };
 
 export function runJob(job: PitchJob): { analysis?: AnalysisResult; channels?: Float32Array[] } {
   if (job.kind === 'analyze') {
-    const track = analyzePitch(monoOf(job.channels), job.sr);
+    const track = analyzePitch(monoOf(job.channels), job.sr, job.opts);
     return { analysis: { track, notes: segmentNotes(track) } };
   }
   return { channels: renderPitch(job.channels, job.track, job.curve, undefined, job.formant) };
@@ -191,9 +191,9 @@ async function inWorker(job: PitchJob): Promise<{ analysis?: AnalysisResult; cha
   }
 }
 
-/** Analyse la partie [start, end[ (s) d'un son. */
-export async function analyzeRegion(buffer: AudioBuffer, start: number, end: number): Promise<AnalysisResult> {
-  const r = await inWorker({ kind: 'analyze', channels: sliceChannels(buffer, start, end), sr: buffer.sampleRate });
+/** Analyse la partie [start, end[ (s) d'un son. opts : plage de hauteur (ex. fmin 30 Hz pour une basse / 808). */
+export async function analyzeRegion(buffer: AudioBuffer, start: number, end: number, opts?: { fmin?: number; fmax?: number }): Promise<AnalysisResult> {
+  const r = await inWorker({ kind: 'analyze', channels: sliceChannels(buffer, start, end), sr: buffer.sampleRate, ...(opts ? { opts } : {}) });
   return r.analysis!;
 }
 

@@ -28,7 +28,7 @@ export interface NovaWindowDetail {
   /** Champ mis en avant à l'ouverture. */
   focus?: 'name' | 'color';
   /** Audio → MIDI (V20) : mélodie, batterie ou harmonie ; micro ; instrument ; version simple. */
-  convert?: { mode: 'melody' | 'drums' | 'harmony'; mic?: boolean; instrument?: '808' | 'piano' | 'lead' | 'pad'; simple?: boolean };
+  convert?: { mode: 'melody' | 'drums' | 'harmony'; mic?: boolean; instrument?: '808' | 'piano' | 'lead' | 'pad'; simple?: boolean; low?: boolean };
   /** Commit / Consolider (R6) : piste entière (commit) ou plage (bounce). */
   bounce?: { mode: 'commit' | 'range'; trackIds?: string[]; start?: number; end?: number };
   /** AudioSuite (R6) : plage de la sélection (sinon les clips visés). */

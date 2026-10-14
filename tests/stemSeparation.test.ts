@@ -133,7 +133,7 @@ describe('lot 6 : 6 stems, voix lead / chœurs, MIDI, licence', () => {
   });
 
   it('propose la bonne conversion MIDI par stem', () => {
-    expect(stemMidiConversion('bass')).toMatchObject({ mode: 'melody', instrument: '808', label: 'Basse → MIDI' });
+    expect(stemMidiConversion('bass')).toMatchObject({ mode: 'melody', instrument: '808', low: true, label: 'Basse → MIDI' });
     expect(stemMidiConversion('piano')).toMatchObject({ mode: 'harmony', label: 'Piano → MIDI' });
     expect(stemMidiConversion('guitar')).toMatchObject({ mode: 'harmony' });
     expect(stemMidiConversion('lead_vocals')).toMatchObject({ mode: 'melody', instrument: 'lead', label: 'Voix → MIDI' });

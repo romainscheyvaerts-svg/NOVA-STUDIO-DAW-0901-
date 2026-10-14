@@ -179,7 +179,9 @@ def scenario_six_midi_leadback(page, log, res, vp):
     after = state(page)
     new = [t for t in after if t["type"] == "MIDI" and t["id"] not in {x["id"] for x in before}]
     res["piste_midi"] = [{"nom": t["name"], "notes": sum(c["notes"] for c in t["clips"])} for t in new]
-    assert len(after) == n_tracks + 1 and new and res["piste_midi"][0]["notes"] > 0, res["piste_midi"]
+    # Basse de « Silence blanc » (808 en Si bémol mineur, fondamentale 44 à 60 Hz) : au moins une note
+    # par mesure environ sur 45 s (avant la détection dès 30 Hz : 5 notes seulement).
+    assert len(after) == n_tracks + 1 and new and res["piste_midi"][0]["notes"] >= 12, res["piste_midi"]
     shot(page, "B7_piste_midi_creee")
     page.keyboard.press("Escape")
     # Voix lead / chœurs sur le même clip
@@ -340,28 +342,35 @@ if __name__ == "__main__":
     ss.make_project(PROJECT)
     make_catalogue_project(PROJECT, PROJECT_CAT)
     ss.PROJECT = PROJECT
+    ONLY = {x.upper() for x in sys.argv[1:]}  # ex. « python qa/stems6.py B D » : seulement ces parties
+    want = lambda k: not ONLY or k in ONLY  # noqa: E731
     report = {}
-    report["A_web_pc"] = run_one(scenario_web, "pc", "A_web_pc")
-    report["A_web_tel"] = run_one(scenario_web, "tel390", "A_web_tel")
-    br = ss.start_bridge(PORT)
-    try:
-        report["B_six_midi_leadback"] = run_one(scenario_six_midi_leadback, "pc", "B_six_midi_leadback")
-        report["B_tel"] = run_one(scenario_phone_dialog, "tel390", "B_tel")
-        report["C_non_achete"] = run_one(lambda p, l, r, v: scenario_licence(p, l, r, v, False), "pc", "C_non_achete")
-        report["C_achete"] = run_one(lambda p, l, r, v: scenario_licence(p, l, r, v, True), "pc", "C_achete")
-    finally:
-        ss.stop_bridge(br)
-        time.sleep(2)
-    HOME_D = make_home_without_6s()
-    try:
-        br = ss.start_bridge(PORT, HOME_D)
+    if want("A"):
+        report["A_web_pc"] = run_one(scenario_web, "pc", "A_web_pc")
+        report["A_web_tel"] = run_one(scenario_web, "tel390", "A_web_tel")
+    if want("B") or want("C"):
+        br = ss.start_bridge(PORT)
         try:
-            report["D_premier_usage"] = run_one(scenario_first_use, "pc", "D_premier_usage")
+            if want("B"):
+                report["B_six_midi_leadback"] = run_one(scenario_six_midi_leadback, "pc", "B_six_midi_leadback")
+                report["B_tel"] = run_one(scenario_phone_dialog, "tel390", "B_tel")
+            if want("C"):
+                report["C_non_achete"] = run_one(lambda p, l, r, v: scenario_licence(p, l, r, v, False), "pc", "C_non_achete")
+                report["C_achete"] = run_one(lambda p, l, r, v: scenario_licence(p, l, r, v, True), "pc", "C_achete")
         finally:
             ss.stop_bridge(br)
             time.sleep(2)
-    finally:
-        drop_home(HOME_D)
+    if want("D"):
+        HOME_D = make_home_without_6s()
+        try:
+            br = ss.start_bridge(PORT, HOME_D)
+            try:
+                report["D_premier_usage"] = run_one(scenario_first_use, "pc", "D_premier_usage")
+            finally:
+                ss.stop_bridge(br)
+                time.sleep(2)
+        finally:
+            drop_home(HOME_D)
     report["ok"] = all(v.get("ok") for k, v in report.items() if isinstance(v, dict))
     (OUT / "qa_stems6.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=1))

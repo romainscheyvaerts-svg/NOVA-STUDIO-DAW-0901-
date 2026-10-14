@@ -145,12 +145,12 @@ export function licensedStemFields(rights: StemsRights): { beatStem?: true; inst
 
 // --- Stem → MIDI (réutilise « Audio → MIDI ») -------------------------------------------
 
-export interface StemMidiConversion { mode: 'melody' | 'drums' | 'harmony'; instrument?: '808' | 'piano' | 'lead' | 'pad'; label: string; tip: string }
+export interface StemMidiConversion { mode: 'melody' | 'drums' | 'harmony'; instrument?: '808' | 'piano' | 'lead' | 'pad'; label: string; tip: string; /** Source grave : hauteur cherchée dès 30 Hz. */ low?: boolean }
 
 /** Conversion MIDI proposée pour un stem (null : rien d'utile). */
 export function stemMidiConversion(key: string): StemMidiConversion | null {
   switch (key) {
-    case 'bass': return { mode: 'melody', instrument: '808', label: 'Basse → MIDI', tip: 'La ligne de basse devient une piste MIDI (808 ou basse du synthé NOVA), avec aperçu avant de valider.' };
+    case 'bass': return { mode: 'melody', instrument: '808', low: true, label: 'Basse → MIDI', tip: 'La ligne de basse devient une piste MIDI (808 ou basse du synthé NOVA), avec aperçu avant de valider.' };
     case 'piano': return { mode: 'harmony', label: 'Piano → MIDI', tip: 'Les accords du piano deviennent des accords MIDI (et, au choix, la piste d’accords).' };
     case 'guitar': return { mode: 'harmony', label: 'Guitare → MIDI', tip: 'Les accords de la guitare deviennent des accords MIDI.' };
     case 'vocals':

@@ -205,7 +205,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
     const conv = stemMidiConversion(a.key);
     if (!conv) return;
     onClose();
-    openNovaWindow('audio-to-midi', { targets: [{ trackId: a.trackId, clipId: a.clipId }], convert: { mode: conv.mode, ...(conv.instrument ? { instrument: conv.instrument } : {}) } });
+    openNovaWindow('audio-to-midi', { targets: [{ trackId: a.trackId, clipId: a.clipId }], convert: { mode: conv.mode, ...(conv.instrument ? { instrument: conv.instrument } : {}), ...(conv.low ? { low: true } : {}) } });
   };
 
   const MidiButtons: React.FC<{ applied?: AppliedStem[]; compact?: boolean }> = ({ applied, compact }) => {
