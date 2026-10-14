@@ -28,7 +28,9 @@ import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
 import CommandPalette from './components/CommandPalette';
 import AddEffectMenu from './components/AddEffectMenu';
-import type { PaletteAction } from './utils/commandPalette';
+import { allPaletteActions, type PaletteAction } from './utils/commandPalette';
+import { buildChatCatalog, catalogText, summarizeStateForChat, planChatCalls, compactHistory, CHAT_LIMITS } from './utils/chatTools';
+import type { ChatRunReport } from './components/ChatAssistant';
 import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
 import { openSamplerPanel } from './utils/samplerPanelStore';
@@ -279,7 +281,7 @@ import { loadDrumSound } from './utils/drumSounds';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
-import { UNDO_LIMIT, isProjectSwitch } from './utils/undoHistory';
+import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, type UndoHistory } from './utils/undoHistory';
 import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose, needsUnloadWarning } from './utils/autosavePolicy';
 import { DiskMirror, bridgeDiskBackend, latestOnDisk, pickMostRecent, importFromDisk, audioFrom, type RecoverySource } from './services/DiskProjectStore';
 import { requestPersistence, refreshStorageStatus, isQuotaError, QUOTA_FULL_MESSAGE, markLocalSaves, evictionSuspected, EVICTED_WEB_MESSAGE, EVICTED_DESKTOP_MESSAGE } from './utils/storageProtection';
@@ -586,7 +588,7 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
 const useUndoRedo = (initialState: DAWState) => {
   // lastChangeAt : heure de la dernière modification RÉELLE du projet (pas une
   // sélection ni un changement de vue), pour l'anti-rebond des entrées.
-  const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; lastChangeAt?: number }>({ past: [], present: initialState, future: [] });
+  const [history, setHistory] = useState<UndoHistory<DAWState>>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = UNDO_LIMIT; // utils/undoHistory (256 étapes)
   const HISTORY_DEBOUNCE_MS = 300; // Debounce 300ms pour éviter trop d'entrées
 
@@ -660,13 +662,9 @@ const useUndoRedo = (initialState: DAWState) => {
       // Autre projet ouvert : historique vidé (Ctrl+Z ne ramène plus le projet d'avant, utils/undoHistory).
       if (isProjectSwitch(curr.present, newState)) return { past: [], present: newState, future: [], lastChangeAt: maintenant };
 
-      // Changements rapproches : on met a jour le present sans nouvelle entree.
-      const antiRebond = maintenant - (curr.lastChangeAt || 0) < HISTORY_DEBOUNCE_MS;
-      if (antiRebond) return { ...curr, present: newState, lastChangeAt: maintenant };
-
-      const cleanedPresentForHistory = cleanStateForHistory(curr.present);
-
-      return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [], lastChangeAt: maintenant };
+      // Changements rapproches (ou groupe ouvert par le chat) : on met a jour le present
+      // sans nouvelle entree (utils/undoHistory, recordChange).
+      return recordChange(curr, newState, maintenant, { debounceMs: HISTORY_DEBOUNCE_MS, limit: MAX_HISTORY, clean: cleanStateForHistory });
     });
   }, []);
 
@@ -705,8 +703,12 @@ const useUndoRedo = (initialState: DAWState) => {
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
   // Étape d'annulation posée MAINTENANT (une passe d'automation = une seule étape).
-  const checkpoint = useCallback(() => setHistory(curr => ({ past: [...curr.past, cleanStateForHistory(curr.present)].slice(-MAX_HISTORY), present: curr.present, future: [], lastChangeAt: Date.now() })), []);
-  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  // Dans un groupe du chat déjà posé : rien (tout le message reste une seule étape).
+  const checkpoint = useCallback(() => setHistory(curr => (curr.group === 2 ? curr : { past: [...curr.past, cleanStateForHistory(curr.present)].slice(-MAX_HISTORY), present: curr.present, future: [], lastChangeAt: Date.now(), group: curr.group === 1 ? 2 : curr.group })), []);
+  // Tout ce que Nova fait pour UN message du chat = une seule étape d'annulation (un Ctrl+Z).
+  const beginUndoGroup = useCallback(() => setHistory(curr => openUndoGroup(curr)), []);
+  const endUndoGroup = useCallback(() => setHistory(curr => closeUndoGroup(curr)), []);
+  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, beginUndoGroup, endUndoGroup, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -1171,7 +1173,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, beginUndoGroup, endUndoGroup, canUndo, canRedo } = useUndoRedo(initialState);
   
   // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
   const { theme } = useTheme();
@@ -8692,6 +8694,8 @@ function Studio() {
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState, handleUniversalAudioImport]);
 
+  /** Un message du chat est en cours d'exécution : son compte rendu remplace les bulles une à une. */
+  const chatBatchRef = useRef(false);
   /**
    * Applique une action renvoyée par l'assistant IA.
    * Le catalogue d'actions est décrit dans api/chat.ts : les deux doivent rester alignés.
@@ -8735,6 +8739,8 @@ function Studio() {
     };
 
     const notify = (msg: string) => {
+      // Pendant un message du chat, le compte rendu (✅ / ❌) dit déjà ce qui a été fait.
+      if (chatBatchRef.current) return;
       setAiNotification(msg);
       setTimeout(() => setAiNotification(null), 2500);
     };
@@ -9354,8 +9360,16 @@ function Studio() {
         break;
 
       case 'OPEN_EXPORT':
-        setIsExportMenuOpen(true);
+        // Même chemin que le bouton Export : identifiant du projet posé (achat « export du projet »),
+        // la fenêtre affiche l'offre et le prix ; le chat ne paie jamais et ne contourne rien.
+        void handleExportMix();
         break;
+
+      case 'SELECT_TRACK': {
+        const t = findTrack(p.trackId);
+        if (t) setState(prev => (prev.selectedTrackId === t.id ? prev : { ...prev, selectedTrackId: t.id }));
+        break;
+      }
 
       // ---- Outils voix ----
       case 'APPLY_MIX_STYLE': {
@@ -9485,61 +9499,81 @@ function Studio() {
     if (r.failed) executeAIAction({ action: 'VST_MIX_FALLBACK', payload: { pluginId: r.pluginId, reason: r.failed } } as AIAction);
   }), [executeAIAction]);
 
-  const envoyerAuChatbot = async (messageUtilisateur: string) => {
+  /** Actions de la palette Ctrl+K du rendu en cours (buildPaletteActions, plus bas) : Nova y a accès. */
+  const paletteBuilderRef = useRef<() => PaletteAction[]>(() => []);
+  /** Catalogue des commandes vu par Nova : la palette entière (actions du studio + raccourcis). */
+  const chatCommands = () => {
+    try { return buildChatCatalog(allPaletteActions(paletteBuilderRef.current())); } catch { return []; }
+  };
+
+  /**
+   * Exécute les appels d'outils d'UN message du chat (IA ou commande locale) :
+   * validés (utils/chatTools), sensibles mis de côté pour confirmation, le reste exécuté
+   * dans UN groupe d'annulation (un Ctrl+Z défait tout le message). Compte rendu par appel.
+   */
+  const runChatActions = async (raw: AIAction[], opts: { confirmed?: boolean } = {}): Promise<ChatRunReport> => {
+    const commands = chatCommands();
+    const plan = planChatCalls(raw, {
+      state: stateRef.current,
+      commands,
+      pluginDefaults: (type) => { try { return createDefaultPlugins(type as PluginType, 0.5, stateRef.current.bpm).params; } catch { return undefined; } },
+    }, opts);
+    const results: ChatRunReport['results'] = [];
+    if (plan.run.length) {
+      beginUndoGroup();
+      chatBatchRef.current = true;
+      try {
+        for (const c of plan.run) {
+          try {
+            if (c.action.action === ('RUN_COMMAND' as any)) {
+              const pa = allPaletteActions(paletteBuilderRef.current()).find(x => x.id === c.action.payload?.id);
+              if (!pa) throw new Error('commande disparue de la palette');
+              if (pa.disabledReason) throw new Error(pa.disabledReason);
+              pa.run();
+            } else executeAIAction(c.action);
+            results.push({ ok: true, text: c.label, notes: c.notes });
+          } catch (e: any) {
+            results.push({ ok: false, text: c.label, reason: e?.message || String(e) });
+          }
+          // Une respiration : l'appel suivant voit l'état du précédent.
+          await new Promise(r => setTimeout(r, 40));
+        }
+      } finally {
+        chatBatchRef.current = false;
+        await new Promise(r => setTimeout(r, 80));
+        endUndoGroup();
+      }
+    }
+    for (const r of plan.rejected) results.push({ ok: false, text: r.label, reason: r.reason });
+    return { results, pending: plan.ask.map(c => ({ action: c.action, label: c.label, confirm: c.confirm || '' })) };
+  };
+
+  const envoyerAuChatbot = async (messageUtilisateur: string, historique: { role: string; content: string }[] = []) => {
     // Ordres simples (« monte ma voix », « style trap », « refais la prise »…) :
     // exécutés tout de suite, sans attendre l'IA ni dépendre du réseau.
     const local = parseLocalCommand(messageUtilisateur, stateRef.current);
     if (local) return { text: local.text, actions: local.actions };
     try {
-        // Préparer un résumé de l'état du DAW pour le contexte
+        // État du projet résumé et borné (paliers gratuits des modèles) : pistes, effets et
+        // réglages principaux, bus, envois, tempo, tonalité, sélection, transport (utils/chatTools).
         const currentState = stateRef.current;
-        const stateSummary = {
-            bpm: currentState.bpm,
-            isPlaying: currentState.isPlaying,
-            isRecording: currentState.isRecording,
-            currentTime: Math.round(playheadStore.get() * 100) / 100,
-            selectedTrackId: currentState.selectedTrackId,
-            trackCount: currentState.tracks.length,
-            currentView: currentState.currentView,
-            timeSignature: currentState.timeSignature,
-            metronome: currentState.metronome,
-            isLoopActive: currentState.isLoopActive,
-            loopStart: currentState.loopStart,
-            loopEnd: currentState.loopEnd,
-            projectKey: currentState.projectKey,
-            projectScale: currentState.projectScale,
-            vocalMixStyle: currentState.vocalMixStyle || null,
-            autoCleanSilence: autoCleanRef.current,
+        const stateSummary = summarizeStateForChat(currentState, {
+            currentTime: playheadStore.get(),
+            mode: simpleModeStore.get().simple ? 'simple' : 'avancé',
+            device: isMobileRef.current ? 'téléphone' : 'ordinateur',
             sessionPart,
+            bridgeVst: novaBridge.isConnected(),
             // Ce que « l'oreille » de Nova mesure : niveaux réels des prises et du beat.
             mixLevels: (() => {
               try {
                 const r = analyseMix(currentState.tracks, c => (c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined) || c.buffer || audioEngine.getAudioBuffer(c.id), currentState.vocalMixStyle);
-                return { levels: levelsForAI(r), issues: r.issues.map(i => ({ title: i.title, target: i.target, fix: i.fix?.actions })) };
+                return { levels: levelsForAI(r), issues: r.issues.map(i => ({ title: i.title, target: i.target })) };
               } catch { return null; }
             })(),
-            markers: currentState.markers.map(m => ({ id: m.id, name: m.name, time: m.time })),
-            trackGroups: currentState.trackGroups.map(g => ({ id: g.id, name: g.name, trackIds: g.trackIds })),
-            // Les id sont indispensables : les actions de l'IA ciblent les pistes,
-            // les clips et les effets par identifiant.
-            tracks: currentState.tracks.map(t => ({
-                id: t.id,
-                name: t.name,
-                role: getVocalRole(t),
-                type: t.type,
-                volume: Math.round(t.volume * 100) / 100,
-                pan: t.pan,
-                isMuted: t.isMuted,
-                isSolo: t.isSolo,
-                isTrackArmed: t.isTrackArmed,
-                isFrozen: t.isFrozen,
-                outputTrackId: t.outputTrackId,
-                sends: t.sends.map(s => ({ id: s.id, level: s.level, isEnabled: s.isEnabled })),
-                plugins: t.plugins.map(p => ({ id: p.id, type: p.type, isEnabled: p.isEnabled })),
-                clips: t.clips.map(c => ({ id: c.id, name: c.name, type: c.type, start: c.start, duration: c.duration, isMuted: c.isMuted, noteCount: c.notes?.length || 0 })),
-                automation: t.automationLanes.filter(l => l.points.length > 0).map(l => ({ parameter: l.parameterName, pointCount: l.points.length }))
-            }))
-        };
+        });
+        // Commandes de la palette les plus proches de la demande (toutes les actions du DAW).
+        const catalog = catalogText(chatCommands(), messageUtilisateur, CHAT_LIMITS.catalogChars);
+        const history = compactHistory(historique);
 
         // Détecter si on est sur GitHub Pages (pas d'API backend)
         // Dans ce cas, utiliser l'API Vercel directement
@@ -9548,7 +9582,7 @@ function Studio() {
             ? 'https://nova-studio-daw-0901.vercel.app'  // URL Vercel
             : '';  // URL relative (même domaine)
         
-        const body = JSON.stringify({ message: messageUtilisateur, state: stateSummary });
+        const body = JSON.stringify({ message: messageUtilisateur, state: stateSummary, catalog, history });
         const ask = (base: string) => fetch(`${base}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -10018,6 +10052,7 @@ function Studio() {
    * ajoutent tout seuls (components/CommandPalette) ; ici, ce qui n'a pas de touche : fenêtres,
    * pistes, vues, gestes voix et beat. Construites à l'ouverture (fonctions du rendu en cours).
    */
+  paletteBuilderRef.current = () => buildPaletteActions();
   const buildPaletteActions = (): PaletteAction[] => {
     const st = stateRef.current;
     const sel = editSelectionStore.get();
@@ -11259,6 +11294,7 @@ function Studio() {
         <ChatAssistant
             onSendMessage={envoyerAuChatbot}
             onExecuteAction={executeAIAction}
+            onRunActions={runChatActions}
             projectState={state}
             externalNotification={aiNotice?.text ?? null}
             externalNotificationId={aiNotice?.id}

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { keymapActions, rememberAction, recentActions, searchActions, type PaletteAction } from '../utils/commandPalette';
+import { allPaletteActions, rememberAction, recentActions, searchActions, type PaletteAction } from '../utils/commandPalette';
 import { useKeymap } from '../utils/keymapStore';
 import { isExplicitWordQuery, wordQueryText } from '../utils/voiceSearch';
 
@@ -30,8 +30,7 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
 
   const all = useMemo(() => {
     if (!open) return [];
-    const own = new Set(actions.map(a => a.id));
-    return [...actions, ...keymapActions(own, keymap)];
+    return allPaletteActions(actions, keymap);
   }, [open, actions, keymap]);
   // Mots chantés (B7) : en tête si la demande vise des paroles (« trouver … », guillemets), sinon après les actions.
   const explicitWords = isExplicitWordQuery(query);
