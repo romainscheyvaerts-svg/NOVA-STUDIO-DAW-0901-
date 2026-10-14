@@ -265,6 +265,9 @@ class VideoTakeController {
 
   /** L'aperçu du panneau : sert à la capture de repli et à affiner l'horodatage. */
   attachPreview(el: HTMLVideoElement | null) {
+    if (el === this.preview && (!el || this.rvfcId)) return; // déjà suivi : pas de 2e boucle (images en double)
+    if (this.preview && this.rvfcId && (this.preview as any).cancelVideoFrameCallback) { try { (this.preview as any).cancelVideoFrameCallback(this.rvfcId); } catch { /* */ } }
+    this.rvfcId = 0;
     this.preview = el;
     if (el) this.watchPreview();
   }

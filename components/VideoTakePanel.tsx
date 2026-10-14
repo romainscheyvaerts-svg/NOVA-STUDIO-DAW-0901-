@@ -297,7 +297,8 @@ const VideoTakeDock: React.FC<Props> = props => {
       {exportFor && (
         <Suspense fallback={null}>
           <VideoTakeExportModal takeId={exportFor} onClose={() => { setExportFor(null); void reload(); }} state={state} ownedInstrumentIds={props.ownedInstrumentIds}
-            onBuyBeat={props.onBuyBeat} onOpenExport={props.onOpenExport} onLyricsChange={props.onLyricsChange} />
+            onBuyBeat={() => { setExportFor(null); props.onBuyBeat(); }} onOpenExport={props.onOpenExport ? () => { setExportFor(null); props.onOpenExport!(); } : undefined}
+            onLyricsChange={props.onLyricsChange} />
         </Suspense>
       )}
     </>

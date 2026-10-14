@@ -698,7 +698,7 @@ def run_plein(p, zpath, y4m):
         page.wait_for_timeout(1500)
         page.evaluate("() => { window.__qaFree = 20 * 1024 * 1024; }")
         s = wait_state(page, lambda s: not s["recording"], 8)
-        audio_on = page.evaluate("() => !!document.querySelector('button[aria-label=\"Arrêter l\\'enregistrement\"]')")
+        audio_on = page.locator("button[aria-label=\"Arrêter l'enregistrement\"]").count() > 0
         r["pendant"] = {"etat": s, "prise_audio_continue": audio_on}
         page.screenshot(path=str(OUT / "C1_stockage_plein_pendant.png")); r["captures"].append(str(OUT / "C1_stockage_plein_pendant.png"))
         if s["recording"] or not s.get("notice") or "Stockage plein" not in s["notice"]: ko(f"stockage plein pendant la prise : {s}")
@@ -728,7 +728,7 @@ def run_plein(p, zpath, y4m):
         page.evaluate("() => { try { document.activeElement && document.activeElement.blur(); } catch (e) {} }")
         page.keyboard.press("r"); page.wait_for_timeout(1500)
         s2 = cam_state(page)
-        audio2 = page.evaluate("() => !!document.querySelector('button[aria-label=\"Arrêter l\'enregistrement\"]')")
+        audio2 = page.locator("button[aria-label=\"Arrêter l'enregistrement\"]").count() > 0
         page.keyboard.press("r"); page.wait_for_timeout(1200)
         r["prise_sans_video"] = {**s2, "prise_audio_en_cours": audio2}
         if s2["recording"] or not s2.get("notice") or "Pas assez de place" not in s2["notice"] or not audio2: ko(f"prise sans place : {r['prise_sans_video']}")
