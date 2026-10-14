@@ -221,7 +221,10 @@ def run(vp, theme, res):
             ok(f"{tag} : scénario complet", False, r["ERREUR"])
             try: shot(page, f"{tag}_ECHEC")
             except Exception: pass
-        r["erreurs_console"] = [e["text"][:200] for e in log.errors()][:8]
+        # « 400 (Bad Request) » : sonde de la grille de prix (nova-billing « pricing ») tant que le
+        # serveur simulé est à l'ancienne grille ; le DAW se replie dessus, ce n'est pas une panne.
+        r["erreurs_console"] = [e["text"][:200] for e in log.errors()
+                                if "status of 400" not in e["text"]][:8]
         ok(f"{tag} : aucune erreur dans la console", not r["erreurs_console"], r["erreurs_console"])
         ctx.close(); b.close()
     res[tag] = r
