@@ -900,6 +900,34 @@ export class AudioEngine {
     return Math.min(0.5, base + output);
   }
   
+  // ─── Lot 2b · caméra pendant la prise : début, fin et calage (utils/videoTakeRecorder) ───
+  private lastTakeOrigin: number | null = null;
+  private mrStartCtx = 0;
+
+  /** nova:take-start | nova:take-stop | nova:take-done (performance.now() de l'instant joint). */
+  private emitTakeEvent(kind: 'start' | 'stop' | 'done', detail: Record<string, unknown>) {
+    try { window.dispatchEvent(new CustomEvent(`nova:take-${kind}`, { detail: { ...detail, perf: performance.now() } })); } catch { /* hors navigateur */ }
+  }
+
+  /**
+   * Calage de la vidéo : origine du morceau sur l'horloge du contexte (change à chaque tour de
+   * boucle), et retard de SORTIE que le moteur retire aux prises (le reste de leur latence est
+   * celui de l'entrée micro, que l'image n'a pas). `renderLead` : écart entre le son calculé et
+   * le son qui sort (getOutputTimestamp donne le second).
+   */
+  public videoSyncInfo(): { playing: boolean; origin: number | null; wrap: { at: number; prev: number } | null; outputSide: number; renderLead: number; loop: { start: number; end: number } | null } | null {
+    if (!this.ctx) return null;
+    const renderLead = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
+    const sr = this.ctx.sampleRate;
+    const asio = this.isUsingASIOInput() && this.asioStreamActive;
+    const outputSide = Math.min(0.5, asio ? (this.latency || 0) / 2 + this.asioQueueSec + 512 / sr : renderLead);
+    const wrap = this.pendingLoopWrap ? { at: this.pendingLoopWrap.atContextTime, prev: this.pendingLoopWrap.previousStartTime } : null;
+    return {
+      playing: this.isPlaying, origin: this.isPlaying ? this.playbackStartTime : null, wrap, outputSide, renderLead,
+      loop: this.isLoopActive && this.loopEnd > this.loopStart ? { start: this.loopStart, end: this.loopEnd } : null,
+    };
+  }
+
   /**
    * Latence d'enregistrement mesurée maintenant (s) : retard avec lequel
    * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
@@ -2436,6 +2464,7 @@ export class AudioEngine {
           if (!this.latencyTimer) this.startLatencyWatch();
           // C1 : Nova Studio — le pont écrit la prise lui-même, depuis le callback de la carte.
           this.startBridgeTake(input.layout, currentTime);
+          this.emitTakeEvent('start', { recordedAt: currentTime, trackIds: [...this.recordingTrackIds] });
           console.log("[AudioEngine] Recording started (enregistreur calé) on tracks:", this.recordingTrackIds, `${input.channels} canaux`);
           return true;
         }
@@ -2463,6 +2492,8 @@ export class AudioEngine {
         }
       };
       this.mediaRecorder.start();
+      this.mrStartCtx = this.ctx?.currentTime ?? 0;
+      this.emitTakeEvent('start', { recordedAt: currentTime, trackIds: [ids[0]] });
       console.log("[AudioEngine] Recording started OK on track:", ids[0]);
       return true;
     } catch (e) {
@@ -2631,7 +2662,12 @@ export class AudioEngine {
 
   /** R14 · Fin de la prise : un clip par piste enregistrée (même groupe si plusieurs). */
   public async stopRecordingAll(): Promise<TakeResult[]> {
-    if (this.recSession && this.recordingTrackId && this.ctx) return this.stopCalibratedRecording();
+    if (this.recordingTrackId) this.emitTakeEvent('stop', {});
+    if (this.recSession && this.recordingTrackId && this.ctx) {
+      const out = await this.stopCalibratedRecording();
+      this.emitTakeEvent('done', { origin: this.lastTakeOrigin, takes: out.map(r => ({ trackId: r.trackId, clipId: r.clip.id, start: r.clip.start, duration: r.clip.duration })) });
+      return out;
+    }
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return [];
     }
@@ -2644,6 +2680,7 @@ export class AudioEngine {
         // etait remise a 0 puis relue plus bas, et toutes les prises atterrissaient
         // donc au tout debut de la timeline.
         const recordedAt = this.recStartTime;
+        const mrStart = this.mrStartCtx;
 
         // Reset recording state FIRST
         this.audioChunks = [];
@@ -2674,6 +2711,8 @@ export class AudioEngine {
             buffer: audioBuffer,
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
+          // Lot 2b : origine approchée (1er échantillon ≈ début du MediaRecorder).
+          this.emitTakeEvent('done', { origin: mrStart - recordedAt, takes: [{ trackId, clipId: clipData.id, start: clipData.start, duration: clipData.duration }] });
           resolve([{ clip: clipData, trackId }]);
         } catch (e) {
           console.error("Error processing recorded audio:", e);
@@ -2728,6 +2767,8 @@ export class AudioEngine {
     // Position de chaque échantillon sur la timeline : (frame / sr) − début de lecture.
     let lead = 0;
     let rawStart = recordedAt;
+    // Lot 2b : instant du contexte où le morceau est à 0 pour CETTE prise (vidéo calée pareil).
+    this.lastTakeOrigin = playStart !== null ? playStart : (firstFrame >= 0 ? firstFrame / ctx.sampleRate - recordedAt : null);
     if (playStart !== null && firstFrame >= 0) {
       const playCtxAtStart = playStart + recordedAt;        // instant (horloge) où la lecture a démarré
       lead = Math.max(0, Math.round((playCtxAtStart - firstFrame / sr) * sr));

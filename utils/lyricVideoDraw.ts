@@ -301,12 +301,12 @@ function lyricsCenterY(look: ClipLook): number {
   return look.background === 'image' || look.background === 'visualiseur' ? 1300 : 1000;
 }
 
-function drawLyrics(g: Ctx, look: ClipLook, f: ClipFrameInput, pal: ClipPalette) {
+function drawLyrics(g: Ctx, look: ClipLook, f: ClipFrameInput, pal: ClipPalette, cyOverride?: number) {
   const fr = lyricsAt(f.lines, f.t);
   if (fr.line < 0) return;
   const line = f.lines[fr.line];
   const words = line.words.map(w => w.text);
-  const cy = lyricsCenterY(look);
+  const cy = cyOverride ?? lyricsCenterY(look);
   const appear = Math.min(1, fr.sinceShow / 0.18);
   g.save();
   g.textBaseline = 'middle'; g.textAlign = 'left';
@@ -401,6 +401,15 @@ function drawLyrics(g: Ctx, look: ClipLook, f: ClipFrameInput, pal: ClipPalette)
     }
   }
   g.restore();
+}
+
+/**
+ * Lot 2b · Paroles seules, par-dessus une autre image (vidéo de la prise). Coordonnées d'une
+ * colonne de 1080 de large (translater et mettre l'échelle avant) ; `cy` : centre vertical.
+ */
+export function drawLyricsOverlay(g: Ctx, look: ClipLook, f: ClipFrameInput, cy?: number): void {
+  const pal = CLIP_PALETTES[look.palette] || CLIP_PALETTES[0];
+  drawLyrics(g, look, f, pal, cy);
 }
 
 /** Dessine l'image du clip à l'instant donné (coordonnées 1080 × 1920 ; mettre l'échelle avant pour l'aperçu). */
