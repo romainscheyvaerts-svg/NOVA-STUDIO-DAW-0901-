@@ -193,7 +193,8 @@ def _open_plugin(path: str, plugin_name: Optional[str] = None, sample_rate: Opti
         # compris), dossier UADx compris. Sondes du chargement à la fréquence du projet.
         return vst_native.load_plugin(path, plugin_name, sample_rate=sample_rate)
     if not HAS_PEDALBOARD:
-        raise RuntimeError("pedalboard n'est pas installé")
+        # Moteur « none » : l'hôte natif manque (pedalboard n'est plus livré).
+        raise RuntimeError(vst_native.missing_engine_message())
     if not os.path.exists(path):
         raise FileNotFoundError(f"Plugin introuvable : {path}")
     if plugin_name:
