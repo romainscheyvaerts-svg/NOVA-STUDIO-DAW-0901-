@@ -23,6 +23,9 @@ import { normText } from './commandPalette';
 import { ANALOG_SPECS } from '../engine/analogCompParams';
 import { v21Automatable } from '../engine/v21Params';
 import { getVocalRole, isVoiceTrack } from './vocalRoles';
+import { findVoicePreset, roleFromTrackName } from './voicePresets';
+import { describeSound } from './describeSound';
+import { macroDef, MACRO_ORDER } from './oneKnob';
 
 // ---------------------------------------------------------------------------
 // Limites (paliers gratuits des modèles)
@@ -228,6 +231,10 @@ export function summarizeStateForChat(st: DAWState, extra: ChatStateExtras = {},
     name: t.name,
     type: t.type,
     role: getVocalRole(t) !== 'other' ? getVocalRole(t) : undefined,
+    // Lot 8 : preset voix posé et positions du One Knob (0-100).
+    voicePreset: t.voiceChain?.presetId || undefined,
+    oneKnob: t.voiceChain?.amounts && Object.values(t.voiceChain.amounts).some(v => (v || 0) > 0)
+      ? Object.fromEntries(Object.entries(t.voiceChain.amounts).filter(([, v]) => (v || 0) > 0).map(([k, v]) => [k, Math.round((v || 0) * 100)])) : undefined,
     volDb: dbOf(t.volume),
     pan: t.pan ? r2(t.pan) : undefined,
     muted: t.isMuted || undefined,
@@ -303,6 +310,8 @@ export const KNOWN_ACTIONS = new Set([
   'SAVE_PROJECT', 'OPEN_EXPORT', 'APPLY_MIX_STYLE', 'OPEN_LYRICS', 'OPEN_SHARE', 'ADD_DRUMS', 'OPEN_DRUMS', 'REMOVE_DRUMS',
   'LOAD_DAILY_CHALLENGE', 'OPEN_MIX_STYLES', 'REMOVE_SILENCE', 'CLEAN_SILENCE', 'BREATHS', 'SET_BREATH_AUTO', 'SET_AUTO_CLEAN',
   'PREPARE_PART', 'ANALYZE_MIX', 'OPEN_STUDIO_OFFER', 'HIGHLIGHT', 'SELECT_TRACK',
+  // Lot 8 : chaîne voix (utils/voiceChatActions) — Décris ton son, presets voix, One Knob.
+  'DESCRIBE_SOUND', 'APPLY_VOICE_PRESET', 'ONE_KNOB',
   'VST_MIX', 'VST_LIST', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE',
   // Commande de la palette Ctrl+K, par son id.
   'RUN_COMMAND',
@@ -535,7 +544,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
     if (!track) return reject(`piste « ${p.trackId} » introuvable`);
     p.trackId = track.id;
   }
-  const needsTrack = /^(SET_VOLUME|SET_PAN|MUTE_TRACK|SOLO_TRACK|RENAME_TRACK|DELETE_TRACK|DUPLICATE_TRACK|UPDATE_TRACK|UPDATE_PLUGIN|SET_PLUGIN_PARAM|BYPASS_PLUGIN|OPEN_PLUGIN|REMOVE_PLUGIN|MOVE_PLUGIN|SET_SEND_LEVEL|SET_TRACK_OUTPUT|ARM_TRACK|FREEZE_TRACK|SET_AUTOMATION|CLEAR_AUTOMATION|SELECT_TRACK|PREPARE_REC|MUTE_CLIP|SPLIT_CLIP|NORMALIZE_CLIP|DELETE_CLIP|DUPLICATE_CLIP|RENAME_CLIP|MOVE_CLIP|SET_CLIP_GAIN|SET_CLIP_FADE)$/.test(name);
+  const needsTrack = /^(SET_VOLUME|SET_PAN|MUTE_TRACK|SOLO_TRACK|RENAME_TRACK|DELETE_TRACK|DUPLICATE_TRACK|UPDATE_TRACK|UPDATE_PLUGIN|SET_PLUGIN_PARAM|BYPASS_PLUGIN|OPEN_PLUGIN|REMOVE_PLUGIN|MOVE_PLUGIN|SET_SEND_LEVEL|SET_TRACK_OUTPUT|ARM_TRACK|FREEZE_TRACK|SET_AUTOMATION|CLEAR_AUTOMATION|SELECT_TRACK|PREPARE_REC|MUTE_CLIP|SPLIT_CLIP|NORMALIZE_CLIP|DELETE_CLIP|DUPLICATE_CLIP|RENAME_CLIP|MOVE_CLIP|SET_CLIP_GAIN|SET_CLIP_FADE|DESCRIBE_SOUND|APPLY_VOICE_PRESET|ONE_KNOB)$/.test(name);
   if (needsTrack && !track && !TRACK_OPTIONAL.has(name)) return reject('aucune piste indiquée');
   if (p.clipId !== undefined) {
     if (!track || !track.clips.some(c => c.id === p.clipId)) return reject(`clip « ${p.clipId} » introuvable${track ? ` sur ${track.name}` : ''}`);
@@ -688,6 +697,29 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       return ok(`Fenêtre d’export ouverte${fmt ? ` (${fmt} demandé)` : ''}`, `Ouvrir l'export${fmt ? ` en ${fmt}` : ''} (payant selon ton offre, prix affiché dans la fenêtre)`);
     }
     case 'APPLY_MIX_STYLE': return ok(`Style de mix « ${p.style || '?'} » appliqué`);
+    case 'DESCRIBE_SOUND': {
+      const text = String(p.text || p.description || '').slice(0, 160);
+      if (!text.trim()) return reject('phrase manquante (« plus brillante, un peu d’écho »…)');
+      const d = describeSound(text, { role: findVoicePreset(track!.voiceChain?.presetId)?.role || roleFromTrackName(tn), currentPresetId: track!.voiceChain?.presetId || null });
+      if (!d.matched.length) return reject(`aucun mot de son reconnu dans « ${text} »`);
+      p.text = text;
+      return ok(`Décris ton son sur ${tn} : ${d.summary}`);
+    }
+    case 'APPLY_VOICE_PRESET': {
+      const pr = findVoicePreset(String(p.preset || p.presetId || p.name || ''));
+      if (!pr) return reject(`preset voix « ${p.preset || p.presetId || p.name || '?'} » inconnu`);
+      p.preset = pr.id;
+      return ok(`Preset voix « ${pr.name} » posé sur ${tn}`);
+    }
+    case 'ONE_KNOB': {
+      const m = String(p.macro || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+      const id = MACRO_ORDER.find(x => x === m);
+      if (!id) return reject(`macro « ${p.macro || '?'} » inconnue (présence, chaleur, brillance, compression, espace, autotune, largeur, saturation)`);
+      const a = clampNum(p.amount ?? p.value, [0, 100], notes, 'Position (%)');
+      if (a === undefined) return reject('position du bouton illisible (0 à 100)');
+      p.macro = id; p.amount = a;
+      return ok(`One Knob de ${tn} : ${macroDef(id).name} ${Math.round(a)} %`);
+    }
     default: {
       const why = CONFIRM_ACTIONS[name];
       return ok(desc || name.toLowerCase().replace(/_/g, ' '), why);

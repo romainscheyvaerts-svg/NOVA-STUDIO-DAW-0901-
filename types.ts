@@ -145,6 +145,29 @@ export interface PluginInstance {
   sidechainTap?: 'pre' | 'post';
 }
 
+/** Les 8 macros du One Knob (utils/oneKnob). */
+export type OneKnobMacro = 'presence' | 'chaleur' | 'brillance' | 'compression' | 'espace' | 'autotune' | 'largeur' | 'saturation';
+
+/** Chaîne voix NOVA d'une piste (lot 8) : preset, gain d'entrée, One Knob. */
+export interface VoiceChainState {
+  /** Preset posé (utils/voicePresets) ; absent : One Knob sur une chaîne faite à la main. */
+  presetId?: string;
+  /** Trim d'entrée posé sur la tranche (dB, tête de tranche) pour amener la prise au niveau de référence. */
+  trimDb?: number;
+  /** Macro affichée sur le gros bouton. */
+  macro?: OneKnobMacro;
+  /** Position de chaque macro (0 à 1). */
+  amounts?: Partial<Record<OneKnobMacro, number>>;
+  /** Réglages de départ des effets pilotés (id d'effet → réglages), relus par les macros. */
+  base?: Record<string, Record<string, any>>;
+  /** Derniers réglages écrits par les macros (une retouche à la main est détectée et devient le départ). */
+  last?: Record<string, Record<string, any>>;
+  /** Envois de départ (avant la macro « Espace » / « Présence »). */
+  sendsBase?: Record<string, number>;
+  /** Effets ajoutés par le One Knob (absents du preset). */
+  added?: string[];
+}
+
 export interface TrackSend {
   id: string;          
   level: number;       
@@ -845,6 +868,12 @@ export interface Track {
   sends: TrackSend[];
   clips: Clip[];
   plugins: PluginInstance[];
+  /**
+   * Lot 8 (presets voix, One Knob) : preset de chaîne voix posé sur la piste, gain
+   * d'entrée calé sur la prise et état du gros bouton (utils/voicePresets, utils/oneKnob).
+   * Absent : aucune chaîne voix NOVA (anciens projets, pistes non voix).
+   */
+  voiceChain?: VoiceChainState;
   automationLanes: AutomationLane[];
   totalLatency: number;
   events?: any[];
@@ -1417,6 +1446,9 @@ export type AIActionType =
   | 'LOAD_BEAT'
   // Outils voix
   | 'APPLY_MIX_STYLE'
+  | 'DESCRIBE_SOUND'
+  | 'APPLY_VOICE_PRESET'
+  | 'ONE_KNOB'
   | 'OPEN_MIX_STYLES'
   // Nova pilote les plugins VST du PC (services/NovaVstMix)
   | 'VST_MIX' | 'VST_LIST' | 'VST_SHOW_PARAMS' | 'VST_SET_PARAM' | 'VST_REMOVE' | 'VST_MOVE' | 'VST_MIX_FALLBACK'

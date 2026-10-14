@@ -143,6 +143,8 @@ import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
 import { stripSilenceFromClip, StripSilenceResult } from './utils/stripSilence';
 import { findVocalMixStyle, suggestVocalMixStyle, VOCAL_MIX_STYLES } from './utils/vocalPresets';
+import { runVoiceChatAction, lufsOfSource } from './utils/voiceChatActions';
+import { setProjectKeyReader } from './utils/voiceProjectKey';
 import { takeDraggedBeat } from './utils/beatDrag';
 import { detectKey } from './utils/keyDetect';
 import { AudioAnalysisEngine } from './engine/AudioAnalysisEngine';
@@ -1187,6 +1189,11 @@ function Studio() {
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+  // Lot 8 : tonalité du projet pour Nova Tune posé depuis la console (One Knob, presets voix).
+  useEffect(() => {
+    setProjectKeyReader(() => ({ key: typeof stateRef.current.projectKey === 'number' ? stateRef.current.projectKey : null, scale: stateRef.current.projectScale || null }));
+    return () => setProjectKeyReader(null);
+  }, []);
   const getStateForMidi = useCallback(() => stateRef.current, []);
 
   // --- Protection contre la perte de travail ---
@@ -9374,6 +9381,17 @@ function Studio() {
       // ---- Outils voix ----
       case 'APPLY_MIX_STYLE': {
         handleApplyMixStyle(String(p.style || p.styleId || p.name || ''));
+        break;
+      }
+
+      // Lot 8 : Décris ton son, presets voix, One Knob (utils/voiceChatActions).
+      case 'DESCRIBE_SOUND': case 'APPLY_VOICE_PRESET': case 'ONE_KNOB': {
+        const t = findTrack(p.trackId);
+        if (!t) break;
+        const st = stateRef.current;
+        const r = runVoiceChatAction(a.action, p, t, { allTracks: st.tracks, inputLufs: a.action === 'ONE_KNOB' ? undefined : lufsOfSource(audioEngine.getTrackSourceAudio(t.id, 90)), projectKey: st.projectKey, projectScale: st.projectScale });
+        if (r.track) handleUpdateTrack(r.track);
+        setAiNotification(r.message);
         break;
       }
 
