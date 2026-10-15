@@ -66,6 +66,10 @@ export interface GuestStudioProps {
   auditionN: number | null;
   onAudition: (n: number | null) => void;
   onKeep: (n: number) => void;
+  /** 📌 Prises mises de côté (zone « Prises gardées » de l'ingé). */
+  keptTakes?: number[];
+  /** Mettre de côté / retirer (absent : l'ingé ne te laisse pas modifier la piste). */
+  onPin?: (n: number) => void;
   /** Prochaine prise : au même endroit que la précédente, ou à la suite. */
   nextTakeFrom: 'same' | 'next';
   onNextTakeFrom: (v: 'same' | 'next') => void;
@@ -338,14 +342,19 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
                 {p.takes.map(t => {
                   const kept = t.used > 0.05;
                   const playing = p.auditionN === t.n;
+                  const pinned = !!p.keptTakes?.includes(t.n);
                   return (
                     <li key={t.n} data-testid="guest-take" data-n={t.n} data-kept={kept ? '1' : '0'} className={`rounded-2xl border p-3 ${kept ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/[0.03]'}`}>
-                      <p className="text-[14px] font-black">{t.name} <span className="font-normal text-slate-400">· {fmt(t.end - t.start)}</span>{kept && <span className="ml-2 rounded-lg bg-emerald-400 px-2 py-0.5 text-[11px] font-black text-black">gardée</span>}</p>
-                      <div className="mt-2 grid grid-cols-3 gap-2">
+                      <p className="text-[14px] font-black">{t.name} <span className="font-normal text-slate-400">· {fmt(t.end - t.start)}</span>{kept && <span className="ml-2 rounded-lg bg-emerald-400 px-2 py-0.5 text-[11px] font-black text-black">gardée</span>}{pinned && <span className="ml-2 rounded-lg bg-amber-400 px-2 py-0.5 text-[11px] font-black text-black">📌 de côté</span>}</p>
+                      <div className={`mt-2 grid ${p.onPin ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2`}>
                         <button type="button" data-testid="guest-take-play" aria-pressed={playing} onClick={() => p.onAudition(playing ? null : t.n)}
                           className={`h-12 rounded-xl text-[13px] font-black ${playing ? 'bg-sky-400 text-black' : 'bg-white/10'}`}>{playing ? '■ Stop' : '▶ Écouter'}</button>
                         <button type="button" data-testid="guest-take-keep" disabled={kept} onClick={() => p.onKeep(t.n)}
                           className="h-12 rounded-xl bg-emerald-500/80 text-[13px] font-black text-black disabled:opacity-40">✓ Garder</button>
+                        {p.onPin && (
+                          <button type="button" data-testid="guest-take-pin" aria-pressed={pinned} onClick={() => p.onPin!(t.n)}
+                            className={`h-12 rounded-xl text-[13px] font-black ${pinned ? 'bg-amber-400 text-black' : 'bg-amber-500/15 text-amber-200'}`}>{pinned ? '📌 Retirer' : '📌 De côté'}</button>
+                        )}
                         <button type="button" data-testid="guest-take-delete" onClick={() => p.onDelete(t.n)}
                           className="h-12 rounded-xl bg-white/10 text-[13px] font-black text-red-200">🗑 Effacer</button>
                       </div>
@@ -362,7 +371,7 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
                   <button type="button" role="radio" aria-checked={p.nextTakeFrom === 'next'} data-testid="guest-next-next" onClick={() => p.onNextTakeFrom('next')}
                     className={`min-h-12 rounded-xl px-2 text-[13px] font-bold ${p.nextTakeFrom === 'next' ? 'bg-white text-black' : 'bg-white/10'}`}>⏭ Continuer à la suite</button>
                 </div>
-                <p className="text-[12px] text-slate-400">« Garder » : c'est celle-là que {eng} entend dans le morceau. Pour recommencer, appuie à nouveau sur ●.</p>
+                <p className="text-[12px] text-slate-400">« Garder » : c'est celle-là que {eng} entend dans le morceau.{p.onPin ? ` « 📌 De côté » : tu la mets de côté pour choisir la meilleure à la fin avec ${eng}.` : ''} Pour recommencer, appuie à nouveau sur ●.</p>
               </>
             )}
           </section>

@@ -302,7 +302,7 @@ export function summarizeStateForChat(st: DAWState, extra: ChatStateExtras = {},
 export const KNOWN_ACTIONS = new Set([
   'SET_VOLUME', 'SET_PAN', 'MUTE_TRACK', 'SOLO_TRACK', 'RENAME_TRACK', 'ADD_TRACK', 'CREATE_TRACK', 'DELETE_TRACK', 'DUPLICATE_TRACK',
   'UPDATE_TRACK', 'UPDATE_PLUGIN', 'SET_PLUGIN_PARAM', 'BYPASS_PLUGIN', 'OPEN_PLUGIN', 'CLOSE_PLUGIN', 'RESET_FX', 'SET_SEND_LEVEL',
-  'PLAY', 'STOP', 'RECORD', 'SEEK', 'COMP_TAKE', 'AUTO_COMP', 'OPEN_TAKE_HOME', 'SET_PUNCH', 'GOTO_SECTION', 'SET_LOOP', 'SET_BPM',
+  'PLAY', 'STOP', 'RECORD', 'SEEK', 'COMP_TAKE', 'AUTO_COMP', 'KEEP_TAKE_ASIDE', 'OPEN_TAKE_HOME', 'SET_PUNCH', 'GOTO_SECTION', 'SET_LOOP', 'SET_BPM',
   'MUTE_CLIP', 'SPLIT_CLIP', 'NORMALIZE_CLIP', 'PREPARE_REC', 'CLEAN_MIX', 'REMOVE_PLUGIN', 'MOVE_PLUGIN', 'COPY_PLUGIN',
   'SET_TRACK_OUTPUT', 'ARM_TRACK', 'FREEZE_TRACK', 'ADD_MARKER', 'DELETE_MARKER', 'GOTO_MARKER', 'SET_METRONOME', 'SET_TIME_SIGNATURE',
   'CREATE_GROUP', 'DELETE_GROUP', 'UPDATE_GROUP', 'DELETE_CLIP', 'DUPLICATE_CLIP', 'RENAME_CLIP', 'MOVE_CLIP', 'SET_CLIP_GAIN',
@@ -538,7 +538,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
 
   // Piste visée (id, nom ou numéro) : remplacée par son id exact.
   let track: Track | undefined;
-  const TRACK_OPTIONAL = new Set(['RESET_FX', 'CLEAN_SILENCE', 'REMOVE_SILENCE', 'VST_MIX', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE', 'BREATHS', 'AUTO_COMP', 'COMP_TAKE']);
+  const TRACK_OPTIONAL = new Set(['RESET_FX', 'CLEAN_SILENCE', 'REMOVE_SILENCE', 'VST_MIX', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE', 'BREATHS', 'AUTO_COMP', 'COMP_TAKE', 'KEEP_TAKE_ASIDE']);
   if (p.trackId !== undefined) {
     track = resolveTrack(st, p.trackId);
     if (!track) return reject(`piste « ${p.trackId} » introuvable`);

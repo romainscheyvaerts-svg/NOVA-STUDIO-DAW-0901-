@@ -120,11 +120,17 @@ interface OverlayProps {
   width: number;
   /** Molette : on fait défiler l'arrangement. */
   onWheel: (e: React.WheelEvent) => void;
+  /** Couleur d'une ligne (📌 prises gardées : celle choisie) ; défaut : celle de la prise. */
+  colorOf?: (lane: TakeLane) => string;
+  /** Lignes de la zone des prises gardées (attribut data-kept-row au lieu de data-take-lane-row). */
+  kept?: boolean;
+  /** Un clip est glissé : les lignes laissent passer la souris (le glisser continue dessous). */
+  inert?: boolean;
 }
 
 interface Drag { n: number; t0: number; t1: number; x0: number; pointerId: number; moved: boolean }
 
-export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, top, zoomH, scrollLeft, width, onWheel }) => {
+export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, top, zoomH, scrollLeft, width, onWheel, colorOf, kept, inert }) => {
   const segs = useMemo<CompSegment[]>(() => readComp(track.clips), [track.clips]);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
@@ -144,10 +150,10 @@ export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, to
   return (
     <>
       {lanes.map((l, i) => (
-        <div key={l.n} data-take-lane-row={l.n}
+        <div key={l.n} {...(kept ? { 'data-kept-row': l.n } : { 'data-take-lane-row': l.n })}
           title={`${l.title}\nBalaie un passage pour le garder dans ta voix finale (Quick Swipe Comping de Logic, comping de Pro Tools) · Tap : remplace le passage à cet endroit`}
           className="absolute left-0 right-0 border-t border-white/5 cursor-crosshair select-none"
-          style={{ top: top + i * TAKE_LANE_H, height: TAKE_LANE_H, pointerEvents: 'auto', touchAction: 'pan-y' }}
+          style={{ top: top + i * TAKE_LANE_H, height: TAKE_LANE_H, pointerEvents: inert ? 'none' : 'auto', touchAction: 'pan-y' }}
           onWheel={onWheel}
           onContextMenu={e => e.preventDefault()}
           onPointerDown={e => {
@@ -168,12 +174,12 @@ export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, to
           onPointerUp={e => end(e)}
           onPointerCancel={e => end(e, true)}
         >
-          <LaneCanvas lane={l} segs={segs} zoomH={zoomH} scrollLeft={scrollLeft} width={width}
+          <LaneCanvas lane={l} segs={segs} zoomH={zoomH} scrollLeft={scrollLeft} width={width} color={colorOf?.(l)}
             solo={api.audition?.trackId === track.id && api.audition.n === l.n} />
           {drag && drag.n === l.n && drag.moved && (
             <div className="absolute top-0.5 bottom-0.5 rounded-md border-2 pointer-events-none"
               style={{ left: Math.min(drag.t0, drag.t1) * zoomH - scrollLeft, width: Math.abs(drag.t1 - drag.t0) * zoomH,
-                borderColor: takeColor(l.n), background: takeColor(l.n) + '33' }}>
+                borderColor: colorOf?.(l) || takeColor(l.n), background: (colorOf?.(l) || takeColor(l.n)) + '33' }}>
               <span className="absolute -top-0.5 left-1 text-[10px] font-black text-white drop-shadow">{fmtTime(Math.min(drag.t0, drag.t1))} → {fmtTime(Math.max(drag.t0, drag.t1))}</span>
             </div>
           )}
@@ -184,8 +190,8 @@ export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, to
 };
 
 /** Un couloir : l'audio de la prise (forme d'onde), en couleur là où on l'entend. */
-const LaneCanvas: React.FC<{ lane: TakeLane; segs: CompSegment[]; zoomH: number; scrollLeft: number; width: number; solo: boolean }> =
-  ({ lane, segs, zoomH, scrollLeft, width, solo }) => {
+const LaneCanvas: React.FC<{ lane: TakeLane; segs: CompSegment[]; zoomH: number; scrollLeft: number; width: number; solo: boolean; color?: string }> =
+  ({ lane, segs, zoomH, scrollLeft, width, solo, color: forced }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -198,7 +204,7 @@ const LaneCanvas: React.FC<{ lane: TakeLane; segs: CompSegment[]; zoomH: number;
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const color = takeColor(lane.n);
+    const color = forced || takeColor(lane.n);
     const used = segs.filter(s => s.n === lane.n);
     for (const sp of lane.spans) {
       const x0 = sp.start * zoomH - scrollLeft, x1 = sp.end * zoomH - scrollLeft;
@@ -235,6 +241,6 @@ const LaneCanvas: React.FC<{ lane: TakeLane; segs: CompSegment[]; zoomH: number;
         ctx.fillRect(x0 + px0 + i, cy - v, 1, Math.max(1, v * 2));
       }
     }
-  }, [lane, segs, zoomH, scrollLeft, width, solo]);
+  }, [lane, segs, zoomH, scrollLeft, width, solo, forced]);
   return <canvas ref={ref} className="absolute inset-0 pointer-events-none" style={{ width: Math.max(1, Math.floor(width)), height: TAKE_LANE_H - 1 }} />;
 };

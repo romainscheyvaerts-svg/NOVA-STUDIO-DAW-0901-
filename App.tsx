@@ -267,7 +267,7 @@ const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayo
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
-  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import { useControlSurface } from './hooks/useControlSurface';
@@ -311,6 +311,8 @@ import { soloModeStore } from './utils/soloModes';
 import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
+import type { KeptZoneApi } from './components/KeptTakesZone';
+import { clearKept, colorKept, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 import ImportTempoCard from './components/ImportTempoCard';
 import { useImportTempo } from './hooks/useImportTempo';
@@ -2561,7 +2563,9 @@ function Studio() {
       placed = ` Je l'ai baissée (${Math.round(rm.volume * 100)} %) et décalée à gauche pour qu'elle soutienne ton lead sans le couvrir.`;
     }
     const st = stateRef.current;
-    const next: NovaFeedMessage['choices'] = [replay];
+    // 📌 Mettre la prise de côté pour choisir à la fin (zone « Prises gardées »).
+    const keep = { label: '📌 Garder de côté', action: { action: 'KEEP_TAKE_ASIDE', payload: { trackId } } as AIAction };
+    const next: NovaFeedMessage['choices'] = [replay, keep];
     let text = `✅ ${takeName} : bon niveau, prise propre.${placed}`;
     if (role === 'lead' && !st.vocalMixStyle && ownChain) {
       text += " Ta chaîne d'effets est déjà en place : réécoute-la. Si elle te va, on passe aux backs ; sinon refais-en une, l'ancienne est gardée (coupée).";
@@ -2575,7 +2579,7 @@ function Studio() {
       const style = findVocalMixStyle(sid);
       text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
       const replayMix = { label: '▶ Réécouter avec le mix', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
-      next.splice(0, next.length, replayMix);
+      next.splice(0, next.length, replayMix, keep);
       VOCAL_MIX_STYLES.filter(s => s.id !== sid && s.id !== 'voix-brute').slice(0, 3)
         .forEach(s => next.push({ label: `${s.emoji} ${s.name}`, action: { action: 'APPLY_MIX_STYLE', payload: { style: s.id } } }));
       next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
@@ -4252,6 +4256,8 @@ function Studio() {
         case 'nova.importAudio': e.preventDefault(); pickAudioFile(f => { void handleNewAudioImport(f); }); return;
         // Capturer la dernière prise (Logic : Capture as Recording).
         case 'nova.capture': e.preventDefault(); void captureRef.current(); return;
+        // 📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste).
+        case 'nova.keepTake': e.preventDefault(); if (e.repeat) return; keepLastTakeAsideRef.current(); return;
         case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
         // Couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
         case 'nova.guide':
@@ -4692,6 +4698,98 @@ function Studio() {
     setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, removedIds)), 0);
     setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
   }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
+
+  // ===== 📌 Prises gardées (utils/keptTakes) : zone au-dessus de la piste =============
+  // Zone repliée (affichage seulement, pas dans le projet) ; absente = dépliée.
+  const [keptClosed, setKeptClosed] = useState<Record<string, boolean>>({});
+  /** Change les repères des prises gardées d'une piste (une étape d'annulation, droits de la séance vérifiés). */
+  const updateKeptMeta = useCallback((trackId: string, f: (meta: TakeMeta[] | undefined) => TakeMeta[]): boolean => {
+    const prev = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!prev) return false;
+    const takeMeta = f(prev.takeMeta as TakeMeta[] | undefined);
+    if (takeMeta === prev.takeMeta) return false;
+    const why = collabTrackGuardRef.current(prev, { ...prev, takeMeta });
+    if (why) { setAiNotification(why); return false; }
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) d.takeMeta = takeMeta;
+    }));
+    breakHistory();
+    return true;
+  }, [setState, breakHistory]);
+  /** 📌 Garder une prise de côté (sans numéro : la dernière enregistrée sur la piste). */
+  const handleKeepAside = useCallback((trackId: string, n?: number | null): boolean => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return false;
+    const take = n ?? lastTakeNumber(t);
+    if (take === null) { setAiNotification(`📌 Pas encore de prise sur « ${t.name} » : enregistre, puis garde les meilleures ici.`); return false; }
+    const name = takeName(t, take);
+    if (isKept(t, take)) { setKeptClosed(prev => ({ ...prev, [trackId]: false })); setAiNotification(`📌 ${name} est déjà dans tes prises gardées.`); return true; }
+    const ok = updateKeptMeta(trackId, meta => keepAside(meta, take, Date.now()));
+    if (!ok) return false;
+    setKeptClosed(prev => ({ ...prev, [trackId]: false }));
+    const count = keptCount(stateRef.current.tracks.find(x => x.id === trackId) || t);
+    setAiNotification(`📌 ${name} gardée de côté (${count} prise${count > 1 ? 's' : ''} gardée${count > 1 ? 's' : ''} au-dessus de « ${t.name} »). Écoute-les à la fin pour choisir — Ctrl+Z pour annuler.`);
+    track('kept_take', { count });
+    return true;
+  }, [updateKeptMeta]);
+  const handleUnkeep = useCallback((trackId: string, n: number) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    if (takeAudition?.trackId === trackId && takeAudition.n === n) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    if (updateKeptMeta(trackId, meta => unkeep(meta, n))) setAiNotification(`📌 ${takeName(t, n)} retirée des prises gardées (elle reste dans les couloirs de prises). Ctrl+Z pour la remettre.`);
+  }, [updateKeptMeta, takeAudition]);
+  const handleClearKept = useCallback((trackId: string) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const n = keptCount(t);
+    if (takeAudition?.trackId === trackId) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    if (updateKeptMeta(trackId, meta => clearKept(meta))) setAiNotification(`📌 Zone vidée : ${n} prise${n > 1 ? 's' : ''} retirée${n > 1 ? 's' : ''} (rien n'est effacé, elles restent dans les couloirs de prises). Ctrl+Z pour revenir.`);
+  }, [updateKeptMeta, takeAudition]);
+  const handleRateKept = useCallback((trackId: string, n: number, stars: number) => {
+    updateKeptMeta(trackId, meta => rateKept(meta, n, stars));
+  }, [updateKeptMeta]);
+  const handleColorKept = useCallback((trackId: string, n: number, color: string | null) => {
+    updateKeptMeta(trackId, meta => colorKept(meta, n, color));
+  }, [updateKeptMeta]);
+  /** « Mettre sur la piste » : la prise gardée remplace ce qu'on entend (prise entière, comp de toujours). */
+  const handlePutKeptOnTrack = useCallback((trackId: string, n: number) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const res = keepTakeGroup(stateRef.current.tracks, trackId, n, takeGroupOn());
+    const why = collabTrackGuardRef.current(t, { ...t, clips: res.get(trackId) as any });
+    if (why) { setAiNotification(why); return; }
+    if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      res.forEach((clips, id) => { const d = draft.tracks.find(x => x.id === id); if (d) d.clips = clips as any; });
+    }));
+    breakHistory();
+    setAiNotification(`⤓ ${takeName(t, n)} mise sur la piste : c'est elle que tu entends maintenant${res.size > 1 ? ` (${res.size} pistes, prises du même passage)` : ''}. Les autres restent gardées — Ctrl+Z pour revenir.`);
+  }, [setState, breakHistory, takeAudition]);
+  const handleToggleKeptZone = useCallback((trackId: string, open?: boolean) => {
+    setKeptClosed(prev => ({ ...prev, [trackId]: open === undefined ? !prev[trackId] : !open }));
+  }, []);
+  /** Raccourci (Ctrl+Alt+P), palette, Nova, cabine : la dernière prise de la piste armée (sinon sélectionnée). */
+  const keepLastTakeAside = useCallback((): boolean => {
+    const st = stateRef.current;
+    if (st.isRecording) { setAiNotification('📌 La prise est en cours : arrête-la (STOP), puis garde-la.'); return false; }
+    const withTakes = (t?: Track) => !!t && lastTakeNumber(t) !== null;
+    const armed = st.tracks.filter(t => t.isTrackArmed && withTakes(t as Track));
+    const sel = st.tracks.find(t => t.id === st.selectedTrackId);
+    const target = (armed.find(t => t.id === st.selectedTrackId) || armed[0] || (withTakes(sel as Track) ? sel : undefined)
+      || st.tracks.find(t => withTakes(t as Track))) as Track | undefined;
+    if (!target) { setAiNotification('📌 Aucune prise à garder pour l’instant : arme une piste (R), enregistre, puis 📌 Garder.'); return false; }
+    return handleKeepAside(target.id, null);
+  }, [handleKeepAside]);
+  const keepLastTakeAsideRef = useRef(keepLastTakeAside);
+  keepLastTakeAsideRef.current = keepLastTakeAside;
+  const keptZoneApi = useMemo<KeptZoneApi>(() => ({
+    closed: keptClosed,
+    onToggle: handleToggleKeptZone, onKeep: handleKeepAside, onUnkeep: handleUnkeep, onClear: handleClearKept,
+    onRate: handleRateKept, onColor: handleColorKept, onPut: handlePutKeptOnTrack,
+  }), [keptClosed, handleToggleKeptZone, handleKeepAside, handleUnkeep, handleClearKept, handleRateKept, handleColorKept, handlePutKeptOnTrack]);
 
   // ===== « Meilleure prise » par l'IA locale (V22) : note chaque prise, propose un comp.
   const [autoCompProposal, setAutoCompProposal] = useState<AutoCompProposal | null>(null);
@@ -8964,6 +9062,14 @@ function Studio() {
         break;
       }
 
+      case 'KEEP_TAKE_ASIDE': {
+        const tr = p.trackId ? findTrack(p.trackId) : undefined;
+        const take = Number(p.take);
+        if (tr) handleKeepAside(tr.id, Number.isFinite(take) && take > 0 ? take : null);
+        else keepLastTakeAsideRef.current();
+        break;
+      }
+
       case 'AUTO_COMP': {
         const tr = (p.trackId ? findTrack(p.trackId) : undefined) || stateRef.current.tracks.find(t => takeCount(t) > 1);
         if (!tr) { notify('Il faut au moins 2 prises sur une piste pour choisir la meilleure'); break; }
@@ -9983,6 +10089,8 @@ function Studio() {
     play: () => { void handleTogglePlay(); },
     stop: () => { void handleStop(); },
     home: () => { handleSeek(0); },
+    keep: () => { keepLastTakeAsideRef.current(); },
+    hasTake: () => stateRef.current.tracks.some(t => lastTakeNumber(t as Track) !== null),
     notify: (text) => setAiNotification(text),
   });
   // Chez l'artiste : le téléphone en cabine.
@@ -10125,6 +10233,7 @@ function Studio() {
       // Voix
       a('Voix', 'pal.voiceTrack', 'Ajouter une piste voix (armée, prête à enregistrer)', () => { void handleAddVoiceTrack(); }, { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste voix micro enregistrer nouvelle' }),
       ...(() => { const t = pickCleanTarget(st.tracks, { clipIds: sel.clipIds, trackId: st.selectedTrackId, playhead: playheadStore.get() }); return [a('Voix', 'pal.voiceClean', '✨ Nettoyer la voix (bruit de fond, niveau)', () => openNovaWindow('voice-clean', { targets: t ? [t] : [] }), { keywords: 'nettoyer voix propre bruit souffle ventilo clim rue débruiter denoise voice cleaner bandlab rx réverbe écho pièce niveau', disabledReason: t ? undefined : 'Sélectionne d’abord un clip voix (clic dessus).' })]; })(),
+      a('Voix', 'nova.keepTake', '📌 Garder la dernière prise de côté (prises gardées, pour choisir à la fin)', () => { keepLastTakeAsideRef.current(); }, { keys: k('nova.keepTake'), pt: 'Playlists : noter / mettre de côté une prise', keywords: 'garder prise côté pin épingler playlist prises gardées favori meilleure take keep', disabledReason: st.tracks.some(t => lastTakeNumber(t as Track) !== null) ? undefined : 'Enregistre d’abord une prise.' }),
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
@@ -10316,7 +10425,7 @@ function Studio() {
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy} onClipsMoved={handleClipsMoved}
                    onAudioDrop={onArrangementAudioDrop}
-                   punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
+                   punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi} keptZone={keptZoneApi}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                    chordLane={chordLane}
@@ -10474,6 +10583,10 @@ function Studio() {
                   tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
+                  keptZone={keptZoneApi}
+                  takeAudition={takeAudition}
+                  onAuditionTake={handleAuditionTake}
+                  onRenameTake={handleRenameTake}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
                   bpm={state.bpm}
@@ -11111,6 +11224,11 @@ function Studio() {
             if (n === null && stateRef.current.isPlaying) void handleTogglePlay();
           }}
           onKeep={(n) => { if (guestTrack) handleKeepTake(guestTrack.id, n); }}
+          keptTakes={guestTrack ? keptMetas(guestTrack).map(m => m.n) : []}
+          onPin={guestTrack && (!collab || guestCanEditContent(guestTrack, collab.key, state.collabGuestRights)) ? (n) => {
+            if (!guestTrack) return;
+            if (isKept(guestTrack, n)) handleUnkeep(guestTrack.id, n); else handleKeepAside(guestTrack.id, n);
+          } : undefined}
           nextTakeFrom={guestTakeFrom}
           onNextTakeFrom={setGuestTakeFrom}
           onDelete={(n) => { if (guestTrack) handleDeleteTake(guestTrack.id, n); }}

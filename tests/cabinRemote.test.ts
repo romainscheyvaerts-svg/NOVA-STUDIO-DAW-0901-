@@ -135,3 +135,23 @@ describe('télécommande de cabine · messages et téléphone', () => {
     expect(cabinAckText({ ok: false, reason: 'Non.' }, 'Max')).toBe('Non.');
   });
 });
+
+describe('télécommande de cabine · 📌 garder la prise', () => {
+  it('hors prise : la dernière prise est gardée chez l’ingé (accusé « 📌 »)', () => {
+    const d = cabinDecide(cmd({ cmd: 'keep' }), ctx({ hasTake: true }));
+    expect(d).toMatchObject({ action: 'keep', ack: { ok: true, done: 'keep' } });
+    expect(d!.log).toMatch(/Nina a gardé la dernière prise/);
+    expect(cabinAckText({ ok: true, done: 'keep' }, 'Max')).toBe('📌 Prise gardée de côté chez Max');
+  });
+  it('pendant la prise, sans prise, sans droit : refusé avec la raison', () => {
+    expect(cabinDecide(cmd({ cmd: 'keep' }), ctx({ isRecording: true }))).toMatchObject({ action: 'none', ack: { ok: false } });
+    expect(cabinDecide(cmd({ cmd: 'keep' }), ctx({ hasTake: false }))!.ack.reason).toMatch(/Pas encore de prise/);
+    expect(cabinDecide(cmd({ cmd: 'keep' }), ctx({ rights: DEFAULT_GUEST_RIGHTS }))!.action).toBe('none');
+    expect(sanitizeCabinCommand({ id: 'a', cmd: 'keep', from: NINA, to: ENG, at: NOW })?.cmd).toBe('keep');
+  });
+  it('bouton du téléphone : coupé pendant la prise', () => {
+    const live = { state: { rec: false, play: false, ci: null, allowed: true, eng: 'Max' }, link: 'ok' as const, online: true, engineerHere: true, pending: null };
+    expect(cabinButtons(live).keep.enabled).toBe(true);
+    expect(cabinButtons({ ...live, state: { ...live.state, rec: true } }).keep.enabled).toBe(false);
+  });
+});
