@@ -43,7 +43,6 @@ const ImportSessionDialog = lazyWithPreload(() => import('./components/ImportSes
 const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazyWithPreload(() => import('./components/AutomationEditorView'));
-const ShareModal = lazy(() => import('./components/ShareModal'));
 const SaveProjectModal = lazyWithPreload(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazyWithPreload(() => import('./components/LoadProjectModal'));
 const SessionTemplatesModal = lazyWithPreload(() => import('./components/SessionTemplatesModal'));
@@ -1047,7 +1046,6 @@ function Studio() {
   const [user, setUser] = useState<User | null>(defaultUser);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
   const [audioSettingsFocus, setAudioSettingsFocus] = useState<'surfaces' | undefined>(undefined);
@@ -1771,7 +1769,6 @@ function Studio() {
       }
   }, [handleLoadProject]);
 
-  const handleShareProject = async (e: string) => { setIsShareModalOpen(false); };
   const handleExportMix = async () => {
     // Identifiant stable du projet (l'achat « mes pistes seules » y est rattaché).
     if (!/^(cloud-|proj-[a-z0-9]{8,})/.test(stateRef.current.id || '')) {
@@ -10642,7 +10639,8 @@ function Studio() {
                   topCard={<NextStepCard inline isMobile
                     open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
                     trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}
-                    besideSidebar={false} onAction={handleNextStep} onClose={() => setNextStep(null)} />}
+                    besideSidebar={false} onAction={handleNextStep} onClose={() => setNextStep(null)}
+                    footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null} />}
                   tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
@@ -10991,6 +10989,8 @@ function Studio() {
         </Suspense>
       )}
       {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={exportKeyOf(state)} ownedInstrumentIds={ownedInstruments} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
+        // « Envoyer au studio Make Music » (chantier 17) : perdu à la fusion du 13/10 (0664fec2), rebranché.
+        onSendToStudio={() => { setIsExportMenuOpen(false); setStudioSendOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} /></PanelBoundary>}
       {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
       {metronomeDialogOpen && (
@@ -11548,7 +11548,6 @@ function Studio() {
         onApply={applyStems} onClose={() => setStemTarget(null)}
         rights={stemsRightsFor(stemTarget ? state.tracks.find(t => t.id === stemTarget.trackId) : null)}
         projectKey={exportKeyOf(state) || undefined} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
-      {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
       
       {rateConfirm && <ProjectRateConfirm {...rateConfirm} onConfirm={confirmRateChange} onCancel={() => setRateConfirm(null)} />}
       {rateBusy && (

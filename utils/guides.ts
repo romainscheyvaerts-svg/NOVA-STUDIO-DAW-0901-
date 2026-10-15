@@ -285,7 +285,7 @@ export const GUIDES: Guide[] = [
     steps: [
       { text: 'Ouvre « Exporter ».', phone: 'Touche « Exporter » (flèche ⬆ en haut), ou ☰ › « Exporter ».', action: 'nova.export',
         target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
-      { text: 'Touche « 🚀 Prêt pour Spotify / Apple / TikTok ? ».', target: tid('export-distribution'), done: { visible: tid('distribution-panel') } },
+      { text: 'Touche « 🚀 Prêt pour Spotify / Apple / TikTok ? » (sous « ⚙️ Réglages avancés »).', target: [tid('export-distribution'), tid('export-avance')], done: { visible: tid('distribution-panel') } },
       { text: 'Choisis la plateforme, puis « Vérifier mon morceau ».', target: tid('dist-analyze') },
       { text: 'Corrige les feux rouges (« Corriger : … ») et remplis titre, artiste, année.', target: tid('dist-form'), manual: true },
       { text: '« Télécharger le paquet Livraison (.zip) ».', target: tid('dist-package') },
@@ -571,8 +571,10 @@ export const GUIDES: Guide[] = [
     keywords: 'studio make music envoyer reserver reservation inge mixage pro mastering session enregistrer au studio bruxelles',
     summary: 'Le projet, les stems et tes notes partent au studio avec ta demande.',
     steps: [
-      { text: 'Ouvre « Envoyer au studio ».', phone: 'Touche ☰ › « Plus d’outils » › « Envoyer au studio ».', action: 'pal.sendStudio',
-        target: [tid('menu-send-studio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('studio-send') } },
+      { text: 'Ouvre « Exporter » (ou ☰ › « Plus d’outils » › « Envoyer au studio »).', phone: 'Touche « Exporter » (flèche ⬆ en haut).', action: 'nova.export',
+        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-send-studio'), MENU_PLUS, PHONE_MENU],
+        done: { visible: `${tid('export-send-studio')}, ${tid('studio-send')}` } },
+      { text: 'Touche « 🏠 Envoyer au studio Make Music ».', action: 'pal.sendStudio', target: tid('export-send-studio'), done: { visible: tid('studio-send') } },
       { text: 'Connecte-toi, choisis le service (enregistrement, mixage, mastering) et ajoute tes notes.', target: tid('studio-send'), manual: true },
       { text: '« Envoyer » : le studio répond avec une référence.', target: tid('studio-send-go'), done: { visible: tid('studio-done') } },
     ],

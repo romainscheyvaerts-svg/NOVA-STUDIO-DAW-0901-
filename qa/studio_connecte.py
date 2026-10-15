@@ -528,12 +528,26 @@ def part_cabine(p, sim):
 
 # --------------------------------------------------------------------------- 2. envoyer au studio
 
-def open_send(page, phone):
-    if phone:
+def open_send(page, phone, via="auto"):
+    """Ouvre « Envoyer au studio » : menu ☰ (téléphone ; mode simple : sous « Plus d'outils »),
+    fenêtre Exporter (bouton « 🏠 Envoyer au studio Make Music », perdu à la fusion du 13/10 puis
+    rebranché le 15/10) ou palette Ctrl+K."""
+    if via == "auto":
+        via = "menu" if phone else "export"
+    if via == "menu":
         page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.tap()
         page.wait_for_timeout(500)
+        if not page.get_by_test_id("menu-send-studio").count() and page.get_by_test_id("menu-plus-toggle").count():
+            page.get_by_test_id("menu-plus-toggle").tap()
+            page.wait_for_timeout(300)
         page.get_by_test_id("menu-send-studio").scroll_into_view_if_needed()
         page.get_by_test_id("menu-send-studio").tap()
+    elif via == "export":
+        page.keyboard.press("Control+Shift+E")
+        page.get_by_test_id("export-send-studio").wait_for(timeout=10000)
+        check("pc : la fenêtre Exporter propose « 🏠 Envoyer au studio Make Music »", page.get_by_test_id("export-send-studio").is_visible())
+        page.get_by_test_id("export-send-studio").click()
+        wait_for(page, lambda: page.locator("[role=dialog][aria-labelledby=export-title]").count() == 0, 10, step=100, what="fenêtre Exporter refermée")
     else:
         page.keyboard.press("Control+k")
         page.wait_for_timeout(400)

@@ -979,6 +979,18 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
             </button>
+            {/* Chantier 17 : aussi dans la vue avancée (ordinateur en mode avancé : elle s'ouvre directement). */}
+            {onSendToStudio && (
+              <button type="button" data-testid="export-send-studio" onClick={onSendToStudio} disabled={isRendering}
+                className="w-full min-h-12 px-4 py-3 rounded-xl border border-amber-400/30 bg-amber-500/[0.06] hover:bg-amber-500/[0.12] text-left flex items-center gap-3">
+                <span className="text-2xl leading-none" aria-hidden="true">🏠</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-black text-white">Envoyer au studio Make Music</span>
+                  <span className="block text-[12px] text-slate-400">Le projet, les stems et tes notes arrivent chez l'ingé, et tu demandes ton créneau en même temps.</span>
+                </span>
+                <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
+              </button>
+            )}
             </>}
         </div>
       </div>
