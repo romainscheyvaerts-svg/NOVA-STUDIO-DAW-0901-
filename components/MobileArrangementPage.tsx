@@ -631,8 +631,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
             {bpm} BPM
           </div>
-          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). */}
-          <PracticeSpeed compact />
+          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). Mode avancé. */}
+          {!simple && <PracticeSpeed compact />}
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
             aria-label="Dézoomer"

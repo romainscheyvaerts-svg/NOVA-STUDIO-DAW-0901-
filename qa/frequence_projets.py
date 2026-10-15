@@ -101,6 +101,8 @@ def scenario(page, log, res, vp):
     prepare(page)
     # D. accueil : nouveau projet vierge
     page.goto(BASE, wait_until="domcontentloaded")   # profil neuf : rien à reprendre
+    page.get_by_text("Nouveau Projet").first.wait_for(timeout=25000)
+    ouvrir_plus_accueil(page)   # mode simple : la fréquence est sous « Plus d'options »
     page.get_by_test_id("landing-project-rate").wait_for(timeout=25000)
     res["D_accueil_choix"] = page.get_by_test_id("landing-project-rate").input_value()
     shot(page, "D0_accueil")

@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-modeles\lennon\nova")
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3446/")
-from qalib import launch, new_page, OUT, Log, save_log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, save_log, BASE, ouvrir_plus_accueil  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 TPL = Path(__file__).resolve().parents[1] / "templates" / "romain-lennon-depart.novatemplate"
@@ -44,6 +44,8 @@ def shot(page, name):
 
 def open_templates(page, email):
     page.goto(BASE, wait_until="domcontentloaded")
+    page.get_by_text("Nouveau Projet").first.wait_for(timeout=30000)
+    ouvrir_plus_accueil(page)
     page.get_by_test_id("landing-templates").wait_for(timeout=30000)
     page.evaluate(SET_ACCOUNT, email)
     page.get_by_test_id("landing-templates").click()

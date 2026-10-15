@@ -3,6 +3,7 @@ import type { DAWState } from '../types';
 import { videoTake, type CamState } from '../utils/videoTakeRecorder';
 import { fmtBytes, fmtMinutes, type VideoFormat } from '../utils/videoTake';
 import { deleteTake, listMeta, videoDbAvailable, type VideoTakeMeta } from '../utils/videoTakeStore';
+import { useSimpleMode } from '../utils/simpleMode';
 
 const VideoTakeExportModal = lazy(() => import('./VideoTakeExportModal'));
 
@@ -38,6 +39,7 @@ function useCam(): CamState { return useSyncExternalStore(videoTake.subscribe, v
 const VideoTakeDock: React.FC<Props> = props => {
   const { open, onOpen, onClose, state } = props;
   const cam = useCam();
+  const { simple } = useSimpleMode();
   const [pillHidden, setPillHidden] = useState(() => { try { return sessionStorage.getItem(HIDE_PILL) === '1'; } catch { return false; } });
   const [mini, setMini] = useState(false);
   const [takes, setTakes] = useState<VideoTakeMeta[]>([]);
@@ -99,7 +101,9 @@ const VideoTakeDock: React.FC<Props> = props => {
 
   // ── Pastille (panneau fermé) ──
   if (!open) {
-    if (!voiceArmed || pillHidden) return null;
+    // Mode simple : pas de pastille flottante (elle recouvrait « Envoyer » du chat invité et la carte
+    // « Et maintenant ? ») ; la caméra est dans le menu ☰ (« Plus d'outils ») et la palette Ctrl+K.
+    if (!voiceArmed || pillHidden || simple) return null;
     return (
       <div className="fixed z-[640] bottom-[140px] right-3 sm:bottom-[120px] sm:right-5 flex items-center gap-1 rounded-full border border-nv-line bg-nv-panel/95 text-nv-ink shadow-xl pl-1 pr-1 backdrop-blur" data-testid="video-take-pill">
         <button type="button" onClick={onOpen} className="h-10 rounded-full px-3 text-[13px] font-bold hover:bg-nv-accent/10" aria-label="Filmer la prise avec la caméra"

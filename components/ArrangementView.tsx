@@ -2658,13 +2658,13 @@ useEffect(() => {
             <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SMART')} aria-pressed={activeTool === 'SMART'} className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'SMART' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Smart Tool (comme dans Pro Tools) (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
+            {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SCRUB')} aria-pressed={activeTool === 'SCRUB'} data-testid="tool-scrub" className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SCRUB' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title={`Scrubber (${shortcutHint('tool.scrub') || 'F9'}) : glisse sur la forme d'onde pour l'entendre, au rythme de ta main (ou de ton doigt). Alt+glisser = shuttle. Avec le Sélecteur, Ctrl+glisser fait la même chose.`} aria-label="Outil scrub"><i className="fas fa-headphones text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('ZOOM')} aria-pressed={activeTool === 'ZOOM'} data-testid="tool-zoom" className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'ZOOM' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title={`Zoom (${shortcutHint('tool.zoom') || 'F5'}) : clic = zoom avant sur ce point, Alt+clic = zoom arrière`} aria-label="Outil zoom"><i className="fas fa-magnifying-glass text-[12px]"></i></button>
+            {!simple && <button onClick={() => setActiveTool('SCRUB')} aria-pressed={activeTool === 'SCRUB'} data-testid="tool-scrub" className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SCRUB' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title={`Scrubber (${shortcutHint('tool.scrub') || 'F9'}) : glisse sur la forme d'onde pour l'entendre, au rythme de ta main (ou de ton doigt). Alt+glisser = shuttle. Avec le Sélecteur, Ctrl+glisser fait la même chose.`} aria-label="Outil scrub"><i className="fas fa-headphones text-[12px]"></i></button>}
+            {!simple && <button onClick={() => setActiveTool('ZOOM')} aria-pressed={activeTool === 'ZOOM'} data-testid="tool-zoom" className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'ZOOM' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title={`Zoom (${shortcutHint('tool.zoom') || 'F5'}) : clic = zoom avant sur ce point, Alt+clic = zoom arrière`} aria-label="Outil zoom"><i className="fas fa-magnifying-glass text-[12px]"></i></button>}
           </div>
           {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
           {!simple && (
@@ -2674,10 +2674,11 @@ useEffect(() => {
               <i className="fas fa-left-right text-[11px]" aria-hidden="true"></i><i className="fas fa-clock text-[8px] -ml-0.5 mt-2" aria-hidden="true"></i>
             </button>
           )}
-          {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). */}
-          <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />
+          {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). Mode simple : sélection, ciseaux,
+              Smart Tool et gomme suffisent (le reste en mode avancé, raccourcis et Ctrl+K inchangés). */}
+          {!simple && <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />}
           {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
-          <EditModeSelector compact={simple} />
+          {!simple && <EditModeSelector compact={simple} />}
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
               <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge » de Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>

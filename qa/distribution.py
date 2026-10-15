@@ -160,6 +160,13 @@ def run_case(p, cas, vp, theme, res):
             page.evaluate(ABIMER)
             page.wait_for_timeout(800)
         open_export(page)
+        # Vue simple de la fenêtre Exporter (15/10/2026) : « Prêt pour Spotify » est dans « Réglages avancés ».
+        if not page.get_by_test_id("export-distribution").count():
+            r.setdefault("chemin", []).append("Réglages avancés")
+            av = page.get_by_test_id("export-avance").first
+            av.scroll_into_view_if_needed()
+            (av.tap if phone else av.click)()
+            page.wait_for_timeout(400)
         btn = page.get_by_test_id("export-distribution")
         btn.scroll_into_view_if_needed()
         check("bouton « Prêt pour Spotify / Apple / TikTok ? » dans la fenêtre Exporter", "Prêt pour Spotify" in btn.inner_text(), btn.inner_text())

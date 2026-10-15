@@ -31,7 +31,7 @@ from pathlib import Path
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3452/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-bandlab\lot4_mastering\qa")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, BASE, Log  # noqa: E402
+from qalib import launch, new_page, OUT, BASE, Log, ouvrir_plus_accueil  # noqa: E402
 from desktop_gate import install_mocks  # noqa: E402
 from tarifs import Billing as TarifsBilling, route_billing  # noqa: E402  (nova-billing simulé, grille du 14/10)
 _r1 = (Path(__file__).parent / "r1_export.py").read_text(encoding="utf-8").split("\nwith sync_playwright() as p:")[0]
@@ -146,6 +146,8 @@ def parcours(b, vp, theme, compte):
     route_billing(page, sim)
     tag = f"{vp}/{theme}"
     page.goto(BASE, wait_until="domcontentloaded")
+    page.get_by_text("Nouveau Projet").first.wait_for(timeout=60000)
+    ouvrir_plus_accueil(page, touch=vp.startswith("tel"))   # mode simple : sous « Plus d'options »
     btn = page.locator("[data-testid=landing-quick-master]").locator("visible=true")
     btn.first.wait_for(timeout=60000)
     page.wait_for_timeout(800)

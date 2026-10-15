@@ -18,6 +18,7 @@ import { useNovaPricing, proMoisTexte } from '../hooks/useNovaPricing';
 import { catalogStatus, isQuotaError } from '../utils/catalogStatus';
 import type { ProjectRate } from '../utils/projectRate';
 import { ProjectRatePicker } from './ProjectRateControls';
+import { useSimpleMode } from '../utils/simpleMode';
 
 interface LandingPageProps {
   user: User | null;
@@ -61,6 +62,12 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onOpenQuickMaster,
 }) => {
   const grille = useNovaPricing();
+  // Mode simple (le site par défaut) : l'accueil ne montre que choisir une instru, un projet vierge
+  // et rouvrir un projet ; le reste (fréquence, modèle, masteriser, ton instru, appli Windows) est
+  // rangé sous « Plus d'options ». Le mode avancé (et l'appli Windows) montre tout, comme avant.
+  const { simple } = useSimpleMode();
+  const [plusOuvert, setPlusOuvert] = useState(false);
+  const extras = !simple || plusOuvert;
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -423,13 +430,24 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-[11px] text-slate-400">Projet vierge{newProjectRate ? ` · ${newProjectRate % 1000 ? (newProjectRate / 1000).toFixed(1).replace('.', ',') : newProjectRate / 1000} kHz` : ''}</p>
               </div>
             </button>
-            {newProjectRate && onNewProjectRate && (
+            {/* Mode simple : le reste de « Démarrer » est rangé ici (un clic pour tout revoir). */}
+            {simple && (
+              <button type="button" onClick={() => setPlusOuvert(o => !o)} aria-expanded={plusOuvert} data-testid="landing-plus"
+                className="w-full min-h-11 px-4 py-2 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] text-left flex items-center gap-3 transition-all">
+                <i className={`fas ${plusOuvert ? 'fa-chevron-up' : 'fa-chevron-down'} w-5 text-center text-slate-400 text-xs`} aria-hidden="true"></i>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-bold text-white">{plusOuvert ? 'Moins d’options' : 'Plus d’options'}</span>
+                  {!plusOuvert && <span className="block text-[11px] text-slate-400">Ton instru, un modèle, masteriser un morceau, fréquence…</span>}
+                </span>
+              </button>
+            )}
+            {extras && newProjectRate && onNewProjectRate && (
               <ProjectRatePicker value={newProjectRate} onChange={onNewProjectRate} tone="dark" label="Fréquence"
                 testId="landing-project-rate" className="justify-end px-1 -mt-1" />
             )}
 
             {/* Masteriser un fichier, sans projet (lot 4a) */}
-            {onOpenQuickMaster && (
+            {extras && onOpenQuickMaster && (
               <button
                 type="button"
                 onClick={onOpenQuickMaster}
@@ -446,7 +464,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             )}
 
             {/* Nouveau projet depuis un modèle de session */}
-            {onOpenTemplates && (
+            {extras && onOpenTemplates && (
               <button
                 onClick={onOpenTemplates}
                 data-testid="landing-templates"
@@ -463,7 +481,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             )}
 
             {/* Bouton Ouvrir fichier audio */}
-            <button
+            {extras && <button
               onClick={handleOpenAudioFile}
               className="w-full flex items-center gap-4 p-4 bg-white/[0.02] border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-white/[0.05] transition-all group"
             >
@@ -474,7 +492,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-sm font-bold text-white">Ouvrir Audio <span className="ml-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-black text-violet-200 align-middle">⭐ Nova Pro</span></p>
                 <p className="text-[11px] text-slate-400">Ta propre instru (MP3, WAV…) · Nova Pro{proMoisTexte(grille) ? ` ${proMoisTexte(grille)}` : ''}</p>
               </div>
-            </button>
+            </button>}
 
             {/* Bouton Charger Sauvegarde */}
             <button
@@ -491,7 +509,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </button>
 
             {/* Application Windows (masquée sur téléphone et dans l'application elle-même) */}
-            {!isNovaDesktop() && (
+            {extras && !isNovaDesktop() && (
               <a
                 href={DESKTOP_APP_DOWNLOAD_URL}
                 download
@@ -513,7 +531,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           {/* Footer sidebar */}
-          <div className="nova-signature mt-auto p-4 border-t border-white/5">
+          {/* Téléphone, mode simple : ce pied de colonne passe sous le catalogue (les instrus montent d'autant). */}
+          <div className={`nova-signature mt-auto p-4 border-t border-white/5 ${simple ? 'hidden md:block' : ''}`}>
             <button type="button" onClick={() => openFeedback()} data-nova-action="feedback-accueil" title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
               className="w-full mb-2 min-h-10 rounded-lg text-[12px] font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
               <i className="fas fa-comment-dots mr-1.5" aria-hidden="true"></i>Signaler un bug / une idée
@@ -636,6 +655,15 @@ const LandingPage: React.FC<LandingPageProps> = ({
             )}
           </div>
         </section>
+        {simple && (
+          <div className="nova-signature md:hidden p-4 border-t border-white/5">
+            <button type="button" onClick={() => openFeedback()} data-nova-action="feedback-accueil-tel" title="Signaler un bug ou proposer une idée"
+              className="w-full mb-2 min-h-10 rounded-lg text-[12px] font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
+              <i className="fas fa-comment-dots mr-1.5" aria-hidden="true"></i>Signaler un bug / une idée
+            </button>
+            <p className="text-[9px] text-slate-600 text-center">© 2026 Nova Studio</p>
+          </div>
+        )}
       </main>
 
       {/* Modal Connexion */}
