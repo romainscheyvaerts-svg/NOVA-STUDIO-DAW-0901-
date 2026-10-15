@@ -49,15 +49,19 @@ const InputMeter: React.FC<{ trackId: string; compact?: boolean }> = ({ trackId,
         <div className="absolute inset-y-0 w-px bg-white/25" style={{ left: `${pos(-12)}%` }} />
         <div className="absolute inset-y-0 w-px bg-white/25" style={{ left: `${pos(-6)}%` }} />
       </div>
-      <span className="w-8 text-right text-[9px] font-mono tabular-nums text-slate-300" title="Crête du micro en dB (0 = saturation). Vise -12 à -6 dB.">{v.hold <= -89 ? '-∞' : v.hold.toFixed(1)}</span>
+      {/* Compact (piste armée, devant ses effets : 40 px) : la barre et une diode ronde. Avant, la crête en dB et
+          « CLIP » débordaient de leurs 40 px et la diode passait SOUS le bouton du retour casque. */}
+      {!compact && <span className="w-8 text-right text-[9px] font-mono tabular-nums text-slate-300" title="Crête du micro en dB (0 = saturation). Vise -12 à -6 dB.">{v.hold <= -89 ? '-∞' : v.hold.toFixed(1)}</span>}
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setClip(false); }}
-        title={clip ? 'Saturation détectée : baisse le gain de ta carte son / éloigne-toi du micro. Clic pour effacer.' : 'Diode de saturation'}
+        title={clip ? 'Saturation détectée : baisse le gain de ta carte son / éloigne-toi du micro. Clic pour effacer.' : `Diode de saturation${compact ? ` (crête ${v.hold <= -89 ? '-∞' : v.hold.toFixed(1)} dB)` : ''}`}
         aria-label={clip ? 'Saturation détectée, cliquer pour effacer' : 'Pas de saturation'}
-        className={`h-4 px-1 rounded text-[8px] font-black ${clip ? 'bg-red-600 text-white' : 'bg-white/5 text-slate-600'}`}
+        className={compact
+          ? `shrink-0 h-2.5 w-2.5 rounded-full ${clip ? 'bg-red-600' : 'bg-white/15 [[data-theme=light]_&]:bg-slate-300'}`
+          : `h-4 px-1 rounded text-[8px] font-black ${clip ? 'bg-red-600 text-white' : 'bg-white/5 text-slate-600'}`}
       >
-        CLIP
+        {compact ? null : 'CLIP'}
       </button>
     </div>
   );

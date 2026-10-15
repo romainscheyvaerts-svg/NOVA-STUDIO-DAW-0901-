@@ -52,6 +52,10 @@ const bufferKeyOf = (b: AudioBuffer) => {
 };
 
 interface MobileArrangementPageProps {
+  /** Boutons de session posés par App (Groupes, Temps, pistes masquées), au bout de la barre d'outils. */
+  toolbarExtras?: React.ReactNode;
+  /** Carte « Et maintenant ? » (après une prise) : dans la page, au-dessus des pistes, jamais par-dessus. */
+  topCard?: React.ReactNode;
   tracks: Track[];
   currentTime: number;
   isPlaying: boolean;
@@ -113,6 +117,8 @@ const MAX_ZOOM = 300;
  * Inspired by Logic Pro iPad, Cubasis, and GarageBand
  */
 const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
+  toolbarExtras,
+  topCard,
   tracks,
   currentTime,
   isPlaying,
@@ -698,6 +704,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         ))}
 
         <div className="flex-1" />
+        {/* Groupes, Temps, pistes masquées (posés par App) : dans la barre, jamais par-dessus. */}
+        {toolbarExtras && <div className="shrink-0 flex items-center gap-1.5 [&>button]:h-8">{toolbarExtras}</div>}
 
         {/* Libre / Grille (modes Slip / Grid de Pro Tools, version téléphone) */}
         <div role="radiogroup" aria-label="Placement des clips" className="shrink-0 flex rounded-md bg-white/5 border border-white/10 p-0.5">
@@ -727,6 +735,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </select></>}
       </div>
 
+      {topCard}
       {keptZone && kept && (
         <KeptTakesCard track={kept.t} lanes={kept.lanes} open={!keptZone.closed[kept.t.id]} api={keptZone} candidate={kept.candidate}
           isRecording={!!isRecording} audition={takeAudition} onAudition={(id, n) => onAuditionTake?.(id, n)} onRename={(id, n, name) => onRenameTake?.(id, n, name)} />

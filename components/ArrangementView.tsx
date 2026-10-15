@@ -1005,6 +1005,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Gestionnaires stables pour les en-tetes memoises (ils appellent toujours la
   // derniere version des props, sans fermeture perimee).
   // Les lignes d'automation masquées en mode simple ne sont jamais réécrites.
+  const headerOnToggleTakes = useLatestCallback((trackId: string) => { takeLanes?.onToggle(trackId); });
   const headerOnUpdate = useLatestCallback((t: Track) => {
     const orig = simple ? tracks.find(x => x.id === t.id) : undefined;
     onUpdateTrack(orig ? { ...t, automationLanes: orig.automationLanes } : t);
@@ -2960,20 +2961,9 @@ useEffect(() => {
                   </div>
                 )}
                 <div style={{ height: `${zoomV}px`, position: 'relative' }}>
-                  {takeLanes && (lanesByTrack.get(track.id)?.length || 0) > 0 && (() => {
-                    const n = lanesByTrack.get(track.id)!.length;
-                    const isOpen = !!takeLanes.open[track.id];
-                    return (
-                      <button type="button" data-takes-button={track.id}
-                        onClick={(e) => { e.stopPropagation(); takeLanes.onToggle(track.id); }}
-                        aria-expanded={isOpen}
-                        title={`${isOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists de Pro Tools ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
-                        className={`absolute z-10 right-1.5 bottom-1.5 h-6 px-2 rounded-full text-[10px] font-black flex items-center gap-1 border ${isOpen ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-black/70 text-cyan-200 border-cyan-400/50 hover:bg-cyan-500/20'}`}>
-                        <i className="fas fa-layer-group text-[9px]" />Prises ({n})<i className={`fas ${isOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px]`} />
-                      </button>
-                    );
-                  })()}
+                  {/* « Prises (N) ▾ » : posée par l'en-tête dans sa dernière ligne (plus rien de recouvert). */}
                   <TrackHeaderMemo 
+                     takesCount={takeLanes ? (lanesByTrack.get(track.id)?.length || 0) : 0} takesOpen={!!takeLanes?.open[track.id]} onToggleTakes={headerOnToggleTakes}
                      track={track} isSelected={selectedTrackId === track.id} onSelect={selectTrackHandler(track.id)} onUpdate={headerOnUpdate} 
                      onDropPlugin={headerOnDropPlugin} onMovePlugin={headerOnMovePlugin} onSelectPlugin={headerOnSelectPlugin} onRemovePlugin={headerOnRemovePlugin} onRequestAddPlugin={headerOnRequestAddPlugin} 
                      onContextMenu={headerOnContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={headerOnDropTrack}

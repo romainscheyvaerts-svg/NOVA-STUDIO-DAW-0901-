@@ -500,6 +500,13 @@ def scenario_tel(page, res_):
         ok("téléphone : groupes en lecture seule", ro)
         page.get_by_role("button", name="Fermer").first.tap(); page.wait_for_timeout(300)
     t = page.get_by_test_id("mobile-time").locator("visible=true")
+    if not t.count():
+        # Mode simple (15/10/2026) : « Temps » est rangé (mode avancé, Ctrl+K) ; au téléphone, il est dans la
+        # barre d'outils de la page Morceau en mode avancé.
+        page.evaluate("async () => (await window.__novaAppModule('/utils/simpleMode.ts')).simpleModeStore.setPref(false)")
+        page.wait_for_timeout(600)
+        t = page.get_by_test_id("mobile-time").locator("visible=true")
+        if t.count(): t.first.scroll_into_view_if_needed()
     if t.count():
         t.first.tap(); page.wait_for_timeout(400)
         shot(page, "tel_02_fenetre_temps")

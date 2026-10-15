@@ -10,6 +10,9 @@ const LABELS: Record<NextStepAction, { emoji: string; label: string }> = {
 };
 
 interface NextStepCardProps {
+  /** Téléphone, page Morceau : la carte se pose DANS la page, au-dessus des pistes (en flottant, elle
+   *  recouvrait les boutons M / S des pistes). */
+  inline?: boolean;
   open: boolean;
   /** Ce qui vient de se passer (bonne prise, export) : change la phrase d'accroche. */
   trigger: 'take' | 'export';
@@ -29,7 +32,7 @@ interface NextStepCardProps {
  * sur ordinateur à droite, au-dessus du bouton Nova : Nova ne s'ouvre plus
  * seule, la carte ne couvre plus les en-têtes de pistes).
  */
-const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose }) => {
+const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose, inline }) => {
   if (!open || actions.length === 0) return null;
   const sub = trigger === 'export'
     ? 'Ton fichier est prêt. Pour aller plus loin :'
@@ -38,9 +41,12 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
     <div
       role="region"
       aria-label="Et maintenant ?"
-      className={`fixed z-[160] ${isMobile
+      data-testid="next-step-card"
+      // Bureau : au-dessus des bulles de Nova (bas droite, 176 px + 3 lignes) : avant, à 216 px, la carte
+      // chevauchait la bulle « Sauvegarde automatique… ».
+      className={`${inline ? 'shrink-0 mx-2 my-1.5' : `fixed z-[160] ${isMobile
         ? 'inset-x-3 bottom-[calc(8.75rem+env(safe-area-inset-bottom))]'
-        : 'right-6 bottom-[13.5rem] w-[340px]'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+        : 'right-6 bottom-[17.5rem] w-[340px]'}`} animate-in fade-in slide-in-from-bottom-2 duration-300`}
     >
       <div className="rounded-2xl border border-cyan-400/30 bg-nv-surface/95 backdrop-blur-xl shadow-2xl p-3">
         <div className="flex items-start gap-2">

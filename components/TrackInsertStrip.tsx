@@ -21,6 +21,8 @@ export interface TrackInsertStripProps {
   onShowAll: (e: React.MouseEvent) => void;
   /** Avant les effets (piste armée : vumètre + retour casque). */
   leading?: React.ReactNode;
+  /** Au bout de la ligne, après « +N » (pastille « Prises (N) ») : dans le flux, jamais par-dessus les effets. */
+  trailing?: React.ReactNode;
   /** Piste vide : effets prêts mais grisés (F8), on lit tout de suite où il y a du son. */
   idle?: boolean;
 }
@@ -111,6 +113,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
           +{hidden}
         </button>
       )}
+      {props.trailing}
     </div>
   );
 };

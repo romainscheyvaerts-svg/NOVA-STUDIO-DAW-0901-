@@ -30,7 +30,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3463/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-prises-gardees\qa")
 sys.path.insert(0, str(Path(__file__).parent))
 import qalib  # noqa: E402,F401  (Supabase simulé avant tout navigateur)
-from qalib import BASE, OUT, CHROME, Log, new_page, shot, save_log  # noqa: E402
+from qalib import BASE, OUT, CHROME, Log, new_page, shot, save_log, balayage_chevauchement  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 SR = 48000
@@ -239,6 +239,26 @@ def close_noise(page):
     page.mouse.move(5, 5)
 
 
+SET_SIMPLE = """async (on) => { const { simpleModeStore } = await window.__novaAppModule('/utils/simpleMode.ts'); simpleModeStore.setPref(on); return simpleModeStore.get().simple; }"""
+
+
+def balayer(page, ou, R):
+    """Balayage de chevauchement de TOUT l'écran (zone Prises gardées active, piste armée), en mode simple
+    puis avancé : aucun élément cliquable recouvert par un autre (qalib.balayage_chevauchement)."""
+    R.setdefault("balayage", {})
+    depart = page.evaluate("async () => (await window.__novaAppModule('/utils/simpleMode.ts')).simpleModeStore.get().pref")
+    for simple in (True, False):
+        page.evaluate(SET_SIMPLE, simple); page.wait_for_timeout(600)
+        page.mouse.move(2, 2)
+        b = balayage_chevauchement(page)
+        mode = "simple" if simple else "avancé"
+        R["balayage"][mode] = b
+        shot(page, f"{ou}_balayage_{'simple' if simple else 'avance'}")
+        check(f"{ou} ({mode}, zone active, piste armée) : aucun bouton recouvert sur l'écran ({b.get('boutons')} boutons)",
+              not b.get("erreur") and b.get("boutons", 0) > 10 and not b["recouverts"], b.get("recouverts") or b.get("erreur"))
+    page.evaluate(SET_SIMPLE, depart); page.wait_for_timeout(400)
+
+
 def desktop(b):
     f = OUT / "seance_vide.zip"
     make_project(f)
@@ -390,6 +410,9 @@ def desktop(b):
     gd = geo(page)
     check("replier : en-tête seul (30 px) ; déplier : 3 lignes", abs(gz["zone"]["h"] - HEAD_H) < 1 and abs(gd["zone"]["h"] - (HEAD_H + 3 * LANE_H)) < 1, [gz["zone"], gd["zone"]])
 
+    # --- Balayage de tout l'écran : rien de cliquable recouvert (pastille « Prises (N) », « +N » des effets…)
+    balayer(page, "bureau", R)
+
     # --- Thème clair
     page.evaluate("() => window.DAW_CONTROL.setTheme('light')"); page.wait_for_timeout(600)
     shot(page, "pc_10_theme_clair")
@@ -455,6 +478,7 @@ def phone(b, f: Path):
         check(f"téléphone ({theme}) : boutons au doigt (≥ 32 px visibles, zone tactile 40 px)", not small and all(s[1] >= 32 for s in sizes), small or sizes[:6])
         cov = page.evaluate(COVER_JS, f'[data-kept-card="{TID}"] button')
         check(f"téléphone ({theme}) : rien ne recouvre la carte", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]])
+        balayer(page, f"téléphone {theme}", R)
         if theme == "dark":
             rows = card.locator("[data-kept-header]")
             rows.nth(0).locator('[data-testid="kept-play"]').tap(); page.wait_for_timeout(1200)
