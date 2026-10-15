@@ -24,7 +24,7 @@ PHASE = os.environ.get("QA_PHASE", "apres")
 MODELE = os.environ.get("QA_MODELE") == "1"
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\session_voix{'_modele' if MODELE else ''}")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, ouvrir_plus_accueil  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 from scenarios import close_welcome, wait_text_gone, DEFAULT_BEAT  # noqa: E402
 from nova_pro_lib import Chrono, visible_first, open_by_palette, via_menu, clip_point, track_point, app_state, canvas_box, save_json  # noqa: E402
@@ -81,6 +81,7 @@ def run(page, log, ch):
     nouveau.wait_for(timeout=60000)
     res["accueil_ms"] = round((time.time() - t) * 1000)
     if MODELE:
+        if ouvrir_plus_accueil(page): ch.cur["clics"] += 1; ch.cur["chemin"].append("clic Plus d'options")
         ch.click(page.locator("[data-testid=landing-templates]:visible").first, "Depuis un modèle")
         use = page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-use]")
         try:

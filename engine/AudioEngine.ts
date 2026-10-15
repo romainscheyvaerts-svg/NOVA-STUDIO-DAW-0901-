@@ -1968,9 +1968,9 @@ export class AudioEngine {
       // On traduit les cas courants plutot que de renvoyer un nom technique.
       const nom = e?.name || '';
       if (nom === 'NotAllowedError' || nom === 'SecurityError') {
-        this.armErrors.set(trackId, "Micro refusé. Autorisez-le dans votre navigateur puis réessayez.");
+        this.armErrors.set(trackId, "Micro bloqué par le navigateur : clique sur le cadenas 🔒 à gauche de l'adresse du site, mets « Micro » sur « Autoriser », puis réappuie sur REC.");
       } else if (nom === 'NotFoundError' || nom === 'OverconstrainedError') {
-        this.armErrors.set(trackId, "Aucun micro détecté. Branchez-en un puis réessayez.");
+        this.armErrors.set(trackId, "Aucun micro détecté : branche un micro (ou des écouteurs avec micro) puis réappuie sur REC.");
       } else if (nom === 'NotReadableError') {
         this.armErrors.set(trackId, "Micro déjà utilisé par une autre application.");
       } else {

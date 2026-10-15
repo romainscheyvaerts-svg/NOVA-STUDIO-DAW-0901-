@@ -68,7 +68,7 @@ SET_MODE = """async ({ simple, theme }) => {
   return true;
 }"""
 
-MEASURE = r"""() => {
+MEASURE = r"""(simple) => {
   const rec = document.querySelector('[data-nova-target=rec]');
   const bar = document.querySelector('[data-testid=transport-bar]') || (rec && rec.closest('.h-16'));
   if (!bar) return { erreur: 'barre introuvable' };
@@ -93,7 +93,13 @@ MEASURE = r"""() => {
     if (r.width < 1) continue;
     elements.push({ el: name(el), x: Math.round(r.left), w: Math.round(r.width) });
   }
-  const ess = {
+  // Mode simple (15/10/2026, « le DAW le plus simple possible ») : la barre ne garde que l'essentiel
+  // (lecture, stop, REC, compteur, Exporter, Mode avancé) ; boucle, BPM, tonalité, LUFS et CPU sont
+  // dans le menu ☰, Ctrl+K et le mode avancé. Mode avancé : tous les essentiels d'avant.
+  const ess = simple ? {
+    lecture: 'button[aria-label=Lecture], button[aria-label=Pause]', stop: 'button[aria-label=Stop]', rec: '[data-nova-target=rec]',
+    compteur: '[data-nova-target=clock]', exporter: 'button[aria-label="Exporter le mix"]', mode_avance: 'button[title^="Afficher la console"]',
+  } : {
     lecture: 'button[aria-label=Lecture], button[aria-label=Pause]', stop: 'button[aria-label=Stop]', rec: '[data-nova-target=rec]',
     boucle: 'button[aria-label=Boucle]', compteur: '[data-nova-target=clock]', bpm: '[data-testid=transport-bpm], [title^="Tempo : glisser"]',
     tempo_tonalite_mesure: '[data-testid=open-tempo]', lufs: '[data-testid=lufs-chip]', cpu: '[data-testid=dsp-meter]',
@@ -124,7 +130,7 @@ def run_case(page, kind, width, simple, theme):
     page.wait_for_timeout(250)
     page.evaluate(TAP_KEYS)  # « TAP 128 » affiché pendant la mesure (le cas le plus large)
     page.wait_for_timeout(350)
-    m = page.evaluate(MEASURE)
+    m = page.evaluate(MEASURE, simple)
     label = f"{kind}_{width}_{'simple' if simple else 'avance'}_{theme}"
     m["cas"] = label
     pb = []

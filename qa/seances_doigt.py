@@ -23,7 +23,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3492/")
 TAG = os.environ.get("QA_TAG", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro2\point6\{TAG}")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, ouvrir_plus_accueil  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from nova_pro_lib import Chrono, track_point, app_state, save_json  # noqa: E402
@@ -239,6 +239,8 @@ def seance_voix(ch, res):
     ch.start("Ouvrir", "Session voix Make Music (modèle) ; sans modèle : projet vierge + piste voix")
     landing(ch)
     lead = "voix-lead"
+    # Accueil en mode simple : « Depuis un modèle » est sous « Plus d'options » (un toucher de plus).
+    if ouvrir_plus_accueil(page, touch=True): ch.cur["clics"] += 1; ch.cur["chemin"].append("doigt Plus d'options")
     tap(ch, r"Depuis un modèle", "Depuis un modèle")
     try: page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-use]").first.wait_for(timeout=15000)
     except Exception: pass

@@ -165,6 +165,9 @@ import { hitNotice, hitWhere, REVEAL_TIME_EVENT, searchTakeWords, type RevealTim
 import { SELECT_CLIP_EVENT } from './hooks/useEditModes';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
+import MicPermissionHint from './components/MicPermissionHint';
+import { withMicExplanation } from './utils/micPermission';
+import { openDistribution } from './utils/distributionBus';
 import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
@@ -778,7 +781,12 @@ function Studio() {
     setShowLanding(false);
   };
   
+  // Instru choisie sur l'accueil : le studio s'ouvre prêt à enregistrer, sans la fenêtre
+  // « en 3 gestes » (un clic de plus avant la première prise ; le bandeau « … est prêt,
+  // appuie sur REC » dit déjà quoi faire).
+  const enteredWithBeatRef = useRef(false);
   const handleEnterWithInstrumental = (instrumental: any) => {
+    enteredWithBeatRef.current = true;
     setPendingInstrumental(instrumental);
     setShowLanding(false);
   };
@@ -2408,7 +2416,8 @@ function Studio() {
     }));
     const armedMidi = stateRef.current.tracks.find(t => t.id === trackId);
     if (armedMidi && isMidiRecordTrack(armedMidi)) { audioEngine.disarmTrack(); await announceMidiArmRef.current?.(armedMidi, true); return true; }
-    const erreur = await audioEngine.armTrack(trackId, { spec: armedMidi?.recordInput ?? null, alone: true });
+    // Premier REC : le navigateur demande le micro ; une bulle explique quoi cliquer (utils/micPermission).
+    const erreur = await withMicExplanation(() => audioEngine.armTrack(trackId, { spec: armedMidi?.recordInput ?? null, alone: true }), e => !e);
     if (erreur) {
       setAiNotification(`🎤 ${erreur}`);
       setState(produce(draft => {
@@ -5099,6 +5108,10 @@ function Studio() {
     // Lien de session partagée : « Choisis un beat » recouvrait le choix du rôle de l'invité,
     // puis revenait à la fermeture du panneau. On le garde pour une prochaine visite.
     if (arrivedByLink) seen = true;
+    if (!seen && enteredWithBeatRef.current && !pendingMelodyModeRef.current) {
+      seen = true;
+      try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
+    }
     if (!seen) {
       const t = setTimeout(() => setWelcomeOpen(true), 1200);
       return () => clearTimeout(t);
@@ -10223,6 +10236,7 @@ function Studio() {
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
       a('Fichier', 'pal.aafImport', 'Importer une séance Pro Tools (AAF)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf pro tools protools séance session importer ingé' }),
       a('Fichier', 'pal.aafExport', 'Exporter la séance pour Pro Tools (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf pro tools protools séance session exporter ingé bwf' }),
+      a('Fichier', 'pal.distribution', '🚀 Prêt pour Spotify / Apple / TikTok ? (contrôle avant distribution)', () => openDistribution(), { keywords: 'distribution spotify apple deezer tiktok distrokid tunecore livraison sortir sortie release paquet' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
       a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
       a('Édition', 'pt.restoreSelection', 'Restaurer la dernière sélection', () => { const st = stateRef.current; const tr = new Set(st.tracks.map(t => t.id)); const cl = new Set(st.tracks.flatMap(t => t.clips.map(c => c.id))); setAiNotification(restoreLastSelection({ track: id => tr.has(id), clip: id => cl.has(id) })); }, { keys: 'Ctrl+Alt+Z', pt: 'Restore Last Selection (Opt+Cmd+Z)', keywords: 'sélection précédente plage reprendre' }),
@@ -10326,7 +10340,7 @@ function Studio() {
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)} onOpenQuickMaster={() => setQuickMasterOpen(true)}
-          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')}
+          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')} onOpenVideoTake={() => setVideoTakeOpen(true)}
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
@@ -10476,6 +10490,9 @@ function Studio() {
           {!isMobile && (
             <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
+                {/* Mode simple : Pistes, Groupes, Temps, Session, Collaborer et Retours sont rangés (menu ☰,
+                    Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
+                {!simpleMode && <>
                 <button type="button" data-testid="dock-track-list" {...dockItem(3)} aria-label="Liste des pistes" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
                   title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
@@ -10496,17 +10513,18 @@ function Studio() {
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-folder-open text-[10px] mr-1.5" aria-hidden="true" /><span data-dock-label>Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span>
                 </button>
-                <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen} {...dockItem(4)} aria-label="Collaborer"
+                </>}
+                {(!simpleMode || !!collab || remote.active || collabOpen) && <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen} {...dockItem(4)} aria-label="Collaborer"
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
                   <span data-dock-icon className="mr-1">{remote.active ? '🎧' : '👥'}</span><span data-dock-label>{remote.active ? `Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : (collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer')}</span>
-                </button>
-                <button type="button" data-testid="dock-reviews" onClick={() => (reviews.open ? reviews.setOpen(false) : reviews.openAt(null))} aria-pressed={reviews.open} {...dockItem(3)}
+                </button>}
+                {(!simpleMode || reviews.open || !!reviewCounts.open || !!reviewsWaiting) && <button type="button" data-testid="dock-reviews" onClick={() => (reviews.open ? reviews.setOpen(false) : reviews.openAt(null))} aria-pressed={reviews.open} {...dockItem(3)}
                   aria-label={`Commentaires et versions${reviewCounts.open ? ` : ${reviewCounts.open} ouvert${reviewCounts.open > 1 ? 's' : ''}` : ''}`}
                   title="Retours : commentaires horodatés sur la timeline (« 1:12 le s siffle »), versions du mix envoyées à l'artiste et validées"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${reviews.open ? 'border-amber-300 bg-amber-400/25 text-white' : 'border-amber-400/40 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20'}`}>
                   <span data-dock-icon className="mr-1">💬</span><span data-dock-label>Retours{reviewCounts.open ? ` · ${reviewCounts.open}` : ''}{reviewsWaiting ? ` · ${reviewsWaiting} à valider` : ''}</span>
-                </button>
+                </button>}
                 {isCloudProject && (
                   <button type="button" onClick={() => setTakeHomeOpen(true)} {...dockItem(2)} aria-label="Session en ligne"
                     title="Session en ligne : lien, QR code, compte client"
@@ -10537,7 +10555,8 @@ function Studio() {
 
           {/* Mode Mobile - Nouveau système de pages */}
           {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
-            <div className="absolute right-2 top-2 z-[60] flex gap-1.5">
+            // Morceau : posées sur la règle (sous l'en-tête et les outils), elles recouvraient « Zoomer » en haut à droite.
+            <div className={`absolute right-2 ${activeMobileTab === 'ARRANGEMENT' ? 'top-[92px]' : 'top-2'} z-[60] flex gap-1.5`}>
               {/* Téléphone (R12) : groupes en lecture seule, insertion de temps. */}
               {state.trackGroups.length > 0 && (
                 <button type="button" data-testid="mobile-groups" onClick={() => setR12Panel({ panel: 'groups' })}
@@ -10546,7 +10565,7 @@ function Studio() {
                   <i className="fas fa-object-group mr-1.5 text-[10px] text-nv-muted" />Groupes ({state.trackGroups.length})
                 </button>
               )}
-              {activeMobileTab !== 'MIXER' && (
+              {activeMobileTab !== 'MIXER' && !simpleMode && (
                 <button type="button" data-testid="mobile-time" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } })}
                   title="Insérer ou supprimer du temps à la tête de lecture"
                   className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
@@ -10799,6 +10818,8 @@ function Studio() {
         activeTakeInZone={(trackId, zone) => { const t = state.tracks.find(x => x.id === trackId); return t ? activeTakeInZone(t, zone) : null; }}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
+
+      <MicPermissionHint />
 
       <WelcomeSteps
         open={welcomeOpen && !proGate && !collabArrival && !collabOpen && !guestMode}
