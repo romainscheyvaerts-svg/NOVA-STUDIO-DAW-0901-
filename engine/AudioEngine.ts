@@ -43,6 +43,7 @@ import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
+import { absorbedSlides } from '../utils/pianoRollPro';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { InputRouter, InputTap } from './InputRouter';
 import { createAsioOutputTap, AsioOutputTap } from './AsioOutputTap';
@@ -1848,6 +1849,8 @@ export class AudioEngine {
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
         const lat = toSamples((rt.latency || 0) + (rt.down || 0));
         const heard = playableNotes(clip);
+        // Glissés par note (piano roll pro) : décidés d'après les notes, comme en lecture.
+        const slides = rt.synth instanceof NovaSynthNode ? absorbedSlides(heard) : null;
         for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(heard) : heard)) {
           const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
@@ -1856,7 +1859,9 @@ export class AudioEngine {
           const attackAt = Math.max(0, noteStart);
           const releaseAt = Math.min(totalDuration, noteEnd);
 
-          if (rt.synth) {
+          if (slides && slides.has(note)) {
+            if (noteStart >= 0) (rt.synth as NovaSynthNode).slideTo(note.pitch, attackAt, note.duration);
+          } else if (rt.synth) {
             rt.synth.triggerAttack(note.pitch, note.velocity, attackAt);
             rt.synth.triggerRelease(note.pitch, releaseAt);
           } else if (rt.sampler) {
@@ -3439,11 +3444,17 @@ export class AudioEngine {
            if (clip.start >= we || clipEnd <= projectWindowStart) return;
 
            const heard = playableNotes(clip);
+           // Glissés par note (piano roll pro) : ni attaque ni relâchement, la note en cours glisse.
+           const slides = novaSynth ? absorbedSlides(heard) : null;
            (novaSynth ? notesInTimeOrder(heard) : heard).forEach(note => {
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
                if (noteAbsStart >= loopEnd) return;
+               if (slides && slides.has(note)) {
+                   if (noteAbsStart >= ws && noteAbsStart < we) (synth as NovaSynthNode).slideTo(note.pitch, contextScheduleTime + (noteAbsStart - ws), note.duration);
+                   return;
+               }
                if (noteAbsStart >= ws && noteAbsStart < we) {
                    this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws), note);
                } else if (firstWindow && lat > 0 && noteAbsStart >= projectWindowStart && noteAbsStart < ws) {

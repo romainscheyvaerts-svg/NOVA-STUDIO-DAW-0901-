@@ -45,6 +45,9 @@ BATTERIE = [
     ("kits_batterie", []),
     # 14/10/2026 : synthé NOVA en un clic (« 🎹 Synthé NOVA »), sons, façade, mini-clavier (bureau et téléphone, sombre et clair).
     ("synthe", []),
+    # 15/10/2026 : piano roll pro sur une piste « Synthé NOVA » : beat de 808 avec glissés, accords dans la gamme, vélocité,
+    # humaniser + quantifier, dupliquer, écouter, export .mid ; preuve audio du glissé (export = lecture) ; bureau et téléphone, sombre et clair.
+    ("pianoroll_pro", []),
     # Lot 2a (BandLab) : clip vertical TikTok / Reels avec les paroles synchronisées (MP4 vérifié par ffprobe / ffmpeg).
     ("clip_paroles", []),
     # 14/10/2026 : tarifs Nova (nova-billing simulé) : gratuit sans export, 1,99 €, Pro, instru → export offert + 1 mois,

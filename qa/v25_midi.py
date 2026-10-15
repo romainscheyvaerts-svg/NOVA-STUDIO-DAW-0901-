@@ -109,6 +109,11 @@ def ui_scale(pg):
     return pg.evaluate("() => { const g = document.querySelector('[data-nova-pianoroll] .custom-scroll'); return g.getBoundingClientRect().width / g.clientWidth; }")
 
 
+def roll_zoom(pg):
+    """Pixels par seconde de la grille du piano roll (attribut data-nova-zoom ; 100 avant le 15/10)."""
+    return pg.evaluate("() => { const g = document.querySelector('[data-nova-roll-grid]'); return g ? +g.dataset.novaZoom : 100; }")
+
+
 def draw_note(pg, pitch, start_s, dur_s, beat):
     """Dessine une note au crayon (clic + glisser), positions en secondes du clip."""
     pg.evaluate("""(p) => { const k = document.querySelector(`[data-nova-pianoroll] [data-pitch='${p}']`); const g = document.querySelector('[data-nova-pianoroll] .custom-scroll');
@@ -118,10 +123,12 @@ def draw_note(pg, pitch, start_s, dur_s, beat):
     kb = pg.locator(f"[data-nova-pianoroll] [data-pitch='{pitch}']").first.bounding_box()
     grid = pg.locator("[data-nova-pianoroll] .custom-scroll").first.bounding_box()
     yy = kb["y"] + kb["height"] / 2
-    xa = grid["x"] + (start_s * 100 + 3) * sc
-    # Le crayon pose une note d'un temps (grille) ; glisser l'allonge du reste.
+    # Zoom réel de la grille (piano roll pro du 15/10 : un temps = 80 px au départ, plus 100 px/s fixes).
+    z = roll_zoom(pg)
+    xa = grid["x"] + (start_s * z + 3) * sc
+    # Clic + glisser : la fin de la note suit la souris (FL Studio), calée sur la grille.
     pg.mouse.move(xa, yy); pg.mouse.down()
-    if dur_s > beat * 1.01: pg.mouse.move(xa + (dur_s - beat) * 100 * sc, yy, steps=8)
+    pg.mouse.move(grid["x"] + (start_s + dur_s) * z * sc, yy, steps=8)
     pg.mouse.up()
     pg.wait_for_timeout(300)
     return yy, grid, sc
@@ -241,9 +248,9 @@ def scenario_pc(pg, errs):
     draw_note(pg, 66, 4 * beat, beat, beat)
     c3b = next(t for t in tracks(pg) if t["id"] == tid)["clips"][0]
     last = max(c3b["notes"], key=lambda n: n["s"])
-    pg.locator("[data-nova-pianoroll] button[title^='Flèche']").first.click(); pg.wait_for_timeout(150)
+    pg.locator("[data-nova-pianoroll] [data-nova-roll-tool='SELECT']").first.click(); pg.wait_for_timeout(150)
     sl = pg.evaluate("() => document.querySelector('[data-nova-pianoroll] .custom-scroll').scrollLeft")
-    pg.mouse.click(grid["x"] + (last["s"] * 100 - sl + 10) * sc, yy); pg.wait_for_timeout(250)
+    pg.mouse.click(grid["x"] + (last["s"] * roll_zoom(pg) - sl + 10) * sc, yy); pg.wait_for_timeout(250)
     sel = pg.locator("[data-nova-pianoroll] .text-cyan-400").first.inner_text() if pg.locator("[data-nova-pianoroll] .text-cyan-400").count() else ""
     pg.locator("[data-nova-roll='outils']").click(); pg.wait_for_timeout(300)
     pg.locator("[data-testid='tool-roll']").click(); pg.wait_for_timeout(200)

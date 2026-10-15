@@ -16,7 +16,7 @@
  */
 import {
   NovaSynthSettings, VoiceSlot, normalizeSynth, noteFreq, unisonVoices, oscCents, velocityGain, cutoffFor,
-  mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart, driveCurve,
+  mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart, driveCurve, soundingAt,
   MIN_ATTACK, MIN_RELEASE, STEAL_FADE, RELEASE_TAIL,
 } from '../utils/novaSynth';
 import { SynthControllers } from './midiControllers';
@@ -38,6 +38,11 @@ interface Voice extends VoiceSlot {
   legatoLvl: number | null;
   /** Débranche la voix des contrôleurs MIDI (pitch bend, vibrato, brillance). */
   detach?: () => void;
+  /** Oscillateurs et leur désaccord de base (glissés par note, piano roll pro). */
+  oscs?: OscillatorNode[];
+  oscBase?: number[];
+  /** Glissé par note en cours : écart (cents) entre la hauteur jouée et `pitch`. */
+  bend?: number;
 }
 
 /** Courbes de saturation partagées (une par valeur de drive). */
@@ -339,9 +344,11 @@ export class NovaSynthNode {
     // Glissé : rampe linéaire en cents sur detune (= exponentielle en fréquence).
     // (Mesuré : -38 dB d'écart entre lecture et export sur les notes glissées, dû aux
     // calculs d'automatisation de Chrome ; essais par tampon audio : pire.)
-    const glideCents = src ? (src.pitch - pitch) * 100 : 0;
+    // (Un glissé par note a pu déplacer la voix d'origine : on part de sa hauteur réelle.)
+    const glideCents = src ? (src.pitch - pitch) * 100 + (src.bend || 0) : 0;
     const glideEnd = this.onGrid(t + Math.max(0.001, s.glide));
     const oscs: OscillatorNode[] = [];
+    const oscBase: number[] = [];
     for (const o of s.osc) {
       if (!o.on || o.level <= 0) continue;
       for (const u of unisonVoices(o.unison, o.detune, o.spread)) {
@@ -368,6 +375,7 @@ export class NovaSynthNode {
         } else g.connect(mix);
         osc.start(t);
         oscs.push(osc);
+        oscBase.push(cents);
         sources.push(osc);
         nodes.push(osc, g);
       }
@@ -469,7 +477,7 @@ export class NovaSynthNode {
       amp.gain.setTargetAtTime(peak * ae.s, t + a, Math.max(1e-3, ae.d / 4));
     }
 
-    const v: Voice = { id: this.nextId++, pitch, start: t, release: Infinity, end: Infinity, vel, s, amp, rel, filters, sources, nodes, envCents, peak, legatoLvl };
+    const v: Voice = { id: this.nextId++, pitch, start: t, release: Infinity, end: Infinity, vel, s, amp, rel, filters, sources, nodes, envCents, peak, legatoLvl, oscs, oscBase };
     v.detach = this.ctrl.attachVoice(oscs.map(o => o.detune), filters.map(f => f.detune));
     // Nettoyage quand la voix s'est tue (marche aussi à l'export, sans minuterie).
     if (sources[0]) sources[0].onended = () => this.dispose(v);
@@ -481,6 +489,32 @@ export class NovaSynthNode {
       const next = nextMonoStart(this.voices, v, Infinity);
       if (next !== null) this.cutVoice(v, next);
     }
+  }
+
+  /**
+   * Glissé par note (piano roll pro, FL Studio : Slide notes) : les voix qui
+   * sonnent à `time` glissent jusqu'à `pitch` en `duration` secondes, sans
+   * nouvelle attaque ni relâchement. Rampe linéaire en cents (= exponentielle
+   * en fréquence), posée aux mêmes instants en lecture et à l'export.
+   * Renvoie le nombre de voix déplacées.
+   */
+  public slideTo(pitch: number, time = 0, duration = 0.1): number {
+    const t = this.onGrid(Math.max(time, this.ctx.currentTime));
+    const end = this.onGrid(t + Math.max(0.005, duration));
+    let n = 0;
+    for (const v of this.voices) {
+      if (!v.oscs?.length || !v.oscBase || v.start >= t - 1e-9 || !soundingAt(v, t)) continue;
+      const from = v.bend || 0;
+      const to = (pitch - v.pitch) * 100;
+      v.oscs.forEach((o, i) => {
+        const base = v.oscBase![i];
+        o.detune.setValueAtTime(base + from, t);
+        o.detune.linearRampToValueAtTime(base + to, end);
+      });
+      v.bend = to;
+      n++;
+    }
+    return n;
   }
 
   public triggerRelease(pitch: number, time = 0) {
