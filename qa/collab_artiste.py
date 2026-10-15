@@ -620,6 +620,24 @@ def run_format(p, vp):
         except AssertionError:
             P.m(choix_recu_chez_max=False)
     P.shot(T, "T07b_prise_choisie")
+    # 📌 Prises gardées (15/10/2026) : l'artiste met la prise 2 de côté depuis son téléphone ;
+    # elle arrive dans la zone « Prises gardées » de l'ingé (op « content », droits de l'ingé respectés).
+    pin = T.locator("[data-testid=guest-take][data-n='2']").get_by_test_id("guest-take-pin") if guest(T) else None
+    if pin is not None and pin.count() and tid:
+        tap(P, T, pin, "« 📌 De côté » la prise 2")
+        T.wait_for_timeout(600)
+        P.shot(T, "T07c_prise_de_cote")
+        try:
+            wait_for(E, lambda: E.evaluate(f"""() => {{ const t = window.DAW_CONTROL.getState().tracks.find(x => x.id === {json.dumps(tid)});
+                return !!t && (t.takeMeta || []).some(m => m.n === 2 && m.kept); }}"""), 25, step=300, what="prise gardée reçue chez Max")
+            pin_ok = True
+        except AssertionError:
+            pin_ok = False
+        P.m(prise_de_cote_recue_chez_max=pin_ok)
+        check(f"{vp} : 📌 « De côté » (artiste) : la prise arrive dans les prises gardées de l'ingé", pin_ok)
+        P.shot(E, "E07c_prises_gardees_chez_max")
+    elif guest(T):
+        check(f"{vp} : 📌 « De côté » visible sur les prises de l'artiste", False, "bouton guest-take-pin absent")
     P.end()
 
     # ------------------------------------------------ 8. parler à l'ingé

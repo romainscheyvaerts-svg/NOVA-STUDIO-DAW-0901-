@@ -7,7 +7,7 @@ vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, c
 import { contentOf } from '../services/Collab';
 import {
   clearKept, colorKept, isKept, keepAside, keptCount, keptLanes, keptMetas, keptZoneHeight, KEPT_HEAD_H, lastTakeNumber,
-  nextStars, rateKept, sanitizeKept, starsLabel, takeOfClip, unkeep,
+  dropSlivers, nextStars, putKeptOnTrack, rateKept, sanitizeKept, starsLabel, takeOfClip, unkeep,
 } from '../utils/keptTakes';
 import { compSwipe, readComp } from '../utils/comping';
 import { keepTake, listLanes, mergeIncomingTakeMeta, renameTake, deleteTake } from '../utils/playlists';
@@ -126,6 +126,22 @@ describe('📌 choisir : écouter, mettre sur la piste, comp depuis une ligne', 
     t.clips = keepTake(t.clips, 2);
     expect(audibleTakes(t)).toEqual([2]);
     expect(keptLanes(t).map(l => [l.n, l.used > 0.05])).toEqual([[1, false], [2, true], [3, false]]);
+  });
+
+  it('« Mettre sur la piste » ne laisse pas dépasser un bout de l’ancienne prise (30 ms), mais garde un vrai passage', () => {
+    // La prise 4 (entendue) finit 30 ms après la prise 2 : sans nettoyage, on entendrait 30 ms de la 4.
+    const t = makeTrack({ id: 'lead', clips: [take(2, 0, 7, { isMuted: true }), take(4, 0, 7.03)] });
+    expect(keepTake(t.clips, 2).filter(c => !c.isMuted).map(c => c.takeNumber)).toEqual([2, 4]);
+    const put = putKeptOnTrack(t.clips, 2);
+    expect(put.filter(c => !c.isMuted).map(c => c.takeNumber)).toEqual([2]);
+    expect(readComp(put).map(s => s.n)).toEqual([2]);
+    // La prise 4 reste entière dans son couloir (muette).
+    expect(listLanes({ clips: put }).map(l => [l.n, l.end])).toEqual([[2, 7], [4, 7.03]]);
+    // Un vrai passage (1 s) de la prise 4 après la fin de la 2 : gardé (c'est la voix).
+    const long = makeTrack({ clips: [take(2, 0, 5, { isMuted: true }), take(4, 0, 6)] });
+    expect(readComp(putKeptOnTrack(long.clips, 2)).map(s => s.n)).toEqual([2, 4]);
+    // Bout coincé entre deux passages de la prise 2 : pas touché (comp voulu).
+    expect(dropSlivers(compSwipe(keepTake(long.clips, 2), 4, 2, 2.1).clips, 2).filter(c => !c.isMuted).length).toBeGreaterThan(2);
   });
 
   it('comp depuis une ligne : un passage de la prise 3 dans la voix finale (crossfades), le reste ne bouge pas', () => {

@@ -184,7 +184,7 @@ import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks
 import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp, editGroupsStore } from './utils/editGroups';
 import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates, inputWidth } from './utils/multiRecord';
 import { placeTake, trimToPlan } from './utils/multiTake';
-import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
+import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked, takeGroupMates } from './utils/takeGroups';
 import type { TakeResult, TakeJournalMeta, TakeJournalLike } from './engine/AudioEngine';
 import { LiveRef, LiveTakeAssembly, LiveTakeSender, LT_SEGMENT_SEC, SegmentCutter, nextOrder, sanitizeLiveRef, withoutLive } from './utils/liveTake';
 import { encodeSegment, takeSum } from './utils/liveTakeCodec';
@@ -312,7 +312,7 @@ import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patc
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
-import { clearKept, colorKept, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
+import { clearKept, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 import ImportTempoCard from './components/ImportTempoCard';
 import { useImportTempo } from './hooks/useImportTempo';
@@ -4624,7 +4624,7 @@ function Studio() {
       const pos = playheadStore.get();
       if (!(pos >= lane.start && pos < lane.end)) handleSeek(lane.start);
       if (!stateRef.current.isPlaying) void handleTogglePlay();
-      setAiNotification(`🎧 Tu écoutes « ${lane.name} » seule — clique encore sur le casque pour revenir à ta voix finale.`);
+      setAiNotification(`🎧 Tu écoutes « ${lane.name} » seule — appuie encore (🎧 ou ■) pour revenir à ta voix finale.`);
     }
   }, [handleSeek, handleTogglePlay]);
   /** Balayage (ou tap) sur un couloir : ce passage de la prise n passe dans la piste. */
@@ -4646,7 +4646,7 @@ function Studio() {
     breakHistory();
     if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
     const at = (x: number) => `${Math.floor(x / 60)}:${(x % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
-    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${at(r.zone.start)} à ${at(r.zone.end)}${mates ? ` sur ${mates + 1} pistes (prises du même passage)` : ''} (crossfades posés aux raccords) — Annuler pour revenir.`);
+    setAiNotification(`✂️ ${takeName(t, n)} mise sur la piste de ${at(r.zone.start)} à ${at(r.zone.end)}${mates ? ` sur ${mates + 1} pistes (prises du même passage)` : ''} (crossfades posés aux raccords) — Annuler pour revenir.`);
   }, [setState, breakHistory, takeAudition]);
   const handleKeepTake = useCallback((trackId: string, n: number) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
@@ -4657,7 +4657,7 @@ function Studio() {
       res.forEach((clips, id) => { const d = draft.tracks.find(x => x.id === id); if (d) d.clips = clips as any; });
     }));
     breakHistory();
-    setAiNotification(`✓ ${takeName(t, n)} gardée en entier${res.size > 1 ? ` sur ${res.size} pistes (prises du même passage)` : ''} (les autres prises restent dans leurs couloirs) — Annuler pour revenir.`);
+    setAiNotification(`✓ ${takeName(t, n)} mise sur la piste en entier${res.size > 1 ? ` sur ${res.size} pistes (prises du même passage)` : ''} (les autres prises restent dans leurs couloirs) — Annuler pour revenir.`);
   }, [setState, breakHistory]);
   const handleRenameTake = useCallback((trackId: string, n: number, name: string) => {
     breakHistory();
@@ -4729,7 +4729,8 @@ function Studio() {
     const ok = updateKeptMeta(trackId, meta => keepAside(meta, take, Date.now()));
     if (!ok) return false;
     setKeptClosed(prev => ({ ...prev, [trackId]: false }));
-    const count = keptCount(stateRef.current.tracks.find(x => x.id === trackId) || t);
+    // L'état n'est pas encore relu (setState) : la piste d'avant + celle-ci.
+    const count = keptCount(t) + 1;
     setAiNotification(`📌 ${name} gardée de côté (${count} prise${count > 1 ? 's' : ''} gardée${count > 1 ? 's' : ''} au-dessus de « ${t.name} »). Écoute-les à la fin pour choisir — Ctrl+Z pour annuler.`);
     track('kept_take', { count });
     return true;
@@ -4757,7 +4758,11 @@ function Studio() {
   const handlePutKeptOnTrack = useCallback((trackId: string, n: number) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
-    const res = keepTakeGroup(stateRef.current.tracks, trackId, n, takeGroupOn());
+    const linked = takeGroupOn();
+    const res = keepTakeGroup(stateRef.current.tracks, trackId, n, linked);
+    // Sans bout de l'ancienne prise qui dépasse (utils/keptTakes.dropSlivers), prises jumelles comprises.
+    const nOf = new Map<string, number>([[trackId, n], ...(linked ? takeGroupMates(stateRef.current.tracks, trackId, n).map(m => [m.trackId, m.n] as [string, number]) : [])]);
+    res.forEach((clips, id) => { const nn = nOf.get(id); if (nn !== undefined) res.set(id, dropSlivers(clips, nn)); });
     const why = collabTrackGuardRef.current(t, { ...t, clips: res.get(trackId) as any });
     if (why) { setAiNotification(why); return; }
     if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }

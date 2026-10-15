@@ -125,7 +125,7 @@ export const KeptZoneHeaders: React.FC<HeadersProps> = ({ track, lanes, open, ap
                 <button type="button" data-testid="kept-name" onClick={() => { setDraft(l.meta?.name || l.name); setEditing(l.n); }}
                   title={`${l.title}\nTouche le nom pour le renommer`}
                   className={`block w-full truncate text-left text-[11px] font-bold ${used ? 'text-white' : 'text-slate-300'}`}>
-                  {l.name}{used && <span className="ml-1 text-[9px] font-black text-emerald-300">· sur la piste</span>}
+                  {l.name}{used && <span className="ml-1 text-[9px] font-black text-emerald-300">· {Math.abs(l.used - l.duration) < 0.05 ? 'sur la piste' : 'en partie sur la piste'}</span>}
                 </button>
               )}
               <span className="flex items-center gap-0.5">
@@ -176,7 +176,7 @@ export const KeptZoneStrip: React.FC<StripProps> = ({ track, count, candidate, i
   else if (dragging) text = '📌 Glisse la prise ici pour la garder de côté';
   else if (isRecording) text = '🔴 Prise en cours… tu pourras la garder juste après.';
   else if (!count) text = 'Garde tes meilleures prises ici pour choisir à la fin';
-  else if (candidate) text = `🎤 ${candidate.name} vient d'être enregistrée`;
+  else if (candidate) text = `🎤 Dernière prise : ${candidate.name}`;
   else text = 'Écoute ▶, note ★, puis ⤓ Piste pour la prise entière — ou balaie un passage d’une ligne pour ton comp';
   return (
     <div data-kept-strip={track.id} className={`absolute left-0 right-0 flex items-center gap-2 px-2 border-b border-amber-400/30 ${dropHot ? 'bg-amber-400/25' : 'bg-amber-500/[0.06]'}`}
@@ -265,16 +265,17 @@ export const KeptTakesCard: React.FC<CardProps> = ({ track, lanes, open, api, ca
                         className="w-full h-9 rounded-lg bg-black/40 border border-amber-400/60 px-2 text-[13px] text-white outline-none" />
                     ) : (
                       <button type="button" data-testid="kept-name" onClick={() => { setDraft(l.meta?.name || l.name); setEditing(l.n); }}
-                        className="block w-full truncate text-left text-[13px] font-black text-white">{l.name}
+                        title="Touche le nom pour le renommer"
+                        className="block w-full min-h-8 truncate text-left text-[13px] font-black text-white">{l.name}
                         <span className="ml-1 font-normal text-slate-400">· {fmtTime(l.duration)}</span>
-                        {onTrack && <span className="ml-1 text-[11px] font-black text-emerald-300">· sur la piste</span>}
+                        {l.used > 0.05 && <span className="ml-1 text-[11px] font-black text-emerald-300">· {onTrack ? 'sur la piste' : 'en partie'}</span>}
                       </button>
                     )}
                     <span className="flex items-center gap-1">
                       {Array.from({ length: KEPT_MAX_STARS }, (_, i) => i + 1).map(k => (
                         <button key={k} type="button" data-testid="kept-star" data-star={k} aria-label={`${k} étoile${k > 1 ? 's' : ''} pour ${l.name}`} aria-pressed={l.stars >= k}
                           onClick={() => api.onRate(track.id, l.n, nextStars(l.stars, k))}
-                          className={`w-8 h-8 text-[18px] leading-none ${l.stars >= k ? 'text-amber-300' : 'text-slate-500'}`}>★</button>
+                          className={`nova-hit w-8 h-8 text-[18px] leading-none ${l.stars >= k ? 'text-amber-300' : 'text-slate-500'}`}>★</button>
                       ))}
                     </span>
                   </div>

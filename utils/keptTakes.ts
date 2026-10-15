@@ -1,6 +1,7 @@
 import type { Clip, KeptTake, TakeMeta, Track } from '../types';
 import { takeNumberOf } from './takes';
-import { listLanes, sanitizeKept, TakeLane } from './playlists';
+import { keepTake, listLanes, sanitizeKept, TakeLane } from './playlists';
+import { CompOptions, readComp, rebuildTakeClips, takeSpans } from './comping';
 
 /**
  * 📌 Prises gardées (module pur : tests/keptTakes.test.ts).
@@ -162,6 +163,33 @@ export function keptZoneHeight(o: { kept: number; open: boolean; armedWithTakes:
   if (o.kept > 0) return head + (o.open ? o.kept * o.laneH : 0);
   return o.armedWithTakes ? head : 0;
 }
+
+/** Bout d'une autre prise plus court que ça, collé à la prise mise sur la piste : retiré (s). */
+export const SLIVER_SEC = 0.25;
+
+/**
+ * Après « Mettre sur la piste » : les bouts de l'ancienne prise qui dépassent à peine
+ * (la prise 4 finit 30 ms après la 2 : on entendrait 30 ms de la 4) sont coupés. Seul
+ * un bout court (< SLIVER_SEC), collé à la prise n et sans autre prise de l'autre côté,
+ * est concerné : un vrai passage d'une autre prise reste (c'est le comp de l'utilisateur).
+ */
+export function dropSlivers(clips: Clip[], n: number, opts: CompOptions = {}): Clip[] {
+  const spans = takeSpans(clips);
+  const segs = readComp(clips, spans).sort((a, b) => a.start - b.start);
+  const drop = new Set<number>();
+  segs.forEach((s, i) => {
+    if (s.n === n || s.end - s.start >= SLIVER_SEC) return;
+    const prev = segs[i - 1], next = segs[i + 1];
+    const touchPrev = !!prev && Math.abs(prev.end - s.start) < 1e-3;
+    const touchNext = !!next && Math.abs(s.end - next.start) < 1e-3;
+    if ((touchPrev && prev.n === n && !touchNext) || (touchNext && next.n === n && !touchPrev)) drop.add(i);
+  });
+  if (!drop.size) return clips;
+  return rebuildTakeClips(clips, spans, segs.filter((_, i) => !drop.has(i)), opts);
+}
+
+/** « Mettre sur la piste » : la prise n entière remplace ce qu'on entend (sans bout de l'ancienne). */
+export const putKeptOnTrack = (clips: Clip[], n: number, opts: CompOptions = {}): Clip[] => dropSlivers(keepTake(clips, n, opts), n, opts);
 
 /** Résumé d'une ligne : « ★★☆ · 0:42 ». */
 export function starsLabel(stars: number): string {
