@@ -261,9 +261,12 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
 
           {simple && (
             <button type="button" onClick={() => setOutilsOuverts(o => !o)} aria-expanded={outilsOuverts} data-testid="vocal-tools-more"
-              className="w-full h-11 rounded-xl border border-white/10 bg-white/[0.03] text-slate-200 font-bold text-[13px] hover:bg-white/[0.07] flex items-center justify-center gap-2">
-              <i className={`fas ${outilsOuverts ? 'fa-chevron-up' : 'fa-chevron-down'} text-[11px]`} aria-hidden="true" />
-              {outilsOuverts ? 'Moins d’outils voix' : 'Plus d’outils voix (blancs, respirations, fredonner, décompte, casque…)'}
+              className="w-full min-h-11 px-4 py-2 rounded-xl border border-white/10 bg-white/[0.03] text-slate-200 font-bold text-[13px] hover:bg-white/[0.07] flex items-center gap-3 text-left">
+              <i className={`fas ${outilsOuverts ? 'fa-chevron-up' : 'fa-chevron-down'} text-[11px] text-slate-400`} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block">{outilsOuverts ? 'Moins d’outils voix' : 'Plus d’outils voix'}</span>
+                {!outilsOuverts && <span className="block text-[11px] font-normal text-slate-400">Batterie, blancs, respirations, fredonner, décompte, casque…</span>}
+              </span>
             </button>
           )}
 

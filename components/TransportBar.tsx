@@ -683,8 +683,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       <button type="button" onClick={() => setMenuPlus(o => !o)} aria-expanded={menuPlus} data-testid="menu-plus-toggle"
         className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3 text-left">
         <i className={`w-5 text-center text-slate-400 fas ${menuPlus ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true"></i>
-        <span className="flex-1">{menuPlus ? 'Moins d’outils' : 'Plus d’outils'}</span>
-        {!menuPlus && <span className="text-[10px] font-normal text-slate-400">Master, caméra, métronome, MIDI, session…</span>}
+        <span className="flex-1 min-w-0">
+          <span className="block">{menuPlus ? 'Moins d’outils' : 'Plus d’outils'}</span>
+          {!menuPlus && <span className="block text-[11px] font-normal text-slate-400">Master, caméra, échauffement, métronome, MIDI, session, collaboration…</span>}
+        </span>
       </button>
       {menuPlus && (
         <div className="space-y-3" data-testid="menu-plus">

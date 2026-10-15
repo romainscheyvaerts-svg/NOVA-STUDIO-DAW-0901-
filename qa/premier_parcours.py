@@ -363,7 +363,12 @@ def main():
             jp = r["jusqu_a_la_prise"]
             print(f"   jusqu'à la prise : {jp['clics']} clic(s), {jp['s']} s mesurées, ~{jp['s_estime_humain']} s pour un humain"
                   f" ; total {r['total']['clics']} clic(s) ; écrans : " + ", ".join(f"{k}={v['elements']}" for k, v in r["inventaire"].items()), flush=True)
-    save_json(OUT / "premier_parcours.json", {"phase": PHASE, "url": BASE, "date": time.strftime("%Y-%m-%d %H:%M"), "cas": out})
+    # Quelques cas seulement (relance) : les autres cas déjà mesurés dans cette phase sont gardés.
+    tous = dict(out)
+    if len(WANT) < len(CAS):
+        try: tous = {**json.loads((OUT / "premier_parcours.json").read_text(encoding="utf-8")).get("cas", {}), **out}
+        except Exception: pass
+    save_json(OUT / "premier_parcours.json", {"phase": PHASE, "url": BASE, "date": time.strftime("%Y-%m-%d %H:%M"), "cas": tous})
     ko = []
     for nom, r in out.items():
         if r["total"]["etapes_ko"]:
