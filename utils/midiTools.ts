@@ -65,6 +65,7 @@ export function chordGroups(notes: MidiNote[], tol = 0.012): MidiNote[][] {
 
 /** Valeur de grille (texte) → durée en temps. */
 export const GRID_BEATS: Record<string, number> = {
+  '1/1': 4, '1/2': 2, '1/4T': 2 / 3,
   '1/4': 1, '1/8': 0.5, '1/16': 0.25, '1/32': 0.125, '1/64': 0.0625,
   '1/8T': 1 / 3, '1/16T': 1 / 6, '1/32T': 1 / 12,
 };

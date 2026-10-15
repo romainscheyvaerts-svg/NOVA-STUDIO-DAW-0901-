@@ -7,6 +7,7 @@ export function notesOfClips(clips: Clip[]) {
   return clips.filter(c => !c.isMuted && c.type === TrackType.MIDI && c.notes && c.notes.length)
     .flatMap(c => playableNotes(c).filter(n => n.start < c.duration).map(n => ({
       pitch: n.pitch, velocity: n.velocity, start: c.start + n.start, duration: Math.min(n.duration, c.duration - n.start),
+      ...(n.slide ? { slide: true } : {}),
     })));
 }
 

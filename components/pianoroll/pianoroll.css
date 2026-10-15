@@ -1,0 +1,96 @@
+/*
+ * Piano roll pro (15/10/2026) : habillage cohérent avec le kit « matériel »
+ * (plugins/hw/hw.css) et la façade du synthé (components/synth/synthe.css) :
+ * barres d'outils en panneau, boutons « poussoirs » avec voyant, clavier
+ * vertical en vraies touches. Thème sombre par défaut, thème clair plus bas.
+ */
+[data-nova-pianoroll] {
+  --pr-panel: linear-gradient(180deg, #16181d, #0e0f12);
+  --pr-panel-line: rgba(255, 255, 255, 0.08);
+  --pr-cap: #1c1f25;
+  --pr-cap-hover: #262a32;
+  --pr-cap-line: rgba(255, 255, 255, 0.09);
+  --pr-cap-ink: #d7dbe2;
+  --pr-cap-ink-soft: #a9b2c4;
+  --pr-accent: #38bdf8;
+  --pr-accent-ink: #04121a;
+  --pr-ruler: #101216;
+  --pr-ruler-ink: #c9d1dc;
+}
+:root[data-theme='light'] [data-nova-pianoroll] {
+  --pr-panel: linear-gradient(180deg, #ffffff, #eef1f5);
+  --pr-panel-line: rgba(15, 23, 42, 0.12);
+  --pr-cap: #ffffff;
+  --pr-cap-hover: #eef2f7;
+  --pr-cap-line: rgba(15, 23, 42, 0.16);
+  --pr-cap-ink: #1f2937;
+  --pr-cap-ink-soft: #475569;
+  --pr-accent: #0369a1;
+  --pr-accent-ink: #ffffff;
+  --pr-ruler: #e9edf2;
+  --pr-ruler-ink: #1f2937;
+}
+
+.pr-bar {
+  background: var(--pr-panel);
+  border-bottom: 1px solid var(--pr-panel-line);
+}
+
+/* Bouton poussoir (comme .hw-chip) : capuchon, liseré, voyant quand il est enfoncé. */
+.pr-cap {
+  height: 32px;
+  min-width: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--pr-cap-ink);
+  background: var(--pr-cap);
+  border: 1px solid var(--pr-cap-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+  flex: none;
+}
+.pr-cap:hover { background: var(--pr-cap-hover); }
+.pr-cap:disabled { opacity: 0.45; cursor: default; }
+.pr-cap[aria-pressed='true'], .pr-cap[data-on='true'] {
+  background: var(--pr-accent);
+  color: var(--pr-accent-ink);
+  border-color: transparent;
+}
+.pr-cap .pr-led { width: 6px; height: 6px; border-radius: 999px; background: rgba(148, 163, 184, 0.5); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.5); }
+.pr-cap[aria-pressed='true'] .pr-led, .pr-cap[data-on='true'] .pr-led { background: #fef08a; box-shadow: 0 0 6px #fde047; }
+
+/* Groupe d'outils (crayon, pinceau…) : un bloc de poussoirs serrés. */
+.pr-seg { display: inline-flex; flex: none; padding: 2px; gap: 2px; border-radius: 10px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--pr-cap-line); }
+:root[data-theme='light'] [data-nova-pianoroll] .pr-seg { background: rgba(15, 23, 42, 0.06); }
+.pr-seg .pr-cap { border-color: transparent; background: transparent; box-shadow: none; color: var(--pr-cap-ink-soft); }
+.pr-seg .pr-cap:hover { color: var(--pr-cap-ink); background: var(--pr-cap-hover); }
+.pr-seg .pr-cap[aria-pressed='true'] { background: var(--pr-accent); color: var(--pr-accent-ink); }
+.pr-seg .pr-cap[aria-pressed='true'][data-tool='ERASE'] { background: #ef4444; color: #fff; }
+
+.pr-sep { width: 1px; height: 24px; background: var(--pr-panel-line); flex: none; }
+.pr-label { font-size: 9px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--pr-cap-ink-soft); flex: none; }
+
+/* Au doigt : cibles de 44 px. */
+@media (pointer: coarse) {
+  .pr-cap { height: 44px; min-width: 44px; }
+  /* Boutons ajoutés par l'appli dans la barre (son de la piste, 808) : même taille au doigt. */
+  [data-nova-roll='barre'] button { min-height: 44px; }
+  [data-nova-roll-menu] input[type='range'] { height: 44px; }
+}
+
+/* Règle (mesures) au-dessus de la grille. */
+.pr-ruler { background: var(--pr-ruler); color: var(--pr-ruler-ink); border-bottom: 1px solid var(--pr-panel-line); }
+
+/* Note glissée : bord gauche en biseau + hachures légères. */
+.pr-note-slide {
+  clip-path: polygon(0 50%, 7px 0, 100% 0, 100% 100%, 7px 100%);
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 3px, transparent 3px 7px);
+}

@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { MidiNote } from '../types';
+import { velocityColor } from '../utils/pianoRollPro';
 import {
   MidiCcPoint, COMMON_LANES, ccLabel, ccShortLabel, ccKey, ccRange, ccDefault, isPitchBend, isSwitchCc, linePoints, replacePoints, sortPoints, clampCc,
 } from '../utils/midiCc';
@@ -34,15 +35,18 @@ interface Props {
   onNotes: (notes: MidiNote[], label: string) => void;
   onCc: (key: string, points: MidiCcPoint[], label: string) => void;
   innerRef: React.RefObject<HTMLDivElement>;
+  /** Couleurs selon la vélocité (comme les notes du piano roll). */
+  velColors?: boolean;
+  light?: boolean;
 }
 
-const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideWidth, selectedIds, color, onNotes, onCc, innerRef }) => {
+const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideWidth, selectedIds, color, onNotes, onCc, innerRef, velColors, light }) => {
   const [lane, setLane] = useState<string>(VELOCITY_LANE);
   const [tool, setTool] = useState<LaneTool>('pencil');
   const [custom, setCustom] = useState('');
   const [draft, setDraft] = useState<{ notes?: MidiNote[]; points?: MidiCcPoint[]; line?: { x0: number; y0: number; x1: number; y1: number } } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ x0: number; y0: number; t0: number; tMin: number; tMax: number; erase: boolean; pts: MidiCcPoint[]; notes: MidiNote[] } | null>(null);
+  const gesture = useRef<{ x0: number; y0: number; t0: number; tMin: number; tMax: number; erase: boolean; pts: MidiCcPoint[]; notes: MidiNote[]; lastT?: number } | null>(null);
 
   const lanes = useMemo(() => {
     const extra = Object.keys(cc || {}).filter(k => (cc![k] || []).length && !COMMON_LANES.includes(k));
@@ -70,7 +74,7 @@ const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideW
   const onDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* pointeur déjà relâché */ }
     const t = toT(e.clientX), v = toV(e.clientY);
     gesture.current = { x0: e.clientX, y0: e.clientY, t0: t, tMin: t, tMax: t, erase: e.altKey, pts: [{ t, v }], notes: [...notes] };
     move(e);
@@ -88,10 +92,13 @@ const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideW
       return;
     }
     if (isVel) {
-      // Crayon sur la vélocité : chaque note survolée prend la hauteur du crayon.
+      // Crayon sur la vélocité : chaque note survolée prend la hauteur du crayon (tout le passage
+      // depuis le dernier point : un geste rapide n'en saute aucune).
       const tol = 4 / zoomX;
       const sel = selectedIds.size > 0;
-      g.notes = g.notes.map(n => (Math.abs(n.start - t) <= tol && (!sel || selectedIds.has(n.id)) ? { ...n, velocity: v / 127 } : n));
+      const a = Math.min(g.lastT ?? t, t) - tol, b = Math.max(g.lastT ?? t, t) + tol;
+      g.lastT = t;
+      g.notes = g.notes.map(n => (n.start >= a && n.start <= b && (!sel || selectedIds.has(n.id)) ? { ...n, velocity: v / 127 } : n));
       setDraft({ notes: g.notes });
       return;
     }
@@ -158,39 +165,50 @@ const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideW
   };
 
   return (
-    <div className="h-[30%] border-t border-white/10 bg-nv-surface flex relative z-30" data-nova-cc-lanes="">
+    <div className="h-[30%] max-sm:h-[26%] min-h-[96px] border-t border-white/10 bg-nv-surface flex relative z-30" data-nova-cc-lanes="">
       <div className={`flex-shrink-0 border-r border-white/10 bg-nv-bg ${sideWidth} p-1 flex flex-col gap-1 overflow-y-auto no-scrollbar`}>
         <select aria-label="Couloir affiché" value={lane} onChange={e => { setLane(e.target.value); setDraft(null); }} data-nova-cc-select=""
           title="Couloir : vélocité, pitch bend, modulation, sustain, expression ou un autre CC (couloirs de contrôleurs de Pro Tools, Event editor de FL)"
-          className="w-full h-7 [@media(pointer:coarse)]:h-10 rounded bg-black/40 border border-white/15 text-[9px] text-white px-0.5">
+          className="w-full h-7 [@media(pointer:coarse)]:h-11 shrink-0 rounded bg-black/40 border border-white/15 text-[9px] text-white px-0.5">
           {lanes.map(k => <option key={k} value={k} title={k === VELOCITY_LANE ? 'Vélocité' : ccLabel(k)}>{k === VELOCITY_LANE ? 'Vélocité' : ccShortLabel(k)}{k !== VELOCITY_LANE && (cc?.[k]?.length || 0) > 0 ? ' •' : ''}</option>)}
         </select>
-        <div className="flex gap-1">
+        {/* Au doigt : outils l'un sous l'autre, 44 px chacun. */}
+        <div className="flex gap-1 [@media(pointer:coarse)]:flex-col">
           <button type="button" aria-label="Crayon" aria-pressed={tool === 'pencil'} onClick={() => setTool('pencil')} data-nova-cc-tool="pencil"
             title="Crayon : dessine à main levée (vélocité : règle les notes survolées). Alt + glisser efface."
-            className={`flex-1 h-7 [@media(pointer:coarse)]:h-10 rounded text-[10px] ${tool === 'pencil' ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300'}`}><i className="fas fa-pencil-alt"></i></button>
+            className={`flex-1 h-7 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:shrink-0 rounded text-[10px] ${tool === 'pencil' ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300'}`}><i className="fas fa-pencil-alt"></i></button>
           <button type="button" aria-label="Ligne" aria-pressed={tool === 'line'} onClick={() => setTool('line')} data-nova-cc-tool="line"
             title="Ligne : tire une rampe droite (outil Ligne du crayon de Pro Tools)"
-            className={`flex-1 h-7 [@media(pointer:coarse)]:h-10 rounded text-[10px] ${tool === 'line' ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300'}`}><i className="fas fa-slash"></i></button>
+            className={`flex-1 h-7 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:shrink-0 rounded text-[10px] ${tool === 'line' ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300'}`}><i className="fas fa-slash"></i></button>
         </div>
-        <div className="flex gap-0.5">
+        {/* Autre CC par son numéro : au clavier (bureau) ; au doigt, la liste suffit. */}
+        <div className="flex gap-0.5 [@media(pointer:coarse)]:hidden">
           <input aria-label="Numéro de CC" inputMode="numeric" placeholder="CC" value={custom} onChange={e => setCustom(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))}
             onKeyDown={e => { if (e.key === 'Enter') addCustom(); }} className="w-full min-w-0 h-7 rounded bg-black/40 border border-white/15 text-[9px] text-white px-1" />
           <button type="button" aria-label="Afficher ce CC" onClick={addCustom} className="h-7 px-1 rounded bg-white/5 text-[9px] text-slate-300">OK</button>
         </div>
         {!isVel && (cc?.[lane]?.length || 0) > 0 && (
-          <button type="button" onClick={() => onCc(lane, [], `${ccLabel(lane)} vidé`)} className="h-7 rounded bg-white/5 text-[9px] text-slate-400 hover:text-red-300" title="Effacer tout ce couloir">Vider</button>
+          <button type="button" onClick={() => onCc(lane, [], `${ccLabel(lane)} vidé`)} className="h-7 [@media(pointer:coarse)]:min-h-11 shrink-0 rounded bg-white/5 text-[9px] text-slate-400 hover:text-red-300" title="Effacer tout ce couloir">Vider</button>
         )}
       </div>
       <div ref={innerRef} className="flex-1 overflow-hidden relative">
         <div ref={boxRef} style={{ width, height: '100%', position: 'relative', touchAction: 'none' }} className="cursor-crosshair"
           onPointerDown={onDown} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { gesture.current = null; setDraft(null); }} data-nova-cc-area={lane}>
+          {isVel && (
+            // Repères 32 / 64 / 96 / 127 : lire une vélocité d'un coup d'œil.
+            <div aria-hidden className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `linear-gradient(to bottom, ${light ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.06)'} 1px, transparent 1px)`, backgroundSize: '100% 25%' }} />
+          )}
           {isVel ? shownNotes.map(note => {
             const sel = selectedIds.has(note.id);
+            const v = Math.max(1, Math.round(note.velocity * 127));
+            // Sucette (FL, Studio One) : tige + tête, colorée selon la vélocité.
+            const col = note.muted ? '#64748b' : velColors ? velocityColor(note.velocity, light) : sel ? (light ? '#0b0c0f' : '#ffffff') : '#94a3b8';
             return (
-              <div key={`vel-${note.id}`} className={`absolute bottom-0 w-1.5 ${note.muted ? 'bg-slate-600' : sel ? 'bg-white' : 'bg-slate-500'}`}
-                style={{ left: note.start * zoomX, height: `${Math.max(1, Math.round(note.velocity * 127)) / 127 * 100}%`, opacity: note.muted ? 0.5 : 1 }}
-                title={`Vélocité ${Math.round(note.velocity * 127)}`} data-nova-vel={Math.round(note.velocity * 127)} />
+              <div key={`vel-${note.id}`} className="absolute bottom-0 pointer-events-none" data-nova-vel={v} title={`Vélocité ${v}`}
+                style={{ left: note.start * zoomX - 1, width: 3, height: `${v / 127 * 100}%`, background: col, opacity: note.muted ? 0.5 : 1,
+                  boxShadow: sel ? `0 0 0 1px ${light ? '#0b0c0f' : '#ffffff'}` : undefined }}>
+                <span className="absolute -top-1 -left-[3px] w-[9px] h-[9px] rounded-full" style={{ background: col, boxShadow: sel ? `0 0 0 2px ${light ? '#0b0c0f' : '#ffffff'}` : '0 0 0 1px rgba(0,0,0,0.35)' }} />
+              </div>
             );
           }) : (
             <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${width} ${H}`} preserveAspectRatio="none" aria-hidden>

@@ -180,5 +180,17 @@ export const chordLabelFr = (notes: number[]): string => {
     '0,4,7,11': 'majeur 7', '0,3,7,10': 'mineur 7', '0,4,7,10': '7', '0,3,6,10': 'demi-diminué', '0,3,6,9': 'diminué 7',
     '0,3,7,10,14': 'mineur 9', '0,4,7,14': 'add9', '0,7': '5', '0,3,7,11': 'mineur maj7',
   };
-  return `${NOTE_NAMES_FR[mod12(root)]} ${table[rel] || ''}`.trim();
+  if (table[rel]) return `${NOTE_NAMES_FR[mod12(root)]} ${table[rel]}`;
+  // Renversement (piano roll pro) : on cherche la fondamentale parmi les notes (Do-Mi-La = La mineur, 1er renversement).
+  const pcs = Array.from(new Set(notes.map(mod12)));
+  for (const r of notes.slice(1)) {
+    const key = pcs.map(p => mod12(p - r)).sort((a, b) => a - b).join(',');
+    if (table[key]) {
+      // La note à la basse dit le renversement : la tierce = 1er, la quinte = 2e, la septième = 3e.
+      const bass = mod12(Math.min(...notes) - r);
+      const inv = bass >= 2 && bass <= 5 ? '1er renversement' : bass >= 6 && bass <= 8 ? '2e renversement' : bass >= 9 ? '3e renversement' : '';
+      return `${NOTE_NAMES_FR[mod12(r)]} ${table[key]}${inv ? ` (${inv})` : ''}`;
+    }
+  }
+  return NOTE_NAMES_FR[mod12(root)];
 };

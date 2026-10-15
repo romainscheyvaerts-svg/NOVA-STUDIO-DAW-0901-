@@ -78,7 +78,7 @@ export interface Voice808 {
  * glissé (si `glide`) sans réattaque, sinon elle coupe la précédente. Deux
  * notes collées (fin = début) se rejouent. Accord : la note la plus grave gagne.
  */
-export function plan808(notes: { pitch: number; start: number; duration: number; velocity: number }[], glide: boolean): Voice808[] {
+export function plan808(notes: { pitch: number; start: number; duration: number; velocity: number; slide?: boolean }[], glide: boolean): Voice808[] {
   const sorted = notes
     .filter(n => n.duration > 0 && Number.isFinite(n.start))
     .slice()
@@ -90,6 +90,13 @@ export function plan808(notes: { pitch: number; start: number; duration: number;
     const end = n.start + n.duration;
     if (cur && n.start < cur.end - EPS) {
       const sameStart = n.start <= cur.start + EPS;
+      // Glissé par note (piano roll pro, FL : Slide) : la 808 glisse sans se rejouer
+      // et garde sa propre fin (la note glissée ne la prolonge pas).
+      if (n.slide && !sameStart) {
+        const last = cur.steps[cur.steps.length - 1];
+        if (n.start <= last.t + EPS) last.pitch = n.pitch; else cur.steps.push({ t: n.start, pitch: n.pitch });
+        continue;
+      }
       if (glide || sameStart) {
         const last = cur.steps[cur.steps.length - 1];
         if (n.start <= last.t + EPS) last.pitch = n.pitch; else cur.steps.push({ t: n.start, pitch: n.pitch });

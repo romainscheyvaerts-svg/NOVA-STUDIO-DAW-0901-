@@ -231,6 +231,14 @@ export interface MidiNote {
    */
   pan?: number;
   tune?: number;
+  /**
+   * Glissé (piano roll pro, FL Studio : Slide notes) : une note glissée qui
+   * commence pendant une autre ne se rejoue pas ; elle fait glisser la hauteur
+   * de la note en cours jusqu'à la sienne, pendant sa propre durée (808, leads
+   * trap). Seule, elle se joue comme une note normale. Synthé NOVA et 808 ;
+   * les autres instruments la jouent comme une note normale.
+   */
+  slide?: boolean;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
