@@ -65,6 +65,12 @@ interface TrackHeaderProps {
   onDropTrack: () => void;
   isDraggingOver?: boolean;
   onSwapInstrument?: (trackId: string) => void;
+  /** Couloirs de prises de la piste : la pastille « Prises (N) ▾ » est posée DANS la dernière ligne de l'en-tête
+   *  (effets, ou réglages d'entrée de la piste armée). Avant, posée en absolu en bas à droite, elle cachait
+   *  « +N » (« Voir les 5 effets ») et la diode du micro. */
+  takesCount?: number;
+  takesOpen?: boolean;
+  onToggleTakes?: (trackId: string) => void;
 }
 
 const HorizontalSendFader: React.FC<{ 
@@ -139,7 +145,7 @@ const HorizontalSendFader: React.FC<{
 
 const TrackHeader: React.FC<TrackHeaderProps> = ({ 
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
-  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument
+  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument, takesCount, takesOpen, onToggleTakes
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
   // Menu « FX » toujours accessible (les pastilles du bas disparaissent quand la piste est basse)
@@ -462,6 +468,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const [showInputRow, setShowInputRow] = useState(false);
   // Ligne des effets affichée (l'indicateur « gel à refaire » s'y range, sinon à côté du nom).
   const insertStripShown = !(track.isTrackArmed && showInputRow) && !(canHaveSends && showSends && !simple) && (insertPlugins.length > 0 || track.isTrackArmed);
+  const takesPill = (n: number, absolute: boolean) => (
+    <button type="button" data-takes-button={track.id}
+      onClick={(e) => { e.stopPropagation(); onToggleTakes?.(track.id); }}
+      aria-expanded={!!takesOpen}
+      title={`${takesOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists de Pro Tools ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
+      className={`${absolute ? 'absolute z-10 right-1.5 bottom-1.5' : 'shrink-0'} h-6 px-2 rounded-full text-[10px] font-black flex items-center gap-1 border whitespace-nowrap ${takesOpen ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-black/70 text-cyan-200 border-cyan-400/50 hover:bg-cyan-500/20 [[data-theme=light]_&]:bg-white [[data-theme=light]_&]:text-cyan-700'}`}>
+      <i className="fas fa-layer-group text-[9px]" />Prises ({n})<i className={`fas ${takesOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px]`} />
+    </button>
+  );
+  const takesShown = !!onToggleTakes && (takesCount || 0) > 0;
 
   return (
     <div 
@@ -734,6 +750,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           <button type="button" onClick={(e) => { e.stopPropagation(); setShowInputRow(false); }}
             title="Revenir aux effets de la piste" aria-label="Revenir aux effets de la piste"
             className="shrink-0 h-5 rounded bg-cyan-500/20 px-1.5 text-[10px] font-bold text-cyan-200">FX</button>
+          {takesShown && takesPill(takesCount!, false)}
         </div>
       )}
 
@@ -857,8 +874,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           onDragStart={(e, id) => handleFXDragStart(e, id)}
           onShowAll={() => setFxMenu(true)}
           idle={track.clips.length === 0 && !track.isTrackArmed}
+          trailing={takesShown ? takesPill(takesCount!, false) : undefined}
         />
       )}
+      {/* Ni ligne d'effets ni réglages d'entrée (envois affichés) : la pastille reste en bas à droite. */}
+      {takesShown && !insertStripShown && !(track.isTrackArmed && showInputRow) && takesPill(takesCount!, true)}
     </div>
   );
 };

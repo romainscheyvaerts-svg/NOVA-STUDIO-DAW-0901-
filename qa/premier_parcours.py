@@ -19,6 +19,8 @@ micro, et l'écran affiché à ce moment est capturé (l'explication est-elle l�
 Inventaire de chaque écran (accueil, studio, pendant la prise, après la prise, fenêtre d'export) :
 éléments interactifs visibles (boutons, liens, champs), éléments flottants, éléments recouverts par un
 autre (un élément flottant ne doit en recouvrir aucun).
+Après la prise (piste REC armée, effets, « Prises (1) », zone 📌 Prises gardées) : balayage de tout l'écran,
+mode simple puis avancé (qalib.balayage_chevauchement) : aucun bouton recouvert par un autre élément.
 
 Objectif : moins de 60 s et au plus 5 clics jusqu'à la première prise (temps de chant compris : 3 s).
 
@@ -32,7 +34,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3464/")
 PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-simplicite\{PHASE}")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, balayage_chevauchement  # noqa: E402
 from nova_pro_lib import Chrono, app_state, save_json  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -303,6 +305,17 @@ def run_cas(p, nom, cfg):
         ch.end()
         page.wait_for_timeout(2900)   # la carte « Et maintenant ? » arrive ~2,6 s après l'arrêt
         inv = pc.capture("e4_apres_prise")
+        # Balayage de chevauchement (15/10/2026) : piste REC armée avec ses effets, « Prises (1) » et la zone
+        # 📌 Prises gardées : aucun bouton de l'écran recouvert, en mode simple puis en mode avancé.
+        res["balayage"] = {}
+        for simple in (True, False):
+            page.evaluate("async (on) => (await window.__novaAppModule('/utils/simpleMode.ts')).simpleModeStore.setPref(on)", simple)
+            page.wait_for_timeout(600)
+            if not doigt: page.mouse.move(2, 2)
+            res["balayage"]["simple" if simple else "avance"] = balayage_chevauchement(page)
+            if not simple: page.screenshot(path=str(OUT / f"{nom}_e4b_apres_prise_avance.png"))
+        page.evaluate("async () => (await window.__novaAppModule('/utils/simpleMode.ts')).simpleModeStore.setPref(true)")
+        page.wait_for_timeout(500)
 
         # 4. Écouter ----------------------------------------------------------------------
         ch.start("Parcours", "Écouter la prise")
@@ -379,6 +392,9 @@ def main():
                 ko.append(f"{nom} {k} : élément recouvert par une pastille flottante {past[:3]}")
             if v.get("chevauchements"):
                 ko.append(f"{nom} {k} : éléments flottants qui se chevauchent {v['chevauchements'][:3]}")
+        for mode, bal in (r.get("balayage") or {}).items():
+            if bal.get("erreur") or bal.get("recouverts"):
+                ko.append(f"{nom} après la prise ({mode}) : bouton recouvert {(bal.get('recouverts') or bal.get('erreur'))[:3]}")
         if CAS[nom]["mesure"] and os.environ.get("QA_OBJECTIF") == "1" and not r["objectif_tenu"]:
             ko.append(f"{nom} : objectif non tenu ({r['jusqu_a_la_prise']})")
     for k in ko: print("KO", k)

@@ -259,3 +259,56 @@ def ouvrir_plus_accueil(page, touch=False):
     (b.first.tap if touch else b.first.click)()
     page.wait_for_timeout(200)
     return True
+
+
+# Balayage de chevauchement (15/10/2026) : aucun élément cliquable de l'écran ne doit être recouvert par un
+# autre élément (pastille, badge, bouton posé en absolu…). Pour chaque bouton visible : on prend la partie
+# réellement visible (coupée par les zones qui défilent), puis on sonde sa ligne médiane (centre et quarts) ;
+# recouvert si au moins 2 sondes sur 3 tombent sur un élément étranger. Ne comptent pas : une fenêtre modale
+# (elle recouvre légitimement le fond), un en-tête collant de la même zone qui défile (défilement normal),
+# et un élément à peine visible (< 30 % de sa surface : il est hors de la zone qui défile).
+BALAYAGE_CHEVAUCHEMENT_JS = r"""(scope) => {
+  const W = innerWidth, H = innerHeight;
+  const sel = 'button, [role=button], a[href], input:not([type=hidden]), select, textarea, [role=tab], [role=switch], [role=slider], [role=menuitem], [role=radio], [role=checkbox]';
+  const root = scope ? document.querySelector(scope) : document;
+  if (!root) return { erreur: 'zone introuvable : ' + scope };
+  const label = el => ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('data-testid'))) || el.innerText || el.title || el.tagName || '').toString().trim().replace(/\s+/g, ' ').slice(0, 50);
+  const clips = el => { const out = []; for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+      const s = getComputedStyle(p); if (/(auto|scroll|hidden|clip)/.test(s.overflow + s.overflowX + s.overflowY)) out.push(p); } return out; };
+  const stickyOf = el => { for (let p = el; p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).position === 'sticky') return p; return null; };
+  const scroller = el => { for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) { const s = getComputedStyle(p); if (/(auto|scroll)/.test(s.overflowY + s.overflowX)) return p; } return null; };
+  const res = []; let n = 0;
+  for (const el of root.querySelectorAll(sel)) {
+    if (!el.getClientRects().length) continue;
+    const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0 || cs.pointerEvents === 'none') continue;
+    if (el.parentElement && el.parentElement.closest(sel) && !el.matches('input, select, textarea')) continue;
+    const r = el.getBoundingClientRect(); if (r.width < 4 || r.height < 4) continue;
+    let L = Math.max(r.left, 0), T = Math.max(r.top, 0), R = Math.min(r.right, W), B = Math.min(r.bottom, H);
+    for (const c of clips(el)) { const q = c.getBoundingClientRect(); L = Math.max(L, q.left); T = Math.max(T, q.top); R = Math.min(R, q.right); B = Math.min(B, q.bottom); }
+    if (R - L < 2 || B - T < 2 || (R - L) * (B - T) < 0.3 * r.width * r.height) continue;
+    n++;
+    // Sondes sur la ligne médiane (centre, quart gauche, quart droit) : les coins d'une pastille arrondie sont
+    // hors de sa forme (Chrome en tient compte), ils tomberaient sur ce qu'il y a dessous.
+    const ym = (T + B) / 2;
+    const pts = [[(L + R) / 2, ym], [L + (R - L) / 4, ym], [R - (R - L) / 4, ym]];
+    let bad = 0, par = null;
+    for (const [x, y] of pts) {
+      const h = document.elementFromPoint(x, y);
+      if (!h || el.contains(h) || h.contains(el)) continue;
+      if (h.closest('[aria-modal=true], [role=dialog], [role=alertdialog]') && !el.closest('[aria-modal=true], [role=dialog], [role=alertdialog]')) continue;
+      const st = stickyOf(h); if (st && !st.contains(el) && scroller(st) && scroller(st).contains(el)) continue;
+      bad++; if (!par) par = h;
+    }
+    if (bad >= 2) {
+      const chaine = []; for (let p = par, i = 0; p && p !== document.body && i < 4; p = p.parentElement, i++) chaine.push(p.tagName.toLowerCase() + (p.getAttribute('data-testid') ? '[' + p.getAttribute('data-testid') + ']' : '') + '.' + String(p.className || '').split(' ').slice(0, 3).join('.'));
+      const pile = document.elementsFromPoint((L + R) / 2, (T + B) / 2).slice(0, 5).map(e => { const s = getComputedStyle(e); return e.tagName.toLowerCase() + '.' + String(e.className || '').split(' ').slice(0, 2).join('.') + ' z=' + s.zIndex + ' ' + s.position + (s.pointerEvents === 'none' ? ' pe:none' : ''); });
+      res.push({ el: label(el), par: label(par.closest(sel) || par), chaine, pile, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+  }
+  return { boutons: n, recouverts: res };
+}"""
+
+
+def balayage_chevauchement(page, scope=None):
+    """Boutons recouverts par un autre élément sur l'écran (ou dans `scope`) : {'boutons': n, 'recouverts': [...]}."""
+    return page.evaluate(BALAYAGE_CHEVAUCHEMENT_JS, scope)

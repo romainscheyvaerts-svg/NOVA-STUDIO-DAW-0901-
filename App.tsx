@@ -9851,6 +9851,31 @@ function Studio() {
   // --- Mode simple (artiste) ------------------------------------------------------
   // Mode instru, ingé son et beatmaker : tous les outils, d'office.
   const { simple: simpleMode } = useSimpleMode();
+  // Téléphone (R12) : groupes en lecture seule, insertion de temps, pistes masquées.
+  const mobilePills = (<>
+              {/* Téléphone (R12) : groupes en lecture seule, insertion de temps. */}
+              {state.trackGroups.length > 0 && (
+                <button type="button" data-testid="mobile-groups" onClick={() => setR12Panel({ panel: 'groups' })}
+                  title="Groupes de la session (lecture seule sur téléphone)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-object-group mr-1.5 text-[10px] text-nv-muted" />Groupes ({state.trackGroups.length})
+                </button>
+              )}
+              {activeMobileTab !== 'MIXER' && !simpleMode && (
+                <button type="button" data-testid="mobile-time" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } })}
+                  title="Insérer ou supprimer du temps à la tête de lecture"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px] text-nv-muted" />Temps
+                </button>
+              )}
+              {state.tracks.some(t => t.isHidden) && (
+                <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
+                  title="Pistes masquées : les révéler (et les activer)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
+                </button>
+              )}
+</>);
   useEffect(() => {
     simpleModeStore.setForced(state.projectMode === 'BEATMAKING' || collab?.role === 'engineer' || collab?.role === 'beatmaker');
   }, [state.projectMode, collab?.role]);
@@ -10554,31 +10579,12 @@ function Studio() {
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
-          {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
-            // Morceau : posées sur la règle (sous l'en-tête et les outils), elles recouvraient « Zoomer » en haut à droite.
-            <div className={`absolute right-2 ${activeMobileTab === 'ARRANGEMENT' ? 'top-[92px]' : 'top-2'} z-[60] flex gap-1.5`}>
-              {/* Téléphone (R12) : groupes en lecture seule, insertion de temps. */}
-              {state.trackGroups.length > 0 && (
-                <button type="button" data-testid="mobile-groups" onClick={() => setR12Panel({ panel: 'groups' })}
-                  title="Groupes de la session (lecture seule sur téléphone)"
-                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
-                  <i className="fas fa-object-group mr-1.5 text-[10px] text-nv-muted" />Groupes ({state.trackGroups.length})
-                </button>
-              )}
-              {activeMobileTab !== 'MIXER' && !simpleMode && (
-                <button type="button" data-testid="mobile-time" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } })}
-                  title="Insérer ou supprimer du temps à la tête de lecture"
-                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
-                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px] text-nv-muted" />Temps
-                </button>
-              )}
-              {state.tracks.some(t => t.isHidden) && (
-                <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
-                  title="Pistes masquées : les révéler (et les activer)"
-                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
-                  <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
-                </button>
-              )}
+          {/* Pistes / console : pastilles en haut à droite. Morceau : elles vont dans la barre d'outils
+              (MobileArrangementPage › toolbarExtras), dans le flux : en flottant elles recouvraient
+              « Zoomer » puis le bouton « 📌 Garder » de la zone des prises gardées. */}
+          {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER') && (
+            <div className="absolute right-2 top-2 z-[60] flex gap-1.5">
+              {mobilePills}
             </div>
           )}
           {isMobile && (
@@ -10604,6 +10610,11 @@ function Studio() {
 
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
+                  toolbarExtras={mobilePills}
+                  topCard={<NextStepCard inline isMobile
+                    open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
+                    trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}
+                    besideSidebar={false} onAction={handleNextStep} onClose={() => setNextStep(null)} />}
                   tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
@@ -10754,7 +10765,7 @@ function Studio() {
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
       <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && activeMobileTab === 'NOVA')}
+        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && (activeMobileTab === 'NOVA' || activeMobileTab === 'ARRANGEMENT'))}
         trigger={nextStep || 'take'}
         actions={nextStepActions}
         beatTitle={getCatalogBeat(state.tracks)?.title}

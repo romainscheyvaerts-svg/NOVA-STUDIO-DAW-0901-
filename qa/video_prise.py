@@ -761,22 +761,17 @@ def run_telephone(p, zpath, y4m, theme="light"):
         dismiss(page)
         page.locator("button[aria-label='Activer le micro']").locator("visible=true").first.tap()
         simple = page.evaluate("async () => (await window.__novaAppModule('/utils/simpleMode.ts')).simpleModeStore.get().simple")
-        if simple:
-            # Mode simple (15/10/2026) : plus de pastille flottante ; la caméra est dans ☰ › « Plus d'outils ».
-            page.wait_for_timeout(1500)
-            if page.get_by_test_id("video-take-pill").count(): ko(f"téléphone ({theme}) : pastille caméra affichée en mode simple")
-            else: ok(f"téléphone ({theme}) : mode simple, pas de pastille flottante")
-            page.locator("button[aria-label='Ouvrir le menu']").locator("visible=true").first.tap()
-            page.get_by_test_id("menu-plus-toggle").tap()
-            page.get_by_test_id("menu-video-take").wait_for(timeout=8000)
-            page.screenshot(path=str(OUT / f"{pre}1_tel_pastille.png")); r["captures"].append(str(OUT / f"{pre}1_tel_pastille.png"))
-            ok(f"téléphone ({theme}) : ☰ › Plus d'outils › « 🎥 Filmer la prise »")
-            page.get_by_test_id("menu-video-take").tap()
-        else:
-            page.get_by_test_id("video-take-pill").wait_for(timeout=10000)
-            page.screenshot(path=str(OUT / f"{pre}1_tel_pastille.png")); r["captures"].append(str(OUT / f"{pre}1_tel_pastille.png"))
-            ok(f"téléphone ({theme}) : piste armée → pastille « 🎥 Filmer la prise »")
-            page.get_by_test_id("video-take-pill").locator("button").first.tap()
+        # Téléphone (15/10/2026) : plus de pastille flottante, en mode simple comme en avancé (elle recouvrait
+        # « Envois » de la piste sélectionnée) ; la caméra est dans ☰ (mode simple : « Plus d'outils »).
+        page.wait_for_timeout(1500)
+        if page.get_by_test_id("video-take-pill").count(): ko(f"téléphone ({theme}) : pastille caméra flottante affichée")
+        else: ok(f"téléphone ({theme}) : pas de pastille flottante (mode {'simple' if simple else 'avancé'})")
+        page.locator("button[aria-label='Ouvrir le menu']").locator("visible=true").first.tap()
+        if page.get_by_test_id("menu-plus-toggle").count(): page.get_by_test_id("menu-plus-toggle").tap()
+        page.get_by_test_id("menu-video-take").wait_for(timeout=8000)
+        page.screenshot(path=str(OUT / f"{pre}1_tel_pastille.png")); r["captures"].append(str(OUT / f"{pre}1_tel_pastille.png"))
+        ok(f"téléphone ({theme}) : ☰ › « 🎥 Filmer la prise »")
+        page.get_by_test_id("menu-video-take").tap()
         page.get_by_test_id("video-take-panel").wait_for(timeout=8000)
         tap(page, "video-format-horizontal", True)
         page.screenshot(path=str(OUT / f"{pre}2_tel_panneau.png")); r["captures"].append(str(OUT / f"{pre}2_tel_panneau.png"))
