@@ -111,7 +111,7 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
             </div>
 
             {onTakeHome && (
-                <button type="button" onClick={() => { onClose(); onTakeHome(); }}
+                <button type="button" onClick={() => { onClose(); onTakeHome(); }} data-testid="save-takehome"
                     className="w-full p-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-left transition-all">
                     <span className="block text-[12px] font-black text-emerald-200">🏠 Emporter la session (en ligne)</span>
                     <span className="block text-[11px] text-slate-400 mt-1">Audio compris, dans le compte client Make Music. Lien et QR code pour continuer sur iPad ou ordinateur, retour au studio.</span>

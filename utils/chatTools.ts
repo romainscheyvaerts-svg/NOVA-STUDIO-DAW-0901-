@@ -26,6 +26,8 @@ import { getVocalRole, isVoiceTrack } from './vocalRoles';
 import { findVoicePreset, roleFromTrackName } from './voicePresets';
 import { describeSound } from './describeSound';
 import { macroDef, MACRO_ORDER } from './oneKnob';
+import { guideById } from './guides';
+import { findVocalMixStyle } from './vocalPresets';
 
 // ---------------------------------------------------------------------------
 // Limites (paliers gratuits des modèles)
@@ -85,7 +87,8 @@ export function buildChatCatalog(actions: PaletteAction[]): ChatCommand[] {
   const seen = new Set<string>();
   const out: ChatCommand[] = [];
   for (const a of actions) {
-    if (!a || !a.id || seen.has(a.id) || a.id.startsWith('word:') || a.id === 'nova.palette') continue;
+    // « Comment faire : … » (howto.*) : le chat a son propre outil GUIDE.
+    if (!a || !a.id || seen.has(a.id) || a.id.startsWith('word:') || a.id.startsWith('howto.') || a.id === 'nova.palette') continue;
     seen.add(a.id);
     const idWords = normText(a.id).replace(/[._]/g, ' ');
     out.push({
@@ -315,6 +318,8 @@ export const KNOWN_ACTIONS = new Set([
   'VST_MIX', 'VST_LIST', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE',
   // Commande de la palette Ctrl+K, par son id.
   'RUN_COMMAND',
+  // Parcours « Comment faire ? » (utils/guides) : affiché en étapes dans le chat, rien n'est exécuté.
+  'GUIDE',
 ]);
 
 /** Confirmation obligatoire : ce qui va se passer, à l'infinitif (affiché au-dessus de « Oui, fais-le »). */
@@ -562,6 +567,13 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       p.id = cmd.id;
       return ok(cmd.label, cmd.sensitive ? `Lancer « ${cmd.label} »` : undefined);
     }
+    case 'GUIDE': {
+      const id = String(p.id || p.guide || '').trim();
+      const g = guideById(id);
+      if (!g) return reject(`parcours « ${id || '?'} » inconnu (pas dans la base « Comment faire ? »)`, desc || 'Parcours demandé');
+      p.id = g.id;
+      return ok(`Parcours « ${g.title} »`);
+    }
     case 'SET_VOLUME': {
       if (p.volumeDb !== undefined || p.db !== undefined) {
         const db = clampNum(p.volumeDb ?? p.db, [-60, 3.5], notes, 'Volume (dB)');
@@ -696,7 +708,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       const fmt = typeof p.format === 'string' ? p.format.toUpperCase() : '';
       return ok(`Fenêtre d’export ouverte${fmt ? ` (${fmt} demandé)` : ''}`, `Ouvrir l'export${fmt ? ` en ${fmt}` : ''} (payant selon ton offre, prix affiché dans la fenêtre)`);
     }
-    case 'APPLY_MIX_STYLE': return ok(`Style de mix « ${p.style || '?'} » appliqué`);
+    case 'APPLY_MIX_STYLE': return ok(`Style de mix « ${findVocalMixStyle(String(p.style || ''))?.name || p.style || '?'} » appliqué`);
     case 'DESCRIBE_SOUND': {
       const text = String(p.text || p.description || '').slice(0, 160);
       if (!text.trim()) return reject('phrase manquante (« plus brillante, un peu d’écho »…)');

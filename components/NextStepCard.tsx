@@ -23,6 +23,8 @@ interface NextStepCardProps {
   besideSidebar?: boolean;
   onAction: (a: NextStepAction) => void;
   onClose: () => void;
+  /** Ligne « Comment faire la suite » (components/HowToHost, HowToNextRow). */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -32,8 +34,8 @@ interface NextStepCardProps {
  * sur ordinateur à droite, au-dessus du bouton Nova : Nova ne s'ouvre plus
  * seule, la carte ne couvre plus les en-têtes de pistes).
  */
-const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose, inline }) => {
-  if (!open || actions.length === 0) return null;
+const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose, inline, footer }) => {
+  if (!open || (actions.length === 0 && !footer)) return null;
   const sub = trigger === 'export'
     ? 'Ton fichier est prêt. Pour aller plus loin :'
     : beatTitle ? `Ta voix sur « ${beatTitle} » est posée. Pour aller plus loin :` : 'Ta voix est posée. Pour aller plus loin :';
@@ -74,6 +76,7 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
             </button>
           ))}
         </div>
+        {footer}
       </div>
     </div>
   );

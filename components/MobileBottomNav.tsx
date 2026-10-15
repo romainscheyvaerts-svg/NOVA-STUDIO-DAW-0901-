@@ -47,6 +47,7 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
             onClick={() => { if (tab.id === 'LYRICS') onToggleLyrics?.(); else { if (lyricsOpen) onToggleLyrics?.(); onTabChange(tab.id); } }}
             aria-pressed={tab.id === 'LYRICS' ? !!lyricsOpen : undefined}
             aria-current={tab.id !== 'LYRICS' && activeTab === tab.id ? 'page' : undefined}
+            data-nova-target={`tab-${tab.id}`}
             className={`flex flex-col items-center justify-center flex-1 h-full transition-all relative ${
               isActive(tab.id)
                 ? 'text-nv-accent-ink'

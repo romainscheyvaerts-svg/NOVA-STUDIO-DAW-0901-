@@ -38,6 +38,7 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
       )}
       <button
         onClick={() => { void (bridge.status === 'reconnecting' ? novaBridge.retryNow() : novaBridge.connect()); }}
+        data-testid="vst-connect"
         disabled={bridge.status === 'connecting'}
         className="w-full h-11 rounded-xl bg-cyan-500 text-black text-xs font-black uppercase tracking-wide hover:bg-cyan-400 disabled:opacity-60 transition-colors"
       >

@@ -57,6 +57,9 @@ BATTERIE = [
     # 14/10/2026 : Nova ingé son (API de chat SIMULÉE) : commandes de la palette, confirmation (« Oui, fais-le »),
     # export payant respecté, un Ctrl+Z par message, refus avec la raison ; bureau et téléphone.
     ("chat_inge", []),
+    # 15/10/2026 : « ❓ Comment faire ? » : 25 parcours (utils/guides), « Montre-moi » de bout en bout (enregistrer, mixer, exporter),
+    # Échap, « Et après ? », questions au chat sans l'IA et avec l'IA SIMULÉE (outil GUIDE) ; bureau sombre et téléphone clair.
+    ("guides", []),
     # Lot 12 BandLab (14/10/2026) : « Prêt pour Spotify / Apple / TikTok ? » (feux, « Corriger », paquet .zip Livraison
     # rouvert et vérifié ; instru non achetée → « Acheter la licence », aucun paquet) ; bureau et téléphone, sombre et clair.
     ("distribution", []),

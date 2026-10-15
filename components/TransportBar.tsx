@@ -58,6 +58,8 @@ interface TransportProps {
   onOpenTempo?: () => void;
   /** Palette de commandes (Ctrl+K) : chercher n'importe quelle action par son nom. */
   onOpenPalette?: () => void;
+  /** « ❓ Comment faire ? » : les parcours pas à pas (components/HowToHost). Toujours visible, mode simple compris. */
+  onOpenHowTo?: () => void;
   onTap?: () => void;
   /** Tempo tapé en cours (affiché à côté du bouton TAP). */
   tapBpm?: number | null;
@@ -225,7 +227,7 @@ const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   punch, onUpdatePunch, onToggleQuickPunch,
-  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
+  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onOpenHowTo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onOpenVideoTake, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
@@ -363,6 +365,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 <i className="fas fa-search text-cyan-300" aria-hidden="true"></i>
                 <span className="flex-1">Chercher une action…</span>
                 <kbd className="hidden md:inline rounded border border-white/15 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+K</kbd>
+              </button>
+            )}
+            {/* « Comment faire ? » : en tête du menu, en mode simple comme en avancé. */}
+            {onOpenHowTo && (
+              <button type="button" data-testid="menu-howto" onClick={() => { setIsMobileMenuOpen(false); onOpenHowTo(); }}
+                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
+                <i className="fas fa-circle-question text-cyan-300" aria-hidden="true"></i>
+                <span className="flex-1">Comment faire ? <span className="font-normal text-cyan-200/80">Les démarches pas à pas</span></span>
               </button>
             )}
 
@@ -732,6 +742,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               className="hidden md:flex w-8 h-8 shrink-0 rounded-lg items-center justify-center border border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/10 hover:text-white"
               title="Chercher une action par son nom : exporter, tempo, bus, Strip Silence… (Ctrl+K)" aria-label="Chercher une action (Ctrl+K)">
               <i className="fas fa-search text-[11px]" aria-hidden="true"></i>
+            </button>
+          )}
+          {/* Comment faire ? : jamais replié (pas de barItem), en mode simple comme en avancé. */}
+          {onOpenHowTo && (
+            <button type="button" onClick={onOpenHowTo} data-testid="open-howto"
+              className="hidden md:flex h-8 min-w-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 text-[11px] font-bold text-cyan-200 hover:bg-cyan-500/20"
+              title="Comment faire ? Les démarches pas à pas : enregistrer, comper, autotune, exporter, Spotify…" aria-label="Comment faire ? (parcours pas à pas)">
+              <i className="fas fa-circle-question text-[12px]" aria-hidden="true"></i><span className="hidden min-[1800px]:inline">Comment faire ?</span>
             </button>
           )}
 
