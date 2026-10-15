@@ -628,9 +628,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                 {statusBlock}
 
-                <button type="button" onClick={() => setAdvanced(true)} disabled={isRendering} aria-expanded={false}
+                <button type="button" onClick={() => setAdvanced(true)} disabled={isRendering} aria-expanded={false} data-testid="export-avance"
                   className="w-full pt-1 text-center text-[12px] font-bold text-slate-400 hover:text-white">
-                  ⚙️ Réglages avancés <span className="font-normal">(format, qualité, voix seules, pistes séparées…)</span>
+                  ⚙️ Réglages avancés <span className="font-normal">(format, qualité, voix seules, pistes séparées, Spotify / distribution, Pro Tools…)</span>
                 </button>
               </div>
             )}
@@ -953,6 +953,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             )}
 
 
+            {/* Vue simple : distribution, .mid et séance Pro Tools sont rangés dans « Réglages avancés »
+                (et la palette Ctrl+K) ; la vue avancée les montre comme avant. */}
+            {advanced && <>
             {/* Lot 12 : contrôle avant distribution et paquet « Livraison » (fenêtre séparée) */}
             <button type="button" data-testid="export-distribution" onClick={() => { onClose(); openDistribution(); }} disabled={isRendering}
               className="w-full min-h-12 px-4 py-3 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] text-left flex items-center gap-3">
@@ -976,6 +979,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
             </button>
+            </>}
         </div>
       </div>
     </div>

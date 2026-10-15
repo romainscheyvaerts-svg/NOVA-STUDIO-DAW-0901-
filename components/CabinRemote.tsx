@@ -202,13 +202,20 @@ const CabinRemote: React.FC<CabinRemoteProps> = (p) => {
           <button type="button" data-testid="cabin-play" data-cmd={b.play.cmd} disabled={!b.play.enabled} onPointerDown={down} onClick={press(b.play.cmd)}
             aria-label={b.play.cmd === 'stop' ? 'Arrêter la lecture' : 'Lancer la lecture'} className={`${big} h-20 bg-white/10 text-[18px]`}>{b.play.label}</button>
         </div>
+        <div className="flex gap-3">
         <button type="button" data-testid="cabin-talk" aria-pressed={p.talkOn}
           onPointerDown={(e) => { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ } p.onTalk(true); }}
           onPointerUp={() => p.onTalk(false)} onPointerCancel={() => p.onTalk(false)}
           onLostPointerCapture={() => { if (p.talkOn) p.onTalk(false); }}
-          className={`${big} h-14 w-full text-[16px] ${p.talkOn ? 'animate-pulse bg-red-500' : 'bg-white/10'}`}>
+          className={`${big} h-14 min-w-0 flex-1 text-[16px] ${p.talkOn ? 'animate-pulse bg-red-500' : 'bg-white/10'}`}>
           {p.talkOn ? `${eng} t'entend… (relâche pour couper)` : `🎙️ Parler à ${eng} (maintenir)`}
         </button>
+        {/* 📌 La prise te plaît : elle va dans les prises gardées de l'ingé (pour choisir à la fin). */}
+        <button type="button" data-testid="cabin-keep" disabled={!b.keep.enabled} onPointerDown={down} onClick={press('keep')}
+          aria-label="Garder la dernière prise de côté" className={`${big} h-14 shrink-0 px-4 bg-amber-400 text-[16px] text-black`}>
+          {p.pending === 'keep' ? '…' : '📌 Garder'}
+        </button>
+        </div>
         {awake === 'non' && <p className="text-center text-[12px] text-slate-500">Ton téléphone peut se mettre en veille : touche l'écran de temps en temps, ou règle la mise en veille sur « jamais ».</p>}
       </footer>
     </div>

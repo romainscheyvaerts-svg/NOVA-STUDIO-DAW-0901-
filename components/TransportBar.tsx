@@ -36,6 +36,8 @@ interface TransportProps {
   /** « Voix et flow » (lot 11) : échauffement de la voix et du flow, accordeur. */
   onOpenWarmup?: () => void;
   onOpenTuner?: () => void;
+  /** « 🎥 Filmer la prise » (caméra pendant la prise) : entrée du menu (la pastille flottante n'existe qu'en mode avancé). */
+  onOpenVideoTake?: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -228,7 +230,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onOpenHowTo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onOpenVideoTake, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -350,6 +352,364 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [isMobileMenuOpen]);
 
+  // Menu ☰. Mode avancé : tout, comme avant. Mode simple : l'essentiel (chercher, ouvrir, sauvegarder,
+  // exporter, annuler, mode avancé, thème, aide, compte) puis « Plus d'outils » qui range tout le reste
+  // (Master Nova, masteriser, échauffement, accordeur, caméra, métronome, MIDI, session, collaboration,
+  // réglages audio, tempo…) : rien n'est retiré, un toucher de plus pour le voir.
+  const [menuPlus, setMenuPlus] = useState(false);
+  const renderMenuBody = () => {
+    const mPalette = <>
+            {onOpenPalette && (
+              <button type="button" data-testid="menu-palette" onClick={() => { setIsMobileMenuOpen(false); onOpenPalette(); }}
+                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
+                <i className="fas fa-search text-cyan-300" aria-hidden="true"></i>
+                <span className="flex-1">Chercher une action…</span>
+                <kbd className="hidden md:inline rounded border border-white/15 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+K</kbd>
+              </button>
+            )}
+            {/* « Comment faire ? » : en tête du menu, en mode simple comme en avancé. */}
+            {onOpenHowTo && (
+              <button type="button" data-testid="menu-howto" onClick={() => { setIsMobileMenuOpen(false); onOpenHowTo(); }}
+                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
+                <i className="fas fa-circle-question text-cyan-300" aria-hidden="true"></i>
+                <span className="flex-1">Comment faire ? <span className="font-normal text-cyan-200/80">Les démarches pas à pas</span></span>
+              </button>
+            )}
+
+          </>;
+    const mFichiers = <>
+              <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-amber-400 fas fa-folder-open" aria-hidden="true"></i><span>Ouvrir un projet</span>
+              </button>
+              <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-green-400 fas fa-save" aria-hidden="true"></i><span>Sauvegarder</span>
+              </button>
+              {onImportAudio && !simple && (
+                <button onClick={() => { audioImportInputRef.current?.click(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <i className="w-5 text-center text-slate-300 fas fa-file-import" aria-hidden="true"></i><span>Importer un fichier audio</span>
+                </button>
+              )}
+              <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-purple-400 fas fa-compact-disc" aria-hidden="true"></i><span>Exporter</span>
+              </button>
+          </>;
+    const mOutils = <>
+              {/* Master Nova remonté avec les fichiers (avant : dans la 2e moitié du menu, sous
+                  l'historique, hors de l'écran sur tablette) : on masterise juste avant d'exporter. */}
+              {onOpenMasterNova && (
+                <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} data-testid="menu-master-nova" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 text-amber-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <i className="w-5 text-center text-amber-300 fas fa-crown" aria-hidden="true"></i><span className="flex-1">Master Nova</span><span className="text-[10px] font-normal text-amber-200/70">mastering en un clic</span>
+                </button>
+              )}
+              {onOpenQuickMaster && (
+                <button onClick={() => { onOpenQuickMaster(); setIsMobileMenuOpen(false); }} data-testid="menu-quick-master" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎚️</span><span className="flex-1">Masteriser un morceau</span><span className="text-[10px] font-normal text-slate-400">un fichier, sans projet</span>
+                </button>
+              )}
+              {onOpenWarmup && (
+                <button onClick={() => { onOpenWarmup(); setIsMobileMenuOpen(false); }} data-testid="menu-warmup" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎤</span><span className="flex-1">Échauffement voix et flow</span>
+                </button>
+              )}
+              {onOpenTuner && (
+                <button onClick={() => { onOpenTuner(); setIsMobileMenuOpen(false); }} data-testid="menu-tuner" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎯</span><span className="flex-1">Accordeur</span>
+                </button>
+              )}
+              {/* Caméra pendant la prise (lot 2b) : rangée ici en mode simple (plus de pastille flottante). */}
+              {onOpenVideoTake && (
+                <button onClick={() => { onOpenVideoTake(); setIsMobileMenuOpen(false); }} data-testid="menu-video-take" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🎥</span><span className="flex-1">Filmer la prise</span>
+                </button>
+              )}
+          </>;
+    const mMetronome = <>
+            {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => onToggleMetronome?.()} aria-pressed={isMetronomeEnabled} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
+                <i className="fas fa-drum block mb-1"></i>
+                Métronome
+              </button>
+              <button onClick={() => onToggleLoop?.()} aria-pressed={isLoopActive} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
+                <i className="fas fa-sync-alt block mb-1"></i>
+                Boucle
+              </button>
+            </div>
+          </>;
+    const mCapture = <>
+            {/* R3 : capture après coup et piste guide, à portée de doigt (freestyle au téléphone) */}
+            {((onCapture && captureReady) || (guide && guide.count > 0 && onToggleGuide)) && (
+              <div className="grid grid-cols-2 gap-2">
+                {onCapture && captureReady && <button type="button" onClick={() => { onCapture(); setIsMobileMenuOpen(false); }} data-testid="menu-capture" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[12px] font-bold"><i className="fas fa-history mr-1.5" aria-hidden="true"></i>Capturer la dernière prise</button>}
+                {guide && guide.count > 0 && onToggleGuide && <button type="button" onClick={onToggleGuide} aria-pressed={!guide.muted} data-testid="menu-guide" className={`min-h-12 rounded-xl text-[12px] font-bold border ${guide.muted ? 'border-white/10 text-slate-400' : 'bg-amber-500/15 border-amber-500/40 text-amber-200'}`}><i className="fas fa-headphones mr-1.5" aria-hidden="true"></i>{guide.muted ? 'Rallumer le guide' : 'Couper le guide'}</button>}
+              </div>
+            )}
+
+          </>;
+    const mMidi = <>
+            {/* R16 : MIDI au téléphone (clavier USB sur Android, clavier de l'ordinateur sur tablette) */}
+            <button type="button" data-testid="menu-midi" onClick={() => { openMidiPanel(); setIsMobileMenuOpen(false); }}
+              className="w-full min-h-12 rounded-xl bg-white/[0.04] border border-white/10 text-slate-200 text-[12px] font-bold text-left px-3 flex items-center gap-2">
+              <i className="fas fa-keyboard text-cyan-300" aria-hidden="true"></i>
+              <span>MIDI : enregistrer depuis ton clavier{midiDeviceName ? ` (${midiDeviceName})` : ''}</span>
+            </button>
+
+          </>;
+    const mMode = <>
+            {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
+            <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />
+
+          </>;
+    const mTheme = <>
+            {/* Thème Sombre / Clair / Auto : en haut aussi. Avant, « Changer le thème »
+                était tout en bas du menu (hors de l'écran sur téléphone). */}
+            <ThemeSwitch />
+
+          </>;
+    const mAccords = <>
+            {/* Affichage : piste d'accords (V20). Pas sur téléphone (version simple). */}
+            {!isMobileLayout && <ChordLaneMenuToggle onDone={() => setIsMobileMenuOpen(false)} />}
+
+          </>;
+    const mVues = <>
+            {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
+            {!isMobileLayout && !simple && (
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Vues</div>
+              <div className="grid grid-cols-3 gap-2">
+                <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <i className="fas fa-grip-horizontal block mb-1"></i>
+                  Pistes
+                </button>
+                <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <i className="fas fa-sliders-h block mb-1"></i>
+                  Console
+                </button>
+                <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <i className="fas fa-project-diagram block mb-1"></i>
+                  Auto
+                </button>
+              </div>
+            </div>
+            )}
+
+          </>;
+    const mAffichage = <>
+            {/* VIEW MODE SWITCHER (PC/MOBILE) */}
+            {children && (
+              <div className="space-y-2">
+                <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Mode d'affichage</div>
+                <div className="group vm-labeled [&>div]:ml-0 [&>div]:border-0 [&>div]:pl-0">
+                  {children}
+                </div>
+              </div>
+            )}
+
+          </>;
+    const mHistorique = <>
+            {/* UNDO / REDO */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Historique</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canUndo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
+                  <i className="fas fa-undo mr-2"></i>Annuler
+                </button>
+                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canRedo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
+                  <i className="fas fa-redo mr-2"></i>Refaire
+                </button>
+              </div>
+              {onRevertToSaved && (
+                <button onClick={() => { setIsMobileMenuOpen(false); onRevertToSaved(); }} data-testid="menu-revert-saved"
+                  title="Le projet revient à sa dernière sauvegarde (Pro Tools : Revert to Saved). Ta version actuelle est gardée dans « Versions de la session »."
+                  className="w-full min-h-11 px-4 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-amber-300 fas fa-clock-rotate-left" aria-hidden="true"></i><span>Revenir à la version enregistrée…</span>
+                </button>
+              )}
+            </div>
+
+          </>;
+    const mFichiersPlus = <>
+            {/* FILE ACTIONS */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Fichiers</div>
+              <div className="space-y-2">
+                {user && (
+                  <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
+                    <span>Partager</span>
+                  </button>
+                )}
+                {onSendToStudio && (
+                  <button onClick={() => { onSendToStudio(); setIsMobileMenuOpen(false); }} data-testid="menu-send-studio" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-amber-300 fas fa-house-signal" aria-hidden="true"></i>
+                    <span>Envoyer au studio</span>
+                  </button>
+                )}
+                <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
+                <SessionMenuItems onDone={() => setIsMobileMenuOpen(false)} phone={typeof window !== 'undefined' && window.innerWidth < 640} />
+                {onOpenTakeHome && (
+                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>
+                    <span>{takeHomeLabel || 'Emporter la session'}</span>
+                  </button>
+                )}
+                {onOpenCollab && (
+                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-violet-300 fas fa-user-group"></i>
+                    <span>{collabLabel || 'Collaborer'}</span>
+                  </button>
+                )}
+                {onOpenReviews && (
+                  <button onClick={() => { onOpenReviews(); setIsMobileMenuOpen(false); }} data-testid="menu-reviews" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-amber-300 fas fa-comment-dots"></i>
+                    <span>{reviewsLabel || 'Commentaires et versions'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+          </>;
+    const mReglages = <>
+            {/* SETTINGS */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Paramètres</div>
+              <div className="space-y-2">
+                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-orange-400 fas fa-microchip"></i>
+                  <span>{simple ? 'Réglages audio (micro, latence)' : 'Réglages audio (moteur, latence)'}</span>
+                </button>
+                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isDelayCompEnabled ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
+                  <span>Compensation de latence (PDC)</span>
+                </button>}
+                {onTogglePunch && !simple && <button onClick={() => { onTogglePunch(); setIsMobileMenuOpen(false); }} aria-pressed={isPunchActive} title="REC ne remplace que la zone rouge de la règle (Pro Tools : punch-in / punch-out). Pré-roll, post-roll : bouton ▾ du punch dans la barre."
+                  className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isPunchActive ? 'bg-red-500/15 text-red-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isPunchActive ? 'bg-red-400' : 'bg-slate-500'}`}></span></span>
+                  <span>Punch-in / punch-out</span>
+                </button>}
+                {!simple && midiDeviceName && (
+                  <p role="status" className="px-4 text-[12px] text-slate-400"><i className="fas fa-plug mr-2 text-green-400" aria-hidden="true"></i>Clavier MIDI : {midiDeviceName}</p>
+                )}
+                {!isMobileLayout && (
+                <button onClick={() => { onToggleSidebar?.(); setIsMobileMenuOpen(false); }} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isSidebarOpen ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <i className="w-5 text-center fas fa-columns"></i>
+                  <span>{isSidebarOpen ? 'Masquer' : 'Afficher'} le navigateur</span>
+                </button>
+                )}
+              </div>
+            </div>
+
+          </>;
+    const mTempo = <>
+            {/* BPM CONTROL */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Tempo (BPM)</div>
+              {(onTap || onOpenTempo || onOpenMetronome) && (
+                <div className="grid grid-cols-3 gap-2">
+                  {onTap && <button type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="menu-tap" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 font-black select-none touch-manipulation">TAP{tapBpm ? <span className="ml-1">{tapBpm}</span> : null}</button>}
+                  {onOpenTempo && <button type="button" onClick={() => { onOpenTempo(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Tempo et mesure</button>}
+                  {onOpenMetronome && <button type="button" onClick={() => { onOpenMetronome(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Clic et décompte</button>}
+                </div>
+              )}
+              <div className="bg-white/5 p-4 rounded-lg flex items-center justify-center space-x-3">
+                <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} aria-label="Tempo -1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
+                {isEditingBpm ? (
+                  <input
+                    ref={bpmInputRef}
+                    type="text"
+                    value={tempBpm}
+                    onChange={(e) => setTempBpm(e.target.value.replace(/[^0-9.]/g, ''))}
+                    onBlur={() => { setIsEditingBpm(false); onBpmChange(parseFloat(tempBpm) || 120); }}
+                    onKeyDown={(e) => e.key === 'Enter' && bpmInputRef.current?.blur()}
+                    className="w-20 bg-white/10 border border-cyan-500/50 rounded text-center text-2xl font-black text-white outline-none"
+                  />
+                ) : (
+                  <div onClick={() => { setTempBpm(String(bpm)); setIsEditingBpm(true); }} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
+                )}
+                <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
+              </div>
+            </div>
+
+          </>;
+    const mAide = <>
+            {/* AIDE : signaler un bug ou proposer une idée */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Aide</div>
+              <button onClick={() => { openFeedback(); setIsMobileMenuOpen(false); }} data-nova-action="feedback-menu" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                <i className="w-5 text-center text-slate-400 fas fa-comment-dots"></i>
+                <span>Signaler un bug / proposer une idée</span>
+              </button>
+              <button onClick={() => { openFeedback({ tab: 'historique' }); setIsMobileMenuOpen(false); }} className="w-full px-4 py-2 rounded-lg text-slate-400 text-[12px] font-bold transition-all flex items-center justify-center space-x-2 hover:text-white">
+                <i className="fas fa-inbox"></i>
+                <span>Mes signalements</span>
+              </button>
+            </div>
+
+          </>;
+    const mCompte = <>
+            {/* USER SECTION */}
+            <div className="space-y-2 border-t border-white/10 pt-3">
+              {user && user.id !== 'guest' ? (
+                <div className="flex items-center justify-between bg-white/5 p-4 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-black text-white">
+                      {user.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-black text-white">{user.username}</div>
+                      <div className="text-xs text-slate-500">{user.email}</div>
+                    </div>
+                  </div>
+                  <button onClick={() => { onLogout?.(); setIsMobileMenuOpen(false); }} className="px-4 py-2 rounded-lg bg-red-500/10 text-red-400 font-black">
+                    <i className="fas fa-sign-out-alt mr-2"></i>Déconnexion
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => { onOpenAuth?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-cyan-500/10 text-cyan-300 font-semibold transition-colors flex items-center justify-center gap-3">
+                  <i className="fas fa-user-circle"></i>
+                  <span>Se connecter</span>
+                </button>
+              )}
+            </div>
+          </>;
+    if (!simple) return (<>
+      {mPalette}
+            {/* Fichiers du quotidien en haut (au doigt, avant : tout en bas du menu, hors de l'écran sur
+                tablette et téléphone) : ouvrir, sauvegarder, importer le beat, exporter. */}
+            <div className="grid grid-cols-2 gap-2" data-testid="menu-fichiers">
+        {mFichiers}
+        {mOutils}
+      </div>
+      {mMetronome}{mCapture}{mMidi}{mMode}{mTheme}{mAccords}{mVues}{mAffichage}{mHistorique}{mFichiersPlus}{mReglages}{mTempo}{mAide}{mCompte}
+    </>);
+    return (<>
+      {mPalette}
+            {/* Fichiers du quotidien en haut (au doigt, avant : tout en bas du menu, hors de l'écran sur
+                tablette et téléphone) : ouvrir, sauvegarder, importer le beat, exporter. */}
+            <div className="grid grid-cols-2 gap-2" data-testid="menu-fichiers">
+        {mFichiers}
+      </div>
+      {mHistorique}{mMode}{mTheme}
+      <button type="button" onClick={() => setMenuPlus(o => !o)} aria-expanded={menuPlus} data-testid="menu-plus-toggle"
+        className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3 text-left">
+        <i className={`w-5 text-center text-slate-400 fas ${menuPlus ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true"></i>
+        <span className="flex-1 min-w-0">
+          <span className="block">{menuPlus ? 'Moins d’outils' : 'Plus d’outils'}</span>
+          {!menuPlus && <span className="block text-[11px] font-normal text-slate-400">Master, caméra, échauffement, métronome, MIDI, session, collaboration…</span>}
+        </span>
+      </button>
+      {menuPlus && (
+        <div className="space-y-3" data-testid="menu-plus">
+          <div className="grid grid-cols-2 gap-2">
+            {mOutils}
+          </div>
+          {mMetronome}{mCapture}{mMidi}{mAccords}{mAffichage}{mFichiersPlus}{mReglages}{mTempo}
+        </div>
+      )}
+      {mAide}{mCompte}
+    </>);
+  };
+
   return (
     <div ref={barRef} data-testid="transport-bar" className="nova-verre nova-verre-haut h-16 flex items-center gap-2 px-2 md:px-4 justify-between z-50 relative shrink-0 transition-all border-b" style={{ borderColor: 'var(--border-dim)' }}>
       {noArmedTrackError && (
@@ -410,17 +770,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* FILE ACTIONS GROUP */}
              <div className="flex items-center space-x-1 pr-1">
-                {/* OPEN / LOAD */}
-                <button {...barItem('ouvrir', 16)} onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
+                {/* OPEN / LOAD (mode simple : menu ☰, la session se sauvegarde toute seule) */}
+                {!simple && <button {...barItem('ouvrir', 16)} onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
                     <i className="fas fa-folder-open text-[10px]"></i>
                     <span {...barItem('libelle-ouvrir', 2)} className="text-[10px] font-bold tracking-wide">Ouvrir</span>
-                </button>
+                </button>}
 
                 {/* SAVE */}
-                <button {...barItem('sauver', 17)} onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
+                {!simple && <button {...barItem('sauver', 17)} onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
                     <i className="fas fa-save text-[10px]"></i>
                     <span {...barItem('libelle-sauver', 2)} className="text-[10px] font-bold tracking-wide">Sauver</span>
-                </button>
+                </button>}
 
                 {/* ✨ NOUVEAU IMPORT AUDIO */}
                 {onImportAudio && !simple && (
@@ -460,13 +820,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              )}
              
              {/* MASTER NOVA (V15) */}
-             {onOpenMasterNova && <button {...barItem('master', 24)} onClick={onOpenMasterNova} data-nova-open-master="" title="Master Nova : mastering en un clic pour Spotify, Apple Music, YouTube… (comme le Mastering Assistant de Logic)" aria-label="Master Nova" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400 hover:text-black"><i className="fas fa-crown text-[10px]"></i><span {...barItem('libelle-master', 4)} className="text-[10px] font-bold tracking-wide">Master</span></button>}
+             {onOpenMasterNova && !simple && <button {...barItem('master', 24)} onClick={onOpenMasterNova} data-nova-open-master="" title="Master Nova : mastering en un clic pour Spotify, Apple Music, YouTube… (comme le Mastering Assistant de Logic)" aria-label="Master Nova" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400 hover:text-black"><i className="fas fa-crown text-[10px]"></i><span {...barItem('libelle-master', 4)} className="text-[10px] font-bold tracking-wide">Master</span></button>}
 
              {/* EXPORT BUTTON */}
              <button {...barItem('exporter', 33)} onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span {...barItem('libelle-exporter', 4)} className="text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
-             <button {...barItem('audio', 14)} onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span {...barItem('libelle-audio', 2)} className="text-[10px] font-bold tracking-wide">Audio</span></button>
+             {!simple && <button {...barItem('audio', 14)} onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span {...barItem('libelle-audio', 2)} className="text-[10px] font-bold tracking-wide">Audio</span></button>}
              
              {/* PDC Toggle */}
              {!simple && <button {...barItem('pdc', 20)} onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé.">
@@ -475,43 +835,45 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              </button>}
 
              {/* MIDI (R16) : clavier branché, clavier de l'ordinateur, mode de prise, MIDI Learn */}
-             <button type="button" data-nova-midi-button="" onClick={openMidiPanel} {...barItem(midiDeviceName ? 'midi-clavier' : 'midi-absent', midiDeviceName ? 21 : 3)}
+             {!simple && <button type="button" data-nova-midi-button="" onClick={openMidiPanel} {...barItem(midiDeviceName ? 'midi-clavier' : 'midi-absent', midiDeviceName ? 21 : 3)}
                className={`h-8 px-2 rounded-lg flex items-center justify-center gap-1.5 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : kbOn ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
                title={`MIDI : ${midiDeviceName ? `clavier « ${midiDeviceName} »` : 'aucun clavier MIDI détecté'}${kbOn ? ' · clavier de l’ordinateur actif (Ctrl+Maj+K)' : ''} · prise ${MODE_LABELS[midiPrefs.mode].label.toLowerCase()}. Clic : réglages MIDI, MIDI Learn.`}
                aria-label={midiDeviceName ? `MIDI : clavier ${midiDeviceName}` : 'Réglages MIDI'}>
                  <i className={`fas ${kbOn ? 'fa-keyboard' : 'fa-plug'} text-[10px]`}></i>
                  <span className="text-[9px] font-black uppercase tracking-wider">MIDI</span>
                  {midiDeviceName && <span {...barItem('libelle-midi', 2)} className="text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
-             </button>
+             </button>}
           </div>
       </div>
 
       {/* CENTER: TRANSPORT */}
       <div className="flex flex-1 md:flex-none md:shrink-0 justify-center items-center space-x-2">
-        <div {...barItem('vumetre', 6)} className="hidden md:block"><ProMasterMeter /></div>
+        {/* Mode simple : ni vumètre ni LUFS (la bulle de la prise dit déjà si le niveau est bon). */}
+        {!simple && <div {...barItem('vumetre', 6)} className="hidden md:block"><ProMasterMeter /></div>}
         {/* LUFS du master en direct (R11) : ouvre la fenêtre Loudness. */}
-        <div className="hidden lg:block"><LufsChip /></div>
+        {!simple && <div className="hidden lg:block"><LufsChip /></div>}
         
         <div className="flex items-center space-x-2 md:space-x-3 px-3 md:px-4 py-1.5 rounded-2xl" style={{ backgroundColor: 'var(--bg-item)' }}>
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-md shadow-black/30'}`} style={isPlaying ? { backgroundColor: 'var(--accent-neon)' } : undefined}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
-          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           {/* Lecture ralentie (R13) : 50 à 100 %, hauteur gardée. */}
-          <PracticeSpeed className="hidden md:block" />
-          {dspTracks ? <DspMeter tracks={dspTracks} onFreezeTrack={onDspFreezeTrack} safety={dspSafety || { isRecording, bridgeConnected: false }} compact={isMobileLayout} /> : <OverloadBadge />}
+          {!simple && <PracticeSpeed className="hidden md:block" />}
+          {/* Mode simple : l'indicateur de charge n'apparaît que si l'ordinateur peine (OverloadBadge). */}
+          {dspTracks && !simple ? <DspMeter tracks={dspTracks} onFreezeTrack={onDspFreezeTrack} safety={dspSafety || { isRecording, bridgeConnected: false }} compact={isMobileLayout} /> : <OverloadBadge />}
           {onTogglePunch && !simple && (
             <PunchControls foldPrio={27} punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
               onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
           )}
-          <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Pro Tools : Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
-          {onOpenMetronome && (
+          <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Pro Tools : Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          {onOpenMetronome && !simple && (
             <button {...barItem('metronome-reglages', 30)} type="button" onClick={onOpenMetronome} data-testid="open-metronome" aria-label="Réglages du métronome et du décompte"
               title="Clic et décompte : son, volume, accent, prise seulement, sortie, décompte en mesures ou en temps, pré-roll (Pro Tools : Click/Countoff Options)"
               className="nova-hit-tactile hidden md:flex h-8 w-4 -ml-1.5 rounded-md items-center justify-center text-slate-500 hover:text-white">
               <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
             </button>
           )}
-          {onOpenWarmup && (
+          {onOpenWarmup && !simple && (
             <button {...barItem('voix-flow', 21)} type="button" onClick={onOpenWarmup} data-testid="open-warmup" aria-label="Voix et flow : échauffement et accordeur"
               title="Voix et flow : échauffement de la voix et du flow (80 → 140 BPM), accordeur, progrès"
               className="nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-slate-400 hover:text-white hover:bg-white/10">
@@ -521,7 +883,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           {guide && guide.count > 0 && onToggleGuide && onGuideLevel && (
             <div {...barItem('guide', 29)} className="hidden md:flex"><GuideControl count={guide.count} muted={guide.muted} level={guide.level} onToggle={onToggleGuide} onLevel={onGuideLevel} /></div>
           )}
-          {onCapture && captureReady && !isRecording && (
+          {onCapture && captureReady && !isRecording && !simple && (
             <button {...barItem('capturer', 32)} type="button" onClick={onCapture} data-testid="capture-take"
               title="Capturer la dernière prise (Maj+R) : ce que tu viens de chanter pendant la lecture, sans avoir appuyé sur REC, posé au bon endroit (Logic : Capture as Recording / Flashback Capture)."
               aria-label="Capturer la dernière prise"
@@ -539,9 +901,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       <div className="flex items-center space-x-2 shrink-0 pr-1">
         
         {/* VISUALIZER : le premier replié quand la place manque */}
-        <div {...barItem('visualiseur', 1)} className="hidden md:block opacity-80 hover:opacity-100 transition-opacity">
+        {!simple && <div {...barItem('visualiseur', 1)} className="hidden md:block opacity-80 hover:opacity-100 transition-opacity">
            <MasterVisualizer />
-        </div>
+        </div>}
 
         {/* VIEW SWITCHER & THEME - Hidden on mobile/tablet (already in bottom nav) */}
         {simple ? (
@@ -563,7 +925,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             onClick={() => openFeedback()}
             data-nova-action="feedback"
             {...barItem('feedback', 10)}
-            className="nova-hit-tactile w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
+            className={`nova-hit-tactile w-9 h-9 rounded-full hidden ${simple ? '' : 'sm:flex'} items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10`}
             title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
             aria-label="Signaler un bug ou proposer une idée"
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
@@ -574,9 +936,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {/* THEME TOGGLE */}
         {/* Sous 768 px, thème / compte / mode sont dans le menu : dans la barre ils
             la faisaient déborder (déconnexion et mode hors de l'écran en 390 px). */}
+        {/* Mode simple : thème, tonalité, TAP et BPM sont dans le menu ☰ (le tempo du beat est réglé tout seul). */}
         <button {...barItem('theme', 11)}
             onClick={onToggleTheme}
-            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden md:flex items-center justify-center transition-all"
+            className={`w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden ${simple ? '' : 'md:flex'} items-center justify-center transition-all`}
             title="Changer le thème"
             aria-label={currentTheme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
@@ -585,8 +948,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </button>
 
         {/* TONALITÉ + SIGNATURE */}
-        <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} onClick={onOpenTempo} />
-        {onTap && (
+        {!simple && <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} onClick={onOpenTempo} />}
+        {onTap && !simple && (
           <button {...barItem('tap', 31)} type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="transport-tap"
             title="Tap tempo : tape au rythme de la prod (ou touche T, comme dans Pro Tools). Le tempo s'affiche, « Tempo et mesure » pour l'appliquer."
             aria-label="Tap tempo"
@@ -599,7 +962,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {/* Souris : glisser / double-clic (comme avant). Doigt ou clavier : la fenêtre Tempo (avant : rien
             au doigt, seule la pastille « 4/4 » de 23 × 10 px menait au tempo sur tablette). */}
         <div data-testid="transport-bpm" role="button" tabIndex={0} aria-label={`Tempo : ${bpm} BPM. Toucher pour le régler`}
-          className="hidden sm:flex shrink-0 flex-col items-end justify-center min-h-[40px] rounded-md cursor-ns-resize group"
+          className={`hidden ${simple ? '' : 'sm:flex'} shrink-0 flex-col items-end justify-center min-h-[40px] rounded-md cursor-ns-resize group`}
           onMouseDown={handleBpmMouseDown}
           // Au clic (après le mousedown de compatibilité du doigt) : ouverte au pointerup, la fenêtre
           // se refermait aussitôt sous ce mousedown (son fond ferme au mousedown).
@@ -631,7 +994,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         )}
 
         {/* View Switcher for mobile/tablet injection from parent */}
-        <div {...barItem('affichage', 13)} className="hidden md:block">{children}</div>
+        {!simple && <div {...barItem('affichage', 13)} className="hidden md:block">{children}</div>}
+        {/* Téléphone, mode simple : « Exporter » à un toucher (avant : menu ☰ puis Exporter). */}
+        {simple && (
+          <button type="button" onClick={onExportMix} data-testid="phone-export" title="Exporter ou partager ton morceau" aria-label="Exporter le mix"
+            className="md:hidden w-10 h-10 shrink-0 rounded-xl flex items-center justify-center border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 active:bg-cyan-500 active:text-black">
+            <i className="fas fa-arrow-up-from-bracket text-sm" aria-hidden="true"></i>
+          </button>
+        )}
       </div>
 
       {/* MOBILE DROPDOWN MENU */}
@@ -641,284 +1011,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <div className="fixed inset-x-0 top-16 bottom-0 z-[540] bg-black/50" onClick={() => setIsMobileMenuOpen(false)} aria-hidden="true" />
         <div role="dialog" aria-label="Menu" className="fixed top-16 left-0 right-0 md:right-auto md:w-[400px] z-[550] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b md:border-r border-white/10 shadow-2xl" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)', touchAction: 'pan-y' }}>
           <div className="p-4 space-y-3" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
-            {onOpenPalette && (
-              <button type="button" data-testid="menu-palette" onClick={() => { setIsMobileMenuOpen(false); onOpenPalette(); }}
-                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
-                <i className="fas fa-search text-cyan-300" aria-hidden="true"></i>
-                <span className="flex-1">Chercher une action…</span>
-                <kbd className="hidden md:inline rounded border border-white/15 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+K</kbd>
-              </button>
-            )}
-            {onOpenHowTo && (
-              <button type="button" data-testid="menu-howto" onClick={() => { setIsMobileMenuOpen(false); onOpenHowTo(); }}
-                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
-                <i className="fas fa-circle-question text-cyan-300" aria-hidden="true"></i>
-                <span className="flex-1">Comment faire ? <span className="font-normal text-cyan-200/80">Les démarches pas à pas</span></span>
-              </button>
-            )}
-
-            {/* Fichiers du quotidien en haut (au doigt, avant : tout en bas du menu, hors de l'écran sur
-                tablette et téléphone) : ouvrir, sauvegarder, importer le beat, exporter. */}
-            <div className="grid grid-cols-2 gap-2" data-testid="menu-fichiers">
-              <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                <i className="w-5 text-center text-amber-400 fas fa-folder-open" aria-hidden="true"></i><span>Ouvrir un projet</span>
-              </button>
-              <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                <i className="w-5 text-center text-green-400 fas fa-save" aria-hidden="true"></i><span>Sauvegarder</span>
-              </button>
-              {onImportAudio && !simple && (
-                <button onClick={() => { audioImportInputRef.current?.click(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                  <i className="w-5 text-center text-slate-300 fas fa-file-import" aria-hidden="true"></i><span>Importer un fichier audio</span>
-                </button>
-              )}
-              <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                <i className="w-5 text-center text-purple-400 fas fa-compact-disc" aria-hidden="true"></i><span>Exporter</span>
-              </button>
-              {/* Master Nova remonté avec les fichiers (avant : dans la 2e moitié du menu, sous
-                  l'historique, hors de l'écran sur tablette) : on masterise juste avant d'exporter. */}
-              {onOpenMasterNova && (
-                <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} data-testid="menu-master-nova" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 text-amber-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                  <i className="w-5 text-center text-amber-300 fas fa-crown" aria-hidden="true"></i><span className="flex-1">Master Nova</span><span className="text-[10px] font-normal text-amber-200/70">mastering en un clic</span>
-                </button>
-              )}
-              {onOpenQuickMaster && (
-                <button onClick={() => { onOpenQuickMaster(); setIsMobileMenuOpen(false); }} data-testid="menu-quick-master" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                  <span className="w-5 text-center" aria-hidden="true">🎚️</span><span className="flex-1">Masteriser un morceau</span><span className="text-[10px] font-normal text-slate-400">un fichier, sans projet</span>
-                </button>
-              )}
-              {onOpenWarmup && (
-                <button onClick={() => { onOpenWarmup(); setIsMobileMenuOpen(false); }} data-testid="menu-warmup" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                  <span className="w-5 text-center" aria-hidden="true">🎤</span><span className="flex-1">Échauffement voix et flow</span>
-                </button>
-              )}
-              {onOpenTuner && (
-                <button onClick={() => { onOpenTuner(); setIsMobileMenuOpen(false); }} data-testid="menu-tuner" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
-                  <span className="w-5 text-center" aria-hidden="true">🎯</span><span className="flex-1">Accordeur</span>
-                </button>
-              )}
-            </div>
-
-            {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => onToggleMetronome?.()} aria-pressed={isMetronomeEnabled} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
-                <i className="fas fa-drum block mb-1"></i>
-                Métronome
-              </button>
-              <button onClick={() => onToggleLoop?.()} aria-pressed={isLoopActive} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
-                <i className="fas fa-sync-alt block mb-1"></i>
-                Boucle
-              </button>
-            </div>
-            {/* R3 : capture après coup et piste guide, à portée de doigt (freestyle au téléphone) */}
-            {((onCapture && captureReady) || (guide && guide.count > 0 && onToggleGuide)) && (
-              <div className="grid grid-cols-2 gap-2">
-                {onCapture && captureReady && <button type="button" onClick={() => { onCapture(); setIsMobileMenuOpen(false); }} data-testid="menu-capture" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[12px] font-bold"><i className="fas fa-history mr-1.5" aria-hidden="true"></i>Capturer la dernière prise</button>}
-                {guide && guide.count > 0 && onToggleGuide && <button type="button" onClick={onToggleGuide} aria-pressed={!guide.muted} data-testid="menu-guide" className={`min-h-12 rounded-xl text-[12px] font-bold border ${guide.muted ? 'border-white/10 text-slate-400' : 'bg-amber-500/15 border-amber-500/40 text-amber-200'}`}><i className="fas fa-headphones mr-1.5" aria-hidden="true"></i>{guide.muted ? 'Rallumer le guide' : 'Couper le guide'}</button>}
-              </div>
-            )}
-
-            {/* R16 : MIDI au téléphone (clavier USB sur Android, clavier de l'ordinateur sur tablette) */}
-            <button type="button" data-testid="menu-midi" onClick={() => { openMidiPanel(); setIsMobileMenuOpen(false); }}
-              className="w-full min-h-12 rounded-xl bg-white/[0.04] border border-white/10 text-slate-200 text-[12px] font-bold text-left px-3 flex items-center gap-2">
-              <i className="fas fa-keyboard text-cyan-300" aria-hidden="true"></i>
-              <span>MIDI : enregistrer depuis ton clavier{midiDeviceName ? ` (${midiDeviceName})` : ''}</span>
-            </button>
-
-            {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
-            <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />
-
-            {/* Thème Sombre / Clair / Auto : en haut aussi. Avant, « Changer le thème »
-                était tout en bas du menu (hors de l'écran sur téléphone). */}
-            <ThemeSwitch />
-
-            {/* Affichage : piste d'accords (V20). Pas sur téléphone (version simple). */}
-            {!isMobileLayout && <ChordLaneMenuToggle onDone={() => setIsMobileMenuOpen(false)} />}
-
-            {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
-            {!isMobileLayout && !simple && (
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Vues</div>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <i className="fas fa-grip-horizontal block mb-1"></i>
-                  Pistes
-                </button>
-                <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <i className="fas fa-sliders-h block mb-1"></i>
-                  Console
-                </button>
-                <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <i className="fas fa-project-diagram block mb-1"></i>
-                  Auto
-                </button>
-              </div>
-            </div>
-            )}
-
-            {/* VIEW MODE SWITCHER (PC/MOBILE) */}
-            {children && (
-              <div className="space-y-2">
-                <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Mode d'affichage</div>
-                <div className="group vm-labeled [&>div]:ml-0 [&>div]:border-0 [&>div]:pl-0">
-                  {children}
-                </div>
-              </div>
-            )}
-
-            {/* UNDO / REDO */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Historique</div>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canUndo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
-                  <i className="fas fa-undo mr-2"></i>Annuler
-                </button>
-                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canRedo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
-                  <i className="fas fa-redo mr-2"></i>Refaire
-                </button>
-              </div>
-              {onRevertToSaved && (
-                <button onClick={() => { setIsMobileMenuOpen(false); onRevertToSaved(); }} data-testid="menu-revert-saved"
-                  title="Le projet revient à sa dernière sauvegarde (Pro Tools : Revert to Saved). Ta version actuelle est gardée dans « Versions de la session »."
-                  className="w-full min-h-11 px-4 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-3">
-                  <i className="w-5 text-center text-amber-300 fas fa-clock-rotate-left" aria-hidden="true"></i><span>Revenir à la version enregistrée…</span>
-                </button>
-              )}
-            </div>
-
-            {/* FILE ACTIONS */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Fichiers</div>
-              <div className="space-y-2">
-                {user && (
-                  <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
-                    <span>Partager</span>
-                  </button>
-                )}
-                {onSendToStudio && (
-                  <button onClick={() => { onSendToStudio(); setIsMobileMenuOpen(false); }} data-testid="menu-send-studio" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-amber-300 fas fa-house-signal" aria-hidden="true"></i>
-                    <span>Envoyer au studio</span>
-                  </button>
-                )}
-                <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
-                <SessionMenuItems onDone={() => setIsMobileMenuOpen(false)} phone={typeof window !== 'undefined' && window.innerWidth < 640} />
-                {onOpenTakeHome && (
-                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>
-                    <span>{takeHomeLabel || 'Emporter la session'}</span>
-                  </button>
-                )}
-                {onOpenCollab && (
-                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-violet-300 fas fa-user-group"></i>
-                    <span>{collabLabel || 'Collaborer'}</span>
-                  </button>
-                )}
-                {onOpenReviews && (
-                  <button onClick={() => { onOpenReviews(); setIsMobileMenuOpen(false); }} data-testid="menu-reviews" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-amber-300 fas fa-comment-dots"></i>
-                    <span>{reviewsLabel || 'Commentaires et versions'}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* SETTINGS */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Paramètres</div>
-              <div className="space-y-2">
-                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                  <i className="w-5 text-center text-orange-400 fas fa-microchip"></i>
-                  <span>{simple ? 'Réglages audio (micro, latence)' : 'Réglages audio (moteur, latence)'}</span>
-                </button>
-                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isDelayCompEnabled ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
-                  <span>Compensation de latence (PDC)</span>
-                </button>}
-                {onTogglePunch && !simple && <button onClick={() => { onTogglePunch(); setIsMobileMenuOpen(false); }} aria-pressed={isPunchActive} title="REC ne remplace que la zone rouge de la règle (Pro Tools : punch-in / punch-out). Pré-roll, post-roll : bouton ▾ du punch dans la barre."
-                  className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isPunchActive ? 'bg-red-500/15 text-red-300' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isPunchActive ? 'bg-red-400' : 'bg-slate-500'}`}></span></span>
-                  <span>Punch-in / punch-out</span>
-                </button>}
-                {!simple && midiDeviceName && (
-                  <p role="status" className="px-4 text-[12px] text-slate-400"><i className="fas fa-plug mr-2 text-green-400" aria-hidden="true"></i>Clavier MIDI : {midiDeviceName}</p>
-                )}
-                {!isMobileLayout && (
-                <button onClick={() => { onToggleSidebar?.(); setIsMobileMenuOpen(false); }} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isSidebarOpen ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
-                  <i className="w-5 text-center fas fa-columns"></i>
-                  <span>{isSidebarOpen ? 'Masquer' : 'Afficher'} le navigateur</span>
-                </button>
-                )}
-              </div>
-            </div>
-
-            {/* BPM CONTROL */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Tempo (BPM)</div>
-              {(onTap || onOpenTempo || onOpenMetronome) && (
-                <div className="grid grid-cols-3 gap-2">
-                  {onTap && <button type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="menu-tap" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 font-black select-none touch-manipulation">TAP{tapBpm ? <span className="ml-1">{tapBpm}</span> : null}</button>}
-                  {onOpenTempo && <button type="button" onClick={() => { onOpenTempo(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Tempo et mesure</button>}
-                  {onOpenMetronome && <button type="button" onClick={() => { onOpenMetronome(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Clic et décompte</button>}
-                </div>
-              )}
-              <div className="bg-white/5 p-4 rounded-lg flex items-center justify-center space-x-3">
-                <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} aria-label="Tempo -1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
-                {isEditingBpm ? (
-                  <input
-                    ref={bpmInputRef}
-                    type="text"
-                    value={tempBpm}
-                    onChange={(e) => setTempBpm(e.target.value.replace(/[^0-9.]/g, ''))}
-                    onBlur={() => { setIsEditingBpm(false); onBpmChange(parseFloat(tempBpm) || 120); }}
-                    onKeyDown={(e) => e.key === 'Enter' && bpmInputRef.current?.blur()}
-                    className="w-20 bg-white/10 border border-cyan-500/50 rounded text-center text-2xl font-black text-white outline-none"
-                  />
-                ) : (
-                  <div onClick={() => { setTempBpm(String(bpm)); setIsEditingBpm(true); }} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
-                )}
-                <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
-              </div>
-            </div>
-
-            {/* AIDE : signaler un bug ou proposer une idée */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Aide</div>
-              <button onClick={() => { openFeedback(); setIsMobileMenuOpen(false); }} data-nova-action="feedback-menu" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                <i className="w-5 text-center text-slate-400 fas fa-comment-dots"></i>
-                <span>Signaler un bug / proposer une idée</span>
-              </button>
-              <button onClick={() => { openFeedback({ tab: 'historique' }); setIsMobileMenuOpen(false); }} className="w-full px-4 py-2 rounded-lg text-slate-400 text-[12px] font-bold transition-all flex items-center justify-center space-x-2 hover:text-white">
-                <i className="fas fa-inbox"></i>
-                <span>Mes signalements</span>
-              </button>
-            </div>
-
-            {/* USER SECTION */}
-            <div className="space-y-2 border-t border-white/10 pt-3">
-              {user && user.id !== 'guest' ? (
-                <div className="flex items-center justify-between bg-white/5 p-4 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-black text-white">
-                      {user.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="font-black text-white">{user.username}</div>
-                      <div className="text-xs text-slate-500">{user.email}</div>
-                    </div>
-                  </div>
-                  <button onClick={() => { onLogout?.(); setIsMobileMenuOpen(false); }} className="px-4 py-2 rounded-lg bg-red-500/10 text-red-400 font-black">
-                    <i className="fas fa-sign-out-alt mr-2"></i>Déconnexion
-                  </button>
-                </div>
-              ) : (
-                <button onClick={() => { onOpenAuth?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-cyan-500/10 text-cyan-300 font-semibold transition-colors flex items-center justify-center gap-3">
-                  <i className="fas fa-user-circle"></i>
-                  <span>Se connecter</span>
-                </button>
-              )}
-            </div>
+            {renderMenuBody()}
 
           </div>
         </div>

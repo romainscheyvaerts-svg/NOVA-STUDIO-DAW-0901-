@@ -1,4 +1,4 @@
-import { Clip, TakeMeta, Track } from '../types';
+import { Clip, KeptTake, TakeMeta, Track } from '../types';
 import { fmtTime, takeNumberOf } from './takes';
 import { CompOptions, compSwipe, compUsage, isCompClip, readComp, rebuildTakeClips, takeSpans, TakeSpan } from './comping';
 
@@ -299,6 +299,18 @@ export function punchedPassages(oldClips: Clip[], punchIn: number, punchOut: num
 
 // ---------------------------------------------------------------------- collaboration
 
+/** Repère « prise gardée » reçu (collaboration, fichier) : vérifié, null s'il est inutilisable. */
+export function sanitizeKept(v: unknown): KeptTake | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.at !== 'number' || !Number.isFinite(o.at)) return null;
+  const out: KeptTake = { at: o.at };
+  const s = Math.round(Number(o.stars));
+  if (Number.isFinite(s) && s >= 1) out.stars = Math.min(3, s);
+  if (typeof o.color === 'string' && /^#[0-9a-f]{6}$/i.test(o.color)) out.color = o.color.toLowerCase();
+  return out;
+}
+
 /**
  * Op « content » de la collab : `takeMeta` est un champ ajouté. Une ancienne
  * version l'ignore (elle lit seulement les champs qu'elle connaît et joue le
@@ -314,6 +326,9 @@ export function mergeIncomingTakeMeta(local: TakeMeta[] | undefined, incoming: u
     if (typeof m.loopPass === 'number') x.loopPass = m.loopPass;
     if (typeof m.group === 'string' && m.group) x.group = m.group.slice(0, 64);
     if (m.score && typeof m.score.total === 'number') x.score = m.score;
+    // 📌 Prise gardée de côté (utils/keptTakes) : champ ajouté, ignoré des anciennes versions.
+    const kept = sanitizeKept(m.kept);
+    if (kept) x.kept = kept;
     return x;
   });
 }

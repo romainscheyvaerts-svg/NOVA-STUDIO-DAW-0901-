@@ -73,9 +73,17 @@ BATTERIE = [
     # 14/10/2026 : prise et horloge : entrée trouée, débranchée, coupée, fil principal bloqué, rendu affamé, page masquée :
     # chaque clic reste à sa place dans la prise (0 échantillon), mesure du recalage du flux MediaStream de Chrome.
     ("prise_horloge", []),
+    # 15/10/2026 : 📌 Prises gardées (zone au-dessus de la piste armée) : 4 prises au micro simulé, 3 gardées (bandeau
+    # de fin de prise, Ctrl+Alt+P, clip glissé), écoute, « Mettre sur la piste », comp depuis une ligne, export sans les
+    # prises gardées, sauvegarde + rechargement ; bureau 1600 × 900 et téléphone 390 × 844, sombre et clair.
+    ("prises_gardees", []),
     # Lot 2b BandLab (14/10/2026) : caméra pendant la prise (fausse caméra de Chrome, flash + clic au même instant), vidéo de la
     # performance (mix + image, MP4 mesuré par ffprobe / ffmpeg : écart ≤ 1 image), stockage plein, prise audio identique ; bureau et téléphone.
     ("video_prise", []),
+    # 15/10/2026 (« le DAW le plus simple possible ») : premier parcours d'un nouveau venu chronométré (accueil → instru →
+    # première prise → écoute → fenêtre d'export), bureau et téléphone, sans compte et connecté ; inventaire des écrans,
+    # aucune pastille flottante qui recouvre un bouton.
+    ("premier_parcours", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

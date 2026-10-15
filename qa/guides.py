@@ -302,17 +302,12 @@ def run_vp(p, vp, res):
 
         # 3. Exporter (fenêtre payante), puis Échap.
         start_guide("exporter", "exporter")
-        sel = "[data-testid=transport-menu]" if tel else "[data-bar-item=exporter]"
+        sel = "[data-testid=phone-export]" if tel else "[data-bar-item=exporter]"
         ok, info = ring_on(sel)
-        check(f"3. anneau autour de {'☰' if tel else '« Exporter »'}", ok, info)
+        check(f"3. anneau autour de « Exporter » ({'bouton du haut, téléphone' if tel else 'barre du haut'})", ok, info)
         snap("30_export_anneau")
         if tel:
-            tap(page.get_by_test_id("transport-menu"))
-            page.wait_for_timeout(400)
-            ok, info = ring_on("[data-testid=menu-fichiers]")
-            check("3. menu ouvert : l'anneau passe sur les fichiers (Exporter)", ok, info)
-            snap("31_export_menu")
-            tap(page.get_by_test_id("menu-fichiers").get_by_role("button", name=re.compile("Exporter")))
+            tap(page.get_by_test_id("phone-export"))
         else:
             page.locator("[data-bar-item=exporter]").locator("visible=true").first.click()
         page.locator("[role=dialog][aria-labelledby=export-title]").wait_for(timeout=8000)

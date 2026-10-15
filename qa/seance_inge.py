@@ -216,6 +216,7 @@ def run(page, log, ch, files):
     page.goto(BASE, wait_until="domcontentloaded", timeout=180000)
     nouveau = page.locator("button:visible", has_text=re.compile("Nouveau Projet")).first
     nouveau.wait_for(timeout=90000)
+    if qalib.ouvrir_plus_accueil(page): ch.cur["clics"] += 1; ch.cur["chemin"].append("clic Plus d'options")
     ch.click(page.locator("[data-testid=landing-templates]:visible").first, "Depuis un modèle")
     use = page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-use]")
     use.first.wait_for(timeout=20000)

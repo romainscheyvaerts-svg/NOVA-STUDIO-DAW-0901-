@@ -19,7 +19,7 @@ from pathlib import Path
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3487/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-pro3\restes")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, ouvrir_plus_accueil  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 from scenarios import close_welcome  # noqa: E402
 from nova_pro_lib import app_state, canvas_box, save_json  # noqa: E402
@@ -51,6 +51,7 @@ def studio(b, vp="pc", touch=False):
     install_mocks(page, "romain", SUPERADMIN, {})
     page.goto(BASE, wait_until="domcontentloaded", timeout=180000)
     page.locator("button:visible", has_text=re.compile("Nouveau Projet")).first.wait_for(timeout=90000)
+    ouvrir_plus_accueil(page, touch=touch)
     (page.locator("[data-testid=landing-templates]:visible").first.tap() if touch else page.locator("[data-testid=landing-templates]:visible").first.click())
     use = page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-use]").first
     use.wait_for(timeout=20000)

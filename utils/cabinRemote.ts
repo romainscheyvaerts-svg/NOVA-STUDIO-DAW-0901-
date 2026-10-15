@@ -24,8 +24,9 @@ import type { GuestRights } from './guestRights';
  * Module pur : testable tel quel (tests/cabinRemote.test.ts).
  */
 
-export type CabinCmd = 'rec' | 'play' | 'stop' | 'home';
-export const CABIN_CMDS: CabinCmd[] = ['rec', 'play', 'stop', 'home'];
+/** 'keep' : 📌 garder la dernière prise de côté (zone « Prises gardées » de l'ingé). */
+export type CabinCmd = 'rec' | 'play' | 'stop' | 'home' | 'keep';
+export const CABIN_CMDS: CabinCmd[] = ['rec', 'play', 'stop', 'home', 'keep'];
 export const CABIN_EV = { cmd: 'rc', ack: 'rca', state: 'rcs', ask: 'rcq' } as const;
 
 export interface CabinCommand {
@@ -135,7 +136,7 @@ export class CabinDedup {
   }
 }
 
-export type CabinAction = 'record' | 'play' | 'stop' | 'home' | 'none';
+export type CabinAction = 'record' | 'play' | 'stop' | 'home' | 'keep' | 'none';
 
 export interface CabinHostCtx {
   myKey: string;
@@ -151,6 +152,8 @@ export interface CabinHostCtx {
   countIn: boolean;
   /** Une prise est en train de démarrer (armement, micro) : REC déjà demandé. */
   busy: boolean;
+  /** 📌 La piste armée a une prise à garder (absent : on ne sait pas, on essaie). */
+  hasTake?: boolean;
   dedup: CabinDedup;
   now: number;
 }
@@ -162,7 +165,7 @@ export interface CabinDecision {
   log?: string;
 }
 
-const CMD_LABEL: Record<CabinCmd, string> = { rec: 'REC', play: 'la lecture', stop: 'STOP', home: 'le retour au début' };
+const CMD_LABEL: Record<CabinCmd, string> = { rec: 'REC', play: 'la lecture', stop: 'STOP', home: 'le retour au début', keep: '📌 Garder la prise' };
 
 /**
  * Chez l'ingé : que faire de cette commande ? null = pas pour moi (aucun accusé).
@@ -197,6 +200,10 @@ export function cabinDecide(c: CabinCommand, ctx: CabinHostCtx): CabinDecision |
     case 'home':
       if (ctx.isRecording || ctx.countIn || ctx.busy) return { action: 'none', ack: { ok: false, reason: 'Pendant la prise, on ne revient pas au début : STOP d’abord.' } };
       return { action: 'home', ack: { ok: true, done: 'home' }, log };
+    case 'keep':
+      if (ctx.isRecording || ctx.countIn || ctx.busy) return { action: 'none', ack: { ok: false, reason: 'La prise est en cours : STOP d’abord, puis 📌 Garder.' } };
+      if (ctx.hasTake === false) return { action: 'none', ack: { ok: false, reason: 'Pas encore de prise à garder : enregistre-en une d’abord.' } };
+      return { action: 'keep', ack: { ok: true, done: 'keep' }, log: `📌 ${who} a gardé la dernière prise depuis la cabine` };
   }
   return null;
 }
@@ -232,6 +239,8 @@ export interface CabinButtons {
   rec: { enabled: boolean; label: string; cmd: CabinCmd };
   play: { enabled: boolean; label: string; cmd: CabinCmd };
   home: { enabled: boolean };
+  /** 📌 Garder la dernière prise de côté (hors prise). */
+  keep: { enabled: boolean };
   /** Raison affichée quand les boutons sont coupés (null : tout va bien). */
   blocked: string | null;
 }
@@ -264,6 +273,7 @@ export function cabinButtons(o: {
       ? { enabled: live && o.pending !== 'stop', label: '■ Stop', cmd: 'stop' }
       : { enabled: live && !recording && o.pending !== 'play', label: '▶ Lecture', cmd: 'play' },
     home: { enabled: live && !recording && o.pending !== 'home' },
+    keep: { enabled: live && !recording && o.pending !== 'keep' },
     blocked,
   };
 }
@@ -276,6 +286,7 @@ export function cabinAckText(a: Pick<CabinAck, 'ok' | 'done' | 'reason'>, eng: s
     case 'stop': return `■ Arrêté chez ${eng}`;
     case 'play': return `▶ Lecture chez ${eng}`;
     case 'home': return '⏮ Retour au début';
+    case 'keep': return `📌 Prise gardée de côté chez ${eng}`;
     default: return '✓ Déjà fait';
   }
 }

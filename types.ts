@@ -1125,6 +1125,22 @@ export interface TakeMeta {
   group?: string;
   /** « Meilleure prise » : note de l'IA locale (0-100) et détail. */
   score?: { total: number; pitch: number; timing: number; level: number; noise: number };
+  /**
+   * 📌 Prise gardée de côté (zone « Prises gardées » au-dessus de la piste,
+   * utils/keptTakes) : l'audio reste celui de la prise (clips muets sous le
+   * comp), seul ce repère s'ajoute. Une ancienne version l'ignore.
+   */
+  kept?: KeptTake;
+}
+
+/** Repère d'une prise gardée de côté (TakeMeta.kept). */
+export interface KeptTake {
+  /** Instant où elle a été gardée (ms) : ordre des lignes de la zone. */
+  at: number;
+  /** Note de 1 à 3 étoiles (absente : pas encore notée). */
+  stars?: number;
+  /** Couleur choisie (#rrggbb ; absente : celle de la prise). */
+  color?: string;
 }
 
 /** Instrument VST3 du PC choisi pour une piste MIDI (voir Track.vstInstrument). */
@@ -1477,7 +1493,9 @@ export type AIActionType =
   | 'SET_PUNCH'
   | 'OPEN_TAKE_HOME'
   | 'COMP_TAKE'
-  | 'AUTO_COMP';
+  | 'AUTO_COMP'
+  /** 📌 Garder une prise de côté (payload : trackId?, take?). */
+  | 'KEEP_TAKE_ASIDE';
 
 export interface AIAction {
   action: AIActionType;

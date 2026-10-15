@@ -115,6 +115,8 @@ const cmd = (id: string, description: string): AIAction => ({ action: 'RUN_COMMA
 
 // Sélecteurs partagés.
 const PHONE_MENU = tid('transport-menu');
+/** Mode simple : le menu ☰ range le reste sous « Plus d'outils » (un toucher de plus). */
+const MENU_PLUS = tid('menu-plus-toggle');
 const EXPORT_OPEN: GuideDone = { visible: '[role="dialog"][aria-labelledby="export-title"]' };
 const MIX_AUTO_OPEN: GuideDone = { visible: '[aria-labelledby="vocal-tools-title"]' };
 const OPEN_NOVA = [tid('nova-open'), nt('tab-NOVA')];
@@ -150,11 +152,12 @@ export const GUIDES: Guide[] = [
   },
   {
     id: 'comp-prises', emoji: '🧩', title: 'Faire un comp de plusieurs prises',
-    keywords: 'comp comping prises meilleure prise garder choisir phrase par phrase couloirs take lanes playlist assembler',
+    keywords: 'comp comping prises meilleure prise garder gardees choisir phrase par phrase couloirs take lanes playlist assembler',
     summary: 'Enregistrer plusieurs prises, les écouter, garder le meilleur de chacune.',
     steps: [
       { text: 'Enregistre au moins 2 prises sur la même piste : chaque nouvelle prise coupe l’ancienne, sans l’effacer.', action: 'nova.record', target: nt('rec'),
         skipIf: 'hasTwoTakes', done: { fact: 'hasTwoTakes' } },
+      { text: 'Après chaque bonne prise, « 📌 Garder Prise N » (au-dessus de la piste REC) la met de côté pour choisir à la fin.', target: tid('kept-keep-last'), manual: true },
       { text: 'Ouvre « Mix auto » : le bloc « 🎙️ Mes prises » liste tes prises.', action: 'pal.mixAuto', target: nt('mix-auto'), done: { visible: '[data-mes-prises]' } },
       { text: 'Écoute chaque prise, puis « Garder » la meilleure, ou « Garder sur » une partie (couplet, refrain…).', target: '[data-mes-prises]', manual: true },
       { text: 'Ou laisse l’IA choisir phrase par phrase : « ✨ Meilleure prise », puis « ✓ Garder ce comp » ou « ↩ Revenir ».', target: '[data-mes-prises]', manual: true },
@@ -241,8 +244,8 @@ export const GUIDES: Guide[] = [
     keywords: 'exporter export telecharger fichier wav mp3 bounce stems voix seule demo sortir rendre',
     summary: 'Le mix, les stems ou les voix seules, en WAV ou MP3.',
     steps: [
-      { text: 'Ouvre « Exporter » (en haut, ou Ctrl+Maj+E).', phone: 'Touche ☰, puis « Exporter ».', action: 'nova.export',
-        target: ['[data-bar-item="exporter"]', tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
+      { text: 'Ouvre « Exporter » (en haut, ou Ctrl+Maj+E).', phone: 'Touche « Exporter » (flèche ⬆ en haut), ou ☰ › « Exporter ».', action: 'nova.export',
+        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
       { text: 'Choisis quoi exporter : « Mon morceau complet », ou « ⚙️ Réglages avancés » (mix, stems, voix seules, WAV ou MP3).', target: '[aria-labelledby="export-title"]', manual: true },
       { text: 'Débloque si besoin : instru achetée = export offert ; sinon l’export de ce projet ou Nova Pro (prix affiché).', target: [tid('export-paywall'), '[aria-labelledby="export-title"]'], manual: true },
     ],
@@ -260,8 +263,8 @@ export const GUIDES: Guide[] = [
     keywords: 'master mastering masteriser loudness lufs fort volume spotify plateforme finaliser reference',
     summary: 'Choisir la plateforme, analyser, appliquer sur le master.',
     steps: [
-      { text: 'Ouvre « Master Nova ».', phone: 'Touche ☰, puis « Master Nova ».', action: 'pal.masterNova',
-        target: ['[data-bar-item="master"]', tid('menu-master-nova'), PHONE_MENU], done: { visible: '[role="dialog"][aria-label="Master Nova"]' } },
+      { text: 'Ouvre « Master Nova ».', phone: 'Touche ☰ › « Plus d’outils » › « Master Nova ».', action: 'pal.masterNova',
+        target: ['[data-bar-item="master"]', tid('menu-master-nova'), MENU_PLUS, PHONE_MENU], done: { visible: '[role="dialog"][aria-label="Master Nova"]' } },
       { text: 'Dis où va ton morceau : Spotify, Apple, YouTube, Deezer, TikTok ou club.', target: '[data-nova-cible]' },
       { text: '« Analyser et masteriser », puis écoute.', target: '[data-nova-master-run]' },
       { text: '« Appliquer sur le master ».', target: '[data-nova-master-apply]' },
@@ -280,8 +283,8 @@ export const GUIDES: Guide[] = [
     keywords: 'spotify apple music deezer tiktok youtube distribution distribuer sortir publier plateforme streaming distrokid tunecore isrc pochette',
     summary: 'NOVA vérifie ton morceau et prépare le paquet ; un distributeur le met en ligne.',
     steps: [
-      { text: 'Ouvre « Exporter ».', phone: 'Touche ☰, puis « Exporter ».', action: 'nova.export',
-        target: ['[data-bar-item="exporter"]', tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
+      { text: 'Ouvre « Exporter ».', phone: 'Touche « Exporter » (flèche ⬆ en haut), ou ☰ › « Exporter ».', action: 'nova.export',
+        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
       { text: 'Touche « 🚀 Prêt pour Spotify / Apple / TikTok ? ».', target: tid('export-distribution'), done: { visible: tid('distribution-panel') } },
       { text: 'Choisis la plateforme, puis « Vérifier mon morceau ».', target: tid('dist-analyze') },
       { text: 'Corrige les feux rouges (« Corriger : … ») et remplis titre, artiste, année.', target: tid('dist-form'), manual: true },
@@ -364,8 +367,8 @@ export const GUIDES: Guide[] = [
     keywords: 'inviter collaborer collaboration collab feat featuring inge ingenieur son distance a distance artiste beatmaker lien code session ensemble',
     summary: 'Une séance partagée en direct, ou un ingé qui mixe à distance avec ses plugins.',
     steps: [
-      { text: 'Ouvre « Collaborer » (en bas).', phone: 'Touche ☰, puis « Collaborer à distance ».', action: 'pal.collab',
-        target: ['[aria-label="Collaborer"]', PHONE_MENU], done: { visible: '[aria-labelledby="collab-title"]' } },
+      { text: 'Ouvre « Collaborer » (en bas).', phone: 'Touche ☰ › « Plus d’outils » › « Collaborer à distance ».', action: 'pal.collab',
+        target: ['[aria-label="Collaborer"]', MENU_PLUS, PHONE_MENU], done: { visible: '[aria-labelledby="collab-title"]' } },
       { text: 'Choisis « En direct » ou « Ingé à distance (ses propres VST) », ton rôle et ton nom, puis démarre.', target: tid('collab-role'),
         done: { visible: `${tid('collab-invite-copy')}, ${tid('remote-panel')}` } },
       { text: '« 🔗 Copier le lien » (ou donne le code à 6 caractères, valable 24 h) et envoie-le.', target: [tid('collab-invite-copy'), tid('remote-panel')], manual: true },
@@ -451,8 +454,8 @@ export const GUIDES: Guide[] = [
     keywords: 'micro carte son interface entree latence retard decalage asio casque retour reglages audio branchement focusrite',
     summary: 'Choisir l’entrée micro et la sortie casque ; le retard est compensé tout seul.',
     steps: [
-      { text: 'Ouvre « Réglages audio ».', phone: 'Touche ☰, puis « Réglages audio (micro, latence) ».', action: 'pal.audio',
-        target: ['[aria-label="Réglages audio"]', PHONE_MENU], done: { visible: tid('audio-input-select') } },
+      { text: 'Ouvre « Réglages audio ».', phone: 'Touche ☰ › « Plus d’outils » › « Réglages audio ».', action: 'pal.audio',
+        target: ['[aria-label="Réglages audio"]', MENU_PLUS, PHONE_MENU], done: { visible: tid('audio-input-select') } },
       { text: 'Choisis ton micro dans « Entrée (micro) » et ton casque dans « Sortie ».', target: tid('audio-input-select'), manual: true },
       { text: 'Fais une prise test : NOVA mesure le retard et recale tes prises tout seul.', action: 'nova.record', target: nt('rec'), done: { fact: 'isRecording' } },
     ],
@@ -536,8 +539,8 @@ export const GUIDES: Guide[] = [
     keywords: 'echauffement echauffer voix flow vocalise diction virelangue souffle accordeur accorder justesse tessiture',
     summary: 'Sirènes, gammes, diction, flow en rythme, et l’accordeur.',
     steps: [
-      { text: 'Ouvre « Voix et flow ».', phone: 'Touche ☰, puis « Échauffement voix et flow ».', action: 'pal.warmup',
-        target: [tid('open-warmup'), tid('menu-warmup'), PHONE_MENU], done: { visible: tid('warmup-start-program') } },
+      { text: 'Ouvre « Voix et flow ».', phone: 'Touche ☰ › « Plus d’outils » › « Échauffement voix et flow ».', action: 'pal.warmup',
+        target: [tid('open-warmup'), tid('menu-warmup'), MENU_PLUS, PHONE_MENU], done: { visible: tid('warmup-start-program') } },
       { text: '« Démarrer l’échauffement » et suis le programme (onglet Accordeur pour la justesse).', target: tid('warmup-start-program') },
     ],
     result: 'Voix chaude, diction et flow prêts pour la prise.',
@@ -568,8 +571,8 @@ export const GUIDES: Guide[] = [
     keywords: 'studio make music envoyer reserver reservation inge mixage pro mastering session enregistrer au studio bruxelles',
     summary: 'Le projet, les stems et tes notes partent au studio avec ta demande.',
     steps: [
-      { text: 'Ouvre « Envoyer au studio ».', phone: 'Touche ☰, puis « Envoyer au studio ».', action: 'pal.sendStudio',
-        target: [tid('menu-send-studio'), PHONE_MENU], done: { visible: tid('studio-send') } },
+      { text: 'Ouvre « Envoyer au studio ».', phone: 'Touche ☰ › « Plus d’outils » › « Envoyer au studio ».', action: 'pal.sendStudio',
+        target: [tid('menu-send-studio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('studio-send') } },
       { text: 'Connecte-toi, choisis le service (enregistrement, mixage, mastering) et ajoute tes notes.', target: tid('studio-send'), manual: true },
       { text: '« Envoyer » : le studio répond avec une référence.', target: tid('studio-send-go'), done: { visible: tid('studio-done') } },
     ],

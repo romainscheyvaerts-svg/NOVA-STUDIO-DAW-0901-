@@ -3,6 +3,7 @@ import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
 import { fmtTime, CompZone } from '../utils/takes';
 import { TakeLane } from '../utils/playlists';
 import { takeColor } from './PlaylistLanes';
+import { useSimpleMode } from '../utils/simpleMode';
 
 interface VocalToolsPanelProps {
   open: boolean;
@@ -83,6 +84,11 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
  */
 const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
   const [compZoneIdx, setCompZoneIdx] = React.useState(-1);
+  // Mode simple : les styles de mix d'abord ; batterie, blancs, respirations, fredonner et réglages de
+  // prise sont rangés sous « Plus d'outils voix » (un toucher). Mode avancé : tout ouvert, comme avant.
+  const { simple } = useSimpleMode();
+  const [outilsOuverts, setOutilsOuverts] = React.useState(false);
+  const outils = !simple || outilsOuverts;
   if (!p.open) return null;
   return (
     <div
@@ -248,13 +254,24 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             <button type="button" onClick={p.onShare} className="mt-2 w-full h-10 rounded-xl border border-cyan-400/40 text-cyan-200 text-[12px] font-bold hover:bg-cyan-500/10">
               📲 Partager un extrait (vidéo / audio) ou télécharger la démo
             </button>
-            <button type="button" onClick={p.onOpenDrums} className="mt-2 w-full h-10 rounded-xl border border-orange-400/40 text-orange-200 text-[12px] font-bold hover:bg-orange-500/10">
+            {(outils || p.hasDrums) && <button type="button" onClick={p.onOpenDrums} className="mt-2 w-full h-10 rounded-xl border border-orange-400/40 text-orange-200 text-[12px] font-bold hover:bg-orange-500/10">
               🥁 {p.hasDrums ? 'Modifier la batterie' : 'Ajouter une batterie (pour une mélodie)'}
-            </button>
+            </button>}
           </div>
 
+          {simple && (
+            <button type="button" onClick={() => setOutilsOuverts(o => !o)} aria-expanded={outilsOuverts} data-testid="vocal-tools-more"
+              className="w-full min-h-11 px-4 py-2 rounded-xl border border-white/10 bg-white/[0.03] text-slate-200 font-bold text-[13px] hover:bg-white/[0.07] flex items-center gap-3 text-left">
+              <i className={`fas ${outilsOuverts ? 'fa-chevron-up' : 'fa-chevron-down'} text-[11px] text-slate-400`} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block">{outilsOuverts ? 'Moins d’outils voix' : 'Plus d’outils voix'}</span>
+                {!outilsOuverts && <span className="block text-[11px] font-normal text-slate-400">Batterie, blancs, respirations, fredonner, décompte, casque…</span>}
+              </span>
+            </button>
+          )}
+
           {/* Outils */}
-          <div className="border-t border-white/5 pt-4">
+          {outils && <div className="border-t border-white/5 pt-4">
             <h3 className="text-[12px] font-black uppercase tracking-wider text-slate-400 mb-2">Outils voix</h3>
             <button
               type="button"
@@ -297,7 +314,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                 hint="Seulement avec un casque : sur haut-parleurs, le son siffle (larsen)."
               />
             </div>
-          </div>
+          </div>}
         </div>
       </div>
     </div>

@@ -245,3 +245,17 @@ def menu_pick(page, text, exact=False, tap=False):
     it = page.locator("[role=menu] button", has_text=rx).locator("visible=true").first
     if tap: it.tap()
     else: it.click()
+
+
+def ouvrir_plus_accueil(page, touch=False):
+    """Accueil en mode simple (15/10/2026) : fréquence, « Depuis un modèle », « Masteriser un morceau »,
+    « Ouvrir Audio » et l'appli Windows sont rangés sous « Plus d'options ». L'ouvre s'il est fermé ;
+    renvoie True si un geste a été fait (mode avancé ou déjà ouvert : rien à faire)."""
+    b = page.locator("[data-testid=landing-plus][aria-expanded=false]").locator("visible=true")
+    try:
+        b.first.wait_for(timeout=1500)
+    except Exception:
+        return False
+    (b.first.tap if touch else b.first.click)()
+    page.wait_for_timeout(200)
+    return True
