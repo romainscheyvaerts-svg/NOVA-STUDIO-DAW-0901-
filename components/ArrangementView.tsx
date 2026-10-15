@@ -55,6 +55,8 @@ import { clipLyricLabels } from '../utils/voiceLyrics';
 import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
+import { KeptZoneApi, KeptZoneHeaders, KeptZoneStrip } from './KeptTakesZone';
+import { KEPT_HEAD_H, KeptLane, keptLanes, keptZoneHeight, lastTakeNumber } from '../utils/keptTakes';
 import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 import { canvasTheme } from '../utils/canvasTheme';
@@ -131,6 +133,8 @@ interface ArrangementViewProps {
   editCommands?: EditCommands;
   /** Couloirs de prises (Playlists) et comp à la souris. components/PlaylistLanes */
   takeLanes?: TakeLanesApi;
+  /** 📌 Prises gardées : zone au-dessus de la piste. components/KeptTakesZone */
+  keptZone?: KeptZoneApi;
   /** Piste d'accords (V20, components/ChordLane) : absente quand le couloir est masqué. */
   chordLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
   /** Piste tempo (R2, components/TempoLane) : au-dessus du couloir d'accords, absente quand elle est masquée. */
@@ -212,7 +216,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy, onClipsMoved,
-  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane, arrangeLane, rulerOverlay
+  punch, onUpdatePunch, editCommands, takeLanes, keptZone, chordLane, tempoLane, arrangeLane, rulerOverlay
 }) => {
   // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
   const chordH = chordLane ? chordLane.height : 0;
@@ -640,7 +644,31 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const openLanesOf = (t: Track): TakeLane[] => (takeLanes?.open[t.id] ? lanesByTrack.get(t.id) || [] : []);
   /** Hauteur sous la ligne de clips : lignes d'automation + couloirs de prises. */
   const extraH = (t: Track) => t.automationLanes.filter(l => l.isExpanded).length * 80 + openLanesOf(t).length * TAKE_LANE_H;
-  const lanesKey = visibleTracks.map(t => `${t.id}:${openLanesOf(t).length}`).join(',');
+  // 📌 Prises gardées (components/KeptTakesZone) : zone au-dessus de la piste (en-tête + une ligne par prise gardée).
+  const keptByTrack = useMemo(() => {
+    const m = new Map<string, KeptLane[]>();
+    lanesByTrack.forEach((lanes, id) => { const t = visibleTracks.find(x => x.id === id); if (t) { const k = keptLanes(t, lanes); if (k.length) m.set(id, k); } });
+    return m;
+  }, [lanesByTrack, visibleTracks]);
+  const keptOpenOf = (t: Track): boolean => !keptZone?.closed[t.id];
+  /** Hauteur de la zone des prises gardées au-dessus de la piste (0 : pas de zone). */
+  const aboveH = (t: Track): number => (keptZone ? keptZoneHeight({ kept: keptByTrack.get(t.id)?.length || 0, open: keptOpenOf(t), armedWithTakes: !!t.isTrackArmed && lanesByTrack.has(t.id), laneH: TAKE_LANE_H }) : 0);
+  /** Hauteur totale d'une piste : zone des prises gardées + ligne de clips + automation + couloirs. */
+  const rowH = (t: Track): number => aboveH(t) + zoomV + extraH(t);
+  /** Piste dont la zone des prises gardées contient ce point (y du contenu), sinon null. */
+  const keptZoneAt = (y: number): string | null => {
+    let yy = tracksTop;
+    for (const t of visibleTracks) {
+      const a = aboveH(t);
+      if (a > 0 && y >= yy && y < yy + a) return t.id;
+      yy += rowH(t);
+    }
+    return null;
+  };
+  // Clip de prise glissé au-dessus de la zone de sa piste (lâché : la prise est gardée).
+  const keptDropRef = useRef<string | null>(null);
+  const [keptDropHot, setKeptDropHot] = useState<string | null>(null);
+  const lanesKey = visibleTracks.map(t => `${t.id}:${openLanesOf(t).length}:${aboveH(t)}`).join(',');
   /** Clips de la ligne principale (les prises mutées cachées dessous vont dans les couloirs). */
   const rowClips = (t: Track) => (lanesByTrack.has(t.id) ? mainRowClips(t) : t.clips);
   // Pastille « Prises (N) ▾ » sur le clip entendu (B3 de l'audit) : menu Écouter / Garder.
@@ -650,6 +678,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (clip.duration * zoomH < TAKE_BADGE_W + 60) return null;
     return (clip.start + clip.duration) * zoomH - TAKE_BADGE_W - 20;
   };
+  // Pastille « 📌 Garder » sur le clip d'une prise (à gauche de « Prises (N) ») : met la prise de côté.
+  const PIN_BADGE_W = 70, PIN_BADGE_H = 18;
+  const pinBadgeX = (t: Track, clip: Clip): number | null => {
+    const n = takeNumberOf(clip);
+    if (!keptZone || clip.isMuted || n === null) return null;
+    const right = takeBadgeX(t, clip);
+    const room = right !== null ? TAKE_BADGE_W + PIN_BADGE_W + 90 : PIN_BADGE_W + 70;
+    if (clip.duration * zoomH < room) return null;
+    return (right !== null ? right : (clip.start + clip.duration) * zoomH - 20) - PIN_BADGE_W - 6;
+  };
+  const pinKept = (t: Track, clip: Clip) => { const n = takeNumberOf(clip); return n !== null && !!keptByTrack.get(t.id)?.some(l => l.n === n); };
   const openTakeMenu = (trackId: string, x: number, y: number) => {
     if (!takeLanes) return;
     const lanes = lanesByTrack.get(trackId) || [];
@@ -684,10 +723,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
-  const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
+  const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + rowH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
   // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
-  const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH });
-  revealRef.current = { zoomH, zoomV, tracksTop, visibleTracks, extraH };
+  const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH, aboveH });
+  revealRef.current = { zoomH, zoomV, tracksTop, visibleTracks, extraH, aboveH };
   useEffect(() => {
     const onReveal = (ev: Event) => {
       const d = (ev as CustomEvent<RevealTimeDetail>).detail;
@@ -699,7 +738,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       if (x < el.scrollLeft + cw * 0.05 || x > el.scrollLeft + cw * 0.9) el.scrollLeft = Math.max(0, x - cw * 0.25);
       if (d.trackId) {
         let y = r.tracksTop;
-        for (const t of r.visibleTracks) { if (t.id === d.trackId) break; y += r.zoomV + r.extraH(t); }
+        for (const t of r.visibleTracks) { y += r.aboveH(t); if (t.id === d.trackId) break; y += r.zoomV + r.extraH(t); }
         const ch = el.clientHeight;
         if (y < el.scrollTop + r.tracksTop || y + r.zoomV > el.scrollTop + ch) el.scrollTop = Math.max(0, y - r.tracksTop - ch * 0.25);
       }
@@ -773,6 +812,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       let targetTrackId: string | null = null;
       let currentY = tracksTop;
       for (const t of visibleTracks) {
+          currentY += aboveH(t);
           if (y >= currentY && y < currentY + zoomV) {
               targetTrackId = t.id;
               break;
@@ -1007,6 +1047,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const y = clientY - rect.top + sc.scrollTop;
     let currentY = tracksTop;
     for (const t of visibleTracks) {
+      currentY += aboveH(t);
       if (y >= currentY && y < currentY + zoomV) {
         const clip = clipAtTime(rowClips(t), x / zoomH);
         return clip ? { trackId: t.id, clip } : null;
@@ -1019,7 +1060,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   /** Haut (contenu, px) de la ligne de clips d'une piste, ou null si elle n'est pas affichée. */
   const laneTopOf = (trackId: string): number | null => {
     let yy = tracksTop;
-    for (const t of visibleTracks) { if (t.id === trackId) return yy; yy += zoomV + extraH(t); }
+    for (const t of visibleTracks) { yy += aboveH(t); if (t.id === trackId) return yy; yy += zoomV + extraH(t); }
     return null;
   };
   /** Appui long du doigt (tablette) : le menu du clip, comme le clic droit ; ailleurs, le clic droit de l'endroit. */
@@ -1145,7 +1186,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (e.button === 0 && !e.shiftKey) {
         let laneTop = tracksTop;
         let inLane = false;
-        for (const t of visibleTracks) { if (y >= laneTop && y < laneTop + zoomV) { inLane = true; break; } laneTop += zoomV + extraH(t); }
+        for (const t of visibleTracks) { laneTop += aboveH(t); if (y >= laneTop && y < laneTop + zoomV) { inLane = true; break; } laneTop += zoomV + extraH(t); }
         const ctrlScrub = (e.ctrlKey || e.metaKey) && inLane && (activeTool === 'RANGE' || (activeTool === 'SMART' && y - laneTop < zoomV * 0.5));
         if (activeTool === 'SCRUB' || ctrlScrub) {
             e.preventDefault();
@@ -1158,12 +1199,20 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
     let currentY = tracksTop;
     for (const t of visibleTracks) {
+        currentY += aboveH(t);
         // Crayon sur une ligne d'automation ouverte (sous les clips).
         if (activeTool === 'DRAW' && y >= currentY + zoomV && y < currentY + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80
             && clipGainEdit.onAutomationDown(e, t, x, y - currentY - zoomV, y)) return;
         if (y >= currentY && y < currentY + zoomV) {
             const clip = clipAtTime(rowClips(t), time);
             if (clip) {
+                const px = pinBadgeX(t, clip);
+                if (px !== null && keptZone && x >= px - 2 && x <= px + PIN_BADGE_W + 2 && y - currentY >= 1 && y - currentY <= PIN_BADGE_H + 6) {
+                    e.preventDefault(); e.stopPropagation();
+                    const n = takeNumberOf(clip)!;
+                    if (pinKept(t, clip)) keptZone.onToggle(t.id, true); else keptZone.onKeep(t.id, n);
+                    return;
+                }
                 const bx = takeBadgeX(t, clip);
                 if (bx !== null && x >= bx - 2 && x <= bx + TAKE_BADGE_W + 2 && y - currentY >= 1 && y - currentY <= TAKE_BADGE_H + 6) {
                     e.preventDefault(); e.stopPropagation();
@@ -1308,6 +1357,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       let laneY = tracksTop;
       let laneTrack: Track | undefined;
       for (const t of visibleTracks) {
+        laneY += aboveH(t);
         const trackHeight = zoomV + extraH(t);
         if (y >= laneY && y < laneY + trackHeight) { laneTrack = t; break; }
         laneY += trackHeight;
@@ -1328,6 +1378,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     {
       let laneY = tracksTop;
       for (const t of visibleTracks) {
+        laneY += aboveH(t);
         const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
           if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, useSnap); return; }
@@ -1421,6 +1472,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
             const ids = new Set<string>();
             let laneY = tracksTop;
             for (const t of visibleTracks) {
+                laneY += aboveH(t);
                 const laneHeight = zoomV + extraH(t);
                 // La bande de clips occupe zoomV, les voies d'automation sont ignorees.
                 if (y1 >= laneY && y0 <= laneY + zoomV) {
@@ -1443,8 +1495,15 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const tHover = x / zoomH;
         let laneY = tracksTop;
         for (const t of visibleTracks) {
+            laneY += aboveH(t);
             if (y >= laneY && y < laneY + zoomV) {
                 const c = clipAtTime(rowClips(t), tHover);
+                const pbx = c ? pinBadgeX(t, c) : null;
+                if (c && pbx !== null && x >= pbx - 2 && x <= pbx + PIN_BADGE_W + 2 && y - laneY >= 1 && y - laneY <= PIN_BADGE_H + 6) {
+                    hovered = c.id; cursor = 'pointer';
+                    hint = pinKept(t, c) ? 'Prise déjà gardée : elle est dans la zone au-dessus de la piste' : '📌 Garder cette prise de côté (Ctrl+Alt+P) — ou glisse le clip dans la zone au-dessus';
+                    break;
+                }
                 if (c) {
                     hovered = c.id;
                     const cx0 = c.start * zoomH, cx1 = (c.start + c.duration) * zoomH;
@@ -1488,6 +1547,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let overId = rd.anchorTrack;
         let laneY = tracksTop;
         for (const t of visibleTracks) {
+            laneY += aboveH(t);
             const laneH = zoomV + extraH(t);
             if (y >= laneY && y < laneY + laneH) { overId = t.id; break; }
             laneY += laneH;
@@ -1540,6 +1600,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
             const from = shInit.group.findIndex(g => g.id === shInit.trackId);
             let row = -1, yy = tracksTop; // sous la règle ET le couloir d'accords (avant : 40 fixe, le clip sautait sur la piste du dessous)
             for (let i = 0; i < visibleTracks.length; i++) {
+                yy += aboveH(visibleTracks[i]);
                 const hh = zoomV + extraH(visibleTracks[i]);
                 if (y >= yy && y < yy + hh) { row = i; break; }
                 yy += hh;
@@ -1559,10 +1620,21 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const newStart = moveClipStart({ settings: editModeStore.get(), invert: inv, bpm, origStart: initialClipState.start,
             rawStart: initialClipState.start + dt, syncOffset: syncOffsetOf(initialClipState) });
 
+        // 📌 Glissé dans la zone des prises gardées de SA piste : la prise y va, le clip reste en place.
+        if (keptZone && takeNumberOf(activeClip.clip) !== null && !(multiDragRef.current && multiDragRef.current.length > 1)) {
+            const zone = keptZoneAt(y);
+            if (zone === activeClip.trackId) {
+                if (keptDropRef.current !== zone) { keptDropRef.current = zone; setKeptDropHot(zone); }
+                if (activeClip.clip.start !== initialClipState.start) onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { start: initialClipState.start });
+                return;
+            }
+        }
+        if (keptDropRef.current) { keptDropRef.current = null; setKeptDropHot(null); }
         // Détecter la piste cible en fonction de la position Y
         let targetTrackId = activeClip.trackId;
         let currentY = tracksTop;
         for (const t of visibleTracks) {
+            currentY += aboveH(t);
             const trackHeight = zoomV + extraH(t);
             if (y >= currentY && y < currentY + trackHeight) {
                 targetTrackId = t.id;
@@ -1665,6 +1737,13 @@ const handleMouseMove = (e: React.MouseEvent) => {
 };
 
 const handleMouseUp = () => {
+    // 📌 Clip de prise lâché dans la zone des prises gardées de sa piste.
+    const keptDrop = keptDropRef.current;
+    if (keptDrop) {
+        keptDropRef.current = null; setKeptDropHot(null);
+        const n = activeClip ? takeNumberOf(activeClip.clip) : null;
+        if (dragAction === 'MOVE' && keptZone && n !== null) setTimeout(() => keptZone.onKeep(keptDrop, n), 0);
+    }
     if (dragAction === 'AUDIO_SCRUB') {
         if (audioScrubRef.current?.shuttle) scrubControl.stopShuttle(); else scrubControl.end();
         audioScrubRef.current = null;
@@ -2105,6 +2184,7 @@ const drawTimeline = useCallback(() => {
     // Dessiner les clips SANS translate - coordonnées relatives au viewport
     let currentY = tracksTop; // Position absolue dans le document
     visibleTracks.forEach((track) => {
+        currentY += aboveH(track);
         const trackH = zoomV;
         const totalAutomationHeight = extraH(track);
         
@@ -2122,6 +2202,23 @@ const drawTimeline = useCallback(() => {
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
                         drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH, hoveredClipId === clip.id);
+                        const px = pinBadgeX(track, clip);
+                        if (px !== null && viewportY + 3 >= tracksTop) {
+                            const kept = pinKept(track, clip);
+                            const x0 = px - scrollX, y0 = viewportY + 3;
+                            ctx.save();
+                            ctx.fillStyle = kept ? 'rgba(251,191,36,0.95)' : cv.labelBg;
+                            ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, PIN_BADGE_W, PIN_BADGE_H, 9) : ctx.rect(x0, y0, PIN_BADGE_W, PIN_BADGE_H);
+                            ctx.fill(); ctx.stroke();
+                            ctx.fillStyle = kept ? '#111827' : cv.labelText;
+                            ctx.font = '700 10px Inter, sans-serif';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(kept ? '📌 Gardée' : '📌 Garder', x0 + 8, y0 + PIN_BADGE_H / 2 + 0.5);
+                            ctx.restore();
+                        }
                         const bx = takeBadgeX(track, clip);
                         if (bx !== null && viewportY + 3 >= tracksTop) {
                             const n = lanesByTrack.get(track.id)!.length;
@@ -2296,6 +2393,7 @@ const drawTimeline = useCallback(() => {
         if (sx + sw > 0 && sx < w) {
             let ly = tracksTop;
             visibleTracks.forEach(t => {
+                ly += aboveH(t);
                 const laneH = zoomV + extraH(t);
                 if (timeSel.trackIds.includes(t.id)) {
                     const vy = ly - scrollTop;
@@ -2854,6 +2952,12 @@ useEffect(() => {
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
+                {keptZone && takeLanes && aboveH(track) > 0 && (
+                  <div style={{ height: aboveH(track), overflow: 'hidden' }}>
+                    <KeptZoneHeaders track={track} lanes={keptByTrack.get(track.id) || []} open={keptOpenOf(track)} api={keptZone} takeLanes={takeLanes}
+                      dropHot={keptDropHot === track.id} />
+                  </div>
+                )}
                 <div style={{ height: `${zoomV}px`, position: 'relative' }}>
                   {takeLanes && (lanesByTrack.get(track.id)?.length || 0) > 0 && (() => {
                     const n = lanesByTrack.get(track.id)!.length;
@@ -2897,7 +3001,7 @@ useEffect(() => {
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
-               let topY = tracksTop; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
+               let topY = tracksTop; for (let i = 0; i < idx; i++) topY += rowH(visibleTracks[i]); topY += aboveH(track);
                return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none', ...(isMidiRecordTrack(track) ? { zIndex: 25 } : {}) }}>{isMidiRecordTrack(track)
                  ? <LiveMidiRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />
                  : <LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />}</div>;
@@ -2937,12 +3041,46 @@ useEffect(() => {
               zIndex: 42
           }}
       />
+      {/* 📌 Prises gardées : bandeau (fin de prise, état vide) et lignes au-dessus de chaque piste */}
+      {keptZone && takeLanes && visibleTracks.some(t => aboveH(t) > 0) && (
+        <div data-testid="kept-layer" data-zoom-h={zoomH} data-scroll-left={scrollLeft} data-zoom-v={zoomV} style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
+          {(() => {
+            let y = tracksTop;
+            const width = Math.max(1, viewportSize.width - headerWidth);
+            return visibleTracks.map(t => {
+              const a = aboveH(t);
+              const top = y - scrollTop - tracksTop;
+              y += rowH(t);
+              if (!a || top > viewportSize.height || top + a < 0) return null;
+              const kept = keptByTrack.get(t.id) || [];
+              const last = lastTakeNumber(t);
+              const candidate = last !== null && !kept.some(l => l.n === last)
+                ? { n: last, name: (lanesByTrack.get(t.id) || []).find(l => l.n === last)?.name || `Prise ${last}` } : null;
+              const dragging = dragAction === 'MOVE' && !!activeClip && activeClip.trackId === t.id && takeNumberOf(activeClip.clip) !== null;
+              return (
+                <div key={t.id} style={{ position: 'absolute', left: 0, right: 0, top, height: a, pointerEvents: dragAction ? 'none' : undefined }}>
+                  <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: KEPT_HEAD_H, pointerEvents: 'none' }}>
+                    <KeptZoneStrip track={t} count={kept.length} candidate={candidate} isRecording={!!isRecording} api={keptZone}
+                      dropHot={keptDropHot === t.id} dragging={dragging} />
+                  </div>
+                  {keptOpenOf(t) && kept.length > 0 && (
+                    <TakeLanesOverlay track={t} lanes={kept} api={takeLanes} top={KEPT_HEAD_H} zoomH={zoomH} scrollLeft={scrollLeft} width={width}
+                      colorOf={(l) => (l as KeptLane).color} kept inert={!!dragAction}
+                      onWheel={(e) => { const sc = scrollContainerRef.current; if (sc) { sc.scrollTop += e.deltaY; sc.scrollLeft += e.deltaX; } }} />
+                  )}
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
       {/* Couloirs de prises (au-dessus des calques dessinés, sous la règle) */}
       {takeLanes && visibleTracks.some(t => openLanesOf(t).length > 0) && (
         <div style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
           {(() => {
             let y = tracksTop;
             return visibleTracks.map(t => {
+              y += aboveH(t);
               const lanes = openLanesOf(t);
               const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - tracksTop;
               y += zoomV + extraH(t);
@@ -2964,7 +3102,7 @@ useEffect(() => {
       <div style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 23 }}>
         {(() => {
           let y = 0;
-          const rows = visibleTracks.map(t => { const r = { trackId: t.id, top: y - scrollTop, height: zoomV }; y += zoomV + extraH(t); return r; });
+          const rows = visibleTracks.map(t => { y += aboveH(t); const r = { trackId: t.id, top: y - scrollTop, height: zoomV }; y += zoomV + extraH(t); return r; });
           return <RedoSpotsOverlay rows={rows} zoomH={zoomH} scrollLeft={scrollLeft} width={Math.max(1, viewportSize.width - headerWidth)}
             coarse={typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches} />;
         })()}

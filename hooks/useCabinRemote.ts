@@ -50,6 +50,10 @@ export function useCabinHost(o: {
   play: () => void;
   stop: () => void;
   home: () => void;
+  /** 📌 Garder la dernière prise de côté (absent : commande refusée). */
+  keep?: () => void;
+  /** La piste armée a une prise à garder. */
+  hasTake?: () => boolean;
   notify: (text: string) => void;
 }) {
   const ref = useRef(o);
@@ -109,6 +113,7 @@ export function useCabinHost(o: {
       myKey: w.memberKey, myRole: p.role, myName: p.name, rights: p.rights,
       senderRole: sender?.role ?? null, senderName: sender?.display_name ?? null,
       isRecording: p.isRecording, isPlaying: p.isPlaying, countIn: p.countInBeat !== null, busy: p.busy(),
+      hasTake: p.keep ? (p.hasTake ? p.hasTake() : undefined) : false,
       dedup: dedup.current, now,
     });
     if (!d) return true;
@@ -144,6 +149,7 @@ export function useCabinHost(o: {
     } else if (d.action === 'play') p.play();
     else if (d.action === 'stop') p.stop();
     else if (d.action === 'home') p.home();
+    else if (d.action === 'keep') p.keep?.();
     window.setTimeout(() => publish(), 60);
     return true;
   }, [publish]);

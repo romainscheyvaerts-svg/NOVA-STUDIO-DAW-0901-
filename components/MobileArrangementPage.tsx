@@ -19,6 +19,9 @@ import { editModeStore, useEditMode } from '../utils/editModes';
 import { breathGainAt, breathSig } from '../utils/breathEnvelope';
 import { envelopeGainAt, gainPointsSig } from '../utils/clipGain';
 import { MobileClipGain } from './ClipGainTools';
+import { KeptTakesCard, KeptZoneApi } from './KeptTakesZone';
+import { keptLanes, lastTakeNumber } from '../utils/keptTakes';
+import { listLanes } from '../utils/playlists';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -73,6 +76,11 @@ interface MobileArrangementPageProps {
   /** Prise en cours (G26) : la région rouge grandit pendant l'enregistrement. */
   isRecording?: boolean;
   recStartTime?: number | null;
+  /** 📌 Prises gardées (components/KeptTakesZone) : carte au-dessus des pistes. */
+  keptZone?: KeptZoneApi;
+  takeAudition?: { trackId: string; n: number } | null;
+  onAuditionTake?: (trackId: string, n: number | null) => void;
+  onRenameTake?: (trackId: string, n: number, name: string) => void;
 }
 
 type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE' | 'FADE' | 'DUPLICATE';
@@ -127,7 +135,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   onRequestAddPlugin,
   sendTracks,
   isRecording,
-  recStartTime
+  recStartTime,
+  keptZone,
+  takeAudition = null,
+  onAuditionTake,
+  onRenameTake,
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -171,6 +183,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS)),
     [tracks, simple]
   );
+  // 📌 Prises gardées : la piste armée qui a des prises, sinon celle qui a des prises gardées (la sélectionnée d'abord).
+  const kept = useMemo(() => {
+    if (!keptZone) return null;
+    const withLanes = visibleTracks.map(t => ({ t, lanes: keptLanes(t, listLanes(t)), last: lastTakeNumber(t) }));
+    const pick = withLanes.find(x => x.t.isTrackArmed && x.last !== null)
+      || withLanes.find(x => x.t.id === selectedTrackId && x.lanes.length)
+      || withLanes.find(x => x.lanes.length);
+    if (!pick) return null;
+    const candidate = pick.last !== null && !pick.lanes.some(l => l.n === pick.last)
+      ? { n: pick.last, name: listLanes(pick.t).find(l => l.n === pick.last)?.name || `Prise ${pick.last}` } : null;
+    return { ...pick, candidate };
+  }, [keptZone, visibleTracks, selectedTrackId]);
   useEffect(() => {
     if (simple && activeTool !== 'SELECT' && activeTool !== 'SPLIT' && activeTool !== 'ERASE') setActiveTool('SELECT');
   }, [simple, activeTool]);
@@ -702,6 +726,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <option value={4}>1 Bar</option>
         </select></>}
       </div>
+
+      {keptZone && kept && (
+        <KeptTakesCard track={kept.t} lanes={kept.lanes} open={!keptZone.closed[kept.t.id]} api={keptZone} candidate={kept.candidate}
+          isRecording={!!isRecording} audition={takeAudition} onAudition={(id, n) => onAuditionTake?.(id, n)} onRename={(id, n, name) => onRenameTake?.(id, n, name)} />
+      )}
 
       {/* === MAIN AREA === */}
       <div className="flex-1 flex overflow-hidden">

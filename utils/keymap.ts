@@ -79,6 +79,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.barNext', keys: ['.', ':'], label: 'Mesure suivante (avec Maj : temps suivant)', pt: 'Pavé 2 (Fast Forward)', category: 'Navigation' }),
   nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off (avec une plage sélectionnée : boucler cette plage)', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
   nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Pas dans Pro Tools : Capture as Recording de Logic', category: 'Transport' }),
+  nova({ id: 'nova.keepTake', keys: ['ctrl+alt+p'], label: '📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste, pour choisir à la fin)', pt: 'Pro Tools : noter la prise (Ctrl+Alt+Démarrer+1…5, Démarrer réservée à Windows) · Copy Selection to Main Playlist', category: 'Transport' }),
   nova({ id: 'nova.guide', keys: ['g'], label: 'Couper / rallumer la piste guide', category: 'Transport' }),
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
   nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),
