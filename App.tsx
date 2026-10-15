@@ -332,7 +332,7 @@ import AraEditorDock, { AraCommitChange, openAraDock } from './components/AraEdi
 import { araInsertMetadata, araInsertOf, isAraInsert, withAraInsertFirst } from './utils/araInsert';
 import { araMenuPlugins, useAraInserts } from './hooks/useAraInserts';
 // « ❓ Comment faire ? » : parcours pas à pas (utils/guides), « Montre-moi », « Et après ? ».
-import HowToHost, { HowToNextRow } from './components/HowToHost';
+import HowToHost, { HowToNextRow, HowToNudgeCard } from './components/HowToHost';
 import { howTo } from './utils/howTo';
 import { GUIDES, guidesForPrompt, howToIntro, matchHowToQuestion, projectFacts } from './utils/guides';
 
@@ -10341,7 +10341,7 @@ function Studio() {
       a('Vues', 'pal.collab', 'Collaborer à distance (artiste, ingé, beatmaker)', () => setCollabOpen(true), { keywords: 'collab collaboration distance ingé' }),
       a('Vues', 'pal.reviews', 'Commentaires et versions (retours)', () => reviews.openAt(null), { keywords: 'commentaire retour version valider frame.io note timeline' }),
       a('Aide', 'pal.howto', '❓ Comment faire ? Les démarches pas à pas', () => howTo.open(), { keywords: 'aide comment faire tuto tutoriel guide parcours démarche étapes help how to montre-moi' }),
-      ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}` })),
+      ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
       a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Pro Tools, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
@@ -10636,6 +10636,7 @@ function Studio() {
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
                   toolbarExtras={mobilePills}
+                  tipCard={<HowToNudgeCard inline blocked={!!nextStep || !!state.isRecording || countInBeat !== null} />}
                   topCard={<NextStepCard inline isMobile
                     open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
                     trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}

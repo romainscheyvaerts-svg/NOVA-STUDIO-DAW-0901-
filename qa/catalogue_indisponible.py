@@ -90,7 +90,7 @@ def run():
             shot(pg, f"{vp}_02_studio_sans_catalogue")
             errs = [e for e in log.errors() if "Failed to load resource" not in e["text"]]   # le 402 lui-même, noté par Chrome
             ok(f"{vp} : projet vierge ouvert sans le catalogue, aucun plantage",
-               not errs and ("BPM" in body(pg) or "Morceau" in body(pg)), [e["text"][:160] for e in errs][:5])
+               not errs and any(k in body(pg) for k in ("BPM", "Morceau", "Piste voix")), [e["text"][:160] for e in errs][:5])
             ctx.close()
 
             # 2. Catalogue déjà vu (copie locale), puis restreint : la dernière liste reste affichée.

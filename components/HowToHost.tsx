@@ -48,17 +48,16 @@ const HowToHost: React.FC<HowToHostProps> = ({ getState, getEnv, isMobile, runPa
   useEffect(() => { if (st.panel) track('howto_opened'); }, [st.panel]);
 
   // « Et après ? » quand un style de mix vient d'être posé (mode simple, une fois, jamais pendant une prise).
-  const [nudge, setNudge] = useState<HowToMoment | null>(null);
+  // Au téléphone, la carte est posée dans la page des pistes (App : topCard de MobileArrangementPage),
+  // jamais en flottant : elle recouvrait les boutons de la zone « Prises gardées ».
   const prevStyle = useRef(vocalMixStyle);
   useEffect(() => {
     const was = prevStyle.current;
     prevStyle.current = vocalMixStyle;
     if (!simple || was || !vocalMixStyle || nextStepPrefs.off() || nextStepPrefs.seen('mix')) return;
-    const t = window.setTimeout(() => setNudge('mix'), 2500);
+    const t = window.setTimeout(() => howTo.setNudge('mix'), 2500);
     return () => window.clearTimeout(t);
   }, [vocalMixStyle, simple]);
-  const showNudge = !!nudge && !busy && !isRecording && !st.coach && !st.panel;
-  useEffect(() => { if (showNudge && nudge) nextStepPrefs.markSeen(nudge); }, [showNudge, nudge]);
 
   return (
     <>
@@ -68,22 +67,35 @@ const HowToHost: React.FC<HowToHostProps> = ({ getState, getEnv, isMobile, runPa
         <HowToCoach key={coachGuide.id} guide={coachGuide} getFacts={getFacts} runAction={runPaletteAction} isMobile={isMobile}
           onClose={(finished) => { if (finished) track('howto_finished', { guide: coachGuide.id }); howTo.stopCoach(); }} />
       )}
-      {showNudge && nudge && (
-        <div role="region" aria-label="Et après ?" data-testid="howto-nudge"
-          className={`fixed z-[160] ${isMobile ? 'inset-x-3 bottom-[calc(8.75rem+env(safe-area-inset-bottom))]' : 'right-6 bottom-[13.5rem] w-[340px]'}`}>
-          <div className="rounded-2xl border border-nv-accent/30 bg-nv-surface/95 p-3 text-nv-ink shadow-2xl backdrop-blur-xl">
-            <div className="flex items-start gap-2">
-              <p className="min-w-0 flex-1 text-[14px] font-black leading-tight">Ton mix est posé. Et après ?</p>
-              <button type="button" onClick={() => setNudge(null)} aria-label="Fermer" title="Fermer"
-                className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-nv-muted hover:bg-nv-line/10 hover:text-nv-ink">
-                <i className="fas fa-times" aria-hidden="true"></i>
-              </button>
-            </div>
-            <HowToNextRow moment={nudge} onPicked={() => setNudge(null)} bare />
-          </div>
-        </div>
-      )}
+      {!isMobile && <HowToNudgeCard blocked={!!busy || !!isRecording} />}
     </>
+  );
+};
+
+/**
+ * Carte « Ton mix est posé. Et après ? ». Bureau : en bas à droite (HowToHost) ; téléphone : `inline`,
+ * en tête de la page des pistes. Attend qu'aucune autre carte, prise, liste ou « Montre-moi » ne soit en cours.
+ */
+export const HowToNudgeCard: React.FC<{ inline?: boolean; blocked?: boolean }> = ({ inline, blocked }) => {
+  const st = useHowTo();
+  const nudge = st.nudge;
+  const show = !!nudge && !blocked && !st.coach && !st.panel;
+  useEffect(() => { if (show && nudge) nextStepPrefs.markSeen(nudge); }, [show, nudge]);
+  if (!show || !nudge) return null;
+  return (
+    <div role="region" aria-label="Et après ?" data-testid="howto-nudge"
+      className={inline ? 'shrink-0 mx-2 my-1.5' : 'fixed z-[160] right-6 bottom-[13.5rem] w-[340px]'}>
+      <div className="rounded-2xl border border-nv-accent/30 bg-nv-surface/95 p-3 text-nv-ink shadow-2xl backdrop-blur-xl">
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-[14px] font-black leading-tight">Ton mix est posé. Et après ?</p>
+          <button type="button" onClick={() => howTo.setNudge(null)} aria-label="Fermer" title="Fermer"
+            className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-nv-muted hover:bg-nv-line/10 hover:text-nv-ink">
+            <i className="fas fa-times" aria-hidden="true"></i>
+          </button>
+        </div>
+        <HowToNextRow moment={nudge} onPicked={() => howTo.setNudge(null)} bare />
+      </div>
+    </div>
   );
 };
 

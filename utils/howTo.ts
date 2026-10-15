@@ -10,9 +10,11 @@ export interface HowToState {
   panel: { initialId: string | null } | null;
   /** Parcours en mode « Montre-moi ». */
   coach: string | null;
+  /** Carte « Et après ? » en attente (posée par HowToHost, affichée par HowToNudgeCard). */
+  nudge: HowToMoment | null;
 }
 
-let state: HowToState = { panel: null, coach: null };
+let state: HowToState = { panel: null, coach: null, nudge: null };
 const subs = new Set<() => void>();
 const emit = () => { subs.forEach(f => { try { f(); } catch { /* abonné défaillant */ } }); };
 
@@ -20,11 +22,12 @@ export const howTo = {
   get: (): HowToState => state,
   subscribe(fn: () => void): () => void { subs.add(fn); return () => { subs.delete(fn); }; },
   /** Ouvre la liste (ou directement le détail d'un parcours). */
-  open(initialId: string | null = null) { state = { panel: { initialId }, coach: null }; emit(); },
+  open(initialId: string | null = null) { state = { ...state, panel: { initialId }, coach: null }; emit(); },
   closePanel() { if (!state.panel) return; state = { ...state, panel: null }; emit(); },
   /** Lance « Montre-moi » (ferme la liste). */
-  showMe(id: string) { state = { panel: null, coach: id }; emit(); },
+  showMe(id: string) { state = { ...state, panel: null, coach: id }; emit(); },
   stopCoach() { if (!state.coach) return; state = { ...state, coach: null }; emit(); },
+  setNudge(m: HowToMoment | null) { if (state.nudge === m) return; state = { ...state, nudge: m }; emit(); },
 };
 
 // --- « Et après ? » : déjà vu / ne plus montrer --------------------------------------

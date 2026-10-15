@@ -31,6 +31,15 @@ WHICH = sys.argv[1] if len(sys.argv) > 1 else "tout"
 RES = {"etapes": {}, "mesures": {}}
 
 
+def ouvrir_midi(pg):
+    """Réglages MIDI : bouton de la barre, ou menu ☰ quand la barre l'a replié faute de place."""
+    btn = pg.locator("[data-nova-midi-button]").first
+    if btn.get_attribute("data-bar-folded") is None and btn.is_visible():
+        btn.click(); return
+    pg.locator("[data-testid=transport-menu]").click()
+    pg.locator("[data-testid=menu-midi]").click()
+
+
 def ok(k, v, note=None):
     RES["etapes"][k] = {"ok": bool(v), **({"detail": note} if note is not None else {})}
     print(("OK  " if v else "KO  ") + k, "" if note is None else json.dumps(note, ensure_ascii=False)[:600], flush=True)
@@ -193,7 +202,7 @@ def run_pc(b, theme="dark"):
     pg.wait_for_timeout(800)
     st = pg.evaluate(STATE)
     ok("piste armée sans micro", tid in st["armed"], st["armed"])
-    pg.locator("[data-nova-midi-button]").first.click()
+    ouvrir_midi(pg)
     pg.wait_for_timeout(600)
     pg.locator("[data-nova-midi-mode='merge']").first.click()
     pg.wait_for_timeout(300)
@@ -292,7 +301,7 @@ def run_pc(b, theme="dark"):
     ok("pitch bend entendu à l'export (440 → 493,9 Hz → 440)", abs(measure["hauteur_avant_bend_Hz"] - 440) < 3 and abs(measure["hauteur_bend_Hz"] - 493.88) < 4 and abs(measure["hauteur_apres_retour_Hz"] - 440) < 3, measure)
 
     # 3. Boucle de 4 tours : une prise par tour.
-    pg.locator("[data-nova-midi-button]").first.click()
+    ouvrir_midi(pg)
     pg.wait_for_timeout(500)
     pg.locator("[data-nova-midi-mode='loop']").first.click()
     pg.wait_for_timeout(200)
@@ -324,7 +333,7 @@ def run_pc(b, theme="dark"):
     shot(pg, "r16_pc_04_boucle_4_prises")
 
     # 4. MIDI Learn : le fader CC7 pilote le volume du BEAT.
-    pg.locator("[data-nova-midi-button]").first.click()
+    ouvrir_midi(pg)
     pg.wait_for_timeout(500)
     pg.locator("[data-nova-midi-mode='merge']").first.click()
     beat = pg.evaluate("() => { const ts = window.__novaMidi.rawTracks(); const t = ts.find(x => x.id === 'instrumental') || ts.find(x => x.type === 'AUDIO' && x.clips.length) || ts[0]; return { id: t.id, name: t.name }; }")
@@ -495,7 +504,7 @@ def run_light(b):
     close_roll(pg)
     pg.locator(f"[data-nova-arm-midi='{tid}']").first.click()
     pg.wait_for_timeout(600)
-    pg.locator("[data-nova-midi-button]").first.click(); pg.wait_for_timeout(500)
+    ouvrir_midi(pg); pg.wait_for_timeout(500)
     pg.locator("[data-nova-midi-mode='loop']").first.click(); pg.wait_for_timeout(200)
     pg.locator("[data-nova-midi-mode='merge']").first.click(); pg.wait_for_timeout(200)
     shot(pg, "r16_pc_clair_01_fenetre_midi")

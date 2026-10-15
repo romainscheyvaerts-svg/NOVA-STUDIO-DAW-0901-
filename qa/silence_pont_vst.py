@@ -252,7 +252,7 @@ def main():
             errs = []
             pg.on("pageerror", lambda x: errs.append(str(x)[:300]))
             pg.add_init_script(APP_MODULE_INIT)
-            pg.add_init_script(f"try {{ localStorage.setItem('nova.bridge.url', 'ws://127.0.0.1:{port}'); localStorage.setItem('nova_welcome_seen', '1'); }} catch (e) {{}}")
+            pg.add_init_script(f"try {{ localStorage.setItem('nova.bridge.url', 'ws://127.0.0.1:{port}'); localStorage.setItem('nova_welcome_seen', '1'); localStorage.setItem('nova_simple_mode', '0'); }} catch (e) {{}}")
             pg.goto(URL, wait_until="domcontentloaded", timeout=120000)
             pg.wait_for_timeout(5000)
             pg.get_by_text("Nouveau Projet", exact=True).first.click()

@@ -97,3 +97,16 @@ describe('palette : action principale', () => {
     expect(searchActions('aaf', acts)[0].id).toBe('pal.aafExport');
   });
 });
+
+describe('palette : parcours « Comment faire ? »', () => {
+  it('« clip tiktok » ouvre le clip avant le tuto ; « comment faire clip » trouve le tuto', async () => {
+    const { searchActions } = await import('../utils/commandPalette');
+    const run = () => {};
+    const acts = [
+      { id: 'howto.clip-tiktok', label: '❓ Faire un clip TikTok avec les paroles', group: 'Comment faire', keywords: 'comment faire tuto clip tiktok', run, guide: true },
+      { id: 'pal.lyricClip', label: 'Clip paroles (TikTok, Reels)', group: 'Exporter', keywords: 'clip tiktok video', run },
+    ];
+    expect(searchActions('clip tiktok', acts)[0].id).toBe('pal.lyricClip');
+    expect(searchActions('comment faire clip', acts)[0].id).toBe('howto.clip-tiktok');
+  });
+});

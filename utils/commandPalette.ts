@@ -28,6 +28,8 @@ export interface PaletteAction {
   detail?: string;
   /** Action principale de son domaine : petit bonus de classement (« export » → l'export du mix avant l'export AAF). */
   primary?: boolean;
+  /** Parcours « Comment faire ? » : passe après les vraies actions (« clip tiktok » ouvre le clip, le tuto vient ensuite). */
+  guide?: boolean;
   /** Pourquoi l'action est grisée (« sélectionne un clip d'abord »…) ; absente = disponible. */
   disabledReason?: string;
   run: () => void;
@@ -73,6 +75,7 @@ export function searchActions(query: string, actions: PaletteAction[], recent: s
     if (words.every(w => label.includes(w))) s += 8;
     if (a.disabledReason) s -= 5;
     if (a.primary) s += 2;
+    if (a.guide) s -= 20;
     // Récente : départage seulement (une action récente ne passe pas devant une meilleure réponse).
     s += Math.min(3, rank(a) / 6);
     // Libellés courts d'abord à score égal (« Exporter » avant « Exporter les stems par bus »).

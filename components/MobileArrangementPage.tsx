@@ -56,6 +56,9 @@ interface MobileArrangementPageProps {
   toolbarExtras?: React.ReactNode;
   /** Carte « Et maintenant ? » (après une prise) : dans la page, au-dessus des pistes, jamais par-dessus. */
   topCard?: React.ReactNode;
+  /** Suggestion secondaire (« Et après ? ») : attend que la zone 📌 Prises gardées soit refermée
+   *  (empilées, les deux cartes poussaient « Vider la zone » sous la barre Piste voix / Mix auto). */
+  tipCard?: React.ReactNode;
   tracks: Track[];
   currentTime: number;
   isPlaying: boolean;
@@ -119,6 +122,7 @@ const MAX_ZOOM = 300;
 const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   toolbarExtras,
   topCard,
+  tipCard,
   tracks,
   currentTime,
   isPlaying,
@@ -735,6 +739,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </select></>}
       </div>
 
+      {!(keptZone && kept && !keptZone.closed[kept.t.id]) && tipCard}
       {topCard}
       {keptZone && kept && (
         <KeptTakesCard track={kept.t} lanes={kept.lanes} open={!keptZone.closed[kept.t.id]} api={keptZone} candidate={kept.candidate}
