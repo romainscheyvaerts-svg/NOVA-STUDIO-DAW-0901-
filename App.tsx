@@ -327,6 +327,10 @@ import { practiceSpeedStore } from './utils/practiceSpeed';
 import AraEditorDock, { AraCommitChange, openAraDock } from './components/AraEditorDock';
 import { araInsertMetadata, araInsertOf, isAraInsert, withAraInsertFirst } from './utils/araInsert';
 import { araMenuPlugins, useAraInserts } from './hooks/useAraInserts';
+// « ❓ Comment faire ? » : parcours pas à pas (utils/guides), « Montre-moi », « Et après ? ».
+import HowToHost, { HowToNextRow } from './components/HowToHost';
+import { howTo } from './utils/howTo';
+import { GUIDES, guidesForPrompt, howToIntro, matchHowToQuestion, projectFacts } from './utils/guides';
 
 /** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
 const MOBILE_PAGE_NAMES: Record<string, string> = {
@@ -9544,6 +9548,9 @@ function Studio() {
       pluginDefaults: (type) => { try { return createDefaultPlugins(type as PluginType, 0.5, stateRef.current.bpm).params; } catch { return undefined; } },
     }, opts);
     const results: ChatRunReport['results'] = [];
+    // GUIDE (parcours « Comment faire ? ») : rien à exécuter, le chat affiche les étapes.
+    const guides = plan.run.filter(c => c.action.action === 'GUIDE').map(c => String(c.action.payload?.id || ''));
+    plan.run = plan.run.filter(c => c.action.action !== 'GUIDE');
     if (plan.run.length) {
       beginUndoGroup();
       chatBatchRef.current = true;
@@ -9570,7 +9577,7 @@ function Studio() {
       }
     }
     for (const r of plan.rejected) results.push({ ok: false, text: r.label, reason: r.reason });
-    return { results, pending: plan.ask.map(c => ({ action: c.action, label: c.label, confirm: c.confirm || '' })) };
+    return { results, pending: plan.ask.map(c => ({ action: c.action, label: c.label, confirm: c.confirm || '' })), guides: guides.length ? guides : undefined };
   };
 
   const envoyerAuChatbot = async (messageUtilisateur: string, historique: { role: string; content: string }[] = []) => {
@@ -9578,6 +9585,9 @@ function Studio() {
     // exécutés tout de suite, sans attendre l'IA ni dépendre du réseau.
     const local = parseLocalCommand(messageUtilisateur, stateRef.current);
     if (local) return { text: local.text, actions: local.actions };
+    // « Comment je fais pour… » : le parcours de la base (étapes vérifiées), sans l'IA ni le réseau.
+    const how = matchHowToQuestion(messageUtilisateur);
+    if (how) return { text: howToIntro(how, projectFacts(stateRef.current, { mobile: isMobileRef.current, simple: simpleModeStore.get().simple })), actions: [], guide: how.id };
     try {
         // État du projet résumé et borné (paliers gratuits des modèles) : pistes, effets et
         // réglages principaux, bus, envois, tempo, tonalité, sélection, transport (utils/chatTools).
@@ -9607,7 +9617,9 @@ function Studio() {
             ? 'https://nova-studio-daw-0901.vercel.app'  // URL Vercel
             : '';  // URL relative (même domaine)
         
-        const body = JSON.stringify({ message: messageUtilisateur, state: stateSummary, catalog, history });
+        // Parcours proches de la demande (seulement pour une question « comment faire ») : quelques lignes « id | titre ».
+        const guides = guidesForPrompt(messageUtilisateur);
+        const body = JSON.stringify({ message: messageUtilisateur, state: stateSummary, catalog, history, ...(guides ? { guides } : {}) });
         const ask = (base: string) => fetch(`${base}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -9819,6 +9831,17 @@ function Studio() {
     setNextStep(trigger);
     track('next_step_card_shown', { trigger });
   };
+  // « ❓ Comment faire ? » (components/HowToHost) : lectures stables pour le mode « Montre-moi ».
+  const openHowTo = useLatestCallback(() => howTo.open());
+  const howToGetState = useLatestCallback(() => stateRef.current);
+  const howToGetEnv = useLatestCallback(() => ({ simple: simpleModeStore.get().simple, desktopApp: isNovaDesktop(), loggedIn: !!user && user.id !== 'guest', inCollab: !!collabRef.current }));
+  const howToRunAction = useLatestCallback((id: string): { ok: boolean; why?: string } => {
+    const pa = allPaletteActions(paletteBuilderRef.current()).find(x => x.id === id);
+    if (!pa) return { ok: false, why: 'Action introuvable dans cette version.' };
+    if (pa.disabledReason) return { ok: false, why: pa.disabledReason };
+    try { pa.run(); return { ok: true }; } catch (e: any) { return { ok: false, why: e?.message || String(e) }; }
+  });
+  const howToBeforeShowMe = useLatestCallback(() => { if (isMobile && activeTabRef.current === 'NOVA') setActiveMobileTab('ARRANGEMENT'); });
   const nextStepActions = useMemo((): NextStepAction[] => {
     if (!nextStep) return [];
     const beat = getCatalogBeat(state.tracks);
@@ -10100,6 +10123,8 @@ function Studio() {
     const simpleNow = simpleModeStore.get().simple;
     const a = (group: string, id: string, label: string, run: () => void, extra: Partial<PaletteAction> = {}): PaletteAction => ({ id, label, group, run, ...extra });
     return [
+      // Lecture directe (et non la touche Espace rejouée, bloquée quand une fenêtre est ouverte) : palette, chat, « Montre-moi ».
+      a('Transport', 'nova.play', 'Lecture / pause', () => handleTogglePlay(), { keys: k('nova.play'), pt: 'Barre d’espace' }),
       // Fichier et livraison
       a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer', primary: true }),
       a('Fichier', 'nova.save', 'Sauvegarder le projet', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer save' }),
@@ -10165,6 +10190,8 @@ function Studio() {
       a('Vues', 'pal.memory', 'Repères (Memory Locations)', () => openNovaWindow('memory-locations'), { keys: k('pt.memoryWindow'), pt: 'Memory Locations (Ctrl+5)', keywords: 'marqueur repère marker' }),
       a('Vues', 'pal.collab', 'Collaborer à distance (artiste, ingé, beatmaker)', () => setCollabOpen(true), { keywords: 'collab collaboration distance ingé' }),
       a('Vues', 'pal.reviews', 'Commentaires et versions (retours)', () => reviews.openAt(null), { keywords: 'commentaire retour version valider frame.io note timeline' }),
+      a('Aide', 'pal.howto', '❓ Comment faire ? Les démarches pas à pas', () => howTo.open(), { keywords: 'aide comment faire tuto tutoriel guide parcours démarche étapes help how to montre-moi' }),
+      ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}` })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
       a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Pro Tools, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
@@ -10202,6 +10229,7 @@ function Studio() {
           onOpenMetronome={() => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }}
           onOpenTempo={() => openTempoDialog(null)}
           onOpenPalette={() => setPaletteOpen(true)}
+          onOpenHowTo={openHowTo}
           onTap={handleTap} tapBpm={tapBpm}
           guide={(() => { const g = state.tracks.filter(t => t.isGuide); return g.length ? { count: g.length, muted: g.every(t => t.guideMuted), level: g[0].guideLevel ?? GUIDE_DEFAULT_LEVEL } : undefined; })()}
           onToggleGuide={toggleGuides} onGuideLevel={setGuideLevel}
@@ -10625,7 +10653,11 @@ function Studio() {
         besideSidebar={isSidebarOpen}
         onAction={handleNextStep}
         onClose={() => setNextStep(null)}
+        footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null}
       />
+      <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
+        onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
+        busy={!!nextStep || countInBeat !== null} simple={simpleMode} />
 
       {/* R23 : changer de beat (fenêtre + carte Avant / Après), passage refait (avant / après) */}
       {r23.swap && <BeatSwapDialog api={r23} compact={isMobile} onChooseFile={(f) => { void r23.chooseSource({ kind: 'file', url: URL.createObjectURL(f), name: f.name, file: f }); }} />}

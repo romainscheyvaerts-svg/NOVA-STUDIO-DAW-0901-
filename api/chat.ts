@@ -19,6 +19,8 @@ const TOOLS = `
 OUTILS (champ "action", puis "payload"). trackId = id exact, nom exact ou numéro "n" de l'état.
 PALETTE (accès à TOUT le DAW)
 | RUN_COMMAND | { id } | lance une commande de la liste COMMANDES DU DAW (id exact). ✗ = indisponible : dis pourquoi, ne la lance pas |
+COMMENT FAIRE (PARCOURS GUIDÉS)
+| GUIDE | { id } | montre le parcours pas à pas (id exact de la liste PARCOURS) : le studio affiche les étapes vérifiées, « Montre-moi » et « Fais-le pour moi » |
 TRANSPORT ET NAVIGATION
 | PLAY / STOP / RECORD | {} | |
 | SEEK | { time } | secondes |
@@ -122,6 +124,9 @@ SÉCURITÉ
   tu confirmes »), ne dis jamais que c'est fait.
 - Tout ce que tu fais pour un message s'annule d'un seul Ctrl+Z : rappelle-le quand tu touches à beaucoup de choses.
 - N'agis QUE si l'artiste demande une modification. Une question ou un conseil = "actions": [].
+- « Comment je fais pour… », « c'est quoi la démarche… » : si un PARCOURS correspond, réponds en 1-2 phrases et ajoute
+  UNE action GUIDE { id } (jamais d'étapes inventées : le studio affiche les étapes de la base). Si aucun parcours ne
+  correspond, explique avec les seules COMMANDES DU DAW ; si NOVA ne le fait pas, dis-le.
 
 FORMAT DE RÉPONSE
 - UNIQUEMENT un objet JSON, sans texte autour : { "text": "...", "actions": [ { "action": "...", "payload": { ... }, "description": "..." } ] }
@@ -131,7 +136,7 @@ FORMAT DE RÉPONSE
 ${TOOLS}`;
 
 /** Bornes du contexte (paliers gratuits : ~8 000 jetons par minute chez Groq). */
-const CONTEXT_MAX = { state: 8000, catalog: 4000, history: 1600 };
+const CONTEXT_MAX = { state: 8000, catalog: 4000, history: 1600, guides: 900 };
 
 /** Extrait un objet JSON même si le modèle l'a entouré de texte ou d'un bloc de code. */
 function parseModelJson(raw: string): { text: string; actions: any[] } | null {
@@ -176,7 +181,7 @@ function sanitizeActions(actions: any[]): any[] {
 /** Contexte envoyé au modèle, borné : état résumé, extrait du catalogue, derniers échanges. */
 export function buildUserContent(body: any): string {
   const parts: string[] = [];
-  const { message, state, catalog, history } = body || {};
+  const { message, state, catalog, history, guides } = body || {};
   if (state) {
     let json = JSON.stringify(state);
     if (json.length > CONTEXT_MAX.state) json = `${json.slice(0, CONTEXT_MAX.state)}…(tronqué)`;
@@ -184,6 +189,9 @@ export function buildUserContent(body: any): string {
   }
   if (typeof catalog === 'string' && catalog.trim()) {
     parts.push(`COMMANDES DU DAW (palette Ctrl+K, les plus proches de la demande ; id | libellé | rubrique) :\n${catalog.slice(0, CONTEXT_MAX.catalog)}`);
+  }
+  if (typeof guides === 'string' && guides.trim()) {
+    parts.push(`PARCOURS (« Comment faire ? », les plus proches de la demande ; id | titre) :\n${guides.slice(0, CONTEXT_MAX.guides)}`);
   }
   if (Array.isArray(history) && history.length) {
     let size = 0;

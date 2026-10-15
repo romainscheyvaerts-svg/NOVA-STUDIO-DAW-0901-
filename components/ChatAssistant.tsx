@@ -5,6 +5,9 @@ import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
 import { getVocalRole } from '../utils/vocalRoles';
 import type { NovaFeedMessage } from '../App';
 import { novaAttention, tipPillLabel } from '../utils/novaAttention';
+import { doItCalls, guideById, guideCard, projectFacts } from '../utils/guides';
+import { howTo } from '../utils/howTo';
+import { simpleModeStore } from '../utils/simpleMode';
 
 /** Bouton de réponse rapide affiché sous un message de Nova. */
 interface ChatChoice { label: string; action?: AIAction; actions?: AIAction[]; message?: string }
@@ -14,6 +17,8 @@ export interface ChatRunReport {
   results: { ok: boolean; text: string; reason?: string; notes?: string[] }[];
   /** Actions sensibles en attente de « Oui, fais-le » (supprimer, exporter, publier…). */
   pending: { action: AIAction; label: string; confirm: string }[];
+  /** Parcours « Comment faire ? » demandés par le modèle (outil GUIDE) : affichés en carte d'étapes. */
+  guides?: string[];
 }
 
 type ChatMessage = AIChatMessage & {
@@ -22,6 +27,8 @@ type ChatMessage = AIChatMessage & {
   pending?: ChatRunReport['pending'];
   /** Réponse de l'artiste à la confirmation. */
   pendingState?: 'asked' | 'running' | 'done' | 'refused';
+  /** Parcours (utils/guides) affiché en étapes numérotées, avec « Montre-moi » / « Fais-le pour moi ». */
+  guide?: string;
 };
 
 /** Les styles de mix, proposés en boutons : fonctionne même sans IA. */
@@ -235,6 +242,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           pending: report.pending.length ? report.pending : undefined,
           pendingState: report.pending.length ? 'asked' : undefined,
           choices: response?.offerStyles ? MIX_STYLE_CHOICES : undefined,
+          guide: (typeof response?.guide === 'string' && guideById(response.guide) ? response.guide : undefined) || report.guides?.find(g => guideById(g)),
         }]);
         return;
       }
@@ -260,6 +268,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         executedAction: (responseActions || []).map((a: any) => a.description).filter(Boolean).join(', ') || undefined,
         // Serveur injoignable : les styles de mix en boutons (ils marchent hors ligne).
         choices: response?.offerStyles ? MIX_STYLE_CHOICES : undefined,
+        guide: typeof response?.guide === 'string' && guideById(response.guide) ? response.guide : undefined,
       };
       
       setMessages(prev => [...prev, assistantMsg]);
@@ -359,14 +368,68 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   }, [etape.numero]);
 
   // Raccourcis : les trois premiers agissent directement (même sans IA).
-  const QUICK_ACTIONS: { label: string; icon: string; run: () => void }[] = [
-    { label: 'Écoute mon mix', icon: 'fa-headphones', run: () => { setMixEcoute(true); void runChoice({ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }); } },
-    { label: 'Mix auto', icon: 'fa-sliders', run: pushMixGuide },
-    { label: 'Mes paroles', icon: 'fa-align-left', run: () => void runChoice({ label: '📝 Mes paroles', action: { action: 'OPEN_LYRICS', payload: {} } }) },
-    { label: 'Faire les backs', icon: 'fa-layer-group', run: () => void runChoice({ label: '🎤 Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } }) },
-    { label: 'Retirer les blancs', icon: 'fa-broom', run: () => void runChoice({ label: '🧹 Retirer les blancs', action: { action: 'CLEAN_SILENCE', payload: {}, description: 'Retirer les blancs' } }) },
-    { label: 'Conseille-moi', icon: 'fa-lightbulb', run: () => void handleSend("Écoute l'état de mon projet et conseille-moi le style de mix qui irait le mieux à ma voix sur ce beat.") },
+  const QUICK_ACTIONS: { label: string; icon: string; run: () => void; id: string }[] = [
+    { id: 'howto', label: 'Comment faire ?', icon: 'fa-circle-question', run: () => howTo.open() },
+    { id: 'listen', label: 'Écoute mon mix', icon: 'fa-headphones', run: () => { setMixEcoute(true); void runChoice({ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }); } },
+    { id: 'mix', label: 'Mix auto', icon: 'fa-sliders', run: pushMixGuide },
+    { id: 'lyrics', label: 'Mes paroles', icon: 'fa-align-left', run: () => void runChoice({ label: '📝 Mes paroles', action: { action: 'OPEN_LYRICS', payload: {} } }) },
+    { id: 'backs', label: 'Faire les backs', icon: 'fa-layer-group', run: () => void runChoice({ label: '🎤 Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } }) },
+    { id: 'blancs', label: 'Retirer les blancs', icon: 'fa-broom', run: () => void runChoice({ label: '🧹 Retirer les blancs', action: { action: 'CLEAN_SILENCE', payload: {}, description: 'Retirer les blancs' } }) },
+    { id: 'conseil', label: 'Conseille-moi', icon: 'fa-lightbulb', run: () => void handleSend("Écoute l'état de mon projet et conseille-moi le style de mix qui irait le mieux à ma voix sur ce beat.") },
   ];
+
+  /** « Fais-le pour moi » d'un parcours : les mêmes appels d'outils validés que l'IA (sensibles → « Oui, fais-le »). */
+  const doGuide = async (id: string) => {
+    const g = guideById(id);
+    if (!g || !onRunActions) return;
+    const calls = doItCalls(g, projectFacts(projectState, { mobile: !!isMobile, simple: simpleModeStore.get().simple }));
+    if (!calls.length) return;
+    setMessages(prev => [...prev, { id: `do-${Date.now()}`, role: 'user', content: `⚡ Fais-le pour moi : ${g.title}`, timestamp: Date.now() }]);
+    setIsSyncing(true);
+    let report: ChatRunReport = { results: [], pending: [] };
+    try { report = await onRunActions(calls); } catch (e: any) { report = { results: [{ ok: false, text: g.title, reason: e?.message || 'erreur' }], pending: [] }; }
+    finally { setIsSyncing(false); }
+    setMessages(prev => [...prev, {
+      id: `done-${Date.now()}`, role: 'assistant', timestamp: Date.now(),
+      content: report.pending.length ? 'Je préfère te demander avant de lancer ça :' : 'Voilà ce que j’ai fait. Le reste (choisir, chanter, payer) reste entre tes mains.',
+      results: report.results.length ? report.results : undefined,
+      pending: report.pending.length ? report.pending : undefined,
+      pendingState: report.pending.length ? 'asked' : undefined,
+    }]);
+  };
+
+  /** Carte d'étapes d'un parcours, adaptée au projet (étapes déjà faites cochées). */
+  const renderGuide = (id: string) => {
+    const g = guideById(id);
+    if (!g) return null;
+    const card = guideCard(g, projectFacts(projectState, { mobile: !!isMobile, simple: simpleModeStore.get().simple }));
+    let n = 0;
+    return (
+      <div className="mt-2 ml-1 max-w-[92%] rounded-2xl border border-cyan-500/25 bg-cyan-500/[0.05] px-3 py-2.5" data-testid="chat-guide" data-guide={g.id}>
+        <p className="text-[12px] font-black text-white">{card.emoji} {card.title}</p>
+        {card.prereqs.length > 0 && <p className="mt-1 text-[11px] text-amber-200/90">Avant : {card.prereqs.join(' · ')}</p>}
+        <ol className="mt-1.5 space-y-1" data-testid="chat-guide-steps">
+          {card.steps.map((s, i) => (
+            <li key={i} className={`flex gap-2 text-[12px] leading-snug ${s.skipped ? 'text-slate-500' : 'text-slate-200'}`} data-skipped={s.skipped ? '1' : '0'}>
+              <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${s.skipped ? 'bg-emerald-500/80 text-black' : 'bg-cyan-500 text-black'}`}>{s.skipped ? '✓' : ++n}</span>
+              <span className={s.skipped ? 'line-through' : ''}>{s.text}{s.skipped ? ' (déjà fait)' : ''}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-1.5 text-[11px] text-slate-300"><b>Résultat :</b> {card.result}</p>
+        {card.pitfalls.map((p, i) => <p key={i} className="mt-1 text-[11px] text-amber-100/90">⚠️ {p}</p>)}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" data-testid="chat-guide-showme"
+            onClick={() => { if (!isMobile) setIsOpen(false); howTo.showMe(g.id); }}
+            className="min-h-11 px-3.5 rounded-xl bg-cyan-500 text-black text-[12px] font-black">▶ Montre-moi</button>
+          {card.canDoIt && onRunActions && (
+            <button type="button" data-testid="chat-guide-doit" onClick={() => void doGuide(g.id)}
+              className="min-h-11 px-3.5 rounded-xl bg-white/10 border border-white/15 text-white text-[12px] font-bold">⚡ Fais-le pour moi</button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const containerClass = isMobile 
     ? "fixed inset-0 z-[50] bg-nv-bg flex flex-col pb-20"
@@ -392,7 +455,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         document.body,
       )}
       {isOpen && (
-        <div className={windowClass}>
+        <div className={windowClass} data-testid="nova-chat">
           <div className="p-6 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-cyan-500/10 to-transparent">
             <div className="flex items-center space-x-5">
               <div className={`w-12 h-12 rounded-[18px] flex items-center justify-center transition-all duration-700 ${isSyncing ? 'bg-cyan-500 text-black shadow-[0_0_30px_#00f2ff]' : 'bg-white/5 text-cyan-400'}`}>
@@ -469,6 +532,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               <button 
                 key={i}
                 onClick={action.run}
+                data-testid={`nova-quick-${action.id}`}
                 className="flex-shrink-0 min-h-[40px] px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
               >
                 <i className={`fas ${action.icon} text-[10px]`}></i>
@@ -489,6 +553,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                     {msg.content}
                   </div>
                 </div>
+                {msg.guide && renderGuide(msg.guide)}
                 {msg.choices && msg.choices.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3 pl-1">
                     {msg.choices.map(c => (
@@ -597,6 +662,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && (
         <button 
           onClick={() => setIsOpen(!isOpen)}
+          data-testid="nova-open"
           aria-label={isOpen ? "Fermer l'assistante Nova" : "Ouvrir l'assistante Nova"}
           title={isOpen ? 'Fermer Nova' : 'Nova, ton assistante de studio'}
           aria-expanded={isOpen}

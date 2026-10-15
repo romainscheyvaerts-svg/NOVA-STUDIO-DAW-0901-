@@ -82,7 +82,7 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
         {error && <p className="mt-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-[12px] text-red-200">⚠️ {error}</p>}
 
         {!session && !busy && (
-          <button type="button" onClick={onSync} className={`${btn} mt-5 w-full bg-cyan-500 text-black hover:bg-cyan-400`}>
+          <button type="button" onClick={onSync} data-testid="takehome-sync" className={`${btn} mt-5 w-full bg-cyan-500 text-black hover:bg-cyan-400`}>
             Mettre la session en ligne
           </button>
         )}

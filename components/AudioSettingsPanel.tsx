@@ -445,6 +445,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusS
                             <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider group-hover:text-white transition-colors">Entrée (micro)</label>
                             <div className="relative">
                                 <select 
+                                    data-testid="audio-input-select"
                                     value={selectedInput} 
                                     onChange={handleInputChange}
                                     className="w-full h-11 bg-nv-surface border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-nv-raised"

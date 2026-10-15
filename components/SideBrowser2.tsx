@@ -112,7 +112,7 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurcha
       {!simple && <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
         <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
-        <TabButton icon="fa-plug" label="VST" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
+        <TabButton icon="fa-plug" label="VST" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} testId="browser-tab-vst" />
       </div>}
 
       {/* Content */}
@@ -125,9 +125,9 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurcha
   );
 };
 
-const TabButton: React.FC<{ icon: string, label: string, isActive: boolean, onClick: () => void }> = ({ icon, label, isActive, onClick }) => (
+const TabButton: React.FC<{ icon: string, label: string, isActive: boolean, onClick: () => void, testId?: string }> = ({ icon, label, isActive, onClick, testId }) => (
   <button 
-    onClick={onClick} aria-pressed={isActive}
+    onClick={onClick} aria-pressed={isActive} data-testid={testId}
     className={`py-3 text-[9px] font-black uppercase rounded-lg transition-all flex flex-col items-center space-y-1 ${isActive ? 'bg-cyan-500/15 [[data-theme=light]_&]:bg-nv-surface text-cyan-400' : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}`}
   >
     <i className={`fas ${icon} text-sm`}></i>

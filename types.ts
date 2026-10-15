@@ -1381,7 +1381,9 @@ export interface AIChatMessage {
 export type AIActionType = 
   | 'SELECT_TRACK'
   | 'RUN_COMMAND'
-  | 'UPDATE_PLUGIN' 
+  // Parcours « Comment faire ? » (utils/guides) : le chat affiche les étapes, rien n'est exécuté.
+  | 'GUIDE'
+  | 'UPDATE_PLUGIN'
   | 'UPDATE_TRACK' 
   | 'ADD_TRACK'
   | 'CREATE_TRACK' 
