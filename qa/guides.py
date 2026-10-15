@@ -313,6 +313,7 @@ def run_vp(p, vp, res):
         page.locator("[role=dialog][aria-labelledby=export-title]").wait_for(timeout=8000)
         s = wait_step(lambda s: s == "2", 6)
         check("3. fenêtre d'export ouverte → étape 2", s == "2", s)
+        check("3. Exporter propose « 🏠 Envoyer au studio Make Music » (mode simple)", page.get_by_test_id("export-send-studio").locator("visible=true").count() == 1)
         page.wait_for_timeout(1500)
         snap("32_export_fenetre")
         tap(page.get_by_test_id("howto-coach-next"))
