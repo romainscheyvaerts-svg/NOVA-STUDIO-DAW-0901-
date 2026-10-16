@@ -492,15 +492,16 @@ export const GUIDES: Guide[] = [
     steps: [
       { text: 'Clic droit sur le clip à séparer (dans la timeline) → « Traitement » → « Séparer en stems… ».', target: nt('track-instrumental'),
         device: 'desktop', done: { visible: tid('stems-dialog') } },
-      { text: 'Dans l’appli Windows : installe le module la première fois, choisis le nombre de stems, puis lance.', target: [tid('stems-start'), tid('stems-dialog')], manual: true },
+      { text: 'Choisis 2 stems (voix + instru) ou 4 stems, puis « Séparer ». Sur le site, la 1re fois télécharge le modèle (~250 Mo, une fois).', target: [tid('stems-start'), tid('stems-dialog')], manual: true },
     ],
     result: 'Une piste par stem, alignée sur l’original (coupé, pas effacé).',
     pitfalls: [
-      'Sur le site, la séparation ne tourne pas : elle se fait dans l’appli Windows.',
+      'Sur le site, le calcul se fait dans ton navigateur : rapide avec une carte graphique (Chrome ou Edge à jour), lent sur le processeur seul.',
+      '6 stems (guitare, piano) et voix lead / chœurs : seulement dans l’appli Windows, bien plus rapide.',
       'Instru du catalogue sans licence : séparation refusée. Tes propres sons : libre.',
-      'Au téléphone : pas de séparation, passe sur ordinateur.',
+      'Au téléphone : possible si le navigateur a accès à la carte graphique ; sinon, sépare sur ton PC. En 4G, attends le Wi-Fi pour le 1er téléchargement.',
     ],
-    prereqs: ['appli-windows', 'licence-instru'],
+    prereqs: ['licence-instru'],
   },
   {
     id: 'paroles', emoji: '📝', title: 'Afficher tes paroles en prompteur',

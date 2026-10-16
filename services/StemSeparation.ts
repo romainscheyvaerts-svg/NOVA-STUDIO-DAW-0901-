@@ -84,7 +84,7 @@ export const LEADBACK_CREDIT = 'Voix lead / chœurs : modèle UVR-MDX-NET Karaok
 
 /** Infobulle commune (équivalents dans les autres logiciels). */
 export const STEMS_TOOLTIP =
-  'Sépare la voix, la batterie, la basse, la guitare, le piano et le reste du clip (ou la voix lead des chœurs), comme Stem Splitter dans Logic, Stem Separation dans FL Studio ou Splitter dans BandLab. Calcul gratuit sur ton PC (appli Windows).';
+  'Sépare la voix, la batterie, la basse, la guitare, le piano et le reste du clip (ou la voix lead des chœurs), comme Stem Splitter dans Logic, Stem Separation dans FL Studio ou Splitter dans BandLab. Calcul gratuit sur ton appareil : dans le navigateur (2 ou 4 stems), ou dans l’appli Windows (plus rapide, 6 stems et voix lead / chœurs en plus).';
 
 /** « 55 Mo », « 1,2 Go ». */
 export function formatBytes(n: number): string {
