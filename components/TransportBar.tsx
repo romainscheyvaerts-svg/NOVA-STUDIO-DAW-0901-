@@ -381,10 +381,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
           </>;
     const mFichiers = <>
-              <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+              <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} data-testid="menu-open-project" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                 <i className="w-5 text-center text-amber-400 fas fa-folder-open" aria-hidden="true"></i><span>Ouvrir un projet</span>
               </button>
-              <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+              <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} data-testid="menu-save" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                 <i className="w-5 text-center text-green-400 fas fa-save" aria-hidden="true"></i><span>Sauvegarder</span>
               </button>
               {onImportAudio && !simple && (
@@ -392,7 +392,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="w-5 text-center text-slate-300 fas fa-file-import" aria-hidden="true"></i><span>Importer un fichier audio</span>
                 </button>
               )}
-              <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+              <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} data-testid="menu-export" className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                 <i className="w-5 text-center text-purple-400 fas fa-compact-disc" aria-hidden="true"></i><span>Exporter</span>
               </button>
           </>;
@@ -551,13 +551,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
                 <SessionMenuItems onDone={() => setIsMobileMenuOpen(false)} phone={typeof window !== 'undefined' && window.innerWidth < 640} />
                 {onOpenTakeHome && (
-                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} data-testid="menu-takehome" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>
                     <span>{takeHomeLabel || 'Emporter la session'}</span>
                   </button>
                 )}
                 {onOpenCollab && (
-                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} data-testid="menu-collab" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-violet-300 fas fa-user-group"></i>
                     <span>{collabLabel || 'Collaborer'}</span>
                   </button>
@@ -577,11 +577,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Paramètres</div>
               <div className="space-y-2">
-                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} data-testid="menu-audio" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                   <i className="w-5 text-center text-orange-400 fas fa-microchip"></i>
                   <span>{simple ? 'Réglages audio (micro, latence)' : 'Réglages audio (moteur, latence)'}</span>
                 </button>
-                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isDelayCompEnabled ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé." className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isDelayCompEnabled ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
                   <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
                   <span>Compensation de latence (PDC)</span>
                 </button>}

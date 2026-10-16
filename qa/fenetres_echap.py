@@ -149,6 +149,8 @@ CASES = [
     ("Charge CPU / DSP", click("[data-testid=dsp-meter]"), None),
     ("Mix auto", click("[data-nova-target=mix-auto]"), None),
     ("Paroles", click("[data-nova-target=lyrics]"), None),
+    # 16/10/2026 (guidage) : le panneau Collaboration se ferme aussi par Échap (fermer ne quitte pas la séance).
+    ("Collaboration (panneau)", click("button[aria-label='Collaborer']"), None),
     ("Liste des pistes", click("[data-testid=dock-track-list]"), None),
     ("Groupes", click("[data-testid=dock-groups]"), None),
     ("Temps (bandeau)", click("[data-testid=dock-time]"), None),
@@ -188,4 +190,7 @@ res["bilan"] = {"ouvertes": len(ok), "echap_ferme": sum(1 for f in ok if f["echa
                 "ms_median": sorted(f["ms"] for f in ok)[len(ok) // 2] if ok else None,
                 "ms_max": max((f["ms"], f["fenetre"]) for f in ok) if ok else None}
 (OUT / "fenetres_echap.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+# 16/10/2026 (guidage) : le panneau Collaboration doit s'ouvrir et se fermer par Échap.
+_collab_ko = "Collaboration (panneau)" in res["bilan"]["echap_ne_ferme_pas"] + res["bilan"]["pas_ouvertes"]
 print("\nBILAN :", json.dumps(res["bilan"], ensure_ascii=False))
+sys.exit(1 if _collab_ko else 0)

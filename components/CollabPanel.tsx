@@ -6,6 +6,7 @@ import { ARRIVAL_ROLE_HELP, formatInviteCode, formatPosition, MAX_PARTICIPANTS, 
 import { agoShort, type HistoryEntry } from '../utils/collabHistory';
 import { GUEST_RIGHTS_HELP, type GuestRights } from '../utils/guestRights';
 import { useNovaPricing, proMoisTexte } from '../hooks/useNovaPricing';
+import { messageClair } from '../utils/friendlyError';
 
 /**
  * Collaboration à distance : inviter (un lien, un code à 6 caractères ; la
@@ -219,6 +220,17 @@ const CollabPanel: React.FC<Props> = (p) => {
     document.body.classList.add('nova-collab-open');
     return () => { document.body.classList.remove('nova-collab-open'); };
   }, [p.open]);
+  // Échap ferme le panneau, comme les autres fenêtres. Fermer ≠ quitter : la séance continue (onClose ne fait
+  // que replier le panneau ; « Quitter » reste un bouton à part). Arrivée par une invitation : pas d'Échap
+  // (on choisit « Rejoindre » ou « Pas maintenant »).
+  const onCloseRef = useRef(p.onClose); onCloseRef.current = p.onClose;
+  const arrivalOpen = !p.active && !!p.arrival;
+  useEffect(() => {
+    if (!p.open || arrivalOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) onCloseRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [p.open, arrivalOpen]);
   // Nouveau message : on descend jusqu'à lui (pas à l'ouverture : les réglages restent en haut).
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length]);
   if (!p.open) return null;
@@ -237,7 +249,7 @@ const CollabPanel: React.FC<Props> = (p) => {
   const joinCode = async () => {
     if (!p.onJoinCode) return;
     setCodeErr(null); setCodeBusy(true);
-    try { await p.onJoinCode(code); setCode(''); } catch (e: any) { setCodeErr(e?.message || 'Code impossible à vérifier : réessaie.'); } finally { setCodeBusy(false); }
+    try { await p.onJoinCode(code); setCode(''); } catch (e: any) { setCodeErr(messageClair(e, 'Code impossible à vérifier : réessaie.')); } finally { setCodeBusy(false); }
   };
   const btn = 'h-10 rounded-xl px-3 text-[12px] font-black transition-colors disabled:opacity-40';
   // Invité de l'ingé : rôle Artiste déjà choisi, une seule carte (les 3 rôles restent à un toucher).
@@ -252,7 +264,7 @@ const CollabPanel: React.FC<Props> = (p) => {
       try {
         if (signUpMode && p.onSignUp) await p.onSignUp(email, password); else await p.onSignIn!(email, password);
         setPassword('');
-      } catch (e: any) { setSignErr(e?.message || 'Connexion impossible'); setJoining(false); return; }
+      } catch (e: any) { setSignErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); setJoining(false); return; }
       setJoining(false);
     }
     const nm = arrivalName.trim() || (email.includes('@') ? email.split('@')[0] : '') || ROLE_LABEL[arrivalRole];
@@ -262,15 +274,16 @@ const CollabPanel: React.FC<Props> = (p) => {
   const peers = p.peers || [];
   const onlineCount = peers.filter(x => x.online).length;
 
+  const loginNearCode = !!codeErr && p.gate === 'login';
   const gateBlock = (
     <>
       {p.gate === 'login' && p.onSignIn && (
-        <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+        <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid="collab-login">
           <p className="text-[12px] font-bold text-white">Connecte-toi avec ton compte Make Music</p>
           <input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
           <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mot de passe" className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
           <button type="button" disabled={!email || !password} className={`${btn} w-full bg-white text-black`}
-            onClick={async () => { setSignErr(null); try { await p.onSignIn!(email, password); setPassword(''); } catch (e: any) { setSignErr(e?.message || 'Connexion impossible'); } }}>Se connecter</button>
+            onClick={async () => { setSignErr(null); try { await p.onSignIn!(email, password); setPassword(''); } catch (e: any) { setSignErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } }}>Se connecter</button>
           {signErr && <p className="text-[11px] text-red-300">{signErr}</p>}
           <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Créer un compte sur studiomakemusic.com</a>
         </div>
@@ -373,6 +386,9 @@ const CollabPanel: React.FC<Props> = (p) => {
                   className={`${btn} h-11 bg-white text-black`}>{codeBusy ? '…' : 'Rejoindre'}</button>
               </div>
               {codeErr && <p role="alert" className="text-[11px] text-red-300">{codeErr}</p>}
+              {/* Code refusé faute de compte : la connexion s'affiche ICI, sous le message (avant : tout en bas
+                  du panneau, hors de l'écran : « Connecte-toi d'abord » sans bouton pour le faire). */}
+              {loginNearCode && gateBlock}
             </div>
           )}
           <fieldset className="space-y-1.5" aria-label="Mode de collaboration">
@@ -400,7 +416,7 @@ const CollabPanel: React.FC<Props> = (p) => {
           )}
           <input value={startName} onChange={e => setStartName(e.target.value)} placeholder="Ton nom (affiché aux autres)"
             className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
-          {gateBlock}
+          {!loginNearCode && gateBlock}
           {mode === 'live' ? (
             <>
               <button type="button" disabled={!!p.busy} onClick={() => p.onStart(startRole, startName.trim() || ROLE_LABEL[startRole])}

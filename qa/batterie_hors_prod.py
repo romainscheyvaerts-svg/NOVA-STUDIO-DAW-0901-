@@ -108,6 +108,10 @@ BATTERIE = [
     # indisponible, nouvel onglet, palette), bureau et téléphone, sombre et clair ; ▶ suivi de la tête de lecture suspendu
     # par un défilement à la main, « Suivre », reprise au Play ; « DUP » du téléphone qui duplique vraiment.
     ("gerer_abonnement", []), ("suivi_lecture", []), ("compte_unique", []),
+    # 1.5.2 · guidage (16/10/2026) : micro refusé / absent dit DANS la page au téléphone, barre du clip en français,
+    # « Montre-moi » qui va jusqu'au bon bouton du menu ☰, étapes sans Ctrl+K au doigt, connexion à l'endroit du code
+    # de collaboration, « Ouvrir un projet » sans compte, projet abîmé, LUFS / dBTP expliqués ; bureau et téléphone, sombre et clair.
+    ("guidage", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

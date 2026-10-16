@@ -171,7 +171,7 @@ const SendsButton: React.FC<{ track: Track, allTracks: Track[] }> = ({ track, al
     return (
         <>
             <button type="button" data-testid={`sends-open-${track.id}`} onClick={(e) => setAnchor((e.currentTarget as HTMLElement).getBoundingClientRect())}
-                title="Envois a à j (Pro Tools : 10 envois par piste, avec pan et mute)"
+                title="Envois : une partie du son de la piste part vers un effet partagé (réverb, delay), sans toucher au son d’origine. 10 envois par piste (a à j), avec pan et mute, comme dans Pro Tools."
                 className="h-6 [@media(pointer:coarse)]:h-8 rounded border border-white/5 bg-black/60 px-2 flex items-center text-[8px] font-black text-slate-500 hover:border-white/20">
                 <span className="mr-2">Envois</span><span className="flex-1 text-left font-mono text-cyan-300">a-j · {used}/10</span><i className="fas fa-caret-down text-[8px] text-slate-600" />
             </button>

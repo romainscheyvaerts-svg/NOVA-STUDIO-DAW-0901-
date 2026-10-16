@@ -202,6 +202,7 @@ export const GUIDES: Guide[] = [
       { text: 'Enregistre d’abord ta voix principale.', action: 'nova.record', target: nt('rec'), skipIf: 'hasTake', done: { fact: 'takeStopped' } },
       { text: 'Ouvre Nova, ton ingé son.', phone: 'Ouvre l’onglet « Nova » en bas.', target: OPEN_NOVA, done: NOVA_OPEN },
       { text: 'Touche « Faire les backs » : Nova crée la piste BACKS, arme le micro et se cale 2 s avant ta voix.', target: tid('nova-quick-backs') },
+      { text: 'Reviens sur l’onglet « Morceau » en bas.', target: nt('tab-ARRANGEMENT'), device: 'phone' },
       { text: 'Appuie sur REC et rechante tes fins de phrase et tes punchlines.', action: 'nova.record', target: nt('rec'), done: { fact: 'isRecording' } },
       { text: 'Ensuite, Nova propose « ➡️ Harmonies » et « ➡️ Ad-libs » : même chemin.', target: [tid('nova-chat'), ...OPEN_NOVA], manual: true },
     ],
@@ -245,7 +246,7 @@ export const GUIDES: Guide[] = [
     summary: 'Le mix, les stems ou les voix seules, en WAV ou MP3.',
     steps: [
       { text: 'Ouvre « Exporter » (en haut, ou Ctrl+Maj+E).', phone: 'Touche « Exporter » (flèche ⬆ en haut), ou ☰ › « Exporter ».', action: 'nova.export',
-        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
+        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-export'), PHONE_MENU], done: EXPORT_OPEN },
       { text: 'Choisis quoi exporter : « Mon morceau complet », ou « ⚙️ Réglages avancés » (mix, stems, voix seules, WAV ou MP3).', target: '[aria-labelledby="export-title"]', manual: true },
       { text: 'Débloque si besoin : instru achetée = export offert ; sinon l’export de ce projet ou Nova Pro (prix affiché).', target: [tid('export-paywall'), '[aria-labelledby="export-title"]'], manual: true },
     ],
@@ -284,7 +285,7 @@ export const GUIDES: Guide[] = [
     summary: 'NOVA vérifie ton morceau et prépare le paquet ; un distributeur le met en ligne.',
     steps: [
       { text: 'Ouvre « Exporter ».', phone: 'Touche « Exporter » (flèche ⬆ en haut), ou ☰ › « Exporter ».', action: 'nova.export',
-        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-fichiers'), PHONE_MENU], done: EXPORT_OPEN },
+        target: ['[data-bar-item="exporter"]', tid('phone-export'), tid('menu-export'), PHONE_MENU], done: EXPORT_OPEN },
       { text: 'Touche « 🚀 Prêt pour Spotify / Apple / TikTok ? » (sous « ⚙️ Réglages avancés »).', target: [tid('export-distribution'), tid('export-avance')], done: { visible: tid('distribution-panel') } },
       { text: 'Choisis la plateforme, puis « Vérifier mon morceau ».', target: tid('dist-analyze') },
       { text: 'Corrige les feux rouges (« Corriger : … ») et remplis titre, artiste, année.', target: tid('dist-form'), manual: true },
@@ -320,7 +321,8 @@ export const GUIDES: Guide[] = [
     keywords: 'partager extrait ecouter envoyer whatsapp insta story demo 30 secondes faire ecouter pote',
     summary: 'Un extrait de 30 s (vidéo ou audio) ou la démo complète, à envoyer.',
     steps: [
-      { text: 'Ouvre « Partager » (Ctrl+K : « partager »).', action: 'pal.share', target: '[data-bar-item="partager"]', done: { visible: '[aria-labelledby="share-title"]' } },
+      { text: 'Ouvre « Partager » (Ctrl+K : « partager »).', phone: 'Touche « Exporter » (flèche ⬆ en haut), puis « Extrait 30 s pour les réseaux ».', action: 'pal.share',
+        target: ['[data-bar-item="partager"]', tid('export-share'), tid('phone-export')], done: { visible: '[aria-labelledby="share-title"]' } },
       { text: 'Choisis « 📼 Vidéo rapide 30 s », « 🎧 Extrait audio 30 s » ou « ⬇️ Démo complète (MP3) ».', target: '[aria-labelledby="share-title"]', manual: true },
     ],
     result: 'Un fichier prêt à envoyer (WhatsApp, Insta, mail), signé Make Music.',
@@ -334,10 +336,10 @@ export const GUIDES: Guide[] = [
     summary: 'En ligne avec un compte, ou en fichier .zip sur ton appareil.',
     steps: [
       { text: 'Ouvre « Sauvegarder » (Ctrl+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
-        target: ['[data-bar-item="sauver"]', tid('menu-fichiers'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
+        target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
       { text: 'Avec un compte : « Sauvegarder » en ligne. Sans compte : « Fichier sur cet appareil (.zip) ».', target: tid('save-new-version-box'), manual: true },
       { text: 'Pour le retrouver : « Ouvrir un projet ».', phone: 'Touche ☰, puis « Ouvrir un projet ».', action: 'pal.open',
-        target: ['[data-bar-item="ouvrir"]', tid('menu-fichiers'), PHONE_MENU], manual: true },
+        target: ['[data-bar-item="ouvrir"]', tid('menu-open-project'), PHONE_MENU], manual: true },
     ],
     result: 'Ton projet est en sécurité ; NOVA garde aussi une sauvegarde automatique dans ce navigateur.',
     pitfalls: [
@@ -353,7 +355,7 @@ export const GUIDES: Guide[] = [
     summary: 'Mettre la session en ligne et l’ouvrir ailleurs par un lien ou un QR code.',
     steps: [
       { text: 'Ouvre « Sauvegarder » (Ctrl+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
-        target: ['[data-bar-item="sauver"]', tid('menu-fichiers'), PHONE_MENU], done: { visible: tid('save-takehome') } },
+        target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-takehome') } },
       { text: 'Touche « 🏠 Emporter la session (en ligne) ».', target: tid('save-takehome'), done: { visible: '[aria-labelledby="takehome-title"]' } },
       { text: '« Mettre la session en ligne ».', target: tid('takehome-sync'), done: { visible: tid('takehome-url') } },
       { text: 'Scanne le QR code, ou copie le lien et envoie-le (WhatsApp, e-mail).', target: tid('takehome-url'), manual: true },
@@ -367,8 +369,8 @@ export const GUIDES: Guide[] = [
     keywords: 'inviter collaborer collaboration collab feat featuring inge ingenieur son distance a distance artiste beatmaker lien code session ensemble notification notifications prevenu alerte',
     summary: 'Une séance partagée en direct, ou un ingé qui mixe à distance avec ses plugins.',
     steps: [
-      { text: 'Ouvre « Collaborer » (en bas).', phone: 'Touche ☰ › « Plus d’outils » › « Collaborer à distance ».', action: 'pal.collab',
-        target: ['[aria-label="Collaborer"]', MENU_PLUS, PHONE_MENU], done: { visible: '[aria-labelledby="collab-title"]' } },
+      { text: 'Ouvre « Collaborer » (en bas ; en mode simple : ☰ › « Plus d’outils » › « Collaborer à distance »).', phone: 'Touche ☰ › « Plus d’outils » › « Collaborer à distance ».', action: 'pal.collab',
+        target: ['[aria-label="Collaborer"]', tid('menu-collab'), MENU_PLUS, PHONE_MENU], done: { visible: '[aria-labelledby="collab-title"]' } },
       { text: 'Choisis « En direct » ou « Ingé à distance (ses propres VST) », ton rôle et ton nom, puis démarre.', target: tid('collab-role'),
         done: { visible: `${tid('collab-invite-copy')}, ${tid('remote-panel')}` } },
       { text: '« 🔗 Copier le lien » (ou donne le code à 6 caractères, valable 24 h) et envoie-le.', target: [tid('collab-invite-copy'), tid('remote-panel')], manual: true },
@@ -393,6 +395,8 @@ export const GUIDES: Guide[] = [
     summary: 'Un lien qui donne à chacun SA copie privée de ta séance : pistes, tempo, accords. Ton original ne bouge pas.',
     steps: [
       { text: 'Ouvre « Faire sa version » (Ctrl+K : « version »).', action: 'pal.forkLink', done: { visible: '[aria-labelledby="share-session-t"]' } },
+      { text: 'Connecte-toi à ton compte Make Music (gratuit) dans la fenêtre : le lien est à ton nom.', target: tid('share-signin'), unless: 'loggedIn',
+        done: { visible: tid('fork-create') } },
       { text: 'Écris pour qui (facultatif), puis « Créer le lien » : ta séance est mise en ligne et le lien est copié.', target: tid('fork-create'), done: { visible: tid('fork-url') } },
       { text: 'Envoie le lien (WhatsApp, Insta, mail). Chacun se connecte (gratuit) et reçoit sa version ; le compteur te dit combien l’ont prise.', target: tid('fork-url'), manual: true },
     ],
@@ -411,6 +415,8 @@ export const GUIDES: Guide[] = [
     summary: 'Une page avec ton morceau (extrait ou mix), ta pochette et tes crédits, un lecteur à mettre sur ton site, et « Réserver au studio Make Music ».',
     steps: [
       { text: 'Ouvre « Page publique du morceau » (Ctrl+K : « page publique »).', action: 'pal.publicPage', done: { visible: '[aria-labelledby="share-session-t"]' } },
+      { text: 'Connecte-toi à ton compte Make Music (gratuit) dans la fenêtre : la page est à ton nom.', target: tid('share-signin'), unless: 'loggedIn',
+        done: { visible: tid('pub-title') } },
       { text: 'Écris le titre, l’artiste et les crédits ; choisis l’extrait de 30 s ou le morceau entier.', target: tid('pub-title'), manual: true },
       { text: 'Coche « Je publie ce morceau », puis « Publier la page ».', target: [tid('pub-consent'), tid('pub-publish')], done: { visible: tid('pub-url') } },
       { text: 'Copie le lien de la page, ou le code du lecteur pour ton site.', target: tid('pub-url'), manual: true },
@@ -428,7 +434,8 @@ export const GUIDES: Guide[] = [
     keywords: 'synthe synth synthetiseur clavier piano notes melodie composer instrument pad nappe lead pluck rhodes midi piano roll',
     summary: 'Une piste synthé, un son, puis les notes au piano roll ou au clavier.',
     steps: [
-      { text: 'Crée une piste « 🎹 Synthé NOVA » (Ctrl+K : « synthé »).', action: 'pal.synth', target: tid('new-synth-track'), done: { visible: tid('synth-panel') } },
+      { text: 'Crée une piste « 🎹 Synthé NOVA » (Ctrl+K : « synthé »).', action: 'pal.synth', target: tid('new-synth-track'),
+        hint: 'Le bouton « Synthé » n’est en bas qu’en mode instru.', done: { visible: tid('synth-panel') } },
       { text: 'Choisis un son dans la liste et essaie-le au mini-clavier.', target: tid('synth-presets'), manual: true },
       { text: 'Ferme la fenêtre du son : tu es dans le piano roll. Clique pour poser une note, glisse pour l’allonger.', target: '[aria-label="Fermer le synthé"]' },
       { text: 'Ou joue au clavier de l’ordi (Ctrl+Maj+K : Q S D F G H J K L M), ou avec un clavier MIDI.', action: 'nova.computerKeyboard',
@@ -517,7 +524,8 @@ export const GUIDES: Guide[] = [
     keywords: 'tempo bpm vitesse mesure tap taper caler rythme lent rapide',
     summary: 'Taper le tempo ou l’écrire ; la mesure se règle au même endroit.',
     steps: [
-      { text: 'Ouvre « Tempo et mesure » (touche le BPM en haut).', action: 'pal.tempo', target: [tid('transport-bpm'), tid('open-tempo')], done: { visible: tid('tempo-dialog') } },
+      { text: 'Ouvre « Tempo et mesure » (touche le BPM en haut, ou Ctrl+K : « tempo »).', action: 'pal.tempo', target: [tid('transport-bpm'), tid('open-tempo')],
+        hint: 'Le BPM n’est pas affiché en haut en mode simple.', done: { visible: tid('tempo-dialog') } },
       { text: 'Écris le BPM, ou tape « Tap » en rythme puis « Utiliser … BPM ».', target: tid('tempo-tap'), manual: true },
     ],
     result: 'Le projet, le clic et la grille suivent le nouveau tempo.',
@@ -532,8 +540,8 @@ export const GUIDES: Guide[] = [
     keywords: 'micro carte son interface entree latence retard decalage asio casque retour reglages audio branchement focusrite',
     summary: 'Choisir l’entrée micro et la sortie casque ; le retard est compensé tout seul.',
     steps: [
-      { text: 'Ouvre « Réglages audio ».', phone: 'Touche ☰ › « Plus d’outils » › « Réglages audio ».', action: 'pal.audio',
-        target: ['[aria-label="Réglages audio"]', MENU_PLUS, PHONE_MENU], done: { visible: tid('audio-input-select') } },
+      { text: 'Ouvre « Réglages audio » (en mode simple : ☰ › « Plus d’outils »).', phone: 'Touche ☰ › « Plus d’outils » › « Réglages audio ».', action: 'pal.audio',
+        target: ['[aria-label="Réglages audio"]', tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('audio-input-select') } },
       { text: 'Choisis ton micro dans « Entrée (micro) » et ton casque dans « Sortie ».', target: tid('audio-input-select'), manual: true },
       { text: 'Fais une prise test : NOVA mesure le retard et recale tes prises tout seul.', action: 'nova.record', target: nt('rec'), done: { fact: 'isRecording' } },
     ],
@@ -717,9 +725,30 @@ export function applicableSteps(g: Guide, f: GuideFacts): GuideStep[] {
   return g.steps.filter(s => (!s.device || (s.device === 'phone') === f.mobile) && (!s.when || f[s.when]) && (!s.unless || !f[s.unless]));
 }
 
+/**
+ * Phrase dite au doigt : pas de clavier au téléphone. « (Ctrl+K : « tempo ») » devient
+ * « (☰ › « Chercher une action… » : « tempo ») », Ctrl+Z devient « Annuler » (☰) ; les autres
+ * raccourcis entre parenthèses disparaissent.
+ */
+export function forPhone(text: string): string {
+  return text
+    .replace(/\(Ctrl\+K\s*:\s*(«[^»]*»)\)/g, '(☰ › « Chercher une action… » : $1)')
+    .replace(/\(Ctrl\+K\)/g, '(☰ › « Chercher une action… »)')
+    .replace(/Ctrl\+Z/g, '« Annuler » (☰)')
+    .replace(/\s*\((?:ou )?(?:Ctrl|Alt|Maj)\+[^()]*\)/g, '')
+    .replace(/,? ?ou Ctrl\+[A-Za-z+]+/g, '')
+    .replace(/Barre d’espace, ou ▶/g, '▶');
+}
+
+/** Texte d'une étape pour cet appareil : variante téléphone, sinon le texte dit au doigt. */
+export function stepText(s: Pick<GuideStep, 'text' | 'phone'>, mobile: boolean): string {
+  if (!mobile) return s.text;
+  return s.phone || forPhone(s.text);
+}
+
 /** Étapes à afficher (liste, chat) : `skipped` = déjà fait dans ce projet. */
 export function stepsFor(g: Guide, f: GuideFacts): (GuideStep & { skipped: boolean; shown: string })[] {
-  return applicableSteps(g, f).map(s => ({ ...s, skipped: isStepDone(s, f, null), shown: f.mobile && s.phone ? s.phone : s.text }));
+  return applicableSteps(g, f).map(s => ({ ...s, skipped: isStepDone(s, f, null), shown: stepText(s, f.mobile) }));
 }
 
 /** Remplace les jetons {voice} / {selected} d'un sélecteur. */

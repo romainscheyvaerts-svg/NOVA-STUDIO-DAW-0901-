@@ -1,4 +1,5 @@
 import { openFeedback } from '../services/feedback';
+import { messageClair } from '../utils/friendlyError';
 import { dailyChallengeId } from '../utils/dailyChallenge';
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Instrumental, DAWState } from '../types';
@@ -204,7 +205,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       setPlayingId(null);
       setPreviewError(isQuotaError(err?.status, err?.message) || catalogStatus.get()?.kind === 'quota'
         ? 'Écoute momentanément indisponible : le catalogue est restreint. Tu peux travailler avec tes propres fichiers.'
-        : `Lecture impossible : « ${inst.title} » est injoignable`);
+        : `Lecture impossible : « ${inst.title} » ne répond pas. Vérifie ta connexion, puis réessaie (ou écoute une autre instru).`);
       setTimeout(() => setPreviewError(null), 4500);
     });
   };
@@ -272,7 +273,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           onEnterWithProject(project);
         }
       } catch (error: any) {
-        setPreviewError(`Ce projet n'a pas pu être ouvert : ${error?.message || 'fichier illisible'}`); setTimeout(() => setPreviewError(null), 6000);
+        setPreviewError(`Ce projet n'a pas pu être ouvert : ${messageClair(error, 'fichier illisible. Choisis le .zip créé par « Sauvegarder › Fichier sur cet appareil ».')}`); setTimeout(() => setPreviewError(null), 6000);
       }
     }
   };
@@ -285,7 +286,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
         onEnterWithProject(project);
       }
     } catch (error: any) {
-      setPreviewError(`Ce projet n'a pas pu être chargé : ${error?.message || 'erreur réseau'}`); setTimeout(() => setPreviewError(null), 6000);
+      setPreviewError(`Ce projet n'a pas pu être chargé : ${messageClair(error, 'vérifie ta connexion, puis réessaie.')}`); setTimeout(() => setPreviewError(null), 6000);
     }
   };
 

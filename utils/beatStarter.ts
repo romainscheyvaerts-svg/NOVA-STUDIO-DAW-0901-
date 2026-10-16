@@ -397,8 +397,8 @@ export function applyBeatSkeleton(st: DAWState, sk: BeatSkeleton, ix: KitIndex |
     ...(keptTempo ? {} : { bpm, projectKey: sk.root, projectScale: projectScaleOf(sk.scale) }),
   };
   const message = keptTempo
-    ? `🥁 Squelette ${sk.genreName} posé sur ton instru (${Math.round(bpm)} BPM gardés) : batterie, 808 et accords ${sk.progression.roman}. Ctrl+Z pour annuler.`
-    : `🥁 Squelette ${sk.summary} posé : batterie, 808 qui suit les accords, ${inst?.name || 'instrument'} et piste d'accords. Ctrl+Z pour annuler.`;
+    ? `🥁 Squelette ${sk.genreName} posé sur ton instru (${Math.round(bpm)} BPM gardés) : batterie, 808 et accords ${sk.progression.roman}. Appuie sur ▶ pour l'écouter ; Ctrl+Z pour annuler.`
+    : `🥁 Squelette ${sk.summary} posé : batterie, 808 qui suit les accords, ${inst?.name || 'instrument'} et piste d'accords. Appuie sur ▶ pour l'écouter, puis « Prolonger ou varier » (Ctrl+K) pour aller plus loin. Ctrl+Z pour annuler.`;
   return { state: next, message, keptTempo };
 }
 

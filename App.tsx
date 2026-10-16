@@ -303,6 +303,8 @@ import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
+import MobileNoticeInline, { MobileStatusInline } from './components/MobileNoticeInline';
+import { messageClair } from './utils/friendlyError';
 import StemSeparationDialog, { AppliedStem, StemTarget } from './components/StemSeparationDialog';
 import { buildStemTracks, insertStemTracks, stemsRightsFor } from './services/StemSeparation';
 import { track, trackOnce } from './utils/analytics';
@@ -1624,7 +1626,7 @@ function Studio() {
       setTimeout(() => { void autosaveNowRef.current?.('manual', true); }, 0);
     } catch (e: any) {
       console.error('[Cloud Save Error]', e);
-      setAiNotification(`❌ Erreur: ${e.message}`);
+      setAiNotification(`❌ Sauvegarde en ligne impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie. En attendant, « Fichier sur cet appareil (.zip) » garde ton projet.')}`);
     } finally {
       setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
     }
@@ -1650,7 +1652,7 @@ function Studio() {
       setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
     } catch (e: any) {
       console.error('[Cloud Copy Error]', e);
-      setAiNotification(`❌ Erreur: ${e.message}`);
+      setAiNotification(`❌ Copie en ligne impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')}`);
     } finally {
       setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
     }
@@ -1679,7 +1681,7 @@ function Studio() {
       void autosaveNowRef.current?.('manual', true);
     } catch (e: any) {
       console.error('[Local Save Error]', e);
-      setAiNotification(`❌ Erreur: ${e.message}`);
+      setAiNotification(`❌ Le fichier .zip n’a pas pu être créé : ${messageClair(e, 'réessaie ; si ça recommence, libère de la place sur ton appareil.')}`);
     } finally {
       setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
     }
@@ -1742,7 +1744,7 @@ function Studio() {
         return true;
     }).catch((e: any) => {
         console.error('[Ouverture]', e);
-        setAiNotification(`❌ Le projet n'a pas pu s'ouvrir : ${e?.message || e}`);
+        setAiNotification(`❌ Le projet n'a pas pu s'ouvrir : ${messageClair(e, 'fichier illisible ou abîmé. Essaie une version plus ancienne (Sauvegarder › Versions de la session).')}`);
         return false;
     }).finally(() => { rateLoadingRef.current = Math.max(0, rateLoadingRef.current - 1); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1759,9 +1761,11 @@ function Studio() {
               setTimeout(() => { void restoreCatalogBeatRef.current('📂 Projet ouvert : tes prises et tes paroles sont là.'); }, 900);
           }
       } catch (e: any) {
-          setExternalImportNotice(`❌ Erreur: ${e.message}`);
+          setExternalImportNotice(`❌ Ce projet ne s’ouvre pas : ${messageClair(e, 'choisis le .zip créé par « Sauvegarder › Fichier sur cet appareil ».')}`);
       } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
+          // Un échec se lit en 8 s (en 3 s, le message disparaissait avant la fin de la phrase).
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('❌') ? n : null)), 3000);
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('❌') ? null : n)), 8000);
       }
   }, [handleLoadProject]);
 
@@ -1774,9 +1778,10 @@ function Studio() {
               setExternalImportNotice("✅ Projet cloud chargé !");
           }
       } catch (e: any) {
-          setExternalImportNotice(`❌ Erreur: ${e.message}`);
+          setExternalImportNotice(`❌ Ce projet en ligne ne s’ouvre pas : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')}`);
       } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('❌') ? n : null)), 3000);
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('❌') ? null : n)), 8000);
       }
   }, [handleLoadProject]);
 
@@ -4528,7 +4533,7 @@ function Studio() {
       } catch (e: any) {
           if (e instanceof BeatLoadCancelled) { setExternalImportNotice(null); return null as any; }
           console.error("[Import Error]", e);
-          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+          setExternalImportNotice(`❌ Import impossible : ${messageClair(e, 'ce fichier audio ne se lit pas. Essaie un WAV ou un MP3.')}`);
       } finally {
           setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('Chargement') && isBeatLoading() ? n : null)), 3000);
       }
@@ -5445,7 +5450,7 @@ function Studio() {
       if (e instanceof CloudConflictError) setCloudConflict(e);
       else {
         console.warn('[Session en ligne]', e);
-        if (opts.interactive) setCloudError(e?.message || 'Envoi impossible');
+        if (opts.interactive) setCloudError(messageClair(e, 'Envoi impossible : vérifie ta connexion, puis réessaie.'));
       }
       if (opts.interactive) setCloudProgress(null);
       return false;
@@ -5496,7 +5501,7 @@ function Studio() {
       try { const u = new URL(window.location.href); u.searchParams.delete('session'); window.history.replaceState(null, '', u.toString()); } catch { /* */ }
     } catch (e: any) {
       setShowLanding(false);
-      setAiNotification(`⚠️ Session en ligne impossible à ouvrir : ${e?.message || 'lien invalide'}`);
+      setAiNotification(`⚠️ Session en ligne impossible à ouvrir : ${messageClair(e, 'lien invalide ou expiré. Demande un nouveau lien à la personne qui te l’a envoyé.')}`);
     } finally {
       setTimeout(() => setCloudProgress(null), 600);
     }
@@ -7312,7 +7317,7 @@ function Studio() {
       }
     } catch (e: any) {
       setCollabBusy(null);
-      setAiNotification(`⚠️ Abonnement impossible : ${e?.message || 'erreur'}`);
+      setAiNotification(`⚠️ Abonnement impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie. Rien n’a été débité.')}`);
     }
   }, [startCollab]);
 
@@ -9462,7 +9467,7 @@ function Studio() {
             await loadCatalogBeatRef.current?.(match);
           } catch (e: any) {
             console.error('[AI] LOAD_BEAT', e);
-            notify(`❌ Chargement impossible : ${e?.message || 'erreur'}`);
+            notify(`❌ Chargement impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie (ou choisis une autre instru).')}`);
           }
         })();
         break;
@@ -10684,11 +10689,11 @@ function Studio() {
                 <MobileArrangementPage
                   toolbarExtras={mobilePills}
                   tipCard={<><HowToNudgeCard inline blocked={!!nextStep || !!state.isRecording || countInBeat !== null} /><NotificationsInline simple={simpleMode} blocked={!!state.isRecording || countInBeat !== null || notifOpen} /></>}
-                  topCard={<NextStepCard inline isMobile
+                  topCard={<><MobileStatusInline text={externalImportNotice} /><MobileNoticeInline notice={aiNotice} blocked={!!state.isRecording || countInBeat !== null} /><NextStepCard inline isMobile
                     open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
                     trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}
                     besideSidebar={false} onAction={handleNextStep} onClose={() => setNextStep(null)}
-                    footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null} />}
+                    footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null} /></>}
                   tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
@@ -10817,7 +10822,8 @@ function Studio() {
           passe a TransportBar en prop statusMessage, declaree et destructuree,
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
-      {externalImportNotice && (
+      {/* Téléphone, page Morceau : posé dans la page (MobileStatusInline) ; en flottant, il couvrait la barre du clip. */}
+      {externalImportNotice && !(isMobile && activeMobileTab === 'ARRANGEMENT') && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
@@ -11201,7 +11207,7 @@ function Studio() {
           if (error) {
             const m = String(error.message || '');
             throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte » et entre ton mot de passe.'
-              : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${m}`);
+              : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${messageClair(error, 'réessaie dans un instant.')}`);
           }
           if (!data?.session) throw new Error('Compte créé ! Ouvre le mail de confirmation que tu viens de recevoir, puis reviens ici et touche « J’ai déjà un compte ».');
           setArrivalSignedIn(true);

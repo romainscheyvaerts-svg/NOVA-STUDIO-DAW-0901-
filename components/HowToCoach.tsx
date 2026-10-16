@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  applicableSteps, findTargetElement, isStepDone, type Guide, type GuideFacts, type GuideStep,
+  applicableSteps, findTargetElement, forPhone, isStepDone, stepText, type Guide, type GuideFacts, type GuideStep,
 } from '../utils/guides';
 
 /**
@@ -34,7 +34,9 @@ const HowToCoach: React.FC<HowToCoachProps> = ({ guide, getFacts, runAction, onC
   const [placeTop, setPlaceTop] = useState(false);
   const ringRef = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLElement | null>(null);
-  const scrolledRef = useRef<GuideStep | null>(null);
+  // Dernier bouton amené à l'écran : un nouveau bouton dans la même étape (☰ › « Plus d'outils » › entrée)
+  // défile aussi jusqu'à lui (avant : seulement le 1er de l'étape, l'entrée du menu restait hors de l'écran).
+  const scrolledRef = useRef<HTMLElement | null>(null);
   const indexRef = useRef(0);
   indexRef.current = index;
   const step = steps[index];
@@ -65,7 +67,7 @@ const HowToCoach: React.FC<HowToCoachProps> = ({ guide, getFacts, runAction, onC
     if (finished || !step) { targetRef.current = null; return; }
     const tick = () => {
       const el = findTargetElement(step, getFacts());
-      if (el && scrolledRef.current !== step) { scrolledRef.current = step; try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* */ } }
+      if (el && scrolledRef.current !== el) { scrolledRef.current = el; try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* */ } }
       targetRef.current = el;
       setTargetShown(!!el);
       if (el) {
@@ -163,12 +165,12 @@ const HowToCoach: React.FC<HowToCoachProps> = ({ guide, getFacts, runAction, onC
           </div>
         ) : step ? (
           <div aria-live="polite">
-            <p className="mt-1 text-[14px] font-bold leading-snug" data-testid="howto-coach-text">{isMobile && step.phone ? step.phone : step.text}</p>
+            <p className="mt-1 text-[14px] font-bold leading-snug" data-testid="howto-coach-text">{stepText(step, isMobile)}</p>
             {!step.target ? (
-              step.hint ? <p className="mt-1 text-[12px] leading-snug text-nv-muted">{step.hint}</p> : null
+              step.hint ? <p className="mt-1 text-[12px] leading-snug text-nv-muted">{isMobile ? forPhone(step.hint) : step.hint}</p> : null
             ) : !targetShown && (
               <p className="mt-1 text-[12px] leading-snug text-amber-500" data-testid="howto-coach-missing">
-                {step.hint || 'Ce bouton n’est pas visible ici.'}{step.action ? ' « Fais-le pour moi » le lance directement.' : ''}
+                {(isMobile && step.hint ? forPhone(step.hint) : step.hint) || 'Ce bouton n’est pas affiché ici (mode simple ou autre écran).'}{step.action ? ' « Fais-le pour moi » le lance directement.' : ''}
               </p>
             )}
             {notice && <p role="status" className="mt-1 text-[12px] font-semibold text-amber-500">⚠️ {notice}</p>}

@@ -68,7 +68,7 @@ const HowToPanel: React.FC<HowToPanelProps> = ({ open, onClose, facts, isMobile,
           <li key={i} className={`flex gap-2.5 rounded-xl border px-3 py-2 ${s.skipped ? 'border-emerald-500/25 bg-emerald-500/[0.06]' : 'border-nv-line/12 bg-nv-raised'}`}>
             <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${s.skipped ? 'bg-emerald-500 text-black' : 'bg-cyan-500 text-black'}`}>{s.skipped ? '✓' : i + 1}</span>
             <span className={`text-[13px] leading-snug ${s.skipped ? 'text-nv-muted line-through decoration-emerald-500/60' : 'text-nv-ink'}`}>
-              {s.text}{s.skipped ? <span className="ml-1 no-underline text-[11px] font-bold text-emerald-500">(déjà fait)</span> : null}
+              {s.shown}{s.skipped ? <span className="ml-1 no-underline text-[11px] font-bold text-emerald-500">(déjà fait)</span> : null}
             </span>
           </li>
         ))}

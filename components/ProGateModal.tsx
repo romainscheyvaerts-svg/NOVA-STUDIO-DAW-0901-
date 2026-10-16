@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import { catalogSupabase } from '../services/supabase';
 import { signInAccount } from '../services/SessionCloud';
 import { billingStatus, hasPlan, loadPricing, euros, type BillingStatus, type Grille } from '../services/Billing';
@@ -88,7 +89,7 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
             <input className={input} type="email" autoComplete="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
             <input className={input} type="password" autoComplete="current-password" placeholder="Mot de passe" value={password} onChange={e => setPassword(e.target.value)} />
             <button type="button" disabled={!email || !password} className={`${btn} bg-white text-black`}
-              onClick={async () => { setMsg(null); try { await signInAccount(email, password); setPassword(''); await afterLogin(); } catch (e: any) { setMsg(e?.message || 'Connexion impossible'); } }}>
+              onClick={async () => { setMsg(null); try { await signInAccount(email, password); setPassword(''); await afterLogin(); } catch (e: any) { setMsg(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } }}>
               Se connecter
             </button>
             <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Créer un compte sur studiomakemusic.com</a>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import { catalogSupabase } from '../services/supabase';
 import type { DAWState } from '../types';
 import {
@@ -93,7 +94,7 @@ const SendToStudioModal: React.FC<SendToStudioModalProps> = (p) => {
       const text = err.code === 'login' ? 'Connecte-toi à ton compte Make Music pour envoyer au studio.'
         : err.code === 'network' || err.code === 'upload'
           ? `L'envoi s'est coupé${started ? ` (${sendState.current.done.size} fichier(s) déjà au studio)` : ''}. Vérifie ton réseau, puis « Réessayer » : on reprend où ça s'est arrêté.`
-          : err.message || "L'envoi n'a pas abouti.";
+          : messageClair(err, "L'envoi n'a pas abouti : réessaie dans un instant.");
       setPhase({ k: 'error', text, retry: err.code !== 'not_deployed' && err.code !== 'login' && err.code !== 'daily_limit' });
     } finally { busy.current = false; }
   };
