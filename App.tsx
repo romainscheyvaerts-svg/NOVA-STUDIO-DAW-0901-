@@ -3999,8 +3999,6 @@ function Studio() {
     }, 50);
   }, [setState]);
   // --- Groupes de pistes (l'interface existait dans le mixer, sans aucun handler)
-  const GROUP_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
-                        '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'];
 
   // Groupes Pro Tools (R12, utils/editGroups) : une piste peut être dans plusieurs groupes.
   const handleCreateGroup = useCallback((trackIds: string[]) => {

@@ -538,7 +538,6 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
 
   if (!open) return null;
 
-  const keyText = typeof key.root === 'number' ? `${keyLabelFr(key.root, key.scale)}${key.guessed ? ' (devinée d’après ta voix)' : ''}` : 'chromatique (tous les demi-tons)';
   const setRoot = (v: string) => {
     const k = v === '' ? { root: undefined, scale: 'CHROMATIC' } : { root: Number(v), scale: key.scale && key.scale !== 'CHROMATIC' ? key.scale : 'MINOR' };
     setKey(k);

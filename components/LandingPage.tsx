@@ -84,7 +84,6 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = user?.email?.toLowerCase() === 'romain.scheyvaerts@gmail.com';
 
   // Défi du jour : la même prod que sur le site (Beat Swipe), pour tout le monde.
   const challenge = React.useMemo(() => {

@@ -102,8 +102,6 @@ export interface BridgeFetched {
 }
 
 // Types pour les messages WebSocket
-type ASIOMessageHandler = (data: any) => void;
-
 interface ASIOMessageHandlers {
   onDevices?: (devices: AudioDevice[], asioDevices: AudioDevice[]) => void;
   onConfigSet?: (success: boolean, config?: ASIOConfig, error?: string) => void;

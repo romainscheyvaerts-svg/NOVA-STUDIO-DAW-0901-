@@ -41,7 +41,7 @@ export interface NotificationsHostProps {
 let openSettingsFn: (() => void) | null = null;
 
 const NotificationsHost: React.FC<NotificationsHostProps> = (p) => {
-  const { open, onOpen, onClose, isMobile, simple, inCollab, meKey, comments, versions, busy, sessionId } = p;
+  const { open, onOpen, onClose, isMobile, simple, inCollab, meKey, comments, busy } = p;
   const live = useRef(p);
   live.current = p;
   openSettingsFn = onOpen;

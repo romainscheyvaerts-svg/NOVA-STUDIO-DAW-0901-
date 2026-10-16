@@ -348,11 +348,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Trim TCE (R13) : place visée du clip étiré pendant le geste (rendu au relâchement).
   const [tceGhost, setTceGhost] = useState<{ trackId: string; clipId: string; start: number; duration: number; from: number } | null>(null);
 
-  const [hoverTime, setHoverTime] = useState<number | null>(null);
   // Bulle « -3.5 dB » pendant le réglage du gain de clip
   const [gainTip, setGainTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const gainDragRef = useRef<{ lastY: number; frac: number } | null>(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   // Bulle de glissement en français (G8) et aide au survol des coins de fondu (G7).
   const [dragTipPos, setDragTipPos] = useState<{ x: number; y: number } | null>(null);
   const [hoverHint, setHoverHint] = useState<{ x: number; y: number; text: string } | null>(null);

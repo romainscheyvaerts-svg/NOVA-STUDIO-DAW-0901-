@@ -151,7 +151,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // State
   const [zoom, setZoom] = useState(80); // pixels per beat
@@ -170,7 +169,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const [activeTool, setActiveTool] = useState<EditTool>('SELECT');
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pinchStart, setPinchStart] = useState<{ dist: number; zoom: number } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
   // Libre / Grille : même réglage que les modes Slip / Grid du PC (utils/editModes).
   const editMode = useEditMode();
   const snapToGrid = editMode.mode === 'GRID';
@@ -179,7 +177,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   
   // NEW: Clipboard and editing states
   const [clipboard, setClipboard] = useState<{ trackId: string; clip: Clip } | null>(null);
-  const [showEditMenu, setShowEditMenu] = useState(false);
   const [showSendsPanel, setShowSendsPanel] = useState(false);
   const [selectedTrackForSends, setSelectedTrackForSends] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
@@ -219,8 +216,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const totalWidth = totalBeats * zoom;
 
   // Convert time <-> beats
-  const timeToBeat = useCallback((time: number) => time * beatsPerSecond, [beatsPerSecond]);
-  const beatToTime = useCallback((beat: number) => beat / beatsPerSecond, [beatsPerSecond]);
   const timeToX = useCallback((time: number) => time * pixelsPerSecond, [pixelsPerSecond]);
   const xToTime = useCallback((x: number) => x / pixelsPerSecond, [pixelsPerSecond]);
 
@@ -544,11 +539,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       showNotification('✨ Clip dupliqué');
     } else if (onUpdateClip) {
       // Fallback: create new clip after current
-      const newClip: Partial<Clip> = {
-        ...selectedClip.clip,
-        id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        start: selectedClip.clip.start + selectedClip.clip.duration + 0.1
-      };
       // Would need onAddClip to fully work
       showNotification('✨ Clip dupliqué');
     }
@@ -592,13 +582,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     if (!selectedClip || !onUpdateClip) return;
     const newFadeOut = Math.max(0, Math.min(selectedClip.clip.duration / 2, (selectedClip.clip.fadeOut || 0) + delta));
     onUpdateClip(selectedClip.trackId, selectedClip.clip.id, { fadeOut: newFadeOut });
-  }, [selectedClip, onUpdateClip]);
-
-  // Adjust clip gain
-  const handleGainChange = useCallback((delta: number) => {
-    if (!selectedClip || !onUpdateClip) return;
-    const newGain = Math.max(0, Math.min(2, (selectedClip.clip.gain || 1) + delta));
-    onUpdateClip(selectedClip.trackId, selectedClip.clip.id, { gain: newGain });
   }, [selectedClip, onUpdateClip]);
 
   // Open sends panel for selected track

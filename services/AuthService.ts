@@ -60,7 +60,7 @@ class AuthService {
   public async register(email: string, password: string, username: string): Promise<{ success: boolean; message?: string }> {
     // --- MODE RÉEL (SUPABASE) ---
     if (isSupabaseConfigured() && supabase) {
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
             email,
             password,
             options: {
