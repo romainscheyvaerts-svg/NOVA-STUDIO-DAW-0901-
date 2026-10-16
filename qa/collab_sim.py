@@ -118,7 +118,7 @@ class FakeNovaCloud:
 
     def _need_plan(self, uid, sid=None):
         """Qui paie pour collaborer, selon la version du serveur (voir __init__)."""
-        if not self.strict or self.pro is None:
+        if self.pro is None:  # règle active dès qu'on dit qui a Nova Pro
             return
         if self.server == "ancien":
             if not self.is_pro(uid):
@@ -138,8 +138,8 @@ class FakeNovaCloud:
         raise HttpErr(402, "L'hôte de cette séance n'a plus Nova Pro : demande-lui de le réactiver (9,99 €/mois). En invité, tu n'as rien à payer.", reason="host_not_pro")
 
     def act(self, a, b, request):
-        if a == "resolve_code" and self.strict:
-            uid = self._need_user(request)
+        if a == "resolve_code" and (self.strict or self.pro is not None):
+            uid = self._need_user(request) if self.strict else self._user(request)
             inv = self.invites.get(str(b.get("code") or "").upper().replace(" ", ""))
             if inv:
                 self._need_plan(uid, inv["sid"])
@@ -155,7 +155,7 @@ class FakeNovaCloud:
             return {"link": f"{inv['sid']}.{s['secret']}", "name": s["name"]}
         if a == "create":
             uid = self._user(request)
-            if self.strict and b.get("purpose") == "collab" and self.server == "151":
+            if self.pro is not None and b.get("purpose") == "collab" and self.server == "151":
                 if not uid:
                     raise HttpErr(401, "Connecte-toi à ton compte Make Music pour collaborer")
                 if not self.is_pro(uid):
@@ -209,9 +209,9 @@ class FakeNovaCloud:
                 if b.get("role") not in ("artist", "engineer", "beatmaker"):
                     raise HttpErr(400, "Rôle inconnu")
                 self._need_user(request)
-                self._need_plan(uid, sid)
                 if key == "d:":
                     raise HttpErr(400, "Appareil inconnu")
+            self._need_plan(uid, sid)
             self.last_seen[(sid, key)] = time.time()
             self.members[(sid, key)] = {"role": b.get("role"), "name": (str(b.get("name") or "") or "Invité")[:40], "uid": uid}
             mem = [{"member_key": k[1], "role": v["role"], "display_name": v["name"]} for k, v in self.members.items() if k[0] == sid]
@@ -505,6 +505,29 @@ class FakeBridgeV7(FakeBridge):
             except Exception:
                 pass
         return (y * (10 ** (db / 20))).astype(np.float32)
+
+
+FREE_STATUS = {"plans": [], "admin": False, "pro": {"active": False, "source": None, "days_left": 0, "until": None}, "unlocked": False}
+
+
+def free_billing(page):
+    """Compte GRATUIT côté appli (nova-billing simulé) : ni Nova Pro, ni admin (invité gratuit, 1.5.1).
+    À poser APRÈS gel_pre_effet.prepare (qui simule un admin) : la dernière route posée gagne."""
+    def h(route, request):
+        if request.method == "OPTIONS":
+            return route.fulfill(status=204, headers=FakeNovaCloud.cors())
+        try:
+            action = json.loads(request.post_data or "{}").get("action")
+        except Exception:
+            action = None
+        if action == "export_access":
+            body = {"unlocked": False, "via": None, "reason": "paiement", "missing": [], "login_required": False, "kits": False, "pro": FREE_STATUS["pro"], "items": []}
+        elif action in ("pricing", "melody_perk"):
+            return route.fulfill(status=400, content_type="application/json", headers=FakeNovaCloud.cors(), body=json.dumps({"error": "Action inconnue"}))
+        else:
+            body = FREE_STATUS
+        route.fulfill(status=200, content_type="application/json", headers=FakeNovaCloud.cors(), body=json.dumps(body))
+    page.route("**/functions/v1/nova-billing", h)
 
 
 def jwt(sub, email):

@@ -198,7 +198,7 @@ def run_vp(p, vp, res):
             check("0. bouton « ❓ Comment faire ? » visible dans la barre du haut (mode simple)", bx is not None and bx["w"] > 0, bx)
         open_panel()
         n_items = page.locator("[data-testid^=howto-item-]").count()
-        check("0. la liste montre 15 à 25 parcours", 15 <= n_items <= 25, n_items)
+        check("0. la liste montre 15 à 30 parcours", 15 <= n_items <= 30, n_items)  # 1.5.1 : 30 au plus (tests/guides.test.ts)
         snap("00_liste")
         page.get_by_test_id("howto-search").fill("autotune")
         page.wait_for_timeout(250)

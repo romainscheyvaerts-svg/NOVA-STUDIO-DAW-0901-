@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { openPublicTrack, PublicTrackError } from '../services/PublicTracks';
 import {
-  EXTRAIT_SECONDES, fmtDuration, parsePublicLocation, playsText, publicErrorCode, publicErrorView,
+  fmtDuration, parsePublicLocation, playsText, publicErrorCode, publicErrorView,
   type PublicErrorCode, type PublicTrackView,
 } from '../utils/publicTrack';
 
@@ -110,7 +110,7 @@ const PublicTrackPage: React.FC = () => {
               : <div className="grid h-[112px] w-[112px] shrink-0 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-[36px] max-[420px]:hidden" aria-hidden>♪</div>}
             <div className="min-w-0 flex-1 space-y-1">
               <p className="truncate text-[15px] font-black leading-tight" data-testid="pub-title-view">{data.title}</p>
-              <p className="truncate text-[12px] text-slate-400">{data.artist || 'NOVA Studio'}{data.kind === 'extrait' ? ` · extrait ${EXTRAIT_SECONDES} s` : ''}</p>
+              <p className="truncate text-[12px] text-slate-400">{data.artist || 'NOVA Studio'}{data.kind === 'extrait' ? ' · extrait' : ''}</p>
               {player}
               <a href={data.booking_url} target="_blank" rel="noopener" data-testid="pub-booking" className="inline-block text-[11px] font-black text-cyan-300 underline">Réserver au studio Make Music ↗</a>
             </div>
@@ -146,7 +146,7 @@ const PublicTrackPage: React.FC = () => {
               <h1 className="mt-3 text-[20px] font-black">{ev.title}</h1>
               <p className="mt-1 text-[14px] leading-snug text-slate-300">{ev.text}</p>
               {ev.retry && <button type="button" onClick={() => { setView({ kind: 'loading' }); void load(); }} className={`${btn} mt-4 h-12 w-full bg-white text-black`}>Réessayer</button>}
-              <a href="https://www.studiomakemusic.com/reservation?utm_source=nova&utm_medium=page_publique" target="_blank" rel="noopener" className={`${btn} mt-3 h-12 w-full bg-white/10 text-[14px] text-white`}>🎙️ Réserver au studio Make Music</a>
+              <a href="https://www.studiomakemusic.com/reservation?utm_source=nova&utm_medium=page_publique" target="_blank" rel="noopener" className={`${btn} mt-3 min-h-12 w-full px-4 py-2 text-center bg-white/10 text-[14px] text-white`}>🎙️ Réserver au studio Make Music</a>
             </div>
           );
         })()}
@@ -160,7 +160,7 @@ const PublicTrackPage: React.FC = () => {
                 <div>
                   <h1 className="text-[24px] font-black leading-tight" data-testid="pub-title-view">{data.title}</h1>
                   {data.artist && <p className="text-[15px] font-bold text-slate-300">{data.artist}</p>}
-                  <p className="mt-1 text-[12px] text-slate-400">{data.kind === 'extrait' ? `Extrait de ${EXTRAIT_SECONDES} s` : 'Morceau entier'} · {fmtDuration(duration)} · {playsText(data.plays)}</p>
+                  <p className="mt-1 text-[12px] text-slate-400">{data.kind === 'extrait' ? 'Extrait' : 'Morceau entier'} · {fmtDuration(duration)} · {playsText(data.plays)}</p>
                 </div>
                 {player}
                 {audioErr && <p role="alert" className="text-[12px] text-red-300">{audioErr}</p>}
@@ -168,7 +168,7 @@ const PublicTrackPage: React.FC = () => {
             </section>
 
             <a href={data.booking_url} target="_blank" rel="noopener" data-testid="pub-booking"
-              className={`${btn} h-14 w-full bg-white text-[16px] text-black`}>🎙️ Réserver une session au studio Make Music</a>
+              className={`${btn} min-h-14 w-full px-4 py-3 text-center text-[16px] leading-tight bg-white text-black`}>🎙️ Réserver une session au studio Make Music</a>
 
             {data.credits && (
               <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4" data-testid="pub-credits-view">

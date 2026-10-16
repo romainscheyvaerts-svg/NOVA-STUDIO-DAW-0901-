@@ -87,6 +87,10 @@ BATTERIE = [
     # première prise → écoute → fenêtre d'export), bureau et téléphone, sans compte et connecté ; inventaire des écrans,
     # aucune pastille flottante qui recouvre un bouton.
     ("premier_parcours", []),
+    # 1.5.1 · lots BandLab 3 et 9 (16/10/2026) : invité GRATUIT (seul l'hôte a Nova Pro ; héberger sans Pro → 402 ;
+    # ancien serveur : message clair), « Faire sa version » (copie au bit près, compteur, lien désactivé → 410) et page
+    # publique d'un morceau (extrait, lecteur intégrable, réserver au studio, pas de téléchargement, retirée → 410).
+    ("invite_copie", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

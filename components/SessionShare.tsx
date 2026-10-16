@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DAWState } from '../types';
 import { catalogSupabase } from '../services/supabase';
 import { claimSession, signInAccount } from '../services/SessionCloud';
@@ -240,12 +240,18 @@ const ForkTab: React.FC<DialogProps> = (p) => {
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** Serveur pas encore à jour (fonction daw-fork absente) : rien à créer pour l'instant. */
+  const [off, setOff] = useState(false);
 
+  // Le panneau suit la séance par une référence : App se redessine souvent, la liste n'est relue
+  // qu'à l'ouverture, à la connexion et après une action (pas à chaque image).
+  const sessionRef = useRef(p.currentSession);
+  sessionRef.current = p.currentSession;
   const refresh = useCallback(async () => {
-    const s = p.currentSession();
+    const s = sessionRef.current();
     if (!s) { setLinks([]); return; }
-    try { setLinks(await withOwnedSession(s, listForkLinks)); } catch (e: any) { setLinks([]); if ((e as ForkError)?.code !== 'not_deployed') setErr(e?.message || null); else setErr(e.message); }
-  }, [p]);
+    try { setLinks(await withOwnedSession(s, listForkLinks)); } catch (e: any) { setLinks([]); setErr(e?.message || null); if ((e as ForkError)?.code === 'not_deployed') setOff(true); }
+  }, []);
   useEffect(() => { if (p.signedIn) void refresh(); }, [p.signedIn, refresh]);
 
   const create = async () => {
@@ -262,7 +268,7 @@ const ForkTab: React.FC<DialogProps> = (p) => {
       const url = forkUrl(r.link.token, baseUrl());
       if (await copyText(url)) { setCopied(r.link.id); window.setTimeout(() => setCopied(c => (c === r.link.id ? null : c)), 2500); }
       p.notify('🎁 Lien « Faire sa version » créé et copié : chacun aura sa propre copie, ton original ne bouge pas.');
-    } catch (e: any) { setErr(e?.message || 'Création impossible'); } finally { setBusy(null); }
+    } catch (e: any) { setErr(e?.message || 'Création impossible'); if ((e as ForkError)?.code === 'not_deployed') setOff(true); } finally { setBusy(null); }
   };
   const revoke = async (l: ForkLinkInfo) => {
     const s = p.currentSession();
@@ -283,7 +289,7 @@ const ForkTab: React.FC<DialogProps> = (p) => {
           <span className="text-[12px] font-bold text-slate-300">Pour qui ? (facultatif)</span>
           <input value={label} onChange={e => setLabel(e.target.value.slice(0, 60))} placeholder="Ex. : rappeurs du 93, Nina…" data-testid="fork-label" className={field} />
         </label>
-        <button type="button" data-testid="fork-create" disabled={!!busy || (links?.length || 0) >= MAX_FORK_LINKS} onClick={() => void create()}
+        <button type="button" data-testid="fork-create" disabled={!!busy || off || (links?.length || 0) >= MAX_FORK_LINKS} onClick={() => void create()}
           className={`${btn} h-12 w-full bg-cyan-400 text-[14px] text-black`}>{busy || '🎁 Créer le lien « Faire sa version »'}</button>
         {(links?.length || 0) >= MAX_FORK_LINKS && <p className="text-[12px] text-amber-200">{MAX_FORK_LINKS} liens actifs au plus : désactives-en un pour en créer un autre.</p>}
       </div>
@@ -299,7 +305,7 @@ const ForkTab: React.FC<DialogProps> = (p) => {
                 <div key={l.id} className="space-y-2 rounded-2xl bg-white/[0.04] p-3" data-testid="fork-link" data-copies={l.copies}>
                   <div className="flex items-center justify-between gap-2">
                     <p className="min-w-0 truncate text-[14px] font-black">{l.label || l.name}</p>
-                    <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[12px] font-black text-emerald-200" data-testid="fork-copies">{copiesText(l.copies)}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[12px] font-black ${l.copies > 0 ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300'}`} data-testid="fork-copies">{copiesText(l.copies)}</span>
                   </div>
                   <input readOnly value={url} onFocus={e => e.currentTarget.select()} aria-label="Lien à envoyer" data-testid="fork-url" className={`${field} font-mono text-[12px]`} />
                   <div className="grid grid-cols-2 gap-2">
@@ -329,6 +335,8 @@ const PublicTab: React.FC<DialogProps> = (p) => {
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<'url' | 'embed' | null>(null);
   const [editing, setEditing] = useState(false);
+  /** Serveur pas encore à jour (pages publiques absentes) : on n'envoie pas le son pour rien. */
+  const [off, setOff] = useState(false);
   const hasLyrics = !!(st.lyrics || '').trim();
   const exportKey = exportKeyOf(st);
   const catalogIds = useMemo(() => catalogIdsOf(st.tracks), [st.tracks]);
@@ -344,7 +352,7 @@ const PublicTab: React.FC<DialogProps> = (p) => {
       if (!live) return;
       setPage(pg);
       if (pg) { setTitle(pg.title); setArtist(pg.artist); setCredits(pg.credits); setShowLyrics(pg.show_lyrics); setKind(pg.kind); }
-    }).catch((e: any) => { if (live) { setPage(null); if ((e as PublicTrackError)?.code === 'not_deployed') setErr(e.message); } });
+    }).catch((e: any) => { if (live) { setPage(null); if ((e as PublicTrackError)?.code === 'not_deployed') { setErr(e.message); setOff(true); } } });
     return () => { live = false; };
   }, [p.signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -398,7 +406,7 @@ const PublicTab: React.FC<DialogProps> = (p) => {
             <p className="min-w-0 truncate text-[15px] font-black">{page.title}</p>
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[12px] font-black ${page.published ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300'}`}>{page.published ? 'En ligne' : 'Retirée'}</span>
           </div>
-          <p className="text-[12px] text-slate-400">{page.kind === 'mix' ? 'Morceau entier' : `Extrait de ${EXTRAIT_SECONDES} s`} · {fmtDuration(page.duration)} · {playsText(page.plays)}</p>
+          <p className="text-[12px] text-slate-400">{page.kind === 'mix' ? 'Morceau entier' : 'Extrait'} · {fmtDuration(page.duration)} · {playsText(page.plays)}</p>
           {page.published && url && (
             <>
               <input readOnly value={url} onFocus={e => e.currentTarget.select()} aria-label="Lien de la page" data-testid="pub-url" className={`${field} font-mono text-[12px]`} />
@@ -451,7 +459,7 @@ const PublicTab: React.FC<DialogProps> = (p) => {
             <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} data-testid="pub-consent" className="mt-0.5 h-5 w-5 shrink-0 accent-cyan-400" />
             <span><b>Je publie ce morceau.</b> La page sera visible par toute personne qui a le lien. Pas de téléchargement, pas de pistes séparées ; je peux la retirer à tout moment.</span>
           </label>
-          <button type="button" data-testid="pub-publish" disabled={!!busy || !consent || !title.trim()} onClick={() => void publish()}
+          <button type="button" data-testid="pub-publish" disabled={!!busy || off || !consent || !title.trim()} onClick={() => void publish()}
             className={`${btn} h-12 w-full bg-cyan-400 text-[14px] text-black`}>{busy || (page ? 'Mettre à jour la page' : '🌍 Publier la page')}</button>
         </section>
       )}

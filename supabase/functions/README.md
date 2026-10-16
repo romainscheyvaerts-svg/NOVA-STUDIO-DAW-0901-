@@ -157,3 +157,17 @@ Migration : `supabase/migrations/20261014120000_nova_tarifs.sql` (AVANT les fonc
 Tests : `npx vitest run supabase/tests` (dont `novaTarifs.test.ts`) ; migration :
 `PGLITE=… node supabase/tests/nova_tarifs.pglite.mjs`.
 Ordre de mise en ligne, commandes et retour arrière : `D:\1 WORK\CONTENU\nova-tarifs\DEPLOIEMENT.md`.
+
+## 1.5.1 · invité gratuit, « Faire sa version », page publique (16/10/2026) — PAS DÉPLOYÉE
+
+| Fonction | Changement |
+|---|---|
+| `daw-session` | **Invité gratuit** : seul l'hôte a besoin de Nova Pro. Pour une séance sans propriétaire, il suffit qu'un membre déjà présent soit Pro. **Héberger sans Pro** : 402 `host_pro` dès `create` (`purpose: "collab"`). **Anti-abus** : 8 comptes actifs au plus par séance (429 `session_full`) et 20 codes faux par heure et par compte (429 `code_attempts`, table `daw_invite_attempts`, ignorée si absente). **Ménage** : l'audio d'un lien « Faire sa version » actif ou d'une page publique est gardé. |
+| `daw-fork` (nouvelle) | Lien « Faire sa version » : `fork_create`, `fork_list` et `fork_revoke` pour le propriétaire ; `fork_open` avec le jeton et un compte, en lecture. Instantané figé, sans l'audio des pistes du catalogue (`_shared/forkCopy.ts`). Compteur d'une copie par compte ; lien révoqué → 410. |
+| `daw-listen` | Page publique (`publicTrack.ts`) : `public_get`, `public_publish` (consentement obligatoire) et `public_set` pour le propriétaire ; `public_open` sans compte. Seulement l'extrait (≤ 31 s, ≤ 1,5 Mo) ou le mix, et le mix seulement si l'export est débloqué (`decisionExport`). Page retirée → 410. |
+
+Migration : `supabase/migrations/20261016120000_invite_copie_151.sql`, à appliquer AVANT les fonctions. Copie à coller : `D:\1 WORK\CONTENU\nova-151\serveur\invite_copie_151.sql`.
+
+Tests : `npx vitest run supabase/tests` (dont `invite-copie.test.ts`).
+
+Mise en ligne : `D:\1 WORK\CONTENU\nova-151\serveur\fonctions_151.sh` (bloc « invite-copie » : les trois fonctions ensemble) et `LISEZMOI_invite_copie.md`.

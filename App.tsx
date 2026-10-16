@@ -7059,11 +7059,14 @@ function Studio() {
   };
 
   const [collabGate, setCollabGate] = useState<'login' | 'subscribe' | null>(null);
+  // Lot 3 (1.5.1) : refus du serveur montré DANS le panneau (au téléphone, le chat Nova est caché).
+  const [collabJoinError, setCollabJoinError] = useState<string | null>(null);
   /** quiet : reprise automatique après un rechargement de la page (pas de fenêtre de connexion). */
   const startCollab = useCallback(async (role: CollabRole, name: string, opts: { quiet?: boolean; host?: boolean; color?: string } = {}) => {
     if (remoteRef.current?.active) await remoteRef.current.leave(false);
     setCollabBusy(opts.quiet ? 'Reconnexion à la collaboration…' : 'Mise en ligne de la session…');
     setCollabGate(null);
+    setCollabJoinError(null);
     try {
       // Collaboration = compte Make Music ; Nova Pro pour l'HÔTE seulement, les invités ne paient rien
       // (le serveur le vérifie : il refuse un invité si l'hôte n'a plus Nova Pro, avec un message clair).
@@ -7268,7 +7271,7 @@ function Studio() {
       // Lot 3 (1.5.1) : Nova Pro pour l'HÔTE seulement ; un invité n'est jamais envoyé vers l'abonnement.
       const refus = collabRefusal(e, !!opts.host);
       if (refus?.gate && !opts.quiet) setCollabGate(refus.gate);
-      else if (refus?.message) setAiNotification(`⚠️ ${refus.message}`);
+      else if (refus?.message) { setAiNotification(`⚠️ ${refus.message}`); if (!opts.quiet) setCollabJoinError(refus.message); }
       else setAiNotification(opts.quiet
         ? `⚠️ Reconnexion à la collaboration impossible (${msg}). Ouvre « Collaborer » pour réessayer.`
         : `⚠️ Collaboration impossible : ${msg}. Vérifie ta connexion puis réessaie.`);
@@ -11146,6 +11149,7 @@ function Studio() {
         onReload={() => { void reloadCollabSession(); }}
         onStart={(r, n) => { void startCollab(r, n, { host: true }); }}
         gate={collabGate}
+        joinError={collabJoinError}
         onSignIn={async (email, password) => {
           await signInAccount(email, password);
           setCollabGate(null);

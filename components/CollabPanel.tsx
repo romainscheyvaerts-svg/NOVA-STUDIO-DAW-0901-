@@ -72,6 +72,8 @@ interface Props {
   busy?: string | null;
   /** Il faut d'abord se connecter (compte Make Music) ou prendre Nova Pro (pour HÉBERGER : les invités ne paient rien). */
   gate?: 'login' | 'subscribe' | null;
+  /** Refus du serveur à montrer dans le panneau (séance complète, hôte sans Nova Pro…) : utils/collabAccess. */
+  joinError?: string | null;
   onSignIn?: (email: string, password: string) => Promise<void>;
   onSubscribe?: () => void;
   /** Mode « Ingé à distance (ses propres VST) » : chacun sa session (voir RemoteIngePanel). */
@@ -353,8 +355,9 @@ const CollabPanel: React.FC<Props> = (p) => {
             className={`${btn} h-12 w-full bg-cyan-500 text-[14px] text-black`}>{p.busy || (joining ? 'Connexion…' : !arrivalRole ? 'Choisis ton rôle pour rejoindre'
               : quickArtist && !showRoles ? (inlineLogin ? (signUpMode ? 'Créer mon compte et rejoindre' : 'Me connecter et rejoindre') : `Rejoindre la séance${p.arrival.host ? ` de ${p.arrival.host.name}` : ''}`)
                 : `Rejoindre comme ${ROLE_LABEL[arrivalRole].toLowerCase()}`)}</button>
+          {p.joinError && <p role="alert" data-testid="collab-join-error" className="rounded-xl bg-amber-500/15 p-3 text-[13px] font-semibold text-amber-100">⚠️ {p.joinError}</p>}
           {/* Lot 3 (1.5.1) : l'invité rejoint gratuitement, il ne paie jamais pour rejoindre. */}
-          <p data-testid="arrival-free" className="text-center text-[12px] font-bold text-emerald-300">🎟️ Gratuit pour toi : {p.arrival.host?.name ? `${p.arrival.host.name} héberge` : "l'hôte héberge"} la séance, tu n'as rien à payer.</p>
+          {!p.joinError && <p data-testid="arrival-free" className="text-center text-[12px] font-bold text-emerald-300">🎟️ Gratuit pour toi : {p.arrival.host?.name ? `${p.arrival.host.name} héberge` : "l'hôte héberge"} la séance, tu n'as rien à payer.</p>}
           <button type="button" onClick={p.onCancelArrival} className="w-full min-h-11 text-center text-[12px] text-slate-400 underline">Pas maintenant (juste regarder la séance)</button>
         </div>
       ) : !p.active ? (
