@@ -555,3 +555,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Une vérification KO = scénario en échec (avant : code 0, la batterie le voyait vert à tort).
+    sys.exit(0 if RES["etapes"] and all(v["ok"] for v in RES["etapes"].values()) else 1)
