@@ -542,3 +542,5 @@ with sync_playwright() as p:
         ctx.close()
     b.close()
 save_json(OUT / "seances_doigt.json", out)
+# Une vérification KO = scénario en échec (avant : code 0, la batterie le voyait vert à tort).
+sys.exit(1 if not out["seances"] or any(r["total"]["etapes_ko"] for r in out["seances"].values()) else 0)

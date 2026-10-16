@@ -31,7 +31,7 @@ export type PrereqId = 'appli-windows' | 'compte' | 'micro' | 'casque' | 'licenc
 
 export const PREREQ_LABELS: Record<PrereqId, string> = {
   'appli-windows': '💻 Appli NOVA pour Windows',
-  compte: '👤 Un compte NOVA (gratuit)',
+  compte: '👤 Un compte Make Music (gratuit, le même que sur studiomakemusic.com)',
   micro: '🎙️ Un micro (celui du téléphone suffit)',
   casque: '🎧 Un casque filaire',
   'licence-instru': '🛒 La licence de l’instru (si elle vient du catalogue)',
@@ -337,7 +337,7 @@ export const GUIDES: Guide[] = [
     steps: [
       { text: 'Ouvre « Sauvegarder » (Ctrl+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
         target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
-      { text: 'Avec un compte : « Sauvegarder » en ligne. Sans compte : « Fichier sur cet appareil (.zip) ».', target: tid('save-new-version-box'), manual: true },
+      { text: 'En ligne : « Emporter la session » (compte Make Music). Sans compte : « Fichier sur cet appareil (.zip) ».', target: tid('save-new-version-box'), manual: true },
       { text: 'Pour le retrouver : « Ouvrir un projet ».', phone: 'Touche ☰, puis « Ouvrir un projet ».', action: 'pal.open',
         target: ['[data-bar-item="ouvrir"]', tid('menu-open-project'), PHONE_MENU], manual: true },
     ],
@@ -348,6 +348,27 @@ export const GUIDES: Guide[] = [
     ],
     prereqs: [],
     doIt: () => [cmd('nova.save', 'Ouvrir la sauvegarde')],
+  },
+  {
+    id: 'creer-compte', emoji: '👤', title: 'Créer ton compte Make Music (gratuit)',
+    keywords: 'compte creer inscription inscrire s inscrire connexion connecter login sign up register mot de passe email studiomakemusic',
+    summary: 'Le même compte que sur studiomakemusic.com : en ligne, Nova Pro, collaboration, instrus.',
+    steps: [
+      { text: 'Touche « Connexion » en haut à droite.', phone: 'Touche ☰, puis « Se connecter ».', action: 'pal.signup',
+        target: ['[aria-label="Connexion"]', PHONE_MENU], unless: 'loggedIn', done: { visible: '[role="dialog"][aria-label="Connexion"]' } },
+      { text: 'Touche « Créer un compte ».', target: tid('auth-signup-open'), unless: 'loggedIn', done: { visible: '[data-mm-signup="form"]' } },
+      { text: 'Ton nom, ton e-mail, un mot de passe (12 caractères, une majuscule, une minuscule, un chiffre), puis « Créer mon compte ».',
+        target: '[data-mm-signup="form"]', unless: 'loggedIn', done: { visible: '[data-mm-signup="sent"]' } },
+      { text: 'Clique le lien reçu par e-mail (regarde les spams), puis « J’ai confirmé, me connecter ».', target: '[data-mm-signup="sent"]', manual: true },
+    ],
+    result: 'Ton compte Make Music : connecte-toi avec lui dans NOVA, l’appli Windows et sur studiomakemusic.com.',
+    pitfalls: [
+      'Tu as déjà un compte sur studiomakemusic.com ? Connecte-toi avec lui, inutile d’en créer un autre.',
+      'Rien reçu ? « Renvoyer l’e-mail », et regarde dans les spams.',
+      'Projets en ligne avec ce compte : « Sauvegarder » → « Emporter la session ».',
+    ],
+    prereqs: ['internet'],
+    doIt: () => [cmd('pal.signup', 'Ouvrir la création de compte Make Music')],
   },
   {
     id: 'emporter', emoji: '🏠', title: 'Continuer sur un autre appareil',

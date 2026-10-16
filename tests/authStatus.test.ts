@@ -43,13 +43,17 @@ describe('connexion e-mail du site (AuthService) quand le service est restreint'
           signUp: async () => ({ data: null, error: Object.assign(new Error('Bad Gateway'), { status: 502 }) }),
         },
       },
-      catalogSupabase: {},
+      // « Créer un compte » crée le compte Make Music (16/10/2026) : c'est ce projet qui est restreint ici.
+      catalogSupabase: { auth: {
+        signUp: async () => ({ data: null, error: Object.assign(new Error('Bad Gateway'), { status: 502 }) }),
+        resetPasswordForEmail: async () => { throw new TypeError('Failed to fetch'); },
+      } },
     }));
     vi.doMock('../services/SupabaseManager', () => ({ supabaseManager: { resetPasswordForEmail: async () => { throw new TypeError('Failed to fetch'); } } }));
     const { authService } = await import('../services/AuthService');
     const r = await authService.login('a@b.c', 'secret12');
     expect(r).toEqual({ success: false, message: AUTH_DOWN_MESSAGE });
-    expect((await authService.register('a@b.c', 'secret12', 'x')).message).toBe(AUTH_DOWN_MESSAGE);
+    expect((await authService.register('a@b.c', 'Motdepasse12', 'x')).message).toBe(AUTH_DOWN_MESSAGE);
     expect((await authService.sendPasswordReset('a@b.c')).message).toBe(AUTH_DOWN_MESSAGE);
     vi.doUnmock('../services/supabase');
     vi.doUnmock('../services/SupabaseManager');

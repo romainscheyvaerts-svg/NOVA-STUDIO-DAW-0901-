@@ -541,8 +541,12 @@ def scenario_ecrans(page, vp, theme="dark"):
     if vp == "tel":
         # Téléphone : menu ☰ → Notes / Versions (version simple).
         page.get_by_test_id("transport-menu").click(); page.wait_for_timeout(500)
+        # Mode simple (15/10/2026) : Notes / Versions sont rangées sous « Plus d'outils » (un toucher de plus).
+        plus = page.get_by_test_id("menu-plus-toggle").locator("visible=true")
+        if plus.count() and plus.first.get_attribute("aria-expanded") != "true":
+            plus.first.click(); page.wait_for_timeout(400)
         shot(page, f"{tag}_01_menu")
-        page.get_by_test_id("menu-session-notes").click(); page.wait_for_timeout(700)
+        page.get_by_test_id("menu-session-notes").locator("visible=true").first.click(); page.wait_for_timeout(700)
         shot(page, f"{tag}_02_notes")
         tabs = page.locator("[data-testid^=session-tab-]").evaluate_all("els => els.map(e => e.dataset.testid)")
         page.get_by_test_id("session-tab-versions").click(); page.wait_for_timeout(700)
@@ -593,6 +597,8 @@ def main(names):
     (OUT / "r21_resultats.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     ko = [k for k, v in res["etapes"].items() if not v["ok"]]
     print(f"\n{len(res['etapes']) - len(ko)}/{len(res['etapes'])} étapes OK" + (f" — KO : {ko}" if ko else ""))
+    # Une étape KO = scénario en échec (avant : code 0, la batterie le voyait vert à tort).
+    sys.exit(1 if ko or not res["etapes"] else 0)
 
 
 if __name__ == "__main__":

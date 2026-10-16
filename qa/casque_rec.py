@@ -116,3 +116,5 @@ res["verifications"] = checks
 res["bilan"] = {"ok": sum(c["ok"] for c in checks), "total": len(checks)}
 (OUT / "casque_rec.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 print("\nBILAN :", json.dumps(res["bilan"], ensure_ascii=False))
+# Une vérification KO = scénario en échec (avant : code 0, la batterie le voyait vert à tort).
+sys.exit(0 if checks and all(c["ok"] for c in checks) else 1)

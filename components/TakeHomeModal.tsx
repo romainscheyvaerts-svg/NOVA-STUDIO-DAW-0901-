@@ -5,6 +5,8 @@ import {
   LocalCloudSession, sessionUrl, currentAccount, signInAccount, signOutAccount, assignSession, claimSession,
 } from '../services/SessionCloud';
 import { formatAgo } from '../utils/sessionStore';
+import MakeMusicSignupForm from './MakeMusicSignupForm';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /**
  * « Emporter la session » : envoie la session en ligne (audio compris), donne
@@ -31,6 +33,8 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
   const [clientEmail, setClientEmail] = useState('');
   const [accountMsg, setAccountMsg] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
+  // « Pas de compte ? » : compte Make Music créé ici (avant : lien vers le site).
+  const [signup, setSignup] = useState(false);
 
   const url = session?.secret ? sessionUrl({ id: session.id, secret: session.secret }) : null;
 
@@ -115,7 +119,12 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
               <p className="text-[12px] font-black text-white">👤 Compte client Make Music</p>
               {account === undefined && <p className="text-[11px] text-slate-500">Vérification…</p>}
-              {account === null && (
+              {account === null && signup && (
+                <MakeMusicSignupForm compact desktop={isNovaDesktop()} testid="takehome-signup" initialEmail={email}
+                  onSignedIn={() => { setSignup(false); currentAccount().then(setAccount).catch(() => setAccount(null)); }}
+                  onWantLogin={(em) => { setEmail(em); setSignup(false); setAccountMsg(null); }} />
+              )}
+              {account === null && !signup && (
                 <>
                   <p className="text-[11px] text-slate-400">Connecte-toi avec ton compte studiomakemusic.com pour ranger la session dans ton espace (retrouvable partout, même sans le lien).</p>
                   <input className={input} type="email" autoComplete="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
@@ -124,7 +133,7 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
                     onClick={() => run(async () => { await signInAccount(email, password); setAccount(await currentAccount()); setPassword(''); return 'Connecté ✓'; })}>
                     Se connecter
                   </button>
-                  <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Pas de compte ? En créer un sur studiomakemusic.com</a>
+                  <button type="button" onClick={() => { setSignup(true); setAccountMsg(null); }} data-testid="takehome-signup-open" className="block w-full min-h-10 text-center text-[12px] text-cyan-300 underline">Pas de compte ? Crée-le ici (gratuit)</button>
                 </>
               )}
               {account && (

@@ -225,3 +225,5 @@ with sync_playwright() as p:
     save_json(OUT / "session_beat.json", rep)
     print("\nTOTAL :", json.dumps(rep["total"], ensure_ascii=False), "| console :", len(rep["erreurs_console"]), "erreur(s), pont VST :", rep["erreurs_pont_vst"])
     ctx.close(); b.close()
+    # Une vérification KO = scénario en échec (avant : code 0, la batterie le voyait vert à tort).
+    sys.exit(1 if rep["total"]["etapes_ko"] else 0)

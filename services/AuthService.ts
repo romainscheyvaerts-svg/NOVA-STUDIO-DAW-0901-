@@ -3,6 +3,8 @@ import { User } from "../types";
 import { supabase, isSupabaseConfigured, catalogSupabase } from "./supabase";
 import { supabaseManager } from "./SupabaseManager";
 import { authServiceMessage } from "../utils/authStatus";
+import { friendlyAuthError } from "../utils/desktopAccess";
+import { signUpMakeMusic, sendMakeMusicPasswordReset } from "./makeMusicSignup";
 
 /** Erreur de connexion : message clair si le SERVICE est restreint / injoignable (402, 5xx, DNS). */
 const authMessage = (error: any, fallback?: string) => authServiceMessage(error) || error?.message || fallback || "Erreur de connexion";
@@ -55,41 +57,19 @@ class AuthService {
   }
 
   /**
-   * Inscription (Réelle ou Simulée)
+   * Inscription : crée le compte MAKE MUSIC (celui de studiomakemusic.com : paiements, collaboration,
+   * séances en ligne, appli Windows), avec les règles du site (services/makeMusicSignup). Avant le
+   * 16/10/2026, elle créait un compte de l'ancien projet, inconnu de tout le reste.
+   * `needsConfirm` : l'e-mail de confirmation est parti (le compte s'ouvre en cliquant le lien).
    */
-  public async register(email: string, password: string, username: string): Promise<{ success: boolean; message?: string }> {
-    // --- MODE RÉEL (SUPABASE) ---
-    if (isSupabaseConfigured() && supabase) {
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                data: { username }
-            }
-        });
-
-        if (error) {
-            return { success: false, message: authMessage(error) };
-        }
-
-        // Si auto-confirm est OFF, l'utilisateur doit vérifier son email
-        return { success: true, message: "Vérifiez vos emails pour confirmer." };
+  public async register(email: string, password: string, username: string, opts: { desktop?: boolean } = {}): Promise<{ success: boolean; message?: string; needsConfirm?: boolean; makeMusicOnly?: boolean }> {
+    try {
+        const r = await signUpMakeMusic({ name: username, email, password }, opts);
+        if (r.status === 'signed_in') return { success: true, makeMusicOnly: true };
+        return { success: true, needsConfirm: true, message: "Vérifie tes e-mails pour confirmer ton compte." };
+    } catch (e: any) {
+        return { success: false, message: e?.message || "Création du compte impossible : réessaie dans un instant." };
     }
-
-    // --- MODE SIMULATION (LocalStorage) ---
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        if (email.includes('error')) {
-          resolve({ success: false, message: "Cet email est déjà utilisé." });
-          return;
-        }
-        const tempUser: User = { id: `usr-${Date.now()}`, email, username, isVerified: false, plan: 'FREE' };
-        sessionStorage.setItem('nova_pending_registration', JSON.stringify(tempUser));
-        sessionStorage.setItem('nova_verification_code', '123456');
-        console.log(`📧 [SIMULATION] Envoi à ${email}: Code 123456`);
-        resolve({ success: true });
-      }, DELAY_MS);
-    });
   }
 
   /**
@@ -124,29 +104,37 @@ class AuthService {
   /**
    * Connexion avec option "Se souvenir de moi"
    */
-  public async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; user?: User; message?: string; makeMusicOnly?: boolean }> {
+  public async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; user?: User; message?: string; makeMusicOnly?: boolean; needsConfirm?: boolean }> {
     // --- MODE RÉEL ---
     if (isSupabaseConfigured() && supabase) {
         // Une seule connexion pour tout NOVA : les mêmes identifiants (tapés par la personne)
         // ouvrent aussi son compte Make Music (paiements, collaboration, séances en ligne), celui
         // de studiomakemusic.com. Aucun jeton n'est copié d'un projet à l'autre.
+        let mmError: any = null;
         const makeMusic = (async () => {
             try {
                 const r = await catalogSupabase.auth.signInWithPassword({ email: email.trim(), password });
+                mmError = r.error || null;
                 return !r.error && !!r.data?.user;
-            } catch { return false; }
+            } catch (e) { mmError = e; return false; }
         })();
+        // Compte Make Music créé dans NOVA ou sur le site, lien de confirmation pas encore cliqué :
+        // on le dit (avant : « Invalid login credentials », en anglais).
+        const notConfirmed = () => /not confirmed/i.test(String(mmError?.message || '')) || mmError?.code === 'email_not_confirmed';
+        const failure = (e: any) => notConfirmed()
+            ? { success: false, needsConfirm: true, message: "Ton e-mail n'est pas encore confirmé : clique sur le lien reçu (regarde aussi dans les spams), puis reconnecte-toi." }
+            : { success: false, message: authServiceMessage(e) || friendlyAuthError(e) || authMessage(e) };
         let data: any, error: any;
         try {
             ({ data, error } = await supabase.auth.signInWithPassword({ email, password }));
         } catch (e: any) {
             if (await makeMusic) return { success: true, makeMusicOnly: true };
-            return { success: false, message: authMessage(e) };
+            return failure(e);
         }
         if (error) {
             // Compte Make Music seulement (le cas courant : compte créé sur studiomakemusic.com).
             if (await makeMusic) return { success: true, makeMusicOnly: true };
-            return { success: false, message: authMessage(error) };
+            return failure(error);
         }
         await makeMusic;
 
@@ -222,12 +210,15 @@ class AuthService {
    */
   public async sendPasswordReset(email: string): Promise<{ success: boolean; message?: string }> {
     if (isSupabaseConfigured()) {
-        try {
-            await supabaseManager.resetPasswordForEmail(email);
-            return { success: true, message: "Lien envoyé. Vérifiez vos emails." };
-        } catch (e: any) {
-            return { success: false, message: authMessage(e, "Erreur d'envoi.") };
-        }
+        // Le compte peut être Make Music (le cas courant) ou de l'ancien projet : le lien part des deux
+        // (chacun ne l'envoie qu'à un e-mail qu'il connaît). Réussi si l'un des deux a accepté.
+        const [mm, old] = await Promise.allSettled([
+            sendMakeMusicPasswordReset(email),
+            supabaseManager.resetPasswordForEmail(email),
+        ]);
+        if (mm.status === 'fulfilled' || old.status === 'fulfilled') return { success: true, message: "Lien envoyé : regarde tes e-mails (et les spams)." };
+        const e: any = mm.status === 'rejected' ? mm.reason : (old as PromiseRejectedResult).reason;
+        return { success: false, message: e?.message || authMessage(e, "Envoi impossible : réessaie dans un instant.") };
     }
 
     // Mode Simulation

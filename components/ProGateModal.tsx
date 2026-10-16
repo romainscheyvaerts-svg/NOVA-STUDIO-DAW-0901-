@@ -4,6 +4,8 @@ import { catalogSupabase } from '../services/supabase';
 import { signInAccount } from '../services/SessionCloud';
 import { billingStatus, hasPlan, loadPricing, euros, type BillingStatus, type Grille } from '../services/Billing';
 import NovaProPlans from './NovaProPlans';
+import MakeMusicSignupForm from './MakeMusicSignupForm';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /**
  * Nova Pro, mensuel ou annuel (prix lus sur le serveur, économie de l'annuel affichée) :
@@ -22,6 +24,8 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  // « Pas encore de compte ? » : compte Make Music créé ici (avant : lien vers le site).
+  const [signup, setSignup] = useState(false);
   const [grille, setGrille] = useState<Grille | null>(null);
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const closeRef = useRef(() => onDone(false));
@@ -83,7 +87,14 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
             {grille.cadeaux.melodie_jours ? ` (une mélodie : ${grille.cadeaux.melodie_jours} jours)` : ''}. Poser ta voix sur nos instrus et mélodies reste gratuit.
           </p>
         )}
-        {logged === false && (
+        {logged === false && signup && (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+            <MakeMusicSignupForm compact desktop={isNovaDesktop()} testid="pro-signup" initialEmail={email}
+              onSignedIn={() => { void afterLogin(); }}
+              onWantLogin={(em) => { setEmail(em); setSignup(false); setMsg(null); }} />
+          </div>
+        )}
+        {logged === false && !signup && (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
             <p className="text-[12px] font-bold text-white">Connecte-toi avec ton compte Make Music pour t'abonner</p>
             <input className={input} type="email" autoComplete="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
@@ -92,7 +103,7 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
               onClick={async () => { setMsg(null); try { await signInAccount(email, password); setPassword(''); await afterLogin(); } catch (e: any) { setMsg(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } }}>
               Se connecter
             </button>
-            <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Créer un compte sur studiomakemusic.com</a>
+            <button type="button" onClick={() => { setSignup(true); setMsg(null); }} data-testid="pro-signup-open" className="block w-full min-h-10 text-center text-[12px] text-cyan-300 underline">Pas encore de compte ? Crée-le ici (gratuit)</button>
           </div>
         )}
         {msg && <p className="text-[12px] text-red-300" role="status">⚠️ {msg}</p>}

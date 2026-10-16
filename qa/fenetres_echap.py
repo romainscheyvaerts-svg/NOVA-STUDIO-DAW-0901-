@@ -193,4 +193,5 @@ res["bilan"] = {"ouvertes": len(ok), "echap_ferme": sum(1 for f in ok if f["echa
 # 16/10/2026 (guidage) : le panneau Collaboration doit s'ouvrir et se fermer par Échap.
 _collab_ko = "Collaboration (panneau)" in res["bilan"]["echap_ne_ferme_pas"] + res["bilan"]["pas_ouvertes"]
 print("\nBILAN :", json.dumps(res["bilan"], ensure_ascii=False))
-sys.exit(1 if _collab_ko else 0)
+# Toute fenêtre ouverte qu'Échap ne ferme pas (ligne « KO ») = échec (avant : seule la collaboration comptait).
+sys.exit(1 if _collab_ko or res["bilan"]["echap_ne_ferme_pas"] or not ok else 0)

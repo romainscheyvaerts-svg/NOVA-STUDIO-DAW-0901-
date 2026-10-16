@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { messageClair } from '../utils/friendlyError';
+import OnlineSessionsList from './OnlineSessionsList';
 
 interface LoadProjectModalProps {
   isOpen: boolean;
@@ -11,22 +12,27 @@ interface LoadProjectModalProps {
   onLoadCloud: (sessionId: string) => void;
   onLoadLocal: (file: File) => void;
   onOpenAuth: () => void;
+  /** Compte Make Music connecté sans compte de l'ancien projet : ses séances en ligne (utils/cloudAccount). */
+  makeMusicEmail?: string | null;
+  onOpenOnlineSession?: (link: string) => void;
   /** « Nouveau projet depuis un modèle » (Session Templates). */
   onOpenTemplates?: () => void;
 }
 
 const LoadProjectModal: React.FC<LoadProjectModalProps> = ({ 
-  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates
+  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates, makeMusicEmail, onOpenOnlineSession
 }) => {
   // Sans compte, les projets en ligne sont inaccessibles : on ouvre d'abord le fichier de l'appareil.
   // Invité (« guest ») : pas de compte, comme sans utilisateur.
   const signedIn = !!user && user.id !== 'guest';
-  const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>(() => (signedIn ? 'CLOUD' : 'LOCAL'));
+  // Compte Make Music seulement : l'onglet « Mon compte (en ligne) » liste ses séances en ligne.
+  const mmOnly = !signedIn && !!makeMusicEmail && !!onOpenOnlineSession;
+  const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>(() => (signedIn || mmOnly ? 'CLOUD' : 'LOCAL'));
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   // Liste en ligne illisible (réseau, serveur) : on le dit, au lieu de « aucun projet ».
   const [loadError, setLoadError] = useState<string | null>(null);
-  useEffect(() => { if (isOpen) setActiveTab(signedIn ? 'CLOUD' : 'LOCAL'); }, [isOpen, signedIn]);
+  useEffect(() => { if (isOpen) setActiveTab(signedIn || mmOnly ? 'CLOUD' : 'LOCAL'); }, [isOpen, signedIn, mmOnly]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -115,7 +121,11 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
             {/* --- CLOUD TAB --- */}
             {activeTab === 'CLOUD' && (
                 <div className="h-full flex flex-col">
-                    {!signedIn ? (
+                    {mmOnly ? (
+                        <div className="flex-1 overflow-y-auto">
+                            <OnlineSessionsList email={makeMusicEmail!} testid="load-online-sessions" onOpen={(l) => { onClose(); onOpenOnlineSession!(l); }} />
+                        </div>
+                    ) : !signedIn ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-4">
                             <i className="fas fa-lock text-4xl text-slate-700"></i>
                             <p className="text-xs text-slate-400 max-w-xs">Connecte-toi pour retrouver les projets que tu as sauvegardés en ligne.</p>

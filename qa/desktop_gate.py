@@ -105,6 +105,43 @@ SUPERADMIN = {
 }
 
 
+# Grille actuelle (supabase/functions/_shared/novaTarifs.ts, 14/10/2026) : export 1,99 € par projet, Nova Pro 9,99 €/mois.
+# Utilisée par CE scénario seulement : NON_ABONNE / SUPERADMIN (ancien serveur) restent tels quels pour les
+# scénarios qui les importent.
+from tarifs import GRILLE  # noqa: E402
+
+
+def grille_billing(admin=False):
+    """nova-billing de la grille du 14/10 : pricing, status, export_access (payé après verify), checkout, verify."""
+    paid = {"v": False}
+
+    def status(body):
+        return {"grille": "2026-10-14", "plans": [], "admin": admin, "pro": None,
+                "features": {"exports_illimites": admin, "collab_hote": admin, "import_instrus": admin},
+                "free_exports_left": 0, "free_exports_total": 0}
+
+    def access(body):
+        ids = body.get("catalog_ids") or []
+        base = {"grille": "2026-10-14", "missing": [], "items": [{"id": i, "title": DEFAULT_BEAT, "kind": "beat", "owned": False} for i in ids],
+                "login_required": False, "kits": bool(body.get("kits")), "offers": None, "pro": None}
+        if admin:
+            return {**base, "unlocked": True, "via": "admin", "reason": None}
+        if paid["v"]:
+            return {**base, "unlocked": True, "via": "achat", "reason": None}
+        return {**base, "unlocked": False, "via": None, "reason": "paiement",
+                "offers": {"export_cents": GRILLE["export"]["cents"], "pro_mois_cents": GRILLE["pro"]["mois_cents"], "pro_an_cents": GRILLE["pro"]["an_cents"]}}
+
+    def verify(body):
+        paid["v"] = True
+        return {"paid": True, "kind": "export_project", "project_key": "x"}
+
+    return {"pricing": GRILLE, "status": status, "export_access": access,
+            "checkout": {"url": "https://checkout.stripe.com/c/pay/cs_test_qa", "session_id": "cs_test_qa"}, "verify": verify}
+
+
+PRIX_EXPORT = f"{GRILLE['export']['cents'] // 100},{GRILLE['export']['cents'] % 100:02d} €"  # « 1,99 € »
+
+
 def gate_visible(page):
     return visible(page.get_by_test_id("desktop-gate"))
 
@@ -156,21 +193,23 @@ def d_non_connecte(page, log, res, vp):
 
 def d_connecte_studio(page, log, res, vp):
     state = {}
-    install_mocks(page, "artiste", NON_ABONNE, state)
+    install_mocks(page, "artiste", grille_billing(), state)
     with step(res, "connecté non abonné : studio libre"):
         page.goto(BASE, wait_until="domcontentloaded")
         enter_studio(page, res)
         assert not gate_visible(page)
         shot(page, "2_connecte_non_abonne_studio")
-    with step(res, "export : paiement 2 € proposé"):
+    with step(res, f"export : paiement {PRIX_EXPORT} proposé (grille actuelle)"):
         open_export(page)
-        # Fenêtre d'export simple (choix débutant) : le paiement 2 € (mes voix
-        # seules) doit s'y trouver, sans passer par « Réglages avancés ».
-        page.get_by_text(re.compile("PAYER 2 € ET EXPORTER", re.I)).first.wait_for(timeout=15000)
-        assert page.locator("[data-export-vue=simple]").count() == 1, "paiement hors de la vue simple"
+        # Fenêtre d'export simple (choix débutant) : le paiement de l'export du projet
+        # doit s'y trouver, sans passer par « Réglages avancés ».
+        page.get_by_text(re.compile(f"PAYER {PRIX_EXPORT} ET EXPORTER", re.I)).first.wait_for(timeout=15000)
+        # Appli Windows = mode avancé : la fenêtre s'ouvre sur la vue avancée (audit G19). Le paiement doit être
+        # dans la vue affichée (simple ou avancée), sans autre clic.
+        assert page.locator("[data-export-vue]").get_by_text(re.compile(f"PAYER {PRIX_EXPORT} ET EXPORTER", re.I)).locator("visible=true").count() >= 1, "paiement hors de la vue affichée"
         shot(page, "3_export_non_abonne_paiement")
     with step(res, "clic Payer : Stripe ouvert dans le navigateur, export débloqué après vérification"):
-        page.get_by_role("button", name=re.compile("PAYER 2 € ET EXPORTER", re.I)).first.click()
+        page.get_by_role("button", name=re.compile(f"PAYER {PRIX_EXPORT} ET EXPORTER", re.I)).first.click()
         page.get_by_text(re.compile("Paiement reçu")).first.wait_for(timeout=20000)
         opened = page.evaluate("window.__opened")
         res["fenetres_ouvertes"] = opened
@@ -181,15 +220,15 @@ def d_connecte_studio(page, log, res, vp):
 
 def d_superadmin(page, log, res, vp):
     state = {}
-    install_mocks(page, "romain", SUPERADMIN, state)
+    install_mocks(page, "romain", grille_billing(admin=True), state)
     with step(res, "super-admin : export libre"):
         page.goto(BASE, wait_until="domcontentloaded")
         enter_studio(page, res)
         open_export(page)
         page.get_by_text("Admin : export gratuit").first.wait_for(timeout=15000)
-        assert page.locator("[data-export-vue=simple]").count() == 1, "mention admin hors de la vue simple"
+        assert page.locator("[data-export-vue]").get_by_text("Admin : export gratuit").locator("visible=true").count() >= 1, "mention admin hors de la vue affichée"
         txt = page.inner_text("body")
-        assert "PAYER 2 €" not in txt.upper()
+        assert "PAYER" not in txt.upper(), "bouton de paiement proposé à un admin"
         shot(page, "4_export_superadmin_libre")
     res["billing_calls"] = state.get("billing_calls")
 
@@ -212,6 +251,8 @@ def d_web_inchange(page, log, res, vp):
         page.goto(BASE, wait_until="domcontentloaded")
         page.get_by_text(DEFAULT_BEAT, exact=True).first.wait_for(timeout=25000)
         assert not gate_visible(page)
+        # Mode simple (15/10/2026) : l'appli Windows est rangée sous « Plus d'options » de l'accueil.
+        ouvrir_plus_accueil(page)
         assert "Compte gratuit requis pour démarrer" in page.inner_text("body")
         shot(page, "5_web_accueil_sans_porte")
 

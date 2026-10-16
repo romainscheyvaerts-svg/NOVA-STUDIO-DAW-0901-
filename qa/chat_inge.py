@@ -5,8 +5,8 @@ de qa/tarifs.py : export payant 1,99 €) et l'API de chat SIMULÉE (aucun appel
 /api/chat (et le déploiement de secours) est intercepté par la page et répond comme le ferait le
 modèle, à partir de l'état et du catalogue réellement envoyés par NOVA.
 
-Séance : le modèle de séance voix de NOVA (BEAT, REC, LEAD COUPLET, LEAD REFRAIN, BACK 1, BACK 2,
-BUS VOX, BUS FX), chargé avec le beat NOCTAMBULE du catalogue simulé.
+Séance : le modèle de séance voix de NOVA en MODE AVANCÉ (BEAT, REC, LEAD COUPLET, LEAD REFRAIN, BACK 1, BACK 2,
+BUS VOX, BUS FX ; le mode simple n'a que BEAT + REC depuis le 16/10/2026), chargé avec le beat NOCTAMBULE du catalogue simulé.
 
 Scénarios, au bureau (1600 × 900, clavier) et au téléphone (390 × 844, au doigt) :
   1. « mets un compresseur 2:1 sur la voix lead » (IA simulée) → ✅ Compresseur ajouté sur REC : 2:1,
@@ -161,6 +161,9 @@ def run_vp(p, vp, res):
 
     b = launch(p)
     ctx, page = new_page(b, vp, log)
+    # Séance voix complète (REC, LEAD COUPLET, LEAD REFRAIN, BACK 1, BACK 2) : depuis le 16/10/2026, c'est le gabarit
+    # du MODE AVANCÉ (le mode simple n'a que BEAT + REC). Le scénario passe donc en mode avancé, comme un ingé son.
+    page.add_init_script("try { localStorage.setItem('nova_simple_mode', '0'); } catch (e) {}")
     route_billing(page, billing)
     route_chat(page, sim)
     try:
