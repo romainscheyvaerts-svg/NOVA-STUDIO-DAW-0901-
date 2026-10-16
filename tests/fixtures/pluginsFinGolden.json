@@ -1,0 +1,1978 @@
+{
+ "COMPRESSOR": [
+  {
+   "action": "threshold:max",
+   "node": [
+    {
+     "threshold": 0,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": 0,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "threshold:min",
+   "node": [
+    {
+     "threshold": -60,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -60,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "threshold:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 2,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "ratio:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 20,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 20,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "ratio:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 1,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 1,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "ratio:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 6,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "knee:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 40,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 40,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "knee:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 0,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 0,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "knee:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.005,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "attack:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.1,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.1,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "attack:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.0001,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.0001,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "attack:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "release:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 1,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "release:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.01,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.01,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "release:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "makeupGain:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 4,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "makeupGain:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 0.25,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 0.25,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "makeupGain:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mix:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mix:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 0,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 0,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mix:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "lookahead:max",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0.005,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0.005,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "lookahead:min",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "lookahead:defaut",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mode:CLEAN",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mode:VCA",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "VCA",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "VCA",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mode:OPTO",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "OPTO",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "OPTO",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "mode:FET",
+   "node": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "FET",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -18,
+     "ratio": 4,
+     "knee": 12,
+     "attack": 0.003,
+     "release": 0.25,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "FET",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "preset:Voix douce",
+   "node": [
+    {
+     "threshold": -20,
+     "ratio": 3,
+     "knee": 20,
+     "attack": 0.015,
+     "release": 0.2,
+     "mix": 1,
+     "scHpFreq": 100,
+     "lookahead": 0,
+     "mode": "OPTO"
+    }
+   ],
+   "host": [
+    {
+     "threshold": -20,
+     "ratio": 3,
+     "knee": 20,
+     "attack": 0.015,
+     "release": 0.2,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 100,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "OPTO",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "preset:Voix agressive",
+   "node": [
+    {
+     "threshold": -15,
+     "ratio": 6,
+     "knee": 6,
+     "attack": 0.002,
+     "release": 0.1,
+     "mix": 1,
+     "scHpFreq": 150,
+     "lookahead": 0,
+     "mode": "FET"
+    }
+   ],
+   "host": [
+    {
+     "threshold": -15,
+     "ratio": 6,
+     "knee": 6,
+     "attack": 0.002,
+     "release": 0.1,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 150,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "FET",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "preset:Colle de mix",
+   "node": [
+    {
+     "threshold": -16,
+     "ratio": 2,
+     "knee": 30,
+     "attack": 0.03,
+     "release": 0.3,
+     "mix": 0.5,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "mode": "VCA"
+    }
+   ],
+   "host": [
+    {
+     "threshold": -16,
+     "ratio": 2,
+     "knee": 30,
+     "attack": 0.03,
+     "release": 0.3,
+     "makeupGain": 1.6,
+     "mix": 0.5,
+     "scHpFreq": 80,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "VCA",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "preset:Punch parallèle",
+   "node": [
+    {
+     "threshold": -30,
+     "ratio": 8,
+     "knee": 0,
+     "attack": 0.001,
+     "release": 0.15,
+     "mix": 0.3,
+     "scHpFreq": 60,
+     "lookahead": 0,
+     "mode": "FET"
+    }
+   ],
+   "host": [
+    {
+     "threshold": -30,
+     "ratio": 8,
+     "knee": 0,
+     "attack": 0.001,
+     "release": 0.15,
+     "makeupGain": 1.6,
+     "mix": 0.3,
+     "scHpFreq": 60,
+     "lookahead": 0,
+     "autoMakeup": false,
+     "mode": "FET",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "preset:Limiteur transparent",
+   "node": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "mode": "CLEAN"
+    }
+   ],
+   "host": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "autoMakeup:on",
+   "node": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "autoMakeup": true,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "autoMakeup": true,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "autoMakeup:off",
+   "node": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "threshold": -6,
+     "ratio": 20,
+     "knee": 0,
+     "attack": 0.0005,
+     "release": 0.05,
+     "makeupGain": 1.6,
+     "mix": 1,
+     "scHpFreq": 20,
+     "lookahead": 0.005,
+     "autoMakeup": false,
+     "mode": "CLEAN",
+     "isEnabled": true
+    }
+   ]
+  }
+ ],
+ "STEREOSPREADER": [
+  {
+   "action": "multiBand:on",
+   "node": [
+    {
+     "width": 1,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 1,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "width:max",
+   "node": [
+    {
+     "width": 2,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 2,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "width:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": 0,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "balance:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": 1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": 1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "balance:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.015,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "haasDelay:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.03,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0.03,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "haasDelay:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "haasAmount:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 1,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 1,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "haasAmount:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0.8,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "lowWidth:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 2,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 2,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "lowWidth:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 1.2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "midWidth:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 2,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "midWidth:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 1.5,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "highWidth:max",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 2,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 2,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "highWidth:min",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": true,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "multiBand:off",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "safeMonoBass:off",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": false,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": false,
+     "isEnabled": true
+    }
+   ]
+  },
+  {
+   "action": "safeMonoBass:on",
+   "node": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ],
+   "host": [
+    {
+     "width": 0,
+     "balance": -1,
+     "monoFreq": 120,
+     "lowWidth": 0,
+     "midWidth": 0,
+     "highWidth": 0,
+     "lowMidFreq": 250,
+     "midHighFreq": 4000,
+     "haasDelay": 0,
+     "haasAmount": 0,
+     "mode": "STEREO",
+     "multiBand": false,
+     "safeMonoBass": true,
+     "isEnabled": true
+    }
+   ]
+  }
+ ],
+ "MASTERSYNC": [
+  {
+   "action": "analyser",
+   "log": [
+    {
+     "analyze": "BUFFER"
+    }
+   ]
+  },
+  {
+   "action": "appliquer",
+   "log": [
+    {
+     "setBpm": 142
+    },
+    {
+     "sync": [
+      9,
+      "MINOR"
+     ]
+    },
+    {
+     "editClip": [
+      "instrumental",
+      "c1",
+      "UPDATE_PROPS",
+      {
+       "start": 0.32112676056338074
+      }
+     ]
+    },
+    {
+     "node": {
+      "alignmentApplied": "Drop calé Mesure 9"
+     }
+    }
+   ]
+  },
+  {
+   "action": "reinitialiser",
+   "log": [
+    {
+     "node": {
+      "hasResult": false,
+      "analysisProgress": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "analyser_sans_instru",
+   "log": [
+    {
+     "node": {
+      "error": "Aucun audio détecté sur la piste INSTRU (Instrumental)."
+     }
+    }
+   ]
+  }
+ ]
+}

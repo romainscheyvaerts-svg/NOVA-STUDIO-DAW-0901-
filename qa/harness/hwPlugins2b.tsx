@@ -15,6 +15,7 @@ import { VocalDoublerUI } from '../../plugins/DoublerPlugin';
 import { StereoSpreaderUI } from '../../plugins/StereoSpreaderPlugin';
 import { VocalDenoiserUI } from '../../plugins/DenoiserPlugin';
 import { MasterSyncUI } from '../../plugins/MasterSyncPlugin';
+import { VocalCompressorUI } from '../../plugins/CompressorPlugin';
 import { NovaHarmonizerUI } from '../../plugins/HarmonizerPlugin';
 import { NovaVoiceShifterUI } from '../../plugins/VoiceShifterPlugin';
 import { NovaTimeFxUI } from '../../plugins/TimeFxPlugin';
@@ -53,6 +54,10 @@ function fakeNode(kind: string) {
     analyzerL: analyser(0), analyzerR: analyser(0.9),
     // Gate de bruit (ex-Anti-bruit)
     getStatus: () => { const s = t(); const open = Math.sin(s * 2) > -0.2; return { reduction: open ? 1 : 0.2, reductionDb: open ? 0 : -14, inputLevel: -30 + 14 * Math.sin(s * 2), isOpen: open, isActive: !open, noiseFloorDb: -62, thresholdDb: -45, humHz: 50 }; },
+    // Compresseur (plugins-fin 1.5.1) : réduction (dB ≤ 0), crêtes d'entrée / de sortie (dBFS) qui bougent.
+    getReduction: () => { const s = t(); return -Math.max(0, 6 + 5 * Math.sin(s * 1.7)); },
+    getInputLevel: () => { const s = t(); return -14 + 8 * Math.sin(s * 1.7); },
+    getOutputLevel: () => { const s = t(); return -16 + 4 * Math.sin(s * 1.7 + 0.4); },
     // Analyse
     getParams: () => sync,
     updateParams: (p: any) => { if (kind === 'MASTERSYNC') sync = { ...sync, ...(p || {}) }; },
@@ -62,6 +67,7 @@ function fakeNode(kind: string) {
 }
 
 const LEGACY: Record<string, any> = {
+  COMPRESSOR: VocalCompressorUI,
   CHORUS: VocalChorusUI, FLANGER: StudioFlangerUI, DOUBLER: VocalDoublerUI, STEREOSPREADER: StereoSpreaderUI, DENOISER: VocalDenoiserUI,
 };
 const V21: Record<string, any> = {

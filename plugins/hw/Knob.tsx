@@ -268,7 +268,7 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
   return (
     <div className={`hw-knob hw-ks-${size}${labeled ? ' hw-kscale' : ''}${className ? ` ${className}` : ''}`} data-nova-param={paramId} data-disabled={disabled ? 'true' : undefined}
       title={`${hint ? `${name} : ${hint}` : name}
-(glisser pour régler · Maj : réglage fin · double-clic : valeur d'origine)`}>
+(glisser pour régler · Maj : réglage fin · molette · double-clic : valeur d'origine)`}>
       {labelPos === 'top' && labelEl}
       <div ref={setBox} className="hw-knob-box" role="slider" tabIndex={disabled ? -1 : 0}
         aria-label={name} aria-valuemin={detents?.length ? detents[0].v : min} aria-valuemax={detents?.length ? detents[detents.length - 1].v : max}

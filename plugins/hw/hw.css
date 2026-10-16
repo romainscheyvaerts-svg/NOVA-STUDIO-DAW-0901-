@@ -58,7 +58,7 @@
 }
 .hw-chip:hover { background: #262a32; color: #fff; }
 .hw-chip[aria-pressed='true'] { background: var(--hw-ui-accent); color: var(--hw-ui-accent-ink); border-color: transparent; }
-@media (max-width: 639px) { .hw-chip { height: 36px; } }
+@media (max-width: 639px) { .hw-chip { height: 44px; } } /* 1.5.1 : 44 px au doigt (était 36) */
 
 .hw-cta {
   display: inline-flex;
@@ -796,3 +796,39 @@
   .hw-touch .hw-toggle-opt { min-height: 28px; }
   .hw-touch .hw-step { height: 52px; }
 }
+
+/* ══ Fin des façades (1.5.1, ajouts) ════════════════════════════════════════
+ * Compresseur (petrol), Stéréo (pearl). Le Master utilise « labgrey » (vague 2B).
+ */
+.hw-finish-petrol {
+  --hw-face-solid: #12343b;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(120, 220, 230, 0.12), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #17414a 0%, #12343b 58%, #0d282e 100%);
+  --hw-ink: #eaf6f6;
+  --hw-ink-soft: #a9cbce;
+  --hw-accent: #fb923c;
+  --hw-rule: rgba(234, 246, 246, 0.18);
+  --hw-edge-hi: rgba(200, 255, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.28);
+}
+.hw-finish-pearl {
+  --hw-face-solid: #e6e9ee;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(0deg, rgba(40, 60, 90, 0.025) 0 1px, rgba(255, 255, 255, 0.03) 1px 3px),
+    linear-gradient(180deg, #f1f3f6 0%, #e6e9ee 55%, #d6dbe2 100%);
+  --hw-ink: #14202e;
+  --hw-ink-soft: #3c4a5c;
+  --hw-accent: #0e7490;
+  --hw-rule: rgba(20, 32, 46, 0.24);
+  --hw-edge-hi: rgba(255, 255, 255, 0.85);
+  --hw-edge-lo: rgba(60, 70, 90, 0.45);
+  --hw-well: rgba(30, 40, 60, 0.08);
+}
+/* Grands chiffres d'afficheur (tempo, tonalité du Master) */
+.hw-lcd-big { font-size: 30px; line-height: 1.05; padding: 8px 14px; letter-spacing: 0.02em; }
+.hw-lcd-big small { font-size: 11px; }
+@media (max-width: 639px) { .hw-lcd-big { font-size: 24px; padding: 6px 10px; } }
+.hw-pad:disabled { opacity: 0.45; cursor: default; }

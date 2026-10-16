@@ -41,6 +41,9 @@ BATTERIE = [
     ("plugins_hw_reel", ["D:/1 WORK/CONTENU/nova-plugins-design/batterie_reel"]),
     ("plugins_hw_vague2b", ["--reel", "D:/1 WORK/CONTENU/nova-plugins-design/batterie_vague2b"]),
     ("v21_fenetres", []), ("harmoniseur_fenetre", []),
+    # 1.5.1 (plugins-fin) : façades du Compresseur, du Stéréo et du Master (bureau 1366 et téléphone 390, sombre et clair :
+    # plus de curseur ni de phrase d'aide, gestes souris / doigt, bornes d'avant, boutons non recouverts).
+    ("plugins_fin", []),
     # 13/10/2026 : kits NOVA (sons à la demande, brouillés, jamais exportés gratuitement), PC + téléphone, sombre + clair.
     ("kits_batterie", []),
     # 14/10/2026 : synthé NOVA en un clic (« 🎹 Synthé NOVA »), sons, façade, mini-clavier (bureau et téléphone, sombre et clair).

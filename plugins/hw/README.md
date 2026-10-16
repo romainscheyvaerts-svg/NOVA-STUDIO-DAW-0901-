@@ -50,9 +50,9 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `seafoam` | émail vert d'eau `#a9d8cc` | vert très foncé `#0f241f`, accent sarcelle | Chorus |
 | `plum` | prune pailletée `#3b1f4f` | lilas clair `#f4eaff`, accent magenta | Flanger |
 | `forest` | vert forêt mat `#1f3b2d` | crème `#f2ead3`, accent ambre | Doubleur |
-| `midnight` | bleu nuit anodisé `#111a2c` | blanc bleuté `#e6f0ff`, accent cyan | (réservé : Stéréo) |
+| `midnight` | bleu nuit anodisé `#111a2c` | blanc bleuté `#e6f0ff`, accent cyan | (libre ; l'Égaliseur a sa propre variante dans `ecrans.css`) |
 | `hammer` | gris martelé `#3a474c` | blanc `#f3f6f6`, accent vert | Gate de bruit |
-| `labgrey` | gris laboratoire `#d4d2cc` | quasi-noir `#1b1c1e`, accent pétrole | (réservé : Master) |
+| `labgrey` | gris laboratoire `#d4d2cc` | quasi-noir `#1b1c1e`, accent pétrole | Master (analyse tempo / tonalité) |
 | `indigo` | indigo `#1e1b4b` | blanc lavande `#eef0ff`, accent rose | Harmoniseur |
 | `vermilion` | émail vermillon `#8a2c1d` | crème `#fff3e3`, accent jaune | Voix grave / aiguë |
 | `mustard` | émail jaune `#d6a72c` | brun noir `#1d1606`, accent rouge | Tape stop & half-time |
@@ -60,6 +60,8 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `jade` | vert anodisé `#133f33` | blanc menthe `#e8fff6`, accent vert | Gate |
 | `cobalt` | aluminium bleu `#173a7a` | blanc bleuté `#eef4ff`, accent ciel | Filtre DJ |
 | `avocado` | olive années 70 `#42501c` | crème `#fbf3d5`, accent anis | Lo-fi / téléphone |
+| `petrol` | bleu pétrole `#12343b` | blanc d'eau `#eaf6f6`, accent orange | Compresseur |
+| `pearl` | blanc nacré `#e6e9ee` | bleu nuit `#14202e`, accent sarcelle | Stéréo |
 
 L'encre atteint au moins 7:1 de contraste sur sa façade ; `--hw-ink-soft` au moins 4,5:1.
 Les couleurs des façades sont codées dans `hw.css`, pas en classes Tailwind : elles ne
@@ -152,3 +154,22 @@ Uniquement des ajouts : le comportement par défaut des briques existantes ne ch
 Côté V21 (`plugins/v21Ui.tsx`) : `V21Knob` (bouton rotatif depuis la fiche d'un réglage), `useV21Meter` (une mesure dans un petit afficheur, sans redessiner la façade), `V21Shell` = `HwWindow` + `Faceplate`.
 
 Captures et contrôles de la vague 2B : `qa/plugins_hw_vague2b.py` (banc `qa/harness/hwPlugins2b.tsx`, ou `--reel` dans le vrai studio).
+
+## Fin des façades (1.5.1, 16/10/2026)
+
+Plus aucun effet NOVA n'a l'ancienne fenêtre « formulaire » : Compresseur (`CompressorPlugin.tsx`),
+Stéréo (`StereoSpreaderPlugin.tsx`) et Master (`MasterSyncPlugin.tsx`) ont leur façade. Ajouts seulement :
+
+| Ajout | Rôle |
+|---|---|
+| Finitions `petrol`, `pearl` | Compresseur, Stéréo (tableau ci-dessus). Le Master prend `labgrey`. |
+| `.hw-lcd-big` | Grands chiffres d'afficheur (tempo et tonalité du Master). |
+| `.hw-pad:disabled` | Pad grisé (« Tout appliquer » tant qu'il n'y a pas d'analyse). |
+| `.hw-chip` au téléphone | 44 px de haut (était 36) : préréglages au doigt. |
+| Infobulle des boutons | mentionne aussi la molette (« glisser · Maj · molette · double-clic »). |
+
+Points d'accroche : `data-nova-plugin` = `COMPRESSOR`, `STEREOSPREADER`, `MASTERSYNC` ; `data-nova-gr-vu`,
+`data-nova-comp-curve` (Compresseur) ; `data-nova-corr` (afficheur de phase du Stéréo) ; `data-nova-sync`
+= `bpm`, `key`, `message`, `analyse`, `appliquer` (Master). Preuve « mêmes paramètres envoyés au moteur » :
+`tests/pluginsFin.test.ts` (gestes capturés sur les anciennes fenêtres, `tests/fixtures/pluginsFinGolden.json`).
+Captures et contrôles : `qa/plugins_fin.py` (bureau 1366 et téléphone 390, thèmes sombre et clair).
