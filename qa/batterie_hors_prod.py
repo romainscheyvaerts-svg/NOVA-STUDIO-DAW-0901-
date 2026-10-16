@@ -87,6 +87,9 @@ BATTERIE = [
     # première prise → écoute → fenêtre d'export), bureau et téléphone, sans compte et connecté ; inventaire des écrans,
     # aucune pastille flottante qui recouvre un bouton.
     ("premier_parcours", []),
+    # Lots 5 et 10 BandLab (16/10/2026) : navigateur de sons (kits brouillés, rien à télécharger), boucles NOVA, Palette dans la
+    # tonalité, « Démarrer un beat » à base de règles (une annulation), Prolonger / Varier ; bureau 1366 et téléphone 390, sombre et clair.
+    ("sons_beat", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

@@ -72,9 +72,9 @@ const stepSelectors = (s: GuideStep): string[] => [
 ];
 
 describe('base des parcours : forme', () => {
-  it('15 à 25 parcours, ids uniques, chaque fiche complète', () => {
+  it('15 à 30 parcours, ids uniques, chaque fiche complète', () => {
     expect(GUIDES.length).toBeGreaterThanOrEqual(15);
-    expect(GUIDES.length).toBeLessThanOrEqual(25);
+    expect(GUIDES.length).toBeLessThanOrEqual(30); // 27 avec les lots 5 et 10 (sons-boucles, demarrer-beat)
     expect(new Set(GUIDES.map(g => g.id)).size).toBe(GUIDES.length);
     for (const g of GUIDES) {
       expect(g.title.length, g.id).toBeGreaterThan(5);

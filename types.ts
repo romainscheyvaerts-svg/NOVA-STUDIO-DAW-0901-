@@ -1477,6 +1477,9 @@ export type AIActionType =
   | 'DESCRIBE_SOUND'
   | 'APPLY_VOICE_PRESET'
   | 'ONE_KNOB'
+  // Lot 10 : Démarrer un beat, Prolonger / Varier un clip MIDI (règles, sans IA)
+  | 'START_BEAT'
+  | 'VARY_MIDI'
   | 'OPEN_MIX_STYLES'
   // Nova pilote les plugins VST du PC (services/NovaVstMix)
   | 'VST_MIX' | 'VST_LIST' | 'VST_SHOW_PARAMS' | 'VST_SET_PARAM' | 'VST_REMOVE' | 'VST_MOVE' | 'VST_MIX_FALLBACK'

@@ -33,6 +33,8 @@ import { buildChatCatalog, catalogText, summarizeStateForChat, planChatCalls, co
 import type { ChatRunReport } from './components/ChatAssistant';
 import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
+import SonsBeatHost from './components/SonsBeatHost';
+import { sonsBeatStore } from './utils/sonsBeatStore';
 import { openSamplerPanel } from './utils/samplerPanelStore';
 import { requestSampler } from './utils/samplerPanelStore';
 const TrackListPanel = lazyWithPreload(() => import('./components/TrackListPanel'));
@@ -9527,6 +9529,11 @@ function Studio() {
         break;
       }
 
+      // Lot 10 : Démarrer un beat, Prolonger / Varier (components/SonsBeatHost).
+      case 'START_BEAT': case 'VARY_MIDI':
+        sonsBeatStore.run(a.action, p);
+        break;
+
       case 'OPEN_LYRICS':
         setLyricsOpen(true);
         break;
@@ -10326,6 +10333,11 @@ function Studio() {
       a('Beat', 'pal.synth', `🎹 Synthé NOVA : nouvelle piste et choix du son (${SYNTH_PRESETS.length} sons)`, () => handleNewSynthTrack(), { pt: 'New Instrument Track', keywords: 'synthé synth synthétiseur instrument clavier son preset pad nappe lead pluck basse piano rhodes cloche afro amapiano rage drill' }),
       a('Beat', 'pal.midi', 'Nouvelle piste MIDI et son piano roll', () => handleNewMidiTrack(), { pt: 'New Instrument Track', keywords: 'midi piano roll synthé instrument' }),
       a('Beat', 'pal.sampler', 'Nouvelle piste Sampler', () => requestSampler({ kind: 'new' }), { keywords: 'sampler sample chop' }),
+      // Lots 5 et 10 (components/SonsBeatHost) : navigateur de sons, Palette, Démarrer un beat, Prolonger / Varier.
+      a('Beat', 'pal.sounds', '🔎 Sons et boucles : one-shots, instruments, boucles (type, genre, BPM, tonalité)', () => sonsBeatStore.open({ kind: 'sons' }), { keywords: 'sons samples one shot oneshot boucle loop navigateur bibliotheque kick snare 808 hihat perc splice sounds' }),
+      a('Beat', 'pal.palette', '🎨 Palette : 2 à 5 boucles assorties au tempo et à la tonalité', () => sonsBeatStore.open({ kind: 'sons', tab: 'palette' }), { keywords: 'palette boucles assorties loops idees tonalite tempo' }),
+      a('Beat', 'pal.startBeat', '🎲 Démarrer un beat : genre, batterie, accords et 808 (règles, sans IA)', () => sonsBeatStore.open({ kind: 'beat' }), { keywords: 'demarrer beat commencer prod squelette songstarter trap drill boom bap rnb afro accords progression 808 de' }),
+      a('Beat', 'pal.varyMidi', '🔀 Prolonger ou varier le clip MIDI sélectionné (règles)', () => sonsBeatStore.open({ kind: 'vary', mode: 'varier' }), { keywords: 'prolonger extend varier recompose variation melodie inversion deplacement rythme transposition midi' }),
       // Réglages
       a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
@@ -11447,6 +11459,8 @@ function Studio() {
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
       {/* R18 / R20 : sampler mélodique, instruments NOVA, « Convertir en sampler », découpe d'un clip. */}
+      <SonsBeatHost tracks={state.tracks} bpm={state.bpm} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator || 4}
+        getState={() => stateRef.current} setState={setState} notify={setAiNotification} ensureEngine={ensureAudioEngine} isMobile={isMobile} />
       <SamplerHost tracks={state.tracks} bpm={state.bpm} isMobile={isMobile} setState={setState} getState={() => stateRef.current}
         notify={setAiNotification} ensureEngine={ensureAudioEngine} openPianoRoll={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })} />
       <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
