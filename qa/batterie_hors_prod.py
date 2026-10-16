@@ -101,6 +101,9 @@ BATTERIE = [
     # ancien serveur : message clair), « Faire sa version » (copie au bit près, compteur, lien désactivé → 410) et page
     # publique d'un morceau (extrait, lecteur intégrable, réserver au studio, pas de téléchargement, retirée → 410).
     ("invite_copie", []),
+    # Lots 5 et 10 BandLab (16/10/2026) : navigateur de sons (kits brouillés, rien à télécharger), boucles NOVA, Palette dans la
+    # tonalité, « Démarrer un beat » à base de règles (une annulation), Prolonger / Varier ; bureau 1366 et téléphone 390, sombre et clair.
+    ("sons_beat", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { KIT_DRAG_TYPE, KIT_SOUND_DROP_EVENT } from '../utils/drumKitLibrary';
+import { LOOP_DRAG_TYPE, requestSoundPlace } from '../utils/sonsBeatStore';
 import { requestSampler } from '../utils/samplerPanelStore';
 import { breathGainAt } from '../utils/breathEnvelope';
 import { requestBreaths } from '../utils/breathBus';
@@ -782,6 +783,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (e.dataTransfer.types.includes('audio-url') || 
         e.dataTransfer.types.includes('Files') ||
         e.dataTransfer.types.includes(KIT_DRAG_TYPE) ||
+        e.dataTransfer.types.includes(LOOP_DRAG_TYPE) ||
         e.dataTransfer.types.includes('application/x-nova-clip')) {
         e.dataTransfer.dropEffect = 'copy';
     }
@@ -819,6 +821,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           }
           currentY += zoomV + extraH(t);
       }
+
+      // Boucle NOVA (navigateur de sons, lot 5) : posée à l'endroit du dépôt, calée sur la mesure (SonsBeatHost).
+      const loopRef = e.dataTransfer.getData(LOOP_DRAG_TYPE);
+      if (loopRef) { requestSoundPlace({ ref: loopRef, at: dropTime }); return; }
 
       // R21 · Clip glissé depuis la liste des clips (Pro Tools : Clips List) : posé sur la piste visée.
       const novaClip = e.dataTransfer.getData('application/x-nova-clip');

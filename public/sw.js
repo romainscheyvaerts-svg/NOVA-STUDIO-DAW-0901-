@@ -5,7 +5,8 @@
  * - /assets/ (fichiers versionnés par Vite), polices, icônes, worklets, sons
  *   de batterie (/drums/, noms = empreinte du fichier) :
  *   cache d'abord, ils ne changent jamais sous le même nom.
- * - Sons des kits NOVA (/drums/kits/, ~2 000 fichiers brouillés) : pas ici. La page les met
+ * - Sons des kits NOVA (/drums/kits/, ~2 000 fichiers brouillés) et batterie du studio
+ *   (/drums/lib/, brouillée de même depuis le 16/10/2026) : pas ici. La page les met
  *   elle-même en cache à la demande (Cache API « nova-kits-v1 », utils/drumKitLibrary.ts), aussi
  *   dans l'appli Windows qui n'a pas de service worker ; ce cache n'est jamais vidé ici.
  * - Tout le reste (API, Supabase, audio des beats) : réseau direct, pas de cache.
@@ -34,7 +35,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
-  if (url.pathname.startsWith('/drums/kits/')) return; // cache géré par la page (voir plus haut)
+  if (url.pathname.startsWith('/drums/kits/') || url.pathname.startsWith('/drums/lib/')) return; // cache géré par la page (voir plus haut)
 
   if (req.mode === 'navigate') {
     e.respondWith((async () => {

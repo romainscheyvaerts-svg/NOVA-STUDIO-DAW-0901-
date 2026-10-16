@@ -16,6 +16,7 @@
  *
  * Données pures (aucun React) : App.tsx branche, les tests vérifient.
  */
+import { checkBeatCall } from './beatChat';
 import type { AIAction, DAWState, PluginInstance, Track } from '../types';
 import { TrackType } from '../types';
 import type { PaletteAction } from './commandPalette';
@@ -315,6 +316,8 @@ export const KNOWN_ACTIONS = new Set([
   'PREPARE_PART', 'ANALYZE_MIX', 'OPEN_STUDIO_OFFER', 'HIGHLIGHT', 'SELECT_TRACK',
   // Lot 8 : chaîne voix (utils/voiceChatActions) — Décris ton son, presets voix, One Knob.
   'DESCRIBE_SOUND', 'APPLY_VOICE_PRESET', 'ONE_KNOB',
+  // Lot 10 : Démarrer un beat, Prolonger / Varier un clip MIDI (utils/beatChat, règles sans IA).
+  'START_BEAT', 'VARY_MIDI',
   'VST_MIX', 'VST_LIST', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE',
   // Commande de la palette Ctrl+K, par son id.
   'RUN_COMMAND',
@@ -732,6 +735,10 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       if (a === undefined) return reject('position du bouton illisible (0 à 100)');
       p.macro = id; p.amount = a;
       return ok(`One Knob de ${tn} : ${macroDef(id).name} ${Math.round(a)} %`);
+    }
+    case 'START_BEAT': case 'VARY_MIDI': {
+      const r = checkBeatCall(name, p, st);
+      return r.ok ? ok(r.label!) : reject(r.reason!);
     }
     default: {
       const why = CONFIRM_ACTIONS[name];

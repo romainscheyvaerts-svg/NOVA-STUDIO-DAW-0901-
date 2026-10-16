@@ -5,6 +5,7 @@ import { parseVstCommand } from './novaVstCommands';
 import { novaBridge } from '../services/NovaBridge';
 import { getVocalRole } from './vocalRoles';
 import { numberedTracks } from './chatTools';
+import { parseBeatCommand } from './beatChat';
 
 /**
  * Commandes de Nova comprises SANS l'IA : exécution immédiate, même hors
@@ -77,6 +78,9 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   if (!msg || msg.length > 90) return null;
   // Questions et demandes de conseil : pour l'IA.
   if (/\?|\b(pourquoi|comment|conseil\w*|quel\w*|quoi|explique\w*|aide moi a choisir|tu penses|recommande\w*)\b/.test(msg)) return null;
+  // Lot 10 : « démarre un beat drill en fa mineur », « prolonge le clip de 4 mesures », « varie la mélodie ».
+  const beatCmd = parseBeatCommand(raw);
+  if (beatCmd) return beatCmd;
 
   const voice = voiceTrack(st, msg);
   const beat = st.tracks.find(t => t.id === 'instrumental');

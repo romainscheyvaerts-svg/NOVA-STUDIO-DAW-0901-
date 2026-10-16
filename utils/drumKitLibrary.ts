@@ -161,17 +161,22 @@ async function openCache(): Promise<Cache | null> {
 }
 
 /** Octets brouillés d'un son (cache d'abord, sinon réseau puis mise en cache). */
-export function fetchKitBytes(id: string): Promise<ArrayBuffer> {
-  let p = inflight.get(id);
+export const fetchKitBytes = (id: string): Promise<ArrayBuffer> => fetchScrambled(kitSoundUrl(id));
+
+/**
+ * Octets brouillés (« NVK1 ») servis à `url` : kits NOVA (/drums/kits/) et batterie du studio
+ * (/drums/lib/, même mécanisme). Cache API « nova-kits-v1 » d'abord, sinon réseau puis mise en cache.
+ */
+export function fetchScrambled(url: string): Promise<ArrayBuffer> {
+  let p = inflight.get(url);
   if (p) return p;
   p = (async () => {
-    const url = kitSoundUrl(id);
     const cache = await openCache();
     const hit = cache ? await cache.match(url).catch(() => undefined) : undefined;
     if (hit) return hit.arrayBuffer();
     let res: Response;
     try {
-      fetchCount++;
+      if (url.startsWith(KIT_BASE)) fetchCount++;
       res = await fetch(url, { credentials: 'same-origin' });
     } catch {
       throw err(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'offline');
@@ -186,8 +191,8 @@ export function fetchKitBytes(id: string): Promise<ArrayBuffer> {
     }
     return buf;
   })();
-  inflight.set(id, p);
-  p.finally(() => inflight.delete(id)).catch(() => {});
+  inflight.set(url, p);
+  p.finally(() => inflight.delete(url)).catch(() => {});
   return p;
 }
 

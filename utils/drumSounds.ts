@@ -8,7 +8,8 @@
  *   « url:<adresse> »        → fichier audio (bibliothèque du studio, plus tard)
  *   « kit:<id> »             → son des kits NOVA (utils/drumKitLibrary.ts), chargé à la demande
  */
-import { isKitRef, kitSoundLabel, loadKitSound } from './drumKitLibrary';
+import { fetchScrambled, isKitRef, kitSoundLabel, loadKitSound } from './drumKitLibrary';
+import { openKitContainer } from './drumKitCodec';
 
 export interface DrumSoundInfo { id: string; name: string; category: DrumCategory }
 export type DrumCategory = 'kick' | '808' | 'snare' | 'clap' | 'hat-closed' | 'hat-open' | 'perc' | 'cymbal';
@@ -213,6 +214,17 @@ async function synth(id: string, sr: number, root: number): Promise<AudioBuffer>
 const cache = new Map<string, Promise<AudioBuffer>>();
 
 /**
+ * Batterie du studio (16/10/2026) : servie brouillée comme les kits (« /drums/lib/<id>.nks »,
+ * tools/kits/scramble_lib.py), jamais en WAV lisible. Les projets gardent leur référence d'origine
+ * « url:/drums/lib/<id>.wav » : c'est ici qu'elle est traduite, rien à migrer.
+ */
+const LIB_REF = /^url:\/drums\/lib\/([a-z]+-[0-9a-f]{8})\.(?:wav|nks)$/;
+export const libContainerUrl = (ref: string): string | null => {
+  const m = LIB_REF.exec(ref);
+  return m ? `/drums/lib/${m[1]}.nks` : null;
+};
+
+/**
  * Buffer d'un son de batterie. `root` = tonique du morceau (0-11 ou MIDI),
  * utilisée par la 808 et le log drum.
  */
@@ -225,7 +237,11 @@ export function loadDrumSound(ref: string, ctx: BaseAudioContext, root = 0): Pro
   const key = `${ref}|${sr}|${tuned ? root : ''}`;
   let p = cache.get(key);
   if (!p) {
-    p = ref.startsWith('url:')
+    const lib = libContainerUrl(ref);
+    p = lib
+      ? fetchScrambled(lib).then(openKitContainer).then(b => ctx.decodeAudioData(b))
+          .then(b => normalize(b, LIB_PEAK_ID[(LIB_REF.exec(ref) || [])[1]?.split('-')[0] || ''] || 'sample'))
+      : ref.startsWith('url:')
       ? fetch(ref.slice(4)).then(r => { if (!r.ok) throw new Error(`son introuvable (${r.status})`); return r.arrayBuffer(); })
           .then(b => ctx.decodeAudioData(b)).then(b => normalize(b, LIB_PEAK_ID[(/\/([a-z]+)-[0-9a-f]{8}\.wav$/.exec(ref) || [])[1] || ''] || 'sample'))
       : synth(id, sr, root).then(b => normalize(b, id));

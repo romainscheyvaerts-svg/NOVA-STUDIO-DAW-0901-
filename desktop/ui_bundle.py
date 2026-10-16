@@ -516,15 +516,17 @@ def download_version(origin: str, cache_dir: str, bundled: "UiVersion | None", m
             if b"drums/lib/" not in text:
                 continue
             for m in DRUM_ID.finditer(text.decode("utf-8", "replace")):
-                cand = f"drums/lib/{m.group(1)}.wav"
-                if cand not in known:
-                    new_drums.add(cand)
+                # Batterie du studio brouillée (.nks, 16/10/2026) ; les anciennes versions servaient des .wav.
+                for ext in (".nks", ".wav"):
+                    cand = f"drums/lib/{m.group(1)}{ext}"
+                    if cand not in known:
+                        new_drums.add(cand)
         for rel in sorted(new_drums)[:400]:
             try:
                 data, ctype = http_get(f"{origin}/{rel}", ua)
             except Exception:
                 continue
-            if data[:4] == b"RIFF" and not _looks_like_spa_fallback(rel, data, ctype):
+            if data[:4] in (b"RIFF", b"NVK1") and not _looks_like_spa_fallback(rel, data, ctype):
                 _save(tmp, rel, data)
                 nbytes += len(data)
         # 4. feuilles de style externes (Font Awesome)

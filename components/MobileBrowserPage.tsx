@@ -4,6 +4,7 @@ import MobileContainer from './MobileContainer';
 import { PluginType, User, PluginMetadata } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
 import { useSimpleMode } from '../utils/simpleMode';
+import SoundLibrary from './SoundLibrary';
 
 interface MobileBrowserPageProps {
   user: User | null;
@@ -46,7 +47,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   onPurchase,
   selectedTrackId
 }) => {
-  const [tabChoisi, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
+  const [tabChoisi, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE' | 'SONS'>('STORE');
   // Mode simple : le catalogue seul (effets en mode avancé).
   const { simple } = useSimpleMode();
   const activeTab = simple ? 'STORE' : tabChoisi;
@@ -72,7 +73,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
       <div className="space-y-4 pb-20">
         {/* Onglets - Même structure que SideBrowser2 */}
         {/* Onglet Bridge (VST externes) retiré : inutile pour essayer sa voix */}
-        {!simple && <div className="grid grid-cols-2 gap-2">
+        {!simple && <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => setActiveTab('STORE')}
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
@@ -95,7 +96,22 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             <i className="fas fa-atom text-lg"></i>
             FX
           </button>
+          {/* Lot 5 : sons, boucles et Palette (mode avancé). */}
+          <button
+            onClick={() => setActiveTab('SONS')}
+            data-testid="mobile-tab-sons"
+            className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
+              activeTab === 'SONS'
+                ? 'bg-cyan-500 text-black'
+                : 'bg-nv-surface text-slate-500'
+            }`}
+          >
+            <i className="fas fa-drum text-lg"></i>
+            Sons
+          </button>
         </div>}
+
+        {activeTab === 'SONS' && <div className="-mx-3"><SoundLibrary variant="embedded" narrow /></div>}
 
         {/* Contenu STORE - Catalogue d'instruments */}
         {activeTab === 'STORE' && (

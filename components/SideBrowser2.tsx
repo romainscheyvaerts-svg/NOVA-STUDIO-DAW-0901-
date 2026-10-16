@@ -5,6 +5,7 @@ import { PluginType, User } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
 import VstBrowserTab from './VstBrowserTab';
 import { useSimpleMode } from '../utils/simpleMode';
+import SoundLibrary from './SoundLibrary';
 
 interface SideBrowser2Props {
   user: User | null;
@@ -104,22 +105,28 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab: tabChoisi, onTabChange, selectedTrackId, onLoadBeat, onMakeBeat }) => {
   // Mode simple : le catalogue seul (effets et VST en mode avancé).
   const { simple } = useSimpleMode();
+  // Lot 5 : onglet « Sons » (one-shots, boucles, Palette), mode avancé seulement.
+  const [sons, setSons] = useState(false);
   const activeTab = simple ? 'STORE' : tabChoisi;
+  const showSons = sons && !simple;
+  const pickTab = (t: 'STORE' | 'FX' | 'BRIDGE') => { setSons(false); onTabChange(t); };
   return (
     <div className="w-80 h-full flex flex-col bg-nv-bg border-r border-white/5 shadow-2xl">
       {/* Tab Bar — VST : plugins du PC via le pont local (ordinateur seulement :
           ce panneau n'est pas affiché sur téléphone). */}
-      {!simple && <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
-        <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
-        <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
-        <TabButton icon="fa-plug" label="VST" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} testId="browser-tab-vst" />
+      {!simple && <div className="grid grid-cols-4 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
+        <TabButton icon="fa-store" label="Store" isActive={!showSons && activeTab === 'STORE'} onClick={() => pickTab('STORE')} />
+        <TabButton icon="fa-drum" label="Sons" isActive={showSons} onClick={() => setSons(true)} testId="browser-tab-sons" />
+        <TabButton icon="fa-atom" label="FX" isActive={!showSons && activeTab === 'FX'} onClick={() => pickTab('FX')} />
+        <TabButton icon="fa-plug" label="VST" isActive={!showSons && activeTab === 'BRIDGE'} onClick={() => pickTab('BRIDGE')} testId="browser-tab-vst" />
       </div>}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
-        {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} onMakeBeat={onMakeBeat} />}
-        {activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
-        {activeTab === 'BRIDGE' && <VstBrowserTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
+        {showSons && <SoundLibrary variant="embedded" />}
+        {!showSons && activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} onMakeBeat={onMakeBeat} />}
+        {!showSons && activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
+        {!showSons && activeTab === 'BRIDGE' && <VstBrowserTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>
     </div>
   );

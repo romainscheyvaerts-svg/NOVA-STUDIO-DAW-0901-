@@ -65,6 +65,8 @@ SESSION VOIX
 | HIGHLIGHT | { target, text } | montre un réglage : "vol-<trackId>", "track-<trackId>", "rec", "mix-auto" |
 | OPEN_LYRICS / OPEN_SHARE / OPEN_EXPORT { format } / OPEN_MIX_STYLES | | |
 | ADD_DRUMS { kit } / OPEN_DRUMS / REMOVE_DRUMS | | batterie Make Music |
+| START_BEAT | { genre, key?, mode?, variant? } | squelette de beat à base de RÈGLES (pas d'IA) : genre "trap", "drill-uk", "drill-fr", "boombap", "rnb", "afro" ; key "fa#", "la"… ; mode "minor"|"major" ; variant 0-2 (le dé) ; pose batterie, accords, 808 |
+| VARY_MIDI | { mode, rule, bars?, trackId? } | clip MIDI sélectionné : mode "prolonger" (bars 1|2|4|8) ou "varier" ; rule "rythme", "inversion", "deplacement", "transposition" ; notes toujours dans la gamme |
 | OPEN_STUDIO_OFFER | { offer } | "beat" (licence), "mix" (mixage pro), "session" (studio), "battle" |
 PLUGINS DU PC (seulement si l'état dit vstBridge)
 | VST_MIX | { intent, trackId } | chaîne sur les plugins INSTALLÉS à partir d'une phrase |
