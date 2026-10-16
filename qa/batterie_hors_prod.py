@@ -87,6 +87,9 @@ BATTERIE = [
     # première prise → écoute → fenêtre d'export), bureau et téléphone, sans compte et connecté ; inventaire des écrans,
     # aucune pastille flottante qui recouvre un bouton.
     ("premier_parcours", []),
+    # 1.5.1 (16/10/2026, chantier fixes-midi) : glissés du piano roll pro dans le .mid (pitch bend + RPN 0, une note par canal
+    # sous un accord), relus et réimportés à l'identique ; V25 (bouton MIDI replié dans ☰) et « Remplacer une prise » remis à jour.
+    ("glisses_midi", []), ("v25_midi", []), ("remplacer_prise", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

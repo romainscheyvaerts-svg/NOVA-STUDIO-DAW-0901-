@@ -92,18 +92,27 @@ describe('crête vraie', () => {
 });
 
 describe('loudness par plateforme', () => {
-  it('−9 LUFS pour Spotify : orange, « va le baisser de 5 dB, ce n\'est pas grave »', () => {
+  it('plus fort que −9 LUFS (−8) pour Spotify : orange, ce que font les plateformes, « pas grave »', () => {
     const ch = [sine(5, 0.5), sine(5, 0.5)];
     const s0 = analyzeAudio(ch, SR);
-    applyGainDb(ch, -9 - s0.lufs);
+    applyGainDb(ch, -8 - s0.lufs);
     const s = analyzeAudio(ch, SR);
-    expect(s.lufs).toBeCloseTo(-9, 1);
+    expect(s.lufs).toBeCloseTo(-8, 1);
     const c = checkLoudness(s, spotify);
     expect(c.level).toBe('warn');
-    expect(c.message).toMatch(/−9,0 LUFS/);
-    expect(c.message).toMatch(/baisser de 5,0 dB/);
+    expect(c.message).toMatch(/−8,0 LUFS, plus fort que −9 LUFS/);
+    expect(c.message).toMatch(/baissent le volume des morceaux trop forts/);
+    expect(c.message).toMatch(/baisser de 6,0 dB/);
     expect(c.message).toMatch(/pas grave/);
     expect(c.fix).toBeUndefined();
+  });
+  it('master rap fort entre la cible et −9 LUFS (−10) : vert, avec l\'explication (décision du 16/10/2026)', () => {
+    const ch = [sine(5, 0.5), sine(5, 0.5)];
+    applyGainDb(ch, -10 - analyzeAudio(ch, SR).lufs);
+    const c = checkLoudness(analyzeAudio(ch, SR), spotify);
+    expect(c.level).toBe('ok');
+    expect(c.message).toMatch(/baisser de 4,0 dB/);
+    expect(SEUILS.loudWarnLufs).toBe(-9);
   });
   it('trop faible : orange avec « Monter vers −14 LUFS » ; le gain simple suffit si la crête le permet', () => {
     const ch = [sine(5, 0.05), sine(5, 0.05)];

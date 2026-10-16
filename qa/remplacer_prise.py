@@ -43,6 +43,30 @@ def take2_wav() -> bytes:
     return buf.getvalue()
 
 
+def close_menu(page):
+    """Menu ☰ resté ouvert (export passé par le menu quand la barre a replié « Exporter ») :
+    il recouvre le bas de l'écran et change l'étiquette du bouton en « Fermer le menu »."""
+    m = page.locator("[data-testid='transport-menu'][aria-expanded='true']").locator("visible=true")
+    if m.count():
+        m.first.click(); page.wait_for_timeout(400)
+
+
+def open_mix_auto(page):
+    """« Mix auto » (bloc « 🎙️ Mes prises ») : bouton du bandeau du bas, sinon la palette Ctrl+K
+    (action « Mix auto », pal.mixAuto), comme l'utilisateur quand le bouton n'est pas à l'écran."""
+    page.keyboard.press("Escape"); page.wait_for_timeout(200)
+    close_menu(page)
+    btn = page.locator("[data-nova-target='mix-auto']").locator("visible=true")
+    if btn.count():
+        btn.first.click()
+    else:
+        page.keyboard.press("Control+k")
+        page.locator("[data-testid=command-palette]").wait_for(timeout=5000)
+        page.keyboard.type("Mix auto"); page.wait_for_timeout(300)
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+
+
 def artist_project(path: Path):
     clips = [{"id": f"p{i+1}", "name": "Prise 1", "start": a, "duration": b - a, "offset": a, "fadeIn": 0, "fadeOut": 0,
               "color": "#22d3ee", "type": "AUDIO", "audioRef": "audio/voix.wav", "gain": 1, "takeNumber": 1} for i, (a, b) in enumerate(PHRASES)]
@@ -77,6 +101,9 @@ def run():
         except Exception as e:  # noqa
             res["ok"] = False
             res["steps"].append({"step": label, "ok": False, "err": f"{type(e).__name__}: {str(e)[:500]}"})
+            for pg, who in ((A, "artiste"), (E, "inge")):
+                try: shot(pg, f"ECHEC_{len(res['steps'])}_{who}")
+                except Exception: pass
             return None
 
     with sync_playwright() as p:
@@ -127,13 +154,13 @@ def run():
             wait_for(A, lambda: "Mise à jour reçue" in text_of(A, "remote-status-voix"), 30, what="réglages appliqués")
             shot(A, "P3_reglages_recus")
             export_wav(A, OUT / "P_avant_remplacement.wav", "P4")
+            close_menu(A)
         step("Premier aller-retour (compresseur VST de l'ingé) + export de l'artiste", first_round)
 
         def replace_take():
             n_send = sum(1 for o in srv.ops if o["kind"] == "ri_send")
             n_ret = sum(1 for o in srv.ops if o["kind"] == "ri_return")
-            A.keyboard.press("Escape"); A.wait_for_timeout(300)
-            A.locator("[data-nova-target='mix-auto']").locator("visible=true").first.click(); A.wait_for_timeout(800)
+            open_mix_auto(A)
             A.get_by_text("Mes prises").first.wait_for(timeout=8000)
             sel = A.locator("select").filter(has=A.locator("option", has_text="Toute la prise")).first
             opts = sel.locator("option").all_inner_texts()
@@ -161,6 +188,7 @@ def run():
         step("Artiste : garde la prise 2 sur « Phrase 2 » → part chez l'ingé, regelée, revient toute seule", replace_take)
 
         def export_after():
+            close_menu(A); close_menu(E)
             export_wav(A, OUT / "P_apres_remplacement.wav", "P9")
             export_wav(E, OUT / "P_inge_apres_remplacement.wav", "P10")
         step("Exports après le remplacement (artiste, ingé)", export_after)

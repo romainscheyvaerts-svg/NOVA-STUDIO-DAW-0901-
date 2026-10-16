@@ -962,7 +962,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               <span className="text-2xl leading-none" aria-hidden="true">🚀</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px] font-black text-white">Prêt pour Spotify / Apple / TikTok&nbsp;?</span>
-                <span className="block text-[12px] text-slate-400">Contrôle avant distribution (volume, crête, blancs, licence, infos) et paquet .zip à envoyer à DistroKid, TuneCore…</span>
+                <span className="block text-[12px] text-slate-400">Contrôle avant distribution (volume, crête, blancs, licence, infos) et paquet .zip prêt pour n'importe quel distributeur</span>
               </span>
               <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
             </button>

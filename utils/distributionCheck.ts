@@ -50,8 +50,13 @@ export const DIST_PLATFORMS: DistPlatform[] = PLATFORM_TARGETS.filter(t => t.id 
 export const platformOf = (id: string): DistPlatform => DIST_PLATFORMS.find(p => p.id === id) || DIST_PLATFORMS[0];
 
 export const SEUILS = {
-  /** Écart de loudness toléré autour de la cible (LU) avant le feu orange. */
+  /** Écart de loudness toléré SOUS la cible (LU) avant le feu orange (morceau trop faible). */
   loudnessTolerance: 2,
+  /**
+   * Feu orange « trop fort » (décision de Romain, 16/10/2026) : seulement au-delà de −9 LUFS
+   * intégrés. Entre la cible et −9 (masters rap volontairement forts), feu vert avec l'explication.
+   */
+  loudWarnLufs: -9,
   /** Spotify : crête vraie conseillée pour un master plus fort que −14 LUFS. */
   spotifyLoudCeiling: -2,
   /** Silence = sous −60 dBFS. Plus de 0,5 s au début ou à la fin : orange. */
@@ -239,9 +244,13 @@ export function checkLoudness(s: AudioStats, p: DistPlatform): Check {
   if (s.silent || !Number.isFinite(s.lufs)) return { ...base, level: 'error', value: 'silence', message: 'Le morceau est silencieux : rien à envoyer. Vérifie que tes pistes ne sont pas coupées.' };
   const value = `${num(s.lufs)} LUFS`;
   const d = s.lufs - p.lufs;
-  if (d > SEUILS.loudnessTolerance) {
+  if (s.lufs > SEUILS.loudWarnLufs) {
     return { ...base, level: 'warn', value,
-      message: `Ton morceau est à ${num(s.lufs)} LUFS : ${p.label} va le baisser de ${num(d)} dB pour le mettre au niveau des autres (${num(p.lufs, 0)} LUFS). Ce n'est pas grave, il ne sonnera pas plus fort, mais un master aussi poussé perd du punch (attaques écrasées). Si c'est voulu, garde-le ; sinon, remasterise plus doucement.` };
+      message: `Ton morceau est à ${num(s.lufs)} LUFS, plus fort que −9 LUFS. Les plateformes ne le joueront pas plus fort : Spotify, Apple Music, YouTube et Deezer baissent le volume des morceaux trop forts pour les mettre au niveau des autres (${p.label} va le baisser de ${num(d)} dB, à ${num(p.lufs, 0)} LUFS). Ce n'est pas grave, mais un master aussi poussé perd du punch (attaques écrasées) sans rien gagner. Si c'est voulu, garde-le ; sinon, remasterise plus doucement.` };
+  }
+  if (d > SEUILS.loudnessTolerance) {
+    return { ...base, level: 'ok', value,
+      message: `Master fort (${num(s.lufs)} LUFS), courant en rap : ${p.label} va juste le baisser de ${num(d)} dB pour le mettre au niveau des autres (${num(p.lufs, 0)} LUFS). Rien à corriger.` };
   }
   if (d < -SEUILS.loudnessTolerance) {
     const raise = p.raisesQuiet
