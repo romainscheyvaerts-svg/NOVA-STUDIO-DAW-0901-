@@ -88,7 +88,6 @@ export class FlangerNode {
   }
 
   private applyParams() {
-    const now = this.ctx.currentTime;
     // Securisation des valeurs pour éviter le crash "non-finite"
     const safeNum = (val: number, def: number) => Number.isFinite(val) ? val : def;
 

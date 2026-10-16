@@ -192,7 +192,6 @@ export class DrumSamplerNode {
     // Force stop (Release logic is usually for NoteOff, but here we treat as One Shot with Release tail)
     // If sustain is 0, we let the decay finish. If sustain > 0, we hold until... well, drums usually decay.
     // We add a safety stop.
-    const safetyStop = now + adjustedDuration + this.params.release + 1.0;
     
     // Cleanup callback
     source.onended = () => {

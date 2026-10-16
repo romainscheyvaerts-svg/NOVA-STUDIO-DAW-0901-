@@ -357,7 +357,6 @@ export class CompressorNode {
   /** Compresseur retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
   private disposed = false;
   private compressor: DynamicsCompressorNode | null = null;
-  private compIn: GainNode;
   private makeupGainNode: GainNode;
 
   // Parallel mix
@@ -428,7 +427,6 @@ export class CompressorNode {
     this.outputAnalyzer.fftSize = 256;
     this.outputData = new Float32Array(this.outputAnalyzer.frequencyBinCount);
 
-    this.compIn = ctx.createGain();
     this.makeupGainNode = ctx.createGain();
 
     // Saturation for character modes (sans surechantillonnage : il ajoute

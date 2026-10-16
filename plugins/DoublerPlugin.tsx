@@ -154,7 +154,6 @@ export class VocalDoublerNode {
   }
 
   private applyParams() {
-    const now = this.ctx.currentTime;
     const safe = (v: number) => Number.isFinite(v) ? v : 0;
     const { detune, width, gainL, gainR, directOn, isEnabled } = this.params;
     const stKey = `${isEnabled ? 1 : 0}`;

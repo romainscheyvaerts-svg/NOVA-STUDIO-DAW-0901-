@@ -120,7 +120,6 @@ export class ChorusNode {
 
   private createVoices() {
     // Voice configurations for different phase offsets
-    const phaseOffsets = [0, 0.25, 0.5, 0.75]; // In cycles (0-1)
     const panPositions = [-0.8, 0.8, -0.4, 0.4];
     
     for (let i = 0; i < this.maxVoices; i++) {
@@ -249,7 +248,6 @@ export class ChorusNode {
   }
 
   private applyParams() {
-    const now = this.ctx.currentTime;
     const safe = (v: number, d: number) => Number.isFinite(v) ? v : d;
     const { rate, depth, spread, mix, feedback, lowCut, highCut, voices, mode, isEnabled } = this.params;
 
@@ -280,9 +278,6 @@ export class ChorusNode {
     const sFeedback = safe(feedback, 0);
 
     // Phase offsets for different modes
-    const phaseOffsets = mode === 'TRI_CHORUS' 
-      ? [0, 0.33, 0.67, 1] // Equal 120° spacing
-      : [0, 0.25, 0.5, 0.75]; // 90° spacing
 
     const panPositions = this.calculatePanPositions(activeVoices, sSpread);
 

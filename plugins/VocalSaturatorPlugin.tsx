@@ -512,9 +512,6 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     onParamsChange?.(params);
   }, [params, onParamsChange]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isDragging = useRef(false);
-  const activeParam = useRef<keyof SaturatorParams | null>(null);
-  const lastTouchY = useRef<number>(0);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
