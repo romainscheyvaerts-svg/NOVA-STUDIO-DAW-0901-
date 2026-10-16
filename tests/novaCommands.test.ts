@@ -95,6 +95,11 @@ describe('parseLocalCommand : tableau des phrases', () => {
     ['enlève la batterie', ['REMOVE_DRUMS']],
     ['style trap', ['APPLY_MIX_STYLE']],
     ['fais un tiktok', ['OPEN_SHARE']],
+    // 1.5.1 · lot 9 : une copie pour chacun, page publique (commandes de la palette).
+    ['envoie ma séance à plusieurs rappeurs', ['RUN_COMMAND']],
+    ['chacun sa version', ['RUN_COMMAND']],
+    ['fais une page publique de mon morceau', ['RUN_COMMAND']],
+    ['un lecteur à intégrer sur mon site', ['RUN_COMMAND']],
     ['ouvre les paroles', ['OPEN_LYRICS']],
     ['analyse mon mix', ['ANALYZE_MIX']],
     ['défi du jour', ['LOAD_DAILY_CHALLENGE']],

@@ -291,6 +291,11 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   }
 
   // --- Session ---
+  // 1.5.1 · lot 9 : « Faire sa version » (une copie pour chacun) et page publique du morceau.
+  if (/\b(sa version|leur version|chacun sa (copie|version)|faire sa version|fork|copie (privee|pour chacun)|plusieurs (rappeurs|artistes))\b/.test(msg))
+    return say('🎁 Je t\'ouvre « Faire sa version » : un lien qui donne à chacun sa propre copie de ta séance, sans toucher à l\'original.', { action: 'RUN_COMMAND', payload: { id: 'pal.forkLink' } } as AIAction);
+  if (/\b(page publique|lecteur (integrable|a integrer)|embed|iframe|integrer (sur|a) (mon|un) site|publier (mon|le|ce) (son|morceau|titre))\b/.test(msg))
+    return say('🌍 Je t\'ouvre la page publique du morceau : extrait ou mix, lecteur à intégrer, et « Réserver au studio ».', { action: 'RUN_COMMAND', payload: { id: 'pal.publicPage' } } as AIAction);
   if (/\b(partage|partager|extrait|demo|tiktok|insta|instagram|story|clip)\b/.test(msg))
     return say('📲 Je t\'ouvre le partage : vidéo 30 s pour Insta / TikTok, extrait audio ou démo complète.', { action: 'OPEN_SHARE', payload: {} });
   if (/\b(paroles|prompteur|texte|lyrics)\b/.test(msg)) return say('📝 Le prompteur est ouvert : écris ou colle tes paroles, elles défileront pendant la prise.', { action: 'OPEN_LYRICS', payload: {} });

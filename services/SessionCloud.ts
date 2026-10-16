@@ -67,8 +67,10 @@ export async function call<T = any>(action: string, body: Record<string, unknown
     const status = (error as any).context?.status;
     if (status === 409 && payload) throw new CloudConflictError(payload.version, payload.updated_at, payload.updated_from);
     // Code HTTP gardé : la collaboration distingue « réseau » (on réessaie) et « refusé » (inutile de réessayer).
-    const err = new Error(payload?.error || error.message || 'Erreur réseau') as Error & { status?: number };
+    const err = new Error(payload?.error || error.message || 'Erreur réseau') as Error & { status?: number; reason?: string };
     if (typeof status === 'number') err.status = status;
+    // Raison du refus (« host_pro », « host_not_pro », « session_full »…) : utils/collabAccess.
+    if (typeof payload?.reason === 'string') err.reason = payload.reason;
     throw err;
   }
   return data as T;

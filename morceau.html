@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0d10">
+  <!-- Page PUBLIQUE d'un morceau (lot 9b, 1.5.1) : publiée par choix explicite de son auteur, désactivable.
+       Le lecteur intégrable (&embed=1) passe aussi par cette page. -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="Écoute ce morceau fait avec NOVA Studio, et réserve ta session au studio Make Music.">
+  <title>Morceau — NOVA Studio</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="%BASE_URL%icons/icon-192.png">
+  <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png">
+  <script>
+    // Thème : &theme=light|dark dans l'adresse (lecteur intégré sur un site), sinon celui choisi
+    // dans NOVA sur cet appareil (« nova_theme »), sinon celui du téléphone.
+    (function () {
+      var t = 'dark';
+      try {
+        var q = new URLSearchParams(location.search).get('theme');
+        var p = q === 'light' || q === 'dark' ? q : localStorage.getItem('nova_theme');
+        if (p === 'light' || p === 'dark') t = p;
+        else if (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+      } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t);
+      if (t === 'light') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f1f4f8');
+    })();
+  </script>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 300 800;
+      font-display: swap;
+      src: url('%BASE_URL%fonts/inter-latin.woff2') format('woff2');
+    }
+    html, body { margin: 0; background: #0c0d10; color: #fff; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-text-size-adjust: 100%; }
+    [data-theme="light"], [data-theme="light"] body { background: #f1f4f8; color: #0f172a; }
+    #morceau-chargement { min-height: 100dvh; display: grid; place-items: center; color: #94a3b8; font: 600 14px/1.4 Inter, system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <!-- Page publique d'un morceau (lot 9b) : page légère, sans le DAW (entrée séparée, morceau.tsx). -->
+  <div id="morceau"><div id="morceau-chargement">Ouverture du morceau…</div></div>
+  <noscript>Active JavaScript pour écouter ce morceau.</noscript>
+  <script type="module" src="/morceau.tsx"></script>
+</body>
+</html>

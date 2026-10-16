@@ -253,8 +253,12 @@ describe('daw-session · projet en ligne gratuit 7 jours', () => {
     expect(b.status).toBe(402);
     expect(b.json.reason).toBe('free_project_limit');
     expect(b.json.error).toMatch(/1 projet en ligne.*« Mon son ».*Nova Pro/);
-    // Séance de collaboration : hors limite (l'hôte doit de toute façon avoir Nova Pro).
-    expect((await call(dawSession, { action: 'create', name: 'Feat', purpose: 'collab' }, { token: 'jwt.artiste.ok' })).status).toBe(200);
+    // Séance de collaboration : hors limite pour l'hôte Nova Pro ; sans Nova Pro, on n'en héberge pas
+    // (1.5.1, invité gratuit : refus dès la création, l'invité rejoint celle des autres).
+    const feat = await call(dawSession, { action: 'create', name: 'Feat', purpose: 'collab' }, { token: 'jwt.artiste.ok' });
+    expect(feat.status).toBe(402);
+    expect(feat.json.reason).toBe('host_pro');
+    expect((await call(dawSession, { action: 'create', name: 'Feat', purpose: 'collab' }, { token: 'jwt.pro.ok' })).status).toBe(200);
     for (let i = 0; i < 3; i++) {
       const p = await call(dawSession, { action: 'create', name: `Pro ${i}` }, { token: 'jwt.pro.ok' });
       expect(p.json).toMatchObject({ unlimited: true, expires_at: null });

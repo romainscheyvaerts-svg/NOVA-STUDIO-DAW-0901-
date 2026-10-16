@@ -353,6 +353,8 @@ const CollabPanel: React.FC<Props> = (p) => {
             className={`${btn} h-12 w-full bg-cyan-500 text-[14px] text-black`}>{p.busy || (joining ? 'Connexion…' : !arrivalRole ? 'Choisis ton rôle pour rejoindre'
               : quickArtist && !showRoles ? (inlineLogin ? (signUpMode ? 'Créer mon compte et rejoindre' : 'Me connecter et rejoindre') : `Rejoindre la séance${p.arrival.host ? ` de ${p.arrival.host.name}` : ''}`)
                 : `Rejoindre comme ${ROLE_LABEL[arrivalRole].toLowerCase()}`)}</button>
+          {/* Lot 3 (1.5.1) : l'invité rejoint gratuitement, il ne paie jamais pour rejoindre. */}
+          <p data-testid="arrival-free" className="text-center text-[12px] font-bold text-emerald-300">🎟️ Gratuit pour toi : {p.arrival.host?.name ? `${p.arrival.host.name} héberge` : "l'hôte héberge"} la séance, tu n'as rien à payer.</p>
           <button type="button" onClick={p.onCancelArrival} className="w-full min-h-11 text-center text-[12px] text-slate-400 underline">Pas maintenant (juste regarder la séance)</button>
         </div>
       ) : !p.active ? (

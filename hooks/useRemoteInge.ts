@@ -19,6 +19,7 @@ import {
 import { remoteStore, RemoteTrackBadge } from '../utils/remoteStore';
 import { LwwClock } from '../utils/collabMerge';
 import { CollabStatus, collabStatusView } from '../utils/collabStatus';
+import { collabRefusal } from '../utils/collabAccess';
 
 /** Gel en échec (pont coupé, plugin planté) : nouveaux essais automatiques espacés. */
 const RETRY_AFTER_MS = 15000;
@@ -43,9 +44,10 @@ export interface RemoteIngeOptions {
   setState: (fn: (prev: DAWState) => DAWState) => void;
   setSilently: (fn: (prev: DAWState) => DAWState) => void;
   notify: (msg: string, ms?: number) => void;
-  /** Compte + abonnement collaboration (interactive : affiche la connexion / l'abonnement). */
-  /** role : l'artiste HÉBERGE le lien (Nova Pro), l'ingé est invité (rien à payer ; le serveur vérifie l'hôte). */
-  gate: (interactive: boolean, role?: RemoteRole) => Promise<boolean>;
+  /** Compte (gratuit), et Nova Pro pour l'hôte seulement (interactive : affiche la connexion / Nova Pro). */
+  /** role + hosting : l'artiste qui CRÉE le lien l'héberge (Nova Pro) ; l'ingé invité, ou un artiste
+   *  qui ouvre un lien reçu, n'a rien à payer (le serveur vérifie l'hôte). utils/collabAccess. */
+  gate: (interactive: boolean, role?: RemoteRole, opts?: { hosting: boolean }) => Promise<boolean>;
   /** Sauvegarde de la session (fichier local + en ligne si liée). */
   saveSession: () => Promise<void>;
   releaseBuffer: (id: string) => void;
@@ -271,8 +273,10 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   const start = useCallback(async (role: RemoteRole, name: string, linkRaw?: string, opts: { quiet?: boolean } = {}): Promise<boolean> => {
     setError(null);
     try {
-      if (!(await o.gate(!opts.quiet, role))) return false;
       const saved = stateRef.current.remoteInge;
+      // Héberger = l'artiste qui crée un lien neuf (ni lien reçu, ni son propre lien enregistré).
+      const hosting = role === 'artist' && !parseRemoteLink(linkRaw) && !(saved?.role === 'artist' && parseRemoteLink(saved.link));
+      if (!(await o.gate(!opts.quiet, role, { hosting }))) return false;
       let link: CloudLink | null = null;
       if (role === 'engineer') {
         link = parseRemoteLink(linkRaw) || (saved?.role === 'engineer' ? parseRemoteLink(saved.link) : null);
@@ -305,7 +309,10 @@ export function useRemoteInge(o: RemoteIngeOptions) {
       return true;
     } catch (e: any) {
       const msg = String(e?.message || 'erreur');
-      if (!opts.quiet) setError(/Connecte-toi|Abonnement/.test(msg) ? msg : `Lien impossible : ${msg}`);
+      if (!opts.quiet) {
+        const ref = collabRefusal(e, role === 'artist' && !linkRaw);
+        setError(ref?.message || (/Connecte-toi|Abonnement|Nova Pro/.test(msg) ? msg : `Lien impossible : ${msg}`));
+      }
       void clientRef.current?.leave().catch(() => {});
       clientRef.current = null;
       outboxRef.current = null;

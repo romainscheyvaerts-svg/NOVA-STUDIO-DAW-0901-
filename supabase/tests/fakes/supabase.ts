@@ -35,6 +35,10 @@ const UNIQUE: Record<string, string[][]> = {
   daw_session_invites: [['code']],
   nova_export_uses: [['user_id', 'project_key']],
   studio_booking_requests: [['package_id']],
+  // 1.5.1 (lots 3 et 9) : invite_copie_151.sql.
+  daw_session_forks: [['token_hash']],
+  daw_session_fork_copies: [['fork_id', 'user_id']],
+  nova_public_tracks: [['session_id']],
 };
 
 type Filter = (row: any) => boolean;

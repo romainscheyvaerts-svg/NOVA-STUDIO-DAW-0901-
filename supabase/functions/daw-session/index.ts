@@ -36,6 +36,9 @@ const ACTIVITY_REFRESH_MS = 3600_000;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const INVITE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
 const INVITE_TTL_MS = 24 * 3600_000;
+// Invité gratuit (1.5.1) : protections contre l'abus d'une collaboration désormais gratuite pour les invités.
+const MAX_COLLAB_ACCOUNTS = 8;
+const CODE_FAILS_MAX = 20;
 
 const ALLOWED_ORIGINS = [
   "https://nova-studio-daw-0901-9kzo.vercel.app",
@@ -142,17 +145,66 @@ async function touchActivity(row: Pick<Row, "id" | "updated_at">) {
 }
 
 /**
- * Collaboration : l'HÔTE (propriétaire de la séance) a Nova Pro ; les invités n'ont rien à payer.
- * Séance sans propriétaire (ancienne version) : la personne qui rejoint doit avoir Nova Pro.
+ * Collaboration (1.5.1, invité gratuit) : seul l'HÔTE a besoin de Nova Pro (payé, offert par un
+ * achat d'instru ou une séance au studio) ; les invités rejoignent gratuitement, avec un compte
+ * gratuit. L'hôte = le propriétaire de la séance. Séance sans propriétaire (créée par une ancienne
+ * version) : l'hôte est un membre déjà présent ; si l'un d'eux a Nova Pro, l'invité entre.
  */
-async function requireCollabHost(user: { id: string; email?: string }, ownerId: string | null) {
+async function requireCollabHost(user: { id: string; email?: string }, ownerId: string | null, sessionId?: string) {
   if (await isPro(user.id, user.email)) return;
   if (ownerId && ownerId !== user.id && await isPro(ownerId)) return;
-  const prix = `${(TARIFS.pro_mois_cents / 100).toFixed(2).replace(".", ",")} €/mois`;
+  if (!ownerId && sessionId) {
+    const { data: present } = await supabase.from("daw_session_members").select("user_id").eq("session_id", sessionId).limit(50);
+    const autres = [...new Set(((present || []) as { user_id: string | null }[]).map(m => m.user_id).filter((u): u is string => !!u && u !== user.id))];
+    for (const u of autres.slice(0, 8)) if (await isPro(u)) return;
+  }
+  const prix = prixPro();
   if (!ownerId || ownerId === user.id) {
     throw new HttpError(402, `Héberger une collaboration fait partie de Nova Pro (${prix}). Tes invités n'ont rien à payer.`, { reason: "host_pro" });
   }
   throw new HttpError(402, `L'hôte de cette séance n'a plus Nova Pro : demande-lui de le réactiver (${prix}). En invité, tu n'as rien à payer.`, { reason: "host_not_pro" });
+}
+
+const prixPro = () => `${(TARIFS.pro_mois_cents / 100).toFixed(2).replace(".", ",")} €/mois`;
+
+/**
+ * Anti-abus (les invités ne paient plus) : au plus MAX_COLLAB_ACCOUNTS comptes actifs (vus depuis
+ * 12 h) dans une séance. L'appli en montre 4 à la fois ; la marge couvre les changements
+ * d'appareil. Un compte déjà membre revient toujours.
+ */
+async function requireRoomFor(sessionId: string, userId: string) {
+  const since = new Date(Date.now() - 12 * 3600_000).toISOString();
+  const { data } = await supabase.from("daw_session_members").select("user_id, last_seen").eq("session_id", sessionId).gt("last_seen", since).limit(200);
+  const comptes = new Set(((data || []) as { user_id: string | null }[]).map(m => m.user_id).filter(Boolean) as string[]);
+  if (comptes.has(userId) || comptes.size < MAX_COLLAB_ACCOUNTS) return;
+  throw new HttpError(429, `Cette séance est complète (${MAX_COLLAB_ACCOUNTS} comptes au plus) : demande à l'hôte de libérer une place.`, { reason: "session_full" });
+}
+
+/** Codes d'invitation faux de ce compte depuis une heure (0 si la table n'existe pas encore). */
+async function codeFailsOf(userId: string): Promise<number> {
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { data, error } = await supabase.from("daw_invite_attempts").select("at").eq("user_id", userId).gt("at", since).limit(CODE_FAILS_MAX + 1);
+  if (error) return 0;
+  return (data || []).length;
+}
+async function noteCodeFail(userId: string) {
+  const { error } = await supabase.from("daw_invite_attempts").insert({ user_id: userId, at: new Date().toISOString() });
+  if (error) return;
+  // Ménage : essais de plus d'un jour.
+  await supabase.from("daw_invite_attempts").delete().lt("at", new Date(Date.now() - 86400_000).toISOString());
+}
+
+/** Morceaux gardés par un lien « Faire sa version » actif ou une page publique de la séance. */
+async function partsHeldElsewhere(sessionId: string): Promise<string[]> {
+  const out = new Set<string>();
+  const { data: forks, error: e1 } = await supabase.from("daw_session_forks").select("manifest, revoked_at").eq("session_id", sessionId).limit(50);
+  if (!e1) for (const f of (forks || []) as { manifest: unknown; revoked_at: string | null }[]) if (!f.revoked_at) partsOf(f.manifest).forEach(p => out.add(p));
+  const { data: pages, error: e2 } = await supabase.from("nova_public_tracks").select("audio, cover_part").eq("session_id", sessionId).limit(5);
+  if (!e2) for (const pg of (pages || []) as { audio: { parts?: unknown[] } | null; cover_part: string | null }[]) {
+    for (const p of pg.audio?.parts || []) if (typeof p === "string" && PART_RE.test(p)) out.add(p);
+    if (pg.cover_part && PART_RE.test(pg.cover_part)) out.add(pg.cover_part);
+  }
+  return [...out];
 }
 
 /** Morceaux référencés par un manifeste : { files: { chemin: { parts: [sha1…] } } }. */
@@ -197,18 +249,24 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
   }
 
   if (action === "resolve_code") {
-    // Code d'invitation (6 caractères) → lien de la session. Compte connecté ET abonné
-    // (comme pour rejoindre) : un code deviné ne suffit pas à ouvrir une session.
+    // Code d'invitation (6 caractères) → lien de la session. Compte connecté (gratuit) exigé, et
+    // l'hôte de la séance a Nova Pro (comme pour rejoindre) : un code deviné ne suffit pas.
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
     const code = String(body?.code || "").toUpperCase().replace(/[\s\-_.]/g, "");
-    const fail = async () => { await new Promise(r => setTimeout(r, 400)); throw new HttpError(404, "Code introuvable ou expiré"); };
+    // Invité gratuit (1.5.1) : n'importe quel compte gratuit peut essayer un code. Au plus
+    // CODE_FAILS_MAX codes faux par heure et par compte (table daw_invite_attempts ; absente :
+    // pas de limite, comme avant), en plus de l'attente de 400 ms après chaque échec.
+    if (await codeFailsOf(user.id) >= CODE_FAILS_MAX) {
+      throw new HttpError(429, "Trop de codes faux d'affilée : attends une heure, ou demande plutôt le lien d'invitation.", { reason: "code_attempts" });
+    }
+    const fail = async () => { await noteCodeFail(user.id); await new Promise(r => setTimeout(r, 400)); throw new HttpError(404, "Code introuvable ou expiré"); };
     if (!INVITE_RE.test(code)) return await fail();
     const { data: inv } = await supabase.from("daw_session_invites").select("session_id, expires_at").eq("code", code).maybeSingle();
     if (!inv || Date.parse(inv.expires_at) < Date.now()) return await fail();
     const { data: s } = await supabase.from("daw_sessions").select("id, secret, name, owner_id").eq("id", inv.session_id).maybeSingle();
     const link = s ? linkOf(s as Pick<Row, "id" | "secret">) : null;
     if (!link) return await fail();
-    await requireCollabHost(user, (s as any).owner_id || null);
+    await requireCollabHost(user, (s as any).owner_id || null, (s as any).id);
     return { link, name: (s as any).name };
   }
 
@@ -225,6 +283,10 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     // Séance de collaboration (purpose « collab ») : hors limite, l'hôte doit de toute façon avoir Nova Pro.
     const unlimited = await isPro(user?.id, user?.email);
     const collabOnly = body?.purpose === "collab";
+    // Invité gratuit (1.5.1) : un invité sans Nova Pro rejoint la séance des autres, mais n'en
+    // HÉBERGE pas (refus dès la création, plus seulement au moment de rejoindre).
+    if (collabOnly && !user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
+    if (collabOnly && !unlimited) throw new HttpError(402, `Héberger une collaboration fait partie de Nova Pro (${prixPro()}). Tes invités n'ont rien à payer.`, { reason: "host_pro" });
     if (user && !unlimited && !collabOnly) {
       const { data: mine } = await supabase.from("daw_sessions").select("id, name, expires_at")
         .eq("owner_id", user.id).gt("expires_at", new Date().toISOString()).limit(10);
@@ -331,6 +393,10 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     // Audio envoyé en direct par les collaborateurs (journal d'opérations) : gardé aussi.
     const { data: recentOps } = await supabase.from("daw_session_ops").select("op").eq("session_id", row.id).order("seq", { ascending: false }).limit(3000);
     for (const o of recentOps || []) for (const h of JSON.stringify(o.op).match(/[a-f0-9]{40}/g) || []) keep.add(h);
+    // 1.5.1 : l'audio figé par un lien « Faire sa version » (daw_session_forks) et celui d'une page
+    // publique (nova_public_tracks) reste aussi, tant que le lien / la page existe. Tables absentes
+    // (pas encore créées) : rien de plus à garder, comme avant.
+    for (const h of await partsHeldElsewhere(row.id)) keep.add(h);
     const old = [...have.entries()].filter(([p, m]) => !keep.has(p) && Date.now() - m.created > 30 * 60_000).map(([p]) => `${row.id}/${p}`);
     for (let i = 0; i < old.length; i += 100) await supabase.storage.from(BUCKET).remove(old.slice(i, i + 100));
     return { version };
@@ -365,9 +431,10 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     if (!ROLES.includes(role)) throw new HttpError(400, "Rôle inconnu");
     // Collaboration : l'hôte a Nova Pro, les invités n'ont rien à payer (le studio en est dispensé).
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
-    await requireCollabHost(user, row.owner_id);
+    await requireCollabHost(user, row.owner_id, row.id);
     const key = memberKeyOf();
     if (key === "d:") throw new HttpError(400, "Appareil inconnu");
+    await requireRoomFor(row.id, user.id);
     const name = String(body?.name || user?.email?.split("@")[0] || "Invité").slice(0, 40);
     const { error } = await supabase.from("daw_session_members").upsert({
       session_id: row.id, member_key: key, user_id: user?.id || null, role, display_name: name, last_seen: new Date().toISOString(),
