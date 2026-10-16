@@ -47,6 +47,11 @@ def make_site(root, tag):
     write(root, "assets/bg-BBBB.png", b"\x89PNG fake")
     write(root, "worklets/proc.js", f"// worklet {tag}")
     write(root, "drums/lib/kick-0123abcd.wav", b"RIFF....WAVEfake")
+    if tag == "v2":
+        # Nouveau son de la batterie du studio, servi brouillé (.nks, 16/10/2026).
+        write(root, f"assets/index-{tag}.js", f'import("./chunk-{tag}.js");import("./shared-AAAA.js");const k="kick-0123abcd";'
+                                              f'const u="/drums/lib/"+k+".wav";const s="snare-89abcdef";')
+        write(root, "drums/lib/snare-89abcdef.nks", b"NVK1" + bytes(16) + b"scrambled")
 
 
 class SiteHandler(http.server.SimpleHTTPRequestHandler):
@@ -100,6 +105,7 @@ def main():
         check("assets/ versionnés repris de la version livrée (pas retéléchargés)",
               "assets/shared-AAAA.js" in v.m["inherited"] and "drums/lib/kick-0123abcd.wav" in v.m["inherited"])
         check("chunk chargé dynamiquement téléchargé", "assets/chunk-v2.js" in v.m["files"])
+        check("nouveau son de batterie brouillé (.nks) téléchargé", "drums/lib/snare-89abcdef.nks" in v.m["files"], sorted(v.m["files"])[:20])
         check("fichier public non versionné retéléchargé", "worklets/proc.js" in v.m["files"])
         a2, b2, dl2 = ub.choose(bundled_dir, cache)
         check("au démarrage suivant : v2", a2.id == v.id, repr(a2))

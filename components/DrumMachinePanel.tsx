@@ -390,9 +390,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                 </div>
               )}
 
-              {/* Grille */}
-              <div className="relative">
-              <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'overflow-x-auto no-scrollbar'}>
+              {/* Grille. Bureau : la flèche « pas suivants » a sa propre colonne à droite (elle recouvrait
+                  les dernières cases visibles quand elle était posée par-dessus la grille). */}
+              <div className={narrow ? 'relative' : 'flex items-stretch gap-1'}>
+              <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'min-w-0 flex-1 overflow-x-auto no-scrollbar'}>
                 <div className={narrow ? '' : 'inline-block min-w-full'}>
                   {shownRows.map(({ r, ri }) => (
                     <div key={r.id} className="flex items-center gap-1 mb-1">
@@ -474,11 +475,11 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   ))}
                 </div>
               </div>
-              {!narrow && moreRight && (
-                <button type="button" onClick={() => gridRef.current?.scrollBy({ left: gridRef.current.clientWidth * 0.6, behavior: 'smooth' })}
-                  aria-label="Voir les pas suivants" title="Pas suivants"
-                  className="absolute right-0 inset-y-0 mb-1 w-11 flex items-center justify-end pr-1.5 rounded-r-lg bg-gradient-to-l from-nv-surface via-nv-surface/85 to-transparent text-white/80">
-                  <i className="fas fa-chevron-right" />
+              {!narrow && (moreRight || (gridRef.current?.scrollLeft || 0) > 0) && (
+                <button type="button" disabled={!moreRight} onClick={() => gridRef.current?.scrollBy({ left: gridRef.current.clientWidth * 0.6, behavior: 'smooth' })}
+                  aria-label="Voir les pas suivants" title={moreRight ? 'Pas suivants' : 'Tu vois déjà les derniers pas'} data-testid="drum-steps-next"
+                  className="shrink-0 w-9 mb-1 flex items-center justify-center rounded-lg bg-white/5 text-slate-200 hover:bg-white/10 disabled:opacity-30 disabled:cursor-default">
+                  <i className="fas fa-chevron-right" aria-hidden />
                 </button>
               )}
               </div>

@@ -12,6 +12,8 @@ Bureau 1366 × 768 (sombre puis clair) :
   4. « Prolonger / Varier » sur le clip d'accords : inversion (variante B) puis prolonger de 2 mesures ;
   5. mode avancé : onglet « Sons » du panneau de gauche ; aucun bouton recouvert (balayage) ;
   6. thème clair : audit (aucune zone très sombre, textes lisibles) sur chaque fenêtre ; aucune erreur console.
+Batterie (16/10/2026, bureau et téléphone) : la batterie du studio est servie brouillée (« NVK1 », aucun .wav) et
+la fenêtre Batterie n'a aucun bouton recouvert (flèche « pas suivants » dans sa colonne au bureau).
 Téléphone 390 × 844 (au doigt, sombre puis clair) : palette → Démarrer un beat (fenêtre posée en bas, rien de
 recouvert), pose ; page « Sons » du navigateur (mode avancé) ; Palette.
 
@@ -160,13 +162,62 @@ def undo(page):
     page.keyboard.press("Control+z"); page.wait_for_timeout(700)
 
 
+def lib_spy(page, store):
+    """Batterie du studio (/drums/lib/) : forme servie (16/10/2026 : brouillée « NVK1 », plus de WAV)."""
+    def on_resp(r):
+        if "/drums/lib/" in r.url:
+            try: head = r.body()[:4]
+            except Exception: head = b""
+            store.append({"url": r.url.rsplit("/", 1)[-1], "status": r.status, "head": head.decode("latin1")})
+    page.on("response", on_resp)
+
+
+def batterie_studio(page, ou, touch, lib):
+    """Fenêtre Batterie : aucun bouton recouvert (la flèche « pas suivants » a sa colonne à droite au bureau,
+    vérifié avec un motif de 2 mesures qui déborde), puis kit « Trap » (sons de la batterie du studio) :
+    servis brouillés, aucun .wav demandé."""
+    ok, d = palette_run(page, "batterie pas a pas", "pal.drums", touch=touch)
+    panel = page.locator('[aria-labelledby="drums-title"]')
+    check(f"{ou} : la Batterie s'ouvre (Ctrl+K)", ok and panel.count() > 0 and panel.first.is_visible(), d)
+    page.wait_for_timeout(600)
+
+    def scan(quand):
+        # Les messages (toasts) passent : on attend qu'ils soient partis avant le balayage.
+        try: page.wait_for_function("() => !document.querySelector('button[role=status][aria-live=polite]')", timeout=15000)
+        except Exception: pass
+        if not touch: page.mouse.move(2, 2)
+        couverture(page, f"{ou} · fenêtre Batterie ({quand})", '[aria-labelledby="drums-title"]')
+        if "light" in ou: audit_clair(page, f"{ou} · Batterie ({quand})")
+
+    if not touch:
+        nxt = page.locator("[data-testid=drum-steps-next]").locator("visible=true")
+        check(f"{ou} : motif de 2 mesures : flèche « pas suivants » dans sa propre colonne", nxt.count() == 1, nxt.count())
+    scan("motif de 2 mesures")
+    shot(page, f"{ou.replace(' ', '_')}_batterie_2_mesures")
+    if not touch and page.locator("[data-testid=drum-steps-next]:not([disabled])").count():
+        page.locator("[data-testid=drum-steps-next]").click(); page.wait_for_timeout(700)
+        scan("après « pas suivants »")
+    n0 = len(lib)
+    k = panel.first.get_by_role("button", name=re.compile(r"Trap$")).first
+    k.tap() if touch else k.click()
+    page.wait_for_timeout(2500)
+    got = lib[n0:]
+    check(f"{ou} : batterie du studio servie brouillée (.nks « NVK1 »), aucun WAV demandé",
+          got and all(g["url"].endswith(".nks") and g["head"] == "NVK1" and g["status"] == 200 for g in got), got[:4])
+    scan("kit Trap du studio")
+    shot(page, f"{ou.replace(' ', '_')}_batterie_studio")
+    close = page.locator('[aria-label="Fermer la batterie"]').locator("visible=true")
+    if close.count(): (close.first.tap() if touch else close.first.click()); page.wait_for_timeout(400)
+
+
 def desktop(b, f: Path, theme):
     R = res["bureau"].setdefault(theme, {})
     log = Log(f"sons_beat_pc_{theme}")
     ctx, page = new_page(b, "pc1366", log=log, touch=False)
     page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
-    kits = []
+    kits, libspy = [], []
     kit_spy(page, kits)
+    lib_spy(page, libspy)
     open_project(page, f)
     page.evaluate(SET_SIMPLE, True); page.wait_for_timeout(400)
     shot(page, f"pc_{theme}_00_simple")
@@ -292,6 +343,12 @@ def desktop(b, f: Path, theme):
     bar = 4 * 60 / 142
     check(f"bureau {theme} : prolonger de 2 mesures (8 → 10 mesures)", abs(e["clips"][0]["dur"] - 10 * bar) < 0.01, e["clips"][0])
 
+    # --- Batterie (motif de 2 mesures du squelette, puis kit « Trap » de la batterie du studio)
+    for sel in ('[aria-label="Fermer Prolonger ou varier"]', '[aria-label="Fermer les sons"]'):
+        x = page.locator(sel).locator("visible=true")
+        if x.count(): x.first.click(); page.wait_for_timeout(300)
+    batterie_studio(page, f"bureau {theme}", False, libspy)
+
     # --- Mode avancé : onglet « Sons » du panneau de gauche (la batterie ouverte par « Sur un pad » est refermée)
     for sel in ('[aria-label="Fermer la batterie"]', '[aria-label="Fermer Prolonger ou varier"]', '[aria-label="Fermer les sons"]'):
         x = page.locator(sel).locator("visible=true")
@@ -324,6 +381,8 @@ def phone(b, f: Path, theme):
     log = Log(f"sons_beat_tel_{theme}")
     ctx, page = new_page(b, "tel390", log=log, touch=True)
     page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
+    lib = []
+    lib_spy(page, lib)
     open_project(page, f, touch=True)
     page.wait_for_timeout(800)
     ok, d = palette_run(page, "démarrer un beat", "pal.startBeat", touch=True)
@@ -342,6 +401,7 @@ def phone(b, f: Path, theme):
     s = page.evaluate(ST)
     check(f"téléphone {theme} : squelette Afro posé (106 BPM, majeur)", s["bpm"] == 106 and s["scale"] == "MAJOR" and any(t["id"] == "track-beat-accords" for t in s["tracks"]), {"bpm": s["bpm"], "scale": s["scale"]})
     shot(page, f"tel_{theme}_02_squelette")
+    batterie_studio(page, f"téléphone {theme}", True, lib)
     # Page « Sons » du navigateur (mode avancé)
     page.evaluate(SET_SIMPLE, False); page.wait_for_timeout(500)
     tabb = page.locator('[data-nova-target="tab-BROWSER"]').locator("visible=true")
