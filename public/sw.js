@@ -9,6 +9,10 @@
  *   elle-même en cache à la demande (Cache API « nova-kits-v1 », utils/drumKitLibrary.ts), aussi
  *   dans l'appli Windows qui n'a pas de service worker ; ce cache n'est jamais vidé ici.
  * - Tout le reste (API, Supabase, audio des beats) : réseau direct, pas de cache.
+ * - Notifications (Lot 7, services/PushNotify.ts) : « push » affiche la notification (commentaire,
+ *   version, invitation, prise reçue) sauf si NOVA est déjà ouverte et au premier plan : la page la
+ *   montre alors elle-même, sans bruit ; un clic ramène la fenêtre NOVA (ou en ouvre une) sur la
+ *   séance, à l'instant du commentaire. Adresses de clic : toujours sur NOVA (chemin relatif).
  */
 const CACHE = 'nova-static-v1';
 
@@ -56,4 +60,49 @@ self.addEventListener('fetch', (e) => {
       return res;
     })());
   }
+});
+
+// --- Notifications (Lot 7) ------------------------------------------------------------
+/** Chemin relatif sur NOVA seulement (jamais une autre adresse, même dans un message reçu). */
+const novaPath = (u) => (typeof u === 'string' && u.charAt(0) === '/' && u.charAt(1) !== '/' && u.charAt(1) !== '\\' ? u : '/');
+
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: 'NOVA', body: e.data ? e.data.text() : '' }; }
+  if (!d || typeof d !== 'object') d = {};
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // NOVA au premier plan : la page affiche la nouveauté elle-même (petite carte), pas de notification système.
+    const front = wins.filter(w => w.visibilityState === 'visible' && w.focused);
+    if (front.length && d.tag !== 'nova-test') {
+      front.forEach(w => w.postMessage({ type: 'nova-push', data: d }));
+      return;
+    }
+    await self.registration.showNotification(String(d.title || 'NOVA').slice(0, 120), {
+      body: String(d.body || '').slice(0, 300),
+      tag: typeof d.tag === 'string' ? d.tag.slice(0, 120) : undefined,
+      renotify: typeof d.tag === 'string',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      lang: 'fr',
+      data: { ...d, url: novaPath(d.url) },
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const d = e.notification.data || {};
+  const path = novaPath(d.url);
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const w = wins.find(c => { try { return new URL(c.url).origin === self.location.origin; } catch (_) { return false; } });
+    if (w) {
+      // Fenêtre déjà ouverte (peut-être en pleine prise) : on ne la recharge pas, la page décide.
+      try { await w.focus(); } catch (_) { /* focus refusé */ }
+      w.postMessage({ type: 'nova-notif-open', data: { ...d, url: path } });
+      return;
+    }
+    await self.clients.openWindow(path);
+  })());
 });

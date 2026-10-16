@@ -364,7 +364,7 @@ export const GUIDES: Guide[] = [
   },
   {
     id: 'collab', emoji: '👥', title: 'Inviter un ingé son ou un artiste',
-    keywords: 'inviter collaborer collaboration collab feat featuring inge ingenieur son distance a distance artiste beatmaker lien code session ensemble',
+    keywords: 'inviter collaborer collaboration collab feat featuring inge ingenieur son distance a distance artiste beatmaker lien code session ensemble notification notifications prevenu alerte',
     summary: 'Une séance partagée en direct, ou un ingé qui mixe à distance avec ses plugins.',
     steps: [
       { text: 'Ouvre « Collaborer » (en bas).', phone: 'Touche ☰ › « Plus d’outils » › « Collaborer à distance ».', action: 'pal.collab',
@@ -373,12 +373,15 @@ export const GUIDES: Guide[] = [
         done: { visible: `${tid('collab-invite-copy')}, ${tid('remote-panel')}` } },
       { text: '« 🔗 Copier le lien » (ou donne le code à 6 caractères, valable 24 h) et envoie-le.', target: [tid('collab-invite-copy'), tid('remote-panel')], manual: true },
       { text: 'Ton invité ouvre le lien, choisit son rôle et rejoint : il apparaît dans la liste.', target: [tid('collab-members'), tid('remote-panel')], manual: true },
+      { text: 'Quand NOVA propose « 🔔 Être prévenu… », touche « Activer » : tu sauras quand ton invité commente ou envoie une prise.', target: tid('notif-ask-yes'),
+        hint: 'Plus tard : Ctrl+K › « Notifications » (compte connecté).', manual: true },
     ],
     result: 'Vous travaillez sur la même séance (4 personnes au plus) ; l’ingé à distance renvoie son mix tout seul.',
     pitfalls: [
       '« Code inconnu ou expiré » : un code dure 24 h, crée-en un nouveau.',
       'L’ingé « à distance » travaille dans l’appli Windows, avec ses plugins.',
       'Une instru du catalogue non achetée n’est pas envoyée aux invités.',
+      'Notifications sur iPhone : ajoute d’abord NOVA à l’écran d’accueil ; dans l’appli Windows, elles arrivent tant que Nova Studio est ouvert.',
     ],
     prereqs: ['compte', 'nova-pro'],
     doIt: () => [cmd('pal.collab', 'Ouvrir la collaboration')],
