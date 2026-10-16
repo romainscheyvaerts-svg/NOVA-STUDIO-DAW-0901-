@@ -314,6 +314,11 @@ export async function isExportVoicesUnlocked(projectKey: string): Promise<boolea
 /** Après un paiement ou un crédit Nova Pro vérifié par le serveur. */
 export const markExportVoicesUnlocked = (projectKey: string) => { unlockedLegacy.add(projectKey); };
 
+/**
+ * « Gérer mon abonnement » : portail client Stripe (carte, factures, résiliation) dans un
+ * nouvel onglet. À appeler pendant le clic (sinon l'onglet est bloqué). Erreur : l'onglet
+ * vide est refermé et l'erreur remonte (message clair : utils/billingPortal.portalErrorMessage).
+ */
 export async function openBillingPortal(): Promise<void> {
   if (isNovaDesktop()) {
     const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
@@ -321,8 +326,14 @@ export async function openBillingPortal(): Promise<void> {
     return;
   }
   const tab = window.open('', '_blank');
-  const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
-  if (tab) { tab.location.href = r.url; return; }
-  const left = await leavePage(r.url);
-  if (left.error) throw new Error(left.error);
+  try {
+    const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
+    if (!r?.url) throw new Error('Action inconnue');
+    if (tab) { tab.location.href = r.url; return; }
+    const left = await leavePage(r.url);
+    if (left.error) throw new Error(left.error);
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }

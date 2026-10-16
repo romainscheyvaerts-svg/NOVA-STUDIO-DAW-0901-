@@ -171,6 +171,8 @@ import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
 import ProGateModal from './components/ProGateModal';
+import { manageSubscription } from './components/ManageSubscription';
+import { knownSubscriber } from './utils/billingPortal';
 import CaptureGuard from './components/CaptureGuard';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, uploadParts, signPart, putPart, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
@@ -10320,6 +10322,7 @@ function Studio() {
       a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      ...(knownSubscriber() ? [a('Fichier', 'pal.manageSubscription', 'Gérer mon abonnement Nova Pro (carte, factures, résiliation)', () => { void manageSubscription().then(e => { if (e) setAiNotification(`⚠️ ${e}`); }); }, { keywords: 'abonnement résilier annuler arrêter facture carte paiement stripe pro compte' })] : []),
       a('Fichier', 'pal.lyricClip', '🎬 Clip pour TikTok / Reels (paroles synchronisées)', () => setLyricClipOpen(true), { keywords: 'clip vidéo video tiktok reels instagram paroles karaoké lyrics mp4 vertical' }),
       a('Fichier', 'pal.videoTake', '🎥 Filmer la prise (caméra, vidéo calée sur le son)', () => setVideoTakeOpen(true), { keywords: 'caméra camera webcam filmer vidéo video prise performance selfie video mix tiktok reels' }),
       a('Fichier', 'pal.sendStudio', 'Envoyer au studio Make Music (projet, stems, notes, réservation)', () => setStudioSendOpen(true), { keywords: 'studio make music réserver réservation envoyer ingé stems session' }),

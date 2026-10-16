@@ -27,6 +27,7 @@ import PracticeSpeed from './PracticeSpeed';
 import type { Track } from '../types';
 import type { SafetyContext } from '../utils/dspLoad';
 import { fitBar, barItem } from '../utils/barFit';
+import ManageSubscription, { useAccountBilling } from './ManageSubscription';
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -239,6 +240,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   children
 }) => {
   const tsNum = timeSignature?.numerator || 4;
+  // Abonné Stripe : « Gérer mon abonnement » dans le compte (components/ManageSubscription).
+  const accountBilling = useAccountBilling();
   const tsDen = timeSignature?.denominator || 4;
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [tempBpm, setTempBpm] = useState(bpm.toString());
@@ -670,6 +673,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <span>Se connecter</span>
                 </button>
               )}
+              <ManageSubscription status={accountBilling} variant="menu" />
             </div>
           </>;
     if (!simple) return (<>
@@ -982,6 +986,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
            <div className="hidden md:block w-14 h-1 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: 'var(--border-dim)' }}><div className="h-full transition-all duration-300" style={{ width: `${Math.min(100, (bpm / 250) * 100)}%`, backgroundColor: 'var(--accent-neon)' }}></div></div>
         </div>
         
+        {/* Abonné Stripe (compte Make Music) : gérer / résilier son abonnement. */}
+        <div className="hidden md:flex"><ManageSubscription status={accountBilling} variant="icon" /></div>
         {/* LOGIN / USER SECTION */}
         {/* Invité (pas de compte) : « Connexion », pas d'avatar ni de déconnexion. */}
         {user && user.id !== 'guest' ? (

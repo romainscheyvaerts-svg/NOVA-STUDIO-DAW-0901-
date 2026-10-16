@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { euros, openCheckout, productFor, waitPaid, type BillingStatus, type Grille } from '../services/Billing';
 import { track } from '../utils/analytics';
+import { canManageSubscription } from '../utils/billingPortal';
+import ManageSubscription from './ManageSubscription';
 
 /**
  * Nova Pro, mensuel ou annuel (prix et économie lus sur le serveur), et jours de Nova Pro
@@ -68,6 +70,8 @@ const NovaProPlans: React.FC<Props> = ({ grille, status, onSubscribed, loggedIn 
   return (
     <div className="space-y-2" data-testid="nova-pro-plans">
       <ProGiftCounter status={status} />
+      {/* Déjà abonné (Stripe) : gérer / résilier, pas une 2e souscription. */}
+      <ManageSubscription status={status} variant="panel" />
       {!compact && (
         <ul className="space-y-1 text-[12px] text-slate-200">
           <li>💿 Exports illimités de tous tes projets</li>
@@ -77,7 +81,7 @@ const NovaProPlans: React.FC<Props> = ({ grille, status, onSubscribed, loggedIn 
           {pro.melodies_offertes_par_mois > 0 && <li>🎁 {pro.melodies_offertes_par_mois} mélodie du catalogue offerte chaque mois</li>}
         </ul>
       )}
-      {loggedIn && (
+      {loggedIn && !canManageSubscription(status) && (
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!!busy} onClick={() => void subscribe('pro_month')} data-testid="pro-month"
             className={`${card} border-violet-400/40 bg-violet-500/15 hover:bg-violet-500/25`}>
