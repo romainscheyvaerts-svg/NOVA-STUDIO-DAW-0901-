@@ -27,10 +27,13 @@
 //
 // Table : supabase/migrations/20261012180000_daw_listen_links.sql (RLS sans
 // policy : accès par cette fonction seulement, clé service).
+//
+// 1.5.1 · Lot 9b : page PUBLIQUE d'un morceau (actions public_*), voir ./publicTrack.ts.
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { collectReview, publicComments, publicVersions } from "./review.ts";
+import { handlePublic, PublicError } from "./publicTrack.ts";
 
 /** Durées proposées à l'ingé (heures) : 24 h, 7 jours, 30 jours. */
 export const TTL_HOURS = [24, 168, 720];
@@ -241,6 +244,17 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
       comments, versions,
       server_time: new Date().toISOString(),
     };
+  }
+
+  // ─── Page publique d'un morceau (1.5.1, lot 9b) ───────────────────────────────────────
+  if (action.startsWith("public_")) {
+    try {
+      const out = await handlePublic(action, body, user, supabase, authorizeSession);
+      if (out !== null) return out;
+    } catch (e) {
+      if (e instanceof PublicError) throw new HttpError(e.status, e.message, e.extra);
+      throw e;
+    }
   }
 
   // ─── Côté ingé : compte connecté + lien de la séance ─────────────────────────────────

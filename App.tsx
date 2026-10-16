@@ -225,11 +225,13 @@ import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, g
 import GuestStudio from './components/GuestStudio';
 import CabinRemote from './components/CabinRemote';
 import SendToStudioModal from './components/SendToStudioModal';
+import SessionShare, { type ShareTab } from './components/SessionShare';
 import { useCabinHost, useCabinPhone } from './hooks/useCabinRemote';
 import CommentsPanel, { CommentPins } from './components/CommentsPanel';
 import { useTimelineComments } from './hooks/useTimelineComments';
 import { commentCounts } from './utils/timelineComments';
 import { renderMixBounce } from './services/mixBounce';
+import { collabRefusal, remoteNeedsPro } from './utils/collabAccess';
 import { exportKeyOf, mixNeedsTag, newExportKey, SHARED_PROJECT_ID } from './utils/exportRights';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
@@ -7061,11 +7063,14 @@ function Studio() {
   };
 
   const [collabGate, setCollabGate] = useState<'login' | 'subscribe' | null>(null);
+  // Lot 3 (1.5.1) : refus du serveur montré DANS le panneau (au téléphone, le chat Nova est caché).
+  const [collabJoinError, setCollabJoinError] = useState<string | null>(null);
   /** quiet : reprise automatique après un rechargement de la page (pas de fenêtre de connexion). */
   const startCollab = useCallback(async (role: CollabRole, name: string, opts: { quiet?: boolean; host?: boolean; color?: string } = {}) => {
     if (remoteRef.current?.active) await remoteRef.current.leave(false);
     setCollabBusy(opts.quiet ? 'Reconnexion à la collaboration…' : 'Mise en ligne de la session…');
     setCollabGate(null);
+    setCollabJoinError(null);
     try {
       // Collaboration = compte Make Music ; Nova Pro pour l'HÔTE seulement, les invités ne paient rien
       // (le serveur le vérifie : il refuse un invité si l'hôte n'a plus Nova Pro, avec un message clair).
@@ -7267,8 +7272,10 @@ function Studio() {
       else setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez les autres, sur TES pistes (personne ne peut les écraser).' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
     } catch (e: any) {
       const msg = String(e?.message || 'erreur');
-      if (/Connecte-toi/.test(msg) && !opts.quiet) setCollabGate('login');
-      else if (/Abonnement/.test(msg) && !opts.quiet) setCollabGate('subscribe');
+      // Lot 3 (1.5.1) : Nova Pro pour l'HÔTE seulement ; un invité n'est jamais envoyé vers l'abonnement.
+      const refus = collabRefusal(e, !!opts.host);
+      if (refus?.gate && !opts.quiet) setCollabGate(refus.gate);
+      else if (refus?.message) { setAiNotification(`⚠️ ${refus.message}`); if (!opts.quiet) setCollabJoinError(refus.message); }
       else setAiNotification(opts.quiet
         ? `⚠️ Reconnexion à la collaboration impossible (${msg}). Ouvre « Collaborer » pour réessayer.`
         : `⚠️ Collaboration impossible : ${msg}. Vérifie ta connexion puis réessaie.`);
@@ -8191,7 +8198,9 @@ function Studio() {
     } catch (e: any) {
       const msg = String(e?.message || '');
       if (/inconnue/i.test(msg)) throw new Error('Les codes ne marchent pas encore : demande plutôt le lien d’invitation.');
-      if (/Abonnement/i.test(msg)) { setCollabGate('subscribe'); throw new Error('Pour rejoindre une collaboration, il faut l’abonnement collaboration (5 €/mois) : abonne-toi ci-dessous, puis entre à nouveau le code.'); }
+      const refus = collabRefusal(e, false);
+      if (refus?.gate === 'login') { setCollabGate('login'); throw new Error('Connecte-toi d’abord avec ton compte Make Music (gratuit), puis entre le code.'); }
+      if (refus?.message) throw new Error(refus.message);
       throw new Error(/introuvable|expir/i.test(msg) ? 'Code inconnu ou expiré (24 h) : demande un nouveau code à la personne qui t’invite.' : `Code impossible à vérifier : ${msg || 'connexion'}. Réessaie.`);
     }
     const link = parseLink(r?.link || '');
@@ -8379,11 +8388,12 @@ function Studio() {
   }, []);
 
   // --- Mode « Ingé à distance (ses propres VST) » : chacun sa session ---------------------
-  const remoteGate = useCallback(async (interactive: boolean, role?: 'artist' | 'engineer') => {
+  const remoteGate = useCallback(async (interactive: boolean, role?: 'artist' | 'engineer', opts?: { hosting: boolean }) => {
     const { data: who } = await catalogSupabase.auth.getUser();
     if (!who?.user) { if (interactive) { setCollabGate('login'); setCollabOpen(true); } return false; }
-    // L'artiste héberge le lien (Nova Pro) ; l'ingé invité n'a rien à payer (le serveur vérifie l'hôte).
-    if (role === 'engineer') return true;
+    // L'artiste qui CRÉE le lien l'héberge (Nova Pro) ; l'ingé invité, ou l'artiste qui ouvre un lien
+    // reçu, n'a rien à payer (le serveur vérifie l'hôte).
+    if (!remoteNeedsPro(role, !!opts?.hosting)) return true;
     const st = await billingStatus();
     if (!hasPlan(st, 'collab')) { if (interactive) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); setCollabOpen(true); } return false; }
     return true;
@@ -10164,6 +10174,8 @@ function Studio() {
   const [cabinOpen, setCabinOpen] = useState(false);
   // « Envoyer au studio » : projet + stems + notes horodatées + demande de réservation (components/SendToStudioModal).
   const [studioSendOpen, setStudioSendOpen] = useState(false);
+  // 1.5.1 · lot 9 : « Faire sa version » et page publique du morceau (components/SessionShare).
+  const [sessionShare, setSessionShare] = useState<ShareTab | null>(null);
   const cabinAllowed = !!collab && collab.role === 'artist' && !!state.collabGuestRights?.remote;
   const cabinEngineer = (() => {
     if (!collab) return null;
@@ -10202,6 +10214,16 @@ function Studio() {
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
+  // 1.5.1 · lot 9 : fenêtre « Partager ta séance » + arrivée d'un lien « Faire sa version » (#copie=…),
+  // aussi sur l'accueil (le destinataire arrive souvent sans projet ouvert).
+  const sessionShareNode = (
+    <SessionShare tab={sessionShare} onTab={setSessionShare} state={state} ownedInstrumentIds={ownedInstruments}
+      currentSession={() => { const c = cloudRef.current; return c?.secret && stateRef.current.id === cloudProjectId(c.id) ? { id: c.id, secret: c.secret } : null; }}
+      ensureOnline={async () => { const ok = await syncCloudRef.current({ interactive: true }); const c = cloudRef.current; return ok && c?.secret ? { id: c.id, secret: c.secret } : null; }}
+      onOpenCopy={(copy) => { handleEnterWithProject(copy.state); setAiNotification(`🎁 Ta version de « ${copy.name || 'la séance'} » est ouverte : elle est rien qu'à toi, l'original ne bouge pas. Enregistre-la pour la garder.`); }}
+      notify={(m) => setAiNotification(m)} />
+  );
+
   // Afficher la Landing Page si c'est la première visite
   if (showLanding) {
     return (
@@ -10233,6 +10255,7 @@ function Studio() {
       />
       {quickMasterNode}
       {vocalCoachNode}
+      {sessionShareNode}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
@@ -10299,6 +10322,8 @@ function Studio() {
       a('Fichier', 'pal.lyricClip', '🎬 Clip pour TikTok / Reels (paroles synchronisées)', () => setLyricClipOpen(true), { keywords: 'clip vidéo video tiktok reels instagram paroles karaoké lyrics mp4 vertical' }),
       a('Fichier', 'pal.videoTake', '🎥 Filmer la prise (caméra, vidéo calée sur le son)', () => setVideoTakeOpen(true), { keywords: 'caméra camera webcam filmer vidéo video prise performance selfie video mix tiktok reels' }),
       a('Fichier', 'pal.sendStudio', 'Envoyer au studio Make Music (projet, stems, notes, réservation)', () => setStudioSendOpen(true), { keywords: 'studio make music réserver réservation envoyer ingé stems session' }),
+      a('Fichier', 'pal.forkLink', '🎁 Faire sa version : un lien qui donne à chacun sa copie de ta séance', () => setSessionShare('fork'), { keywords: 'copie version fork remix dupliquer envoyer séance rappeurs beatmaker stems plusieurs artistes lien partager' }),
+      a('Fichier', 'pal.publicPage', '🌍 Page publique du morceau (lecteur à intégrer, réserver au studio)', () => setSessionShare('public'), { keywords: 'page publique publier lecteur embed intégrer iframe site partager morceau écoute lien public soundcloud' }),
       ...(collab?.role === 'artist' && state.collabGuestRights?.remote ? [a('Collaboration', 'pal.cabin', 'Mode cabine : télécommande REC, lecture et paroles en grand', () => setCabinOpen(true), { keywords: 'cabine télécommande rec téléphone studio' })] : []),
       // Voix
       a('Voix', 'pal.voiceTrack', 'Ajouter une piste voix (armée, prête à enregistrer)', () => { void handleAddVoiceTrack(); }, { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste voix micro enregistrer nouvelle' }),
@@ -11133,6 +11158,7 @@ function Studio() {
         onReload={() => { void reloadCollabSession(); }}
         onStart={(r, n) => { void startCollab(r, n, { host: true }); }}
         gate={collabGate}
+        joinError={collabJoinError}
         onSignIn={async (email, password) => {
           await signInAccount(email, password);
           setCollabGate(null);
@@ -11343,6 +11369,7 @@ function Studio() {
             onLogin={() => { setStudioSendOpen(false); setIsAuthOpen(true); }} sampleRate={audioEngine.getProjectSampleRate()} />
         </PanelBoundary>
       )}
+      {sessionShareNode}
       {cabinOpen && collab && collab.role === 'artist' && (
         <PanelBoundary name="le mode cabine" overlay onClose={() => setCabinOpen(false)}>
           <CabinRemote

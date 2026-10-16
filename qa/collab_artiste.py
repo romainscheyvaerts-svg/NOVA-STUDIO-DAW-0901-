@@ -35,7 +35,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3494/")
 import qalib  # noqa
 from qalib import *  # noqa
 from gel_pre_effet import prepare, voice_wav  # noqa
-from collab_sim import FakeNovaCloud, FakeRealtime, jwt, SUPA, STORE  # noqa
+from collab_sim import FakeNovaCloud, FakeRealtime, jwt, SUPA, STORE, free_billing  # noqa
 from feat_lib import dismiss, wait_for, collab, open_panel, close_panel, REC_INIT, BASE_T  # noqa
 
 MAX_UID, NINA_UID = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
@@ -292,7 +292,8 @@ def run_format(p, vp):
         if not ok:
             res["ok"] = False
 
-    cloud = FakeNovaCloud(per_device=True, codes=True, strict=True)
+    # 1.5.1 (invité gratuit) : seul Max, l'hôte, a Nova Pro ; Nina a un compte GRATUIT (serveur ET appli).
+    cloud = FakeNovaCloud(per_device=True, codes=True, strict=True, pro={MAX_UID})
     rt = FakeRealtime()
     src = out / "00_seance_max.novaproj.zip"
     seance_project(src)
@@ -308,6 +309,7 @@ def run_format(p, vp):
     cT, T = new_page(b, vp, lT)
     os.environ["QA_SORTIE_AUDIO"] = "Casque (Realtek(R) Audio)"
     prepare(T, None, desktop=False)
+    free_billing(T)
     connect_logged_out(T, cloud, rt, "T", NINA_UID, NINA_MAIL)
     E.goto(BASE, wait_until="domcontentloaded", timeout=180000)
     E.get_by_text("Charger Projet").first.wait_for(timeout=180000)
@@ -379,8 +381,11 @@ def run_format(p, vp):
         P.friction("Pas de compte ? « Créer un compte » ouvre un AUTRE site (studiomakemusic.com) : il faut revenir ensuite")
     wait_for(T, lambda: collab(T, "c.role()") == "artist", 90, step=200, what="Nina reliée")
     P.wait(time.time() - t0)
-    P.m(abonnement="non simulé : le serveur réel exige l'abonnement collaboration (5 €/mois) pour CHAQUE compte, artiste invité compris")
-    P.friction("Hors appli (serveur) : l'artiste invité doit avoir un compte ET l'abonnement collaboration 5 €/mois (402 sinon) — décision commerciale, voir le rapport")
+    # 1.5.1 · lot 3 : Nina n'a PAS Nova Pro (compte gratuit, serveur et appli) et rejoint quand même.
+    P.m(invite_gratuit=True, nina_pro=cloud.is_pro(NINA_UID), hote_pro=cloud.is_pro(MAX_UID))
+    check("invité gratuit : Nina (sans Nova Pro) rejoint la séance de Max (seul l'hôte a Nova Pro)", not cloud.is_pro(NINA_UID) and collab(T, "c.role()") == "artist")
+    abo = text_on_screen(T, r"abonne-toi|M'abonner|abonnement collaboration")
+    check("invité gratuit : aucun « abonne-toi » montré à l'invitée", not abo)
     P.end()
 
     # ------------------------------------------------ 3. où suis-je ?

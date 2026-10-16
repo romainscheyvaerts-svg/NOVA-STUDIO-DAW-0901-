@@ -119,6 +119,8 @@ export default defineConfig(({ mode }) => {
           input: {
             main: path.resolve(__dirname, 'index.html'),
             ecoute: path.resolve(__dirname, 'ecoute.html'),
+            // 1.5.1 (lot 9b) : page publique d'un morceau et lecteur intégrable, sans le DAW.
+            morceau: path.resolve(__dirname, 'morceau.html'),
           },
           output: {
             manualChunks: {

@@ -138,7 +138,10 @@ describe('daw-session', () => {
   });
 
   it("collaboration en hôte : l'hôte Nova Pro invite, l'invité n'a rien à payer ; hôte sans Pro → 402 clair", async () => {
-    const { json: s } = await call(dawSession, { action: 'create', name: 'Hôte', purpose: 'collab' }, { token: 'jwt.inge.ok' });
+    // 1.5.1 : sans Nova Pro, la séance de collaboration est refusée dès la création ; une séance
+    // ordinaire (projet en ligne gratuit) partagée quand même reste refusée au moment de rejoindre.
+    expect((await call(dawSession, { action: 'create', name: 'Hôte', purpose: 'collab' }, { token: 'jwt.inge.ok' })).json.reason).toBe('host_pro');
+    const { json: s } = await call(dawSession, { action: 'create', name: 'Hôte' }, { token: 'jwt.inge.ok' });
     const guest = { action: 'join', id: s.id, secret: s.secret, role: 'artist', device_id: 'tel' };
     const host = { action: 'join', id: s.id, secret: s.secret, role: 'engineer', device_id: 'pc' };
     const h0 = await call(dawSession, host, { token: 'jwt.inge.ok' });

@@ -119,7 +119,9 @@ def run():
     res = {"name": "collab_bout_en_bout", "ok": True, "serveur": "corrigé (fe14e5f, règles strictes)" if NEW_SERVER else "actuel (en ligne)",
            "steps": [], "convergence": [], "latences_ms": {}, "constats": [], "verifications": {},
            "note": "Serveur NOVA (daw-session) et Supabase Realtime SIMULÉS ; protocole Phoenix réel côté navigateur ; WebRTC réel entre pages ; micro simulé (WAV)."}
-    cloud = FakeNovaCloud(per_device=NEW_SERVER, codes=NEW_SERVER, strict=NEW_SERVER)
+    # 1.5.1 (invité gratuit) : avec le serveur à jour, seule Lina (l'hôte) a Nova Pro ; Max et Sam
+    # rejoignent sans (règle de daw-session 1.5.1, simulée).
+    cloud = FakeNovaCloud(per_device=NEW_SERVER, codes=NEW_SERVER, strict=NEW_SERVER, pro={LINA} if NEW_SERVER else None)
     rt = FakeRealtime()
     src = OUT / "00_session_lina.novaproj.zip"
     feat_project(src, name="Feat Lina x Sam")
@@ -678,6 +680,9 @@ def run():
             res[f"erreurs_{k}"] = [e["text"][:200] for e in lg.errors()][:12]
             save_log(lg)
         res["ecritures_bloquees"] = sum(len(getattr(pg, "_blocked", [])) for pg in pages.values() if pg is not None)
+        if NEW_SERVER:
+            joined = {m.get("uid") for m in cloud.members.values()}
+            check("invités gratuits : Max et Sam, sans Nova Pro, ont rejoint la séance de Lina", not cloud.is_pro(MAX) and not cloud.is_pro(SAM) and MAX in joined and SAM in joined)
         b.close()
 
     for k, v in list(res["latences_ms"].items()):

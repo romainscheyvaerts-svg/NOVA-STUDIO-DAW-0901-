@@ -27,26 +27,33 @@ def _id(n, alphabet=string.ascii_lowercase + string.digits):
 
 
 class HttpErr(Exception):
-    """Erreur avec le code HTTP de la vraie fonction (401, 402, 403, 413…)."""
+    """Erreur avec le code HTTP de la vraie fonction (401, 402, 403, 413…) ; extra : champs en plus (reason…)."""
 
-    def __init__(self, status, msg):
+    def __init__(self, status, msg, **extra):
         super().__init__(msg)
         self.status = status
+        self.extra = extra
 
 
 class FakeNovaCloud:
     """daw-session simulée : sessions (manifeste + version), membres, journal, morceaux audio."""
 
-    def __init__(self, per_device=False, codes=False, strict=False, subscribed=None):
+    def __init__(self, per_device=False, codes=False, strict=False, subscribed=None, pro=None, server="151"):
         # per_device / codes : la fonction avec le patch « Feat à distance »
         # (clé de membre par appareil, codes d'invitation) ; sinon la fonction en ligne.
-        # strict : comme la VRAIE fonction (fe14e5f) — compte exigé, abonnement (402),
+        # strict : comme la VRAIE fonction — compte exigé, Nova Pro (402),
         # nom d'opération ^[a-z_]{2,20}$, taille 1,5 Mo (413), codes HTTP réels.
-        # subscribed : comptes abonnés (None : tous).
+        # pro : comptes Nova Pro (None : tous). server : règle de paiement de la collaboration
+        #   « 151 » (1.5.1, invité gratuit : seul l'hôte a Nova Pro ; héberger sans Pro → 402 dès la
+        #   création), « 149 » (même règle, sans le refus à la création), « ancien » (avant la 1.4.9 :
+        #   CHAQUE participant doit être abonné, 402 « Abonnement collaboration requis (5 €/mois) »).
+        # subscribed : ancien nom de « pro ».
         self.per_device = per_device
         self.codes = codes
         self.strict = strict
         self.subscribed = subscribed
+        self.pro = pro if pro is not None else subscribed
+        self.server = server
         self.lose_reply = set()   # navigateurs dont la PROCHAINE réponse à « op » se perd (op enregistrée)
         self.calls = []           # (tag, action, ms) : latence côté serveur simulé
         self.last_seen = {}
@@ -86,7 +93,7 @@ class FakeNovaCloud:
                 self.calls.append((tag, a, round((time.time() - t0) * 1000, 2)))
                 route.fulfill(status=200, content_type="application/json", headers=self.cors(), body=json.dumps(out))
             except HttpErr as e:
-                route.fulfill(status=e.status, content_type="application/json", headers=self.cors(), body=json.dumps({"error": str(e)}))
+                route.fulfill(status=e.status, content_type="application/json", headers=self.cors(), body=json.dumps({"error": str(e), **e.extra}))
             except Exception as e:  # noqa
                 route.fulfill(status=400, content_type="application/json", headers=self.cors(), body=json.dumps({"error": str(e)}))
         return h
@@ -106,14 +113,36 @@ class FakeNovaCloud:
             raise HttpErr(401, msg)
         return uid
 
-    def _need_plan(self, uid):
-        if self.strict and self.subscribed is not None and uid not in self.subscribed:
-            raise HttpErr(402, "Abonnement collaboration requis (5 €/mois)")
+    def is_pro(self, uid):
+        return bool(uid) and (self.pro is None or uid in self.pro)
+
+    def _need_plan(self, uid, sid=None):
+        """Qui paie pour collaborer, selon la version du serveur (voir __init__)."""
+        if self.pro is None:  # règle active dès qu'on dit qui a Nova Pro
+            return
+        if self.server == "ancien":
+            if not self.is_pro(uid):
+                raise HttpErr(402, "Abonnement collaboration requis (5 €/mois)")
+            return
+        if self.is_pro(uid):
+            return
+        owner = (self.sessions.get(sid) or {}).get("owner") if sid else None
+        if owner and owner != uid and self.is_pro(owner):
+            return
+        if not owner and sid and self.server == "151":
+            others = {m.get("uid") for k, m in self.members.items() if k[0] == sid and m.get("uid") and m.get("uid") != uid}
+            if any(self.is_pro(u) for u in others):
+                return
+        if not owner or owner == uid:
+            raise HttpErr(402, "Héberger une collaboration fait partie de Nova Pro (9,99 €/mois). Tes invités n'ont rien à payer.", reason="host_pro")
+        raise HttpErr(402, "L'hôte de cette séance n'a plus Nova Pro : demande-lui de le réactiver (9,99 €/mois). En invité, tu n'as rien à payer.", reason="host_not_pro")
 
     def act(self, a, b, request):
-        if a == "resolve_code" and self.strict:
-            uid = self._need_user(request)
-            self._need_plan(uid)
+        if a == "resolve_code" and (self.strict or self.pro is not None):
+            uid = self._need_user(request) if self.strict else self._user(request)
+            inv = self.invites.get(str(b.get("code") or "").upper().replace(" ", ""))
+            if inv:
+                self._need_plan(uid, inv["sid"])
         if a == "resolve_code":
             if not self.codes:
                 raise RuntimeError("Action inconnue")
@@ -125,9 +154,15 @@ class FakeNovaCloud:
             s = self.sessions[inv["sid"]]
             return {"link": f"{inv['sid']}.{s['secret']}", "name": s["name"]}
         if a == "create":
+            uid = self._user(request)
+            if self.pro is not None and b.get("purpose") == "collab" and self.server == "151":
+                if not uid:
+                    raise HttpErr(401, "Connecte-toi à ton compte Make Music pour collaborer")
+                if not self.is_pro(uid):
+                    raise HttpErr(402, "Héberger une collaboration fait partie de Nova Pro (9,99 €/mois). Tes invités n'ont rien à payer.", reason="host_pro")
             sid = _id(12)
             self.sessions[sid] = {"secret": _id(32, string.ascii_letters + "23456789"), "name": b.get("name"), "version": 0, "manifest": None,
-                                  "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "updated_from": b.get("device")}
+                                  "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "updated_from": b.get("device"), "owner": uid}
             return {"id": sid, "secret": self.sessions[sid]["secret"], "version": 0, "owned": True}
         sid = b.get("id")
         s = self.sessions.get(sid)
@@ -174,11 +209,11 @@ class FakeNovaCloud:
                 if b.get("role") not in ("artist", "engineer", "beatmaker"):
                     raise HttpErr(400, "Rôle inconnu")
                 self._need_user(request)
-                self._need_plan(uid)
                 if key == "d:":
                     raise HttpErr(400, "Appareil inconnu")
+            self._need_plan(uid, sid)
             self.last_seen[(sid, key)] = time.time()
-            self.members[(sid, key)] = {"role": b.get("role"), "name": (str(b.get("name") or "") or "Invité")[:40]}
+            self.members[(sid, key)] = {"role": b.get("role"), "name": (str(b.get("name") or "") or "Invité")[:40], "uid": uid}
             mem = [{"member_key": k[1], "role": v["role"], "display_name": v["name"]} for k, v in self.members.items() if k[0] == sid]
             last = max([o["seq"] for o in self.ops if o["sid"] == sid] or [0])
             return {"member_key": key, "last_seq": last, "members": mem, "channel": f"nova-collab-{sid}-test"}
@@ -470,6 +505,29 @@ class FakeBridgeV7(FakeBridge):
             except Exception:
                 pass
         return (y * (10 ** (db / 20))).astype(np.float32)
+
+
+FREE_STATUS = {"plans": [], "admin": False, "pro": {"active": False, "source": None, "days_left": 0, "until": None}, "unlocked": False}
+
+
+def free_billing(page):
+    """Compte GRATUIT côté appli (nova-billing simulé) : ni Nova Pro, ni admin (invité gratuit, 1.5.1).
+    À poser APRÈS gel_pre_effet.prepare (qui simule un admin) : la dernière route posée gagne."""
+    def h(route, request):
+        if request.method == "OPTIONS":
+            return route.fulfill(status=204, headers=FakeNovaCloud.cors())
+        try:
+            action = json.loads(request.post_data or "{}").get("action")
+        except Exception:
+            action = None
+        if action == "export_access":
+            body = {"unlocked": False, "via": None, "reason": "paiement", "missing": [], "login_required": False, "kits": False, "pro": FREE_STATUS["pro"], "items": []}
+        elif action in ("pricing", "melody_perk"):
+            return route.fulfill(status=400, content_type="application/json", headers=FakeNovaCloud.cors(), body=json.dumps({"error": "Action inconnue"}))
+        else:
+            body = FREE_STATUS
+        route.fulfill(status=200, content_type="application/json", headers=FakeNovaCloud.cors(), body=json.dumps(body))
+    page.route("**/functions/v1/nova-billing", h)
 
 
 def jwt(sub, email):

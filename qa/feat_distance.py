@@ -72,7 +72,9 @@ def run():
     res = {"name": "feat_distance", "ok": True, "serveur": "avec le patch (clé par appareil, codes)" if NEW_SERVER else "actuel (sans le patch)",
            "steps": [], "mesures": {}, "verifications": {},
            "note": "Serveur NOVA et Supabase Realtime SIMULÉS (protocole Phoenix réel côté navigateur), micro simulé (fichier WAV)."}
-    cloud, rt = FakeNovaCloud(per_device=NEW_SERVER, codes=NEW_SERVER), FakeRealtime()
+    # 1.5.1 (invité gratuit) : avec le serveur à jour, seul Léo (l'hôte) a Nova Pro ; Sam et Max
+    # rejoignent sans (le serveur simulé applique la règle de daw-session 1.5.1).
+    cloud, rt = FakeNovaCloud(per_device=NEW_SERVER, codes=NEW_SERVER, pro={LEO_ID} if NEW_SERVER else None), FakeRealtime()
     src = OUT / "00_session_leo.novaproj.zip"
     feat_project(src)
     link, ids = {}, {}
@@ -375,6 +377,9 @@ def run():
     else:
         check("exports présents", False)
     check("instantané écrit par l'hôte seulement", res.get("instantanes_ecrits_par") in (["A"], []))
+    if NEW_SERVER:
+        check("invités gratuits : Sam et Max, sans Nova Pro, ont rejoint la séance de Léo", not cloud.is_pro(SAM_ID) and not cloud.is_pro(MAX_ID)
+              and any(m.get("uid") == SAM_ID for m in cloud.members.values()) and any(m.get("uid") == MAX_ID for m in cloud.members.values()))
     (out / "resultat_feat_distance.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({k: res[k] for k in ("ok", "serveur", "verifications", "mesures")}, ensure_ascii=True, indent=1)[:6000])
     for s in res["steps"]:
