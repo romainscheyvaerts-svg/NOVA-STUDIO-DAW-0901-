@@ -1,0 +1,184 @@
+{
+ "MELODIC_SAMPLER": [
+  {
+   "action": "Accord fin:max",
+   "patches": [
+    {
+     "fineTune": 50
+    }
+   ]
+  },
+  {
+   "action": "Accord fin:min",
+   "patches": [
+    {
+     "fineTune": -50
+    }
+   ]
+  },
+  {
+   "action": "Attaque:max",
+   "patches": [
+    {
+     "attack": 2
+    }
+   ]
+  },
+  {
+   "action": "Attaque:min",
+   "patches": [
+    {
+     "attack": 0.0010000000000000002
+    }
+   ]
+  },
+  {
+   "action": "Déclin:max",
+   "patches": [
+    {
+     "decay": 5.000000000000001
+    }
+   ]
+  },
+  {
+   "action": "Déclin:min",
+   "patches": [
+    {
+     "decay": 0.005000000000000002
+    }
+   ]
+  },
+  {
+   "action": "Maintien:max",
+   "patches": []
+  },
+  {
+   "action": "Maintien:min",
+   "patches": [
+    {
+     "sustain": 0
+    }
+   ]
+  },
+  {
+   "action": "Relâchement:max",
+   "patches": [
+    {
+     "release": 5.000000000000001
+    }
+   ]
+  },
+  {
+   "action": "Relâchement:min",
+   "patches": [
+    {
+     "release": 0.005000000000000002
+    }
+   ]
+  },
+  {
+   "action": "Glissé:max",
+   "patches": [
+    {
+     "glide": 1
+    }
+   ]
+  },
+  {
+   "action": "Glissé:min",
+   "patches": []
+  },
+  {
+   "action": "Pitch bend:max",
+   "patches": [
+    {
+     "bendRange": 24
+    }
+   ]
+  },
+  {
+   "action": "Pitch bend:min",
+   "patches": [
+    {
+     "bendRange": 0
+    }
+   ]
+  },
+  {
+   "action": "Vélocité:max",
+   "patches": [
+    {
+     "velSens": 1
+    }
+   ]
+  },
+  {
+   "action": "Vélocité:min",
+   "patches": [
+    {
+     "velSens": 0
+    }
+   ]
+  },
+  {
+   "action": "Filtre:max",
+   "patches": []
+  },
+  {
+   "action": "Filtre:min",
+   "patches": [
+    {
+     "cutoff": 40
+    }
+   ]
+  },
+  {
+   "action": "Résonance:max",
+   "patches": [
+    {
+     "resonance": 12
+    }
+   ]
+  },
+  {
+   "action": "Résonance:min",
+   "patches": [
+    {
+     "resonance": 0.1
+    }
+   ]
+  },
+  {
+   "action": "Volume:max",
+   "patches": [
+    {
+     "gainDb": 12
+    }
+   ]
+  },
+  {
+   "action": "Volume:min",
+   "patches": [
+    {
+     "gainDb": -24
+    }
+   ]
+  },
+  {
+   "action": "bouton:Mono",
+   "patches": [
+    {
+     "mono": true
+    }
+   ]
+  },
+  {
+   "action": "bouton:Poly",
+   "patches": [
+    {
+     "mono": false
+    }
+   ]
+  }
+ ]
+}

@@ -832,3 +832,71 @@
 .hw-lcd-big small { font-size: 11px; }
 @media (max-width: 639px) { .hw-lcd-big { font-size: 24px; padding: 6px 10px; } }
 .hw-pad:disabled { opacity: 0.45; cursor: default; }
+
+/* Instruments (1.5.1) : Sampler (rose), Drum sampler (sky), Drum Rack (sand) */
+.hw-finish-rose {
+  --hw-face-solid: #d9a3ad;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #e2b2bb 0%, #d9a3ad 55%, #c98f9a 100%);
+  --hw-ink: #2a0f16;
+  --hw-ink-soft: #5b2a36;
+  --hw-accent: #be185d;
+  --hw-rule: rgba(42, 15, 22, 0.25);
+  --hw-edge-hi: rgba(255, 255, 255, 0.6);
+  --hw-edge-lo: rgba(90, 40, 50, 0.45);
+  --hw-well: rgba(60, 20, 30, 0.08);
+}
+.hw-finish-sky {
+  --hw-face-solid: #9cc7e8;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(90deg, rgba(20, 50, 80, 0.025) 0 1px, rgba(255, 255, 255, 0.02) 1px 3px),
+    linear-gradient(180deg, #abd2ef 0%, #9cc7e8 55%, #88b6da 100%);
+  --hw-ink: #0b1b2b;
+  --hw-ink-soft: #24435f;
+  --hw-accent: #ea580c;
+  --hw-rule: rgba(11, 27, 43, 0.25);
+  --hw-edge-hi: rgba(255, 255, 255, 0.65);
+  --hw-edge-lo: rgba(30, 60, 90, 0.45);
+  --hw-well: rgba(10, 30, 50, 0.08);
+}
+.hw-finish-sand {
+  --hw-face-solid: #c9c1ad;
+  --hw-face:
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.03) 0 1px, rgba(0, 0, 0, 0) 1.5px) 0 0 / 5px 5px,
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #d3cbb8 0%, #c9c1ad 55%, #b9b09a 100%);
+  --hw-ink: #17140e;
+  --hw-ink-soft: #4a4234;
+  --hw-accent: #0891b2;
+  --hw-rule: rgba(23, 20, 14, 0.25);
+  --hw-edge-hi: rgba(255, 255, 255, 0.6);
+  --hw-edge-lo: rgba(70, 60, 40, 0.45);
+  --hw-well: rgba(40, 30, 10, 0.08);
+}
+/* Grille de pads du Drum Rack */
+.hw-rack-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.hw-rack-pad { min-height: 58px; padding: 16px 4px 6px; gap: 2px; justify-content: flex-end; touch-action: manipulation; }
+.hw-rack-pad[data-selected='true'] { outline: 2px solid var(--hw-accent); outline-offset: 2px; }
+.hw-rack-pad[data-muted='true'] { opacity: 0.5; }
+.hw-rack-pad[data-solo='true'] { box-shadow: 0 0 0 2px #facc15 inset, 0 3px 0 #0c0c0c; }
+.hw-rack-num { position: absolute; top: 4px; left: 6px; font: 800 10px/1 Inter, system-ui, sans-serif; color: #d6d2c8; }
+.hw-rack-pad[aria-pressed='true'] .hw-rack-num { color: #1a1206; }
+.hw-rack-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 700; text-transform: none; letter-spacing: 0; }
+.hw-rack-flags { position: absolute; top: 4px; right: 6px; font: 800 9px/1 Inter, system-ui, sans-serif; color: #facc15; }
+@media (max-width: 639px) { .hw-rack-pad { min-height: 52px; padding-top: 15px; } .hw-rack-name { font-size: 9px; } }
+
+.hw-finish-lilac {
+  --hw-face-solid: #c9b8e6;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #d4c6ec 0%, #c9b8e6 55%, #b8a5da 100%);
+  --hw-ink: #1d1230;
+  --hw-ink-soft: #46365f;
+  --hw-accent: #7c3aed;
+  --hw-rule: rgba(29, 18, 48, 0.25);
+  --hw-edge-hi: rgba(255, 255, 255, 0.6);
+  --hw-edge-lo: rgba(60, 40, 90, 0.45);
+  --hw-well: rgba(30, 20, 50, 0.08);
+}

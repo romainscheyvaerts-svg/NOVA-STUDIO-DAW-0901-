@@ -1,0 +1,506 @@
+{
+ "SAMPLER": [
+  {
+   "action": "montage",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0.01,
+      "decay": 0.2,
+      "sustain": 0.8,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "attack:max",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 2,
+      "decay": 0.2,
+      "sustain": 0.8,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "attack:min",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0.2,
+      "sustain": 0.8,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "decay:max",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 2,
+      "sustain": 0.8,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "decay:min",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0,
+      "sustain": 0.8,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "sustain:max",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0,
+      "sustain": 1,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "sustain:min",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0,
+      "sustain": 0,
+      "release": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "release:max",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0,
+      "sustain": 0,
+      "release": 5
+     }
+    }
+   ]
+  },
+  {
+   "action": "release:min",
+   "log": [
+    {
+     "setADSR": {
+      "attack": 0,
+      "decay": 0,
+      "sustain": 0,
+      "release": 0
+     }
+    }
+   ]
+  }
+ ],
+ "DRUM_SAMPLER": [
+  {
+   "action": "gain:max",
+   "log": [
+    {
+     "update": {
+      "gain": 12
+     }
+    }
+   ]
+  },
+  {
+   "action": "gain:min",
+   "log": [
+    {
+     "update": {
+      "gain": -60
+     }
+    }
+   ]
+  },
+  {
+   "action": "pan:max",
+   "log": [
+    {
+     "update": {
+      "pan": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "pan:min",
+   "log": [
+    {
+     "update": {
+      "pan": -1
+     }
+    }
+   ]
+  },
+  {
+   "action": "transpose:max",
+   "log": [
+    {
+     "update": {
+      "transpose": 24
+     }
+    }
+   ]
+  },
+  {
+   "action": "transpose:min",
+   "log": [
+    {
+     "update": {
+      "transpose": -24
+     }
+    }
+   ]
+  },
+  {
+   "action": "fineTune:max",
+   "log": [
+    {
+     "update": {
+      "fineTune": 100
+     }
+    }
+   ]
+  },
+  {
+   "action": "fineTune:min",
+   "log": [
+    {
+     "update": {
+      "fineTune": -100
+     }
+    }
+   ]
+  },
+  {
+   "action": "attack:max",
+   "log": [
+    {
+     "update": {
+      "attack": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "attack:min",
+   "log": [
+    {
+     "update": {
+      "attack": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "hold:max",
+   "log": [
+    {
+     "update": {
+      "hold": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "action": "hold:min",
+   "log": [
+    {
+     "update": {
+      "hold": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "decay:max",
+   "log": [
+    {
+     "update": {
+      "decay": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "decay:min",
+   "log": [
+    {
+     "update": {
+      "decay": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "sustain:max",
+   "log": [
+    {
+     "update": {
+      "sustain": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "sustain:min",
+   "log": [
+    {
+     "update": {
+      "sustain": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "release:max",
+   "log": [
+    {
+     "update": {
+      "release": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "release:min",
+   "log": [
+    {
+     "update": {
+      "release": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "cutoff:max",
+   "log": [
+    {
+     "update": {
+      "cutoff": 20000
+     }
+    }
+   ]
+  },
+  {
+   "action": "cutoff:min",
+   "log": [
+    {
+     "update": {
+      "cutoff": 20
+     }
+    }
+   ]
+  },
+  {
+   "action": "resonance:max",
+   "log": [
+    {
+     "update": {
+      "resonance": 20
+     }
+    }
+   ]
+  },
+  {
+   "action": "resonance:min",
+   "log": [
+    {
+     "update": {
+      "resonance": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "velocitySens:max",
+   "log": [
+    {
+     "update": {
+      "velocitySens": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "velocitySens:min",
+   "log": [
+    {
+     "update": {
+      "velocitySens": 0
+     }
+    }
+   ]
+  },
+  {
+   "action": "bouton:Rev",
+   "log": [
+    {
+     "update": {
+      "reverse": true
+     }
+    }
+   ]
+  },
+  {
+   "action": "bouton:Norm",
+   "log": [
+    {
+     "update": {
+      "normalize": true
+     }
+    }
+   ]
+  },
+  {
+   "action": "bouton:3",
+   "log": [
+    {
+     "update": {
+      "chokeGroup": 3
+     }
+    }
+   ]
+  },
+  {
+   "action": "bouton:1",
+   "log": [
+    {
+     "update": {
+      "chokeGroup": 1
+     }
+    }
+   ]
+  },
+  {
+   "action": "ecouter",
+   "log": [
+    {
+     "trigger": [
+      1,
+      0
+     ]
+    }
+   ]
+  }
+ ],
+ "DRUM_RACK_UI": [
+  {
+   "action": "pad1",
+   "log": [
+    {
+     "trigger": [
+      "dr",
+      60,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "action": "volume:max",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 1,
+    "pan": 0,
+    "isMuted": false,
+    "isSolo": false,
+    "midiNote": 60
+   }
+  },
+  {
+   "action": "volume:min",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 0,
+    "pan": 0,
+    "isMuted": false,
+    "isSolo": false,
+    "midiNote": 60
+   }
+  },
+  {
+   "action": "pan:max",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 0.8,
+    "pan": 1,
+    "isMuted": false,
+    "isSolo": false,
+    "midiNote": 60
+   }
+  },
+  {
+   "action": "pan:min",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 0.8,
+    "pan": -1,
+    "isMuted": false,
+    "isSolo": false,
+    "midiNote": 60
+   }
+  },
+  {
+   "action": "bouton:M",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 0.8,
+    "pan": 0,
+    "isMuted": true,
+    "isSolo": false,
+    "midiNote": 60
+   }
+  },
+  {
+   "action": "bouton:S",
+   "pad": {
+    "id": 1,
+    "name": "Pad 1",
+    "sampleName": "Kick",
+    "volume": 0.8,
+    "pan": 0,
+    "isMuted": false,
+    "isSolo": true,
+    "midiNote": 60
+   }
+  }
+ ]
+}

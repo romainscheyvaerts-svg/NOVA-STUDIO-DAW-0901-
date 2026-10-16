@@ -1,26 +1,40 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginInstance } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import WaveformRenderer from './WaveformRenderer';
+import { Faceplate, HwSection, HwWindow, Knob } from '../plugins/hw';
 
+/**
+ * Sampler (instrument SAMPLER), dessiné comme un sampler de studio (kit plugins/hw) :
+ * façade vieux rose, écran du son chargé (glisser-déposer ou clic), enveloppe en
+ * quatre boutons rotatifs. Mêmes réglages et mêmes envois qu'avant au moteur
+ * (setADSR avec l'enveloppe complète) : preuve dans tests/pluginsFin.test.ts.
+ */
 interface SamplerEditorProps {
   plugin: PluginInstance;
   trackId: string;
   onClose: () => void;
 }
 
-const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose }) => {
-  const [adsr, setAdsr] = useState({ attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.5 });
+const SAMPLER_ACCENT = '#be185d';
+const ADSR_DEFAULTS = { attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.5 };
+const secFr = (v: number) => (v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(2).replace('.', ',')} s`);
+const HINTS = {
+  attack: 'Attaque : temps pour atteindre le volume quand la note démarre. Court = net, long = le son « monte ».',
+  decay: 'Déclin : temps pour descendre jusqu’au niveau de maintien.',
+  sustain: 'Maintien : niveau tant que la note est tenue.',
+  release: 'Relâche : temps d’extinction après avoir lâché la note.',
+};
+
+const SamplerEditor: React.FC<SamplerEditorProps> = ({ trackId, onClose }) => {
+  const [adsr, setAdsr] = useState({ ...ADSR_DEFAULTS });
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
-  const [fileName, setFileName] = useState<string>("Drag & Drop Audio File");
+  const [fileName, setFileName] = useState<string>('');
+  const [loadError, setLoadError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync with AudioEngine on mount
+  // À l'ouverture : l'enveloppe affichée part au moteur, et on reprend le son déjà chargé.
   useEffect(() => {
-     // Ideally we would fetch current ADSR from engine, but here we just push initial
-     // or check if we can retrieve it. For now, local state pushes to engine.
      updateEngine();
   }, []);
 
@@ -30,7 +44,7 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
          dsp.sampler.setADSR(adsr);
          if (dsp.sampler.getBuffer()) {
              setBuffer(dsp.sampler.getBuffer());
-             setFileName("Loaded Sample");
+             setFileName('Son chargé');
          }
      }
   };
@@ -57,99 +71,69 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
 
   const loadFile = async (file: File) => {
       setFileName(file.name);
+      setLoadError(false);
       try {
           const arrayBuffer = await file.arrayBuffer();
-          // Assuming audioEngine is initialized
           await audioEngine.init();
           const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           setBuffer(audioBuffer);
           audioEngine.loadSamplerBuffer(trackId, audioBuffer);
       } catch (e) {
           console.error("Sampler Load Error:", e);
-          setFileName("Error Loading File");
+          setLoadError(true);
       }
   };
 
-  return (
-    <div className="w-[500px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none text-white">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 rounded-2xl bg-pink-500/10 flex items-center justify-center text-pink-400 border border-pink-500/20 shadow-lg shadow-pink-500/5">
-                    <i className="fas fa-wave-square text-xl"></i>
-                </div>
-                <div>
-                    <h2 className="text-lg font-black uppercase italic tracking-tighter leading-none">Nova <span className="text-pink-400">Sampler</span></h2>
-                    <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Audio Engine v1.0</p>
-                </div>
-            </div>
-            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
-                <i className="fas fa-times"></i>
-            </button>
-        </div>
-
-        {/* Drop Zone / Waveform */}
-        <div 
-            className="h-32 bg-black/60 rounded-[28px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group cursor-pointer"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleFileDrop}
-            onClick={() => fileInputRef.current?.click()}
-        >
-            {buffer ? (
-                <WaveformRenderer 
-                    buffer={buffer} 
-                    color="#ec4899" 
-                    height={128} 
-                    offset={0} 
-                    duration={buffer.duration} 
-                    pixelsPerSecond={500 / buffer.duration} 
-                />
-            ) : (
-                <div className="text-center opacity-40 group-hover:opacity-80 transition-opacity">
-                    <i className="fas fa-file-audio text-3xl mb-2"></i>
-                    <p className="text-[9px] font-black uppercase tracking-widest">Drop Audio File Here</p>
-                </div>
-            )}
-            <div className="absolute bottom-2 left-4 text-[8px] font-mono text-pink-500 bg-black/50 px-2 rounded">
-                {fileName}
-            </div>
-            <input type="file" ref={fileInputRef} className="hidden" accept="audio/*" onChange={handleFileSelect} />
-        </div>
-
-        {/* ADSR Controls */}
-        <div className="bg-white/[0.02] p-4 rounded-[24px] border border-white/5">
-            <div className="grid grid-cols-4 gap-4">
-                <Knob label="Attaque" value={adsr.attack} min={0} max={2} onChange={v => handleKnobChange('attack', v)} color="#ec4899" />
-                <Knob label="Déclin" value={adsr.decay} min={0} max={2} onChange={v => handleKnobChange('decay', v)} color="#ec4899" />
-                <Knob label="Maintien" value={adsr.sustain} min={0} max={1} onChange={v => handleKnobChange('sustain', v)} color="#ec4899" />
-                <Knob label="Relâche" value={adsr.release} min={0} max={5} onChange={v => handleKnobChange('release', v)} color="#ec4899" />
-            </div>
-        </div>
-    </div>
+  const K = (id: keyof typeof adsr, label: string, max: number, fmt: (v: number) => string, scale: { v: number; label: string }[]) => (
+    <Knob paramId={id} label={label} hint={HINTS[id]} value={adsr[id]} min={0} max={max} defaultValue={ADSR_DEFAULTS[id]}
+      onChange={v => handleKnobChange(id, v)} format={fmt} scale={scale} cap="black" arc={SAMPLER_ACCENT} size="M" />
   );
-};
+  const pick = () => fileInputRef.current?.click();
 
-const Knob: React.FC<{ label: string, value: number, min: number, max: number, onChange: (v: number) => void, color: string }> = ({ label, value, min, max, onChange, color }) => {
-    const knob = useKnobInteraction(value, onChange, { min, max, sensitivity: 100 });
-
-    const percentage = (value - min) / (max - min);
-    const rotation = percentage * 270 - 135;
-
-    return (
-        <div className="flex flex-col items-center space-y-2 group cursor-ns-resize" {...knob.bind}>
-             <div className="relative w-12 h-12 rounded-full bg-nv-surface border border-white/10 shadow-lg flex items-center justify-center">
-                 <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
-                 <div 
-                    className="absolute w-1 h-4 bg-current rounded-full origin-bottom bottom-1/2"
-                    style={{ transform: `rotate(${rotation}deg)`, color }}
-                 />
-             </div>
-             <div className="text-center">
-                 <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
-                 <span className="text-[9px] font-mono text-white">{value.toFixed(2)}s</span>
-             </div>
+  return (
+    <HwWindow type="SAMPLER" width={560} accent={SAMPLER_ACCENT} accentInk="#ffffff"
+      toolbar={
+        <div className="hw-toolbar-row">
+          <button type="button" className="hw-chip" onClick={pick} title="Choisir un son (WAV, MP3, AIFF…) sur l'ordinateur ou le téléphone">
+            <i className="fas fa-folder-open mr-1.5" aria-hidden="true" />Charger un son
+          </button>
+          <button type="button" className="hw-chip hidden sm:inline-block ml-auto" aria-label="Fermer" title="Fermer" onClick={onClose}><i className="fas fa-times" aria-hidden="true" /></button>
         </div>
-    );
+      }
+      idleHelp={<>Joue un son sur toutes les notes du clavier. <span style={{ color: '#7d8696' }}>Glisse un son sur l’écran, puis règle l’enveloppe.</span></>}>
+      <Faceplate finish="rose" model="Sampler" kicker="Un son · toutes les notes" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: SAMPLER_ACCENT }}>
+        <div className="hw-screen">
+          <div className="hw-screen-glass cursor-pointer" style={{ height: 120 }} role="button" tabIndex={0} aria-label="Charger un son : glisse un fichier ici ou clique"
+            data-nova-sampler-drop onDragOver={(e) => e.preventDefault()} onDrop={handleFileDrop}
+            onClick={pick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } }}>
+            {buffer ? (
+              <WaveformRenderer buffer={buffer} color="#f9a8d4" height={120} offset={0} duration={buffer.duration} pixelsPerSecond={500 / buffer.duration} />
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center" style={{ color: '#cbd5e1' }}>
+                <i className="fas fa-file-audio text-2xl" aria-hidden="true" />
+                <span className="text-[12px] font-bold">Glisse un son ici</span>
+                <span className="text-[11px]" style={{ color: '#a3aec0' }}>ou clique pour le choisir</span>
+              </div>
+            )}
+            {(fileName || loadError) && (
+              <span className="hw-screen-label" style={{ bottom: 6, left: 8 }} role={loadError ? 'alert' : 'status'}>
+                {loadError ? <>Fichier illisible : essaie un WAV ou un MP3</> : <b>{fileName}</b>}
+              </span>
+            )}
+          </div>
+          <input type="file" ref={fileInputRef} className="hidden" accept="audio/*" onChange={handleFileSelect} />
+        </div>
+        <HwSection title="Enveloppe" className="mt-3">
+          <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+            {K('attack', 'Attaque', 2, secFr, [{ v: 0, label: '0' }, { v: 1, label: '1' }, { v: 2, label: '2 s' }])}
+            {K('decay', 'Déclin', 2, secFr, [{ v: 0, label: '0' }, { v: 1, label: '1' }, { v: 2, label: '2 s' }])}
+            {K('sustain', 'Maintien', 1, v => `${Math.round(v * 100)} %`, [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }])}
+            {K('release', 'Relâche', 5, secFr, [{ v: 0, label: '0' }, { v: 2.5, label: '2,5' }, { v: 5, label: '5 s' }])}
+          </div>
+        </HwSection>
+      </Faceplate>
+    </HwWindow>
+  );
 };
 
 export default SamplerEditor;

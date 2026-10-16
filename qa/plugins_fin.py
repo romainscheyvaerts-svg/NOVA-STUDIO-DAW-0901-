@@ -1,4 +1,5 @@
-"""Fin des façades « matériel » (1.5.1) : Compresseur, Stéréo, Master (analyse tempo / tonalité).
+"""Fin des façades « matériel » (1.5.1) : Compresseur, Stéréo, Master (analyse tempo / tonalité),
+et les instruments restés « formulaire » : Sampler, Drum sampler, Drum Rack, écran du Sampler mélodique.
 
 Headless (aucune fenêtre), hors production (qa_hors_prod via qalib). Chaque fenêtre est montée
 seule par le banc qa/harness/hwPlugins2b.tsx (même cadre que PluginEditor), dans l'appli :
@@ -38,7 +39,7 @@ try:
 except Exception:
     pass
 
-KINDS = ARGS or ["COMPRESSOR", "STEREOSPREADER", "MASTERSYNC"]
+KINDS = ARGS or ["COMPRESSOR", "STEREOSPREADER", "MASTERSYNC", "SAMPLER", "DRUM_SAMPLER", "DRUM_RACK_UI", "MELODIC_SAMPLER"]
 checks = []
 res = {}
 
@@ -91,7 +92,7 @@ MEASURE = r"""(k) => {
     curseurs_range: [...el.querySelectorAll('input[type=range]')].filter(i => !i.classList.contains('hw-sr-only')).length,
     listes_select: [...el.querySelectorAll('select')].filter(s => !s.closest('.hw-lcd-select')).length,
     phrases_aide_facade: phrases,
-    infobar: !!el.querySelector('[data-nova-infobar]'),
+    infobar: !!root.querySelector('[data-nova-infobar]'),
     titre: (el.querySelector('h2') || {}).textContent || null,
     mots_anglais: ['MONO SAFE', 'GOOD', 'WIDE', 'PHASE ISSUE', 'More', 'Less', 'Multi-Band', 'Mono Bass', 'Haas', 'Active', 'Bypass', 'MINOR', 'MAJOR', 'NOT DETECTED', 'Appliquer Tout', 'Full-Range', 'Low Width']
       .filter(w => (el.innerText || '').includes(w)),
@@ -156,29 +157,32 @@ def drag(pg, k, dy):
 
 def gestes_souris(pg, kind):
     """Gestes communs à tous les boutons : glisser, double-clic, molette, clavier."""
-    first = {"COMPRESSOR": ("threshold", -18, -60, 0), "STEREOSPREADER": ("width", 1, 0, 2)}.get(kind)
+    first = {"COMPRESSOR": ("threshold", -18, -60, 0, "Seuil"), "STEREOSPREADER": ("width", 1, 0, 2, "Largeur"),
+             "SAMPLER": ("attack", 0.01, 0, 2, "Attaque"), "DRUM_SAMPLER": ("gain", 0, -60, 12, "Volume"),
+             "MELODIC_SAMPLER": ("release", 0.25, 0.005, 5, "Relâche")}.get(kind)
     if not first:
         return
-    pid, dflt, lo, hi = first
+    pid, dflt, lo, hi, nom = first
     k = knob(pg, pid)
-    v0 = params(pg).get(pid, None)
+    # Compresseur / Stéréo : la valeur remontée au projet ; instruments (moteur factice) : la valeur du bouton.
+    val = (lambda: params(pg).get(pid)) if kind in ("COMPRESSOR", "STEREOSPREADER", "MELODIC_SAMPLER") else (lambda: float(k.get_attribute("aria-valuenow")))
     before = float(k.get_attribute("aria-valuenow"))
     x, y = drag(pg, k, 40)
-    v1 = params(pg).get(pid)
-    check(f"{kind} : glisser vers le haut augmente « {pid} » (projet mis à jour)", v1 is not None and v1 > before, [v0, before, v1])
+    v1 = val()
+    check(f"{kind} : glisser vers le haut augmente « {pid} »", v1 is not None and v1 > before, [before, v1])
     k.dblclick(); pg.wait_for_timeout(150)
-    check(f"{kind} : double-clic = valeur d'origine ({dflt})", params(pg).get(pid) == dflt, params(pg).get(pid))
+    check(f"{kind} : double-clic = valeur d'origine ({dflt})", val() == dflt, val())
     pg.mouse.move(x, y); pg.mouse.wheel(0, -100); pg.wait_for_timeout(150)
-    check(f"{kind} : molette vers le haut augmente", (params(pg).get(pid) or -1e9) > dflt, params(pg).get(pid))
+    check(f"{kind} : molette vers le haut augmente", (val() or -1e9) > dflt, val())
     k.focus(); pg.keyboard.press("End"); pg.wait_for_timeout(80)
-    hi_v = params(pg).get(pid)
+    hi_v = val()
     pg.keyboard.press("Home"); pg.wait_for_timeout(80)
-    lo_v = params(pg).get(pid)
+    lo_v = val()
     check(f"{kind} : bornes d'avant au clavier (Début / Fin = {lo} / {hi})", hi_v == hi and lo_v == lo, [lo_v, hi_v])
     # Ligne d'info : nom + valeur du réglage survolé.
     pg.mouse.move(x, y); pg.wait_for_timeout(150)
     info = pg.locator("[data-qa-hw] [data-nova-infobar]").first.inner_text()
-    check(f"{kind} : la ligne d'info décrit le réglage survolé", len(info) > 10 and any(w in info for w in ("Seuil", "Largeur")), info)
+    check(f"{kind} : la ligne d'info décrit le réglage survolé", nom in info, info)
     k.dblclick(); pg.wait_for_timeout(100)
 
 
@@ -227,10 +231,33 @@ def gestes_specifiques(pg, kind):
         check("MASTERSYNC : après réinitialisation, gros bouton « Analyser l'instru »", go.is_visible() and go.is_enabled(), go.inner_text() if go.count() else None)
         appl = pg.locator("[data-qa-hw] [data-nova-sync='appliquer']").first
         check("MASTERSYNC : « Tout appliquer » grisé tant qu'il n'y a pas d'analyse", appl.is_disabled(), appl.is_disabled())
+    elif kind == "DRUM_RACK_UI":
+        vol = knob(pg, "volume")
+        check("DRUM_RACK_UI : sans pad choisi, Volume et Pan sont grisés", vol.get_attribute("aria-disabled") == "true", vol.get_attribute("aria-disabled"))
+        pg.locator("[data-qa-hw] [data-nova-pad='1']").click(); pg.wait_for_timeout(200)
+        lcd = pg.locator("[data-qa-hw] [data-nova-rack-selected]").first.inner_text()
+        check("DRUM_RACK_UI : toucher le pad 1 le choisit (afficheur « Pad 1 · Kick »)", "Pad 1" in lcd and "Kick" in lcd, lcd)
+        vol.focus(); pg.keyboard.press("End"); pg.wait_for_timeout(100)
+        pads = params(pg).get("pads") or []
+        check("DRUM_RACK_UI : Volume du pad jusqu'à 100 % (borne d'avant)", bool(pads) and pads[0].get("volume") == 1, pads[:1])
+        pg.locator("[data-qa-hw] [data-nova-param='isMuted'] [role=checkbox]").click(); pg.wait_for_timeout(100)
+        pads = params(pg).get("pads") or []
+        check("DRUM_RACK_UI : « Muet » coupe le pad choisi", bool(pads) and pads[0].get("isMuted") is True, pads[:1])
+    elif kind == "MELODIC_SAMPLER":
+        pg.locator("[data-qa-hw] [data-testid='sampler-mono']").click(); pg.wait_for_timeout(100)
+        check("MELODIC_SAMPLER : poussoir « Mono » (même réglage qu'avant)", params(pg).get("mono") is True, params(pg).get("mono"))
+        k = knob(pg, "cutoff"); k.focus(); pg.keyboard.press("Home"); pg.wait_for_timeout(80)
+        check("MELODIC_SAMPLER : filtre jusqu'à 40 Hz (borne d'avant)", params(pg).get("cutoff") == 40, params(pg).get("cutoff"))
+    elif kind == "SAMPLER":
+        check("SAMPLER : zone « Glisse un son ici » (clavier : Entrée)", pg.locator("[data-qa-hw] [data-nova-sampler-drop]").count() == 1)
+    elif kind == "DRUM_SAMPLER":
+        pg.locator("[data-qa-hw] [data-nova-param='chokeGroup'] [role=radio]", has_text="3").click(); pg.wait_for_timeout(100)
+        check("DRUM_SAMPLER : groupe d'étouffement 3 allumé", pg.locator("[data-qa-hw] [data-nova-param='chokeGroup'] [role=radio][aria-checked='true']").inner_text().strip() == "3")
+        check("DRUM_SAMPLER : gros pad « Écouter »", pg.locator("[data-qa-hw] [data-nova-drum-preview]").is_visible())
 
 
 def gestes_doigt(pg, ctx, kind):
-    pid = {"COMPRESSOR": "threshold", "STEREOSPREADER": "width"}.get(kind)
+    pid = {"COMPRESSOR": "threshold", "STEREOSPREADER": "width", "DRUM_SAMPLER": "gain", "MELODIC_SAMPLER": "release"}.get(kind)
     if not pid:
         return
     k = knob(pg, pid)
@@ -245,15 +272,16 @@ def gestes_doigt(pg, ctx, kind):
         cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x, "y": y - i * 10}]})
     cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
     pg.wait_for_timeout(200)
-    v = params(pg).get(pid)
+    val = (lambda: params(pg).get(pid)) if kind in ("COMPRESSOR", "STEREOSPREADER", "MELODIC_SAMPLER") else (lambda: float(k.get_attribute("aria-valuenow")))
+    v = val()
     check(f"{kind} téléphone : glisser au doigt règle « {pid} »", v is not None and v > before, [before, v])
     for _ in range(2):
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         pg.wait_for_timeout(60)
     pg.wait_for_timeout(150)
-    dflt = {"threshold": -18, "width": 1}[pid]
-    check(f"{kind} téléphone : double tape = valeur d'origine", params(pg).get(pid) == dflt, params(pg).get(pid))
+    dflt = {"threshold": -18, "width": 1, "gain": 0, "release": 0.25}[pid]
+    check(f"{kind} téléphone : double tape = valeur d'origine", val() == dflt, val())
     check(f"{kind} téléphone : bouton rotatif ≥ 44 px", min(bx["width"], bx["height"]) >= 44, [bx["width"], bx["height"]])
 
 
@@ -292,6 +320,6 @@ with sync_playwright() as p:
 res["checks"] = checks
 ok = all(c["ok"] for c in checks)
 res["ok"] = ok
-(OUT / "plugins_fin.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+(OUT / ("plugins_fin.json" if not ARGS else f"plugins_fin_{'_'.join(k.lower() for k in KINDS)}.json")).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 print(f"{sum(c['ok'] for c in checks)}/{len(checks)} contrôles OK" if checks else "captures seules (--avant)")
 sys.exit(0 if ok else 1)

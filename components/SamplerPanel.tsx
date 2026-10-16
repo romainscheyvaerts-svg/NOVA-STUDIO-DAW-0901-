@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Clip, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
-import { MelodicSamplerSettings, noteName, samplerBufferKey } from '../utils/melodicSampler';
+import { DEFAULT_SAMPLER, MelodicSamplerSettings, noteName, samplerBufferKey } from '../utils/melodicSampler';
 import { INSTRUMENT_PRESETS, loadInstrumentManifest, settingsForInstrument } from '../utils/instrumentPresets';
 import { preloadInstrument } from '../utils/samplerLoad';
 import { detectRoot } from '../utils/samplerRoot';
 import { MicTake, startMicSample } from '../utils/micSample';
 import { clipRegionChannels } from '../utils/drumSamples';
 import { registerSamplerSound } from './SamplerHost';
+import { Faceplate, HwHelpProvider, HwSection, InfoBar, Knob, PushButton } from '../plugins/hw';
 
 /**
  * R18 · Écran du sampler mélodique (FL : Sampler / DirectWave · Live :
@@ -16,6 +17,9 @@ import { registerSamplerSound } from './SamplerHost';
  * multi-échantillons. Ordinateur et tablette : tout ; téléphone : l'essentiel
  * (instrument, son au micro ou en fichier, note racine, attaque / relâchement,
  * mono / glide) avec « Plus de réglages ».
+ * 1.5.1 : les réglages (enveloppe, jeu, son) sont sur une façade « matériel » (kit
+ * plugins/hw : boutons rotatifs, poussoirs, aide dans l'infobulle et la ligne d'info) ;
+ * mêmes réglages, mêmes bornes, mêmes envois (preuve : tests/pluginsFinInstruments.test.ts).
  */
 
 interface SessionClipRef { trackId: string; clip: Clip; trackName: string }
@@ -37,25 +41,19 @@ const channelsOf = (b: AudioBuffer) => Array.from({ length: b.numberOfChannels }
 const ms = (v: number) => (v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(2)} s`);
 const pct = (v: number) => `${Math.round(v * 100)} %`;
 
+/**
+ * Réglage du sampler : bouton rotatif du kit (glisser vertical, Maj = fin, molette,
+ * double-clic = valeur d'origine) ; mêmes bornes et même pas qu'avant (curseurs).
+ */
 const Range: React.FC<{
   label: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string;
-  onChange: (v: number) => void; title: string; log?: boolean; testId?: string;
-}> = ({ label, value, min, max, step, fmt, onChange, title, log, testId }) => {
-  // Échelle logarithmique (fréquences, temps) : le geste reste fin en bas de course.
-  const toPos = (v: number) => (log ? (Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) : (v - min) / (max - min));
-  const fromPos = (p: number) => (log ? Math.exp(Math.log(min) + p * (Math.log(max) - Math.log(min))) : min + p * (max - min));
-  return (
-    <label className="flex flex-col gap-0.5 min-w-0" title={title}>
-      <span className="flex items-baseline justify-between gap-1 text-[11px] font-bold text-nv-muted">
-        <span className="truncate">{label}</span>
-        <span className="font-mono text-cyan-500 shrink-0">{fmt(value)}</span>
-      </span>
-      <input type="range" min={0} max={1000} step={1} value={Math.round(toPos(value) * 1000)} data-testid={testId}
-        onChange={e => { const v = fromPos(parseInt(e.target.value, 10) / 1000); onChange(step ? Math.round(v / step) * step : v); }}
-        className="w-full h-8 accent-cyan-500 touch-none cursor-pointer" aria-label={label} />
-    </label>
-  );
-};
+  onChange: (v: number) => void; title: string; log?: boolean; testId?: string; dflt: number; paramId: string;
+}> = ({ label, value, min, max, step, fmt, onChange, title, log, testId, dflt, paramId }) => (
+  <div className="flex justify-center min-w-0" data-testid={testId}>
+    <Knob size="S" label={label} hint={title} value={value} min={min} max={max} step={step || undefined} curve={log ? 'log' : 'lin'}
+      format={fmt} onChange={onChange} defaultValue={dflt} paramId={paramId} cap="black" arc="#7c3aed" />
+  </div>
+);
 
 const Section: React.FC<{ title: string; hint?: string; children: React.ReactNode; right?: React.ReactNode }> = ({ title, hint, children, right }) => (
   <section className="rounded-xl border border-nv-line bg-nv-well p-3 flex flex-col gap-2 min-w-0">
@@ -342,7 +340,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
             </label>
           </div>
           {showAll && (
-            <Range label="Accord fin" value={s.fineTune} min={-50} max={50} step={1} fmt={v => `${v > 0 ? '+' : ''}${Math.round(v)} cents`}
+            <Range label="Accord fin" paramId="fineTune" dflt={0} value={s.fineTune} min={-50} max={50} step={1} fmt={v => `${v > 0 ? '+' : ''}${Math.round(v)} cents`}
               onChange={v => onChange({ fineTune: v })} title="Accord fin en cents (Fine tune de Simpler / FL). Rempli tout seul par la détection." />
           )}
         </>
@@ -351,56 +349,53 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
     </Section>
   );
 
+  const D = DEFAULT_SAMPLER;
   const envelope = (
-    <Section title="Enveloppe" hint="ADSR : comment la note démarre, tient et s'éteint (comme dans Simpler, le Sampler de FL ou Quick Sampler).">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1">
-        <Range label="Attaque" value={Math.max(0.001, s.attack)} min={0.001} max={2} step={0} log fmt={ms} onChange={v => onChange({ attack: v })} title="Attaque : temps pour atteindre le volume (Attack)" testId="sampler-attack" />
-        {showAll && <Range label="Déclin" value={s.decay} min={0.005} max={5} step={0} log fmt={ms} onChange={v => onChange({ decay: v })} title="Déclin : temps pour descendre au maintien (Decay)" />}
-        {showAll && <Range label="Maintien" value={s.sustain} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ sustain: v })} title="Maintien : niveau tant que la note est tenue (Sustain)" />}
-        <Range label="Relâchement" value={s.release} min={0.005} max={5} step={0} log fmt={ms} onChange={v => onChange({ release: v })} title="Relâchement : temps d'extinction après la note (Release)" testId="sampler-release" />
+    <HwSection title="Enveloppe">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-1 gap-y-2" title="ADSR : comment la note démarre, tient et s'éteint (comme dans Simpler, le Sampler de FL ou Quick Sampler).">
+        <Range label="Attaque" paramId="attack" dflt={D.attack} value={Math.max(0.001, s.attack)} min={0.001} max={2} step={0} log fmt={ms} onChange={v => onChange({ attack: v })} title="Attaque : temps pour atteindre le volume (Attack)" testId="sampler-attack" />
+        {showAll && <Range label="Déclin" paramId="decay" dflt={D.decay} value={s.decay} min={0.005} max={5} step={0} log fmt={ms} onChange={v => onChange({ decay: v })} title="Déclin : temps pour descendre au maintien (Decay)" />}
+        {showAll && <Range label="Maintien" paramId="sustain" dflt={D.sustain} value={s.sustain} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ sustain: v })} title="Maintien : niveau tant que la note est tenue (Sustain)" />}
+        <Range label="Relâche" paramId="release" dflt={D.release} value={s.release} min={0.005} max={5} step={0} log fmt={ms} onChange={v => onChange({ release: v })} title="Relâchement : temps d'extinction après la note (Release)" testId="sampler-release" />
       </div>
-    </Section>
+    </HwSection>
   );
 
   const play = (
-    <Section title="Jeu" hint="Poly : plusieurs notes à la fois. Mono : une seule note, legato et glissé entre les notes (Mono / Glide de FL et Simpler, Portamento de Logic).">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg overflow-hidden border border-nv-line" role="group" aria-label="Polyphonie">
+    <HwSection title="Jeu" className="mt-2">
+      <div className="flex flex-wrap items-start justify-around gap-2" title="Poly : plusieurs notes à la fois. Mono : une seule note, legato et glissé entre les notes (Mono / Glide de FL et Simpler, Portamento de Logic).">
+        <div className="flex gap-1.5 pt-5" role="radiogroup" aria-label="Polyphonie">
           {([[false, 'Poly'], [true, 'Mono']] as const).map(([m, label]) => (
-            <button key={label} type="button" onClick={() => onChange({ mono: m })} aria-pressed={s.mono === m} data-testid={`sampler-${label.toLowerCase()}`}
-              className={`min-h-[40px] px-4 text-[12px] font-bold ${s.mono === m ? 'bg-cyan-500 text-black' : 'bg-nv-raised text-nv-ink'}`}>{label}</button>
+            <PushButton key={label} role="radio" active={s.mono === m} onClick={() => onChange({ mono: m })} text={label} led="#a78bfa" dark
+              dataAttrs={{ 'data-testid': `sampler-${label.toLowerCase()}` }}
+              hint={m ? 'Mono : une seule note à la fois, les notes liées glissent (808 qui glisse).' : 'Poly : plusieurs notes à la fois (accords).'} />
           ))}
         </div>
-        <div className="flex-1 min-w-[160px]">
-          <Range label="Glissé" value={s.glide} min={0} max={1} step={0.005} fmt={v => (v ? ms(v) : 'off')} onChange={v => onChange({ glide: v })}
-            title="Glissé (portamento) entre deux notes, comme le Glide de FL ou le Portamento de Logic : en mono, les notes liées glissent sans nouvelle attaque (808 qui glisse)." testId="sampler-glide" />
-        </div>
+        <Range label="Glissé" paramId="glide" dflt={0} value={s.glide} min={0} max={1} step={0.005} fmt={v => (v ? ms(v) : 'off')} onChange={v => onChange({ glide: v })}
+          title="Glissé (portamento) entre deux notes, comme le Glide de FL ou le Portamento de Logic : en mono, les notes liées glissent sans nouvelle attaque (808 qui glisse)." testId="sampler-glide" />
+        {showAll && <Range label="Pitch bend" paramId="bendRange" dflt={D.bendRange} value={s.bendRange} min={0} max={24} step={1} fmt={v => `±${v} dt`} onChange={v => onChange({ bendRange: v })}
+          title="Amplitude de la molette de pitch bend (demi-tons). Le pitch bend et la modulation (CC1) du piano roll sont suivis." />}
+        {showAll && <Range label="Vélocité" paramId="velSens" dflt={D.velSens} value={s.velSens} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ velSens: v })}
+          title="Sensibilité à la force de frappe (0 = toutes les notes au même niveau)." />}
       </div>
-      {showAll && (
-        <div className="grid grid-cols-2 gap-x-3">
-          <Range label="Pitch bend" value={s.bendRange} min={0} max={24} step={1} fmt={v => `±${v} dt`} onChange={v => onChange({ bendRange: v })}
-            title="Amplitude de la molette de pitch bend (demi-tons). Le pitch bend et la modulation (CC1) du piano roll sont suivis." />
-          <Range label="Vélocité" value={s.velSens} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ velSens: v })}
-            title="Sensibilité à la force de frappe (0 = toutes les notes au même niveau)." />
-        </div>
-      )}
-    </Section>
+    </HwSection>
   );
 
   const tone = showAll ? (
-    <Section title="Son" hint="Filtre passe-bas et niveau de sortie.">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3">
-        <Range label="Filtre" value={s.cutoff} min={40} max={20000} step={0} log fmt={v => (v >= 19999 ? 'ouvert' : v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`)} onChange={v => onChange({ cutoff: v >= 19900 ? 20000 : v })}
+    <HwSection title="Son" className="mt-2">
+      <div className="grid grid-cols-3 gap-x-1" title="Filtre passe-bas et niveau de sortie.">
+        <Range label="Filtre" paramId="cutoff" dflt={D.cutoff} value={s.cutoff} min={40} max={20000} step={0} log fmt={v => (v >= 19999 ? 'ouvert' : v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`)} onChange={v => onChange({ cutoff: v >= 19900 ? 20000 : v })}
           title="Coupure du filtre passe-bas (Cutoff)" />
-        <Range label="Résonance" value={s.resonance} min={0.1} max={12} step={0.1} fmt={v => v.toFixed(1)} onChange={v => onChange({ resonance: v })} title="Résonance du filtre (Q)" />
-        <Range label="Volume" value={s.gainDb} min={-24} max={12} step={0.5} fmt={v => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`} onChange={v => onChange({ gainDb: v })} title="Niveau de sortie du sampler" />
+        <Range label="Résonance" paramId="resonance" dflt={D.resonance} value={s.resonance} min={0.1} max={12} step={0.1} fmt={v => v.toFixed(1)} onChange={v => onChange({ resonance: v })} title="Résonance du filtre (Q)" />
+        <Range label="Volume" paramId="gainDb" dflt={D.gainDb} value={s.gainDb} min={-24} max={12} step={0.5} fmt={v => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`} onChange={v => onChange({ gainDb: v })} title="Niveau de sortie du sampler" />
       </div>
-    </Section>
+    </HwSection>
   ) : null;
 
   return (
     <div className="fixed inset-0 z-[300] bg-black/60 flex items-stretch sm:items-center justify-center" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog" aria-modal="true" aria-label="Sampler" data-testid="sampler-panel">
+      <HwHelpProvider>
       <div className="w-full sm:w-[min(980px,96vw)] h-full sm:h-auto sm:max-h-[92vh] bg-nv-panel text-nv-ink sm:rounded-2xl border border-nv-line shadow-2xl flex flex-col overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-nv-line bg-gradient-to-r from-cyan-500/10 to-amber-500/10">
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -416,13 +411,17 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain p-3 grid grid-cols-1 md:grid-cols-2 gap-2 content-start">
           <div className="flex flex-col gap-2 min-w-0">{instruments}{ownSound}</div>
-          <div className="flex flex-col gap-2 min-w-0">
-            {envelope}{play}{tone}
-            {narrow && (
-              <button type="button" onClick={() => setMore(v => !v)} className="min-h-[40px] rounded-lg bg-nv-raised border border-nv-line text-[12px] font-bold">
-                {more ? 'Moins de réglages' : 'Plus de réglages'}
-              </button>
-            )}
+          <div className="flex flex-col gap-2 min-w-0 nova-sombre" data-nova-plugin="MELODIC_SAMPLER">
+            <Faceplate finish="lilac" model="Sampler" kicker="Enveloppe · jeu · son" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: '#7c3aed' }}>
+              {envelope}{play}{tone}
+              {narrow && (
+                <div className="flex justify-center mt-2">
+                  <button type="button" onClick={() => setMore(v => !v)} className="hw-chip">
+                    {more ? 'Moins de réglages' : 'Plus de réglages'}
+                  </button>
+                </div>
+              )}
+            </Faceplate>
           </div>
         </div>
         <div className="border-t border-nv-line px-3 py-2 bg-nv-well flex items-center gap-2">
@@ -432,7 +431,11 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
           </div>
           <div className="flex-1 min-w-0"><Keys from={kbFrom} count={narrow ? 13 : 25} root={root} onOn={noteOn} onOff={stableOff} /></div>
         </div>
+        <div className="nova-sombre shrink-0">
+          <InfoBar idle={<>Sampler : choisis un instrument ou charge ton son, puis règle l'enveloppe. Glisse un bouton, double-clic = valeur d'origine.</>} />
+        </div>
       </div>
+      </HwHelpProvider>
     </div>
   );
 };

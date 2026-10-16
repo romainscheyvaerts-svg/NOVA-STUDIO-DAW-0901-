@@ -5,7 +5,7 @@ export type HwFinish = 'cream' | 'black' | 'silver' | 'burgundy' | 'graphite' | 
   // Vague 2B
   | 'seafoam' | 'plum' | 'forest' | 'midnight' | 'hammer' | 'labgrey' | 'indigo' | 'vermilion' | 'mustard' | 'concrete' | 'jade' | 'cobalt' | 'avocado'
   // Fin des façades (1.5.1)
-  | 'petrol' | 'pearl';
+  | 'petrol' | 'pearl' | 'rose' | 'sky' | 'sand' | 'lilac';
 
 /** Logo NOVA (étoile à quatre branches + mot), à l'encre de la façade. */
 export const NovaLogo: React.FC<{ className?: string; size?: number }> = ({ className, size = 13 }) => (

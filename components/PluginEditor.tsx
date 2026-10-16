@@ -239,12 +239,12 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (!track || !onUpdateTrack) {
           return <div className="p-10 text-white bg-red-900 rounded">Error: Track Data Missing</div>;
       }
-      if (isMobile) return mobileShell(<DrumRack track={track} onUpdateTrack={onUpdateTrack} />);
+      if (isMobile) return mobileShell(<DrumRack track={track} onUpdateTrack={onUpdateTrack} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px] relative">
-                  <button aria-label="Fermer" title="Fermer" onClick={onClose} className="nova-hit absolute top-4 right-4 z-50 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"><i className="fas fa-times"></i></button>
-                  <DrumRack track={track} onUpdateTrack={onUpdateTrack} />
+                  {/* « Fermer » est dans la barre d'outils de la façade (plus de bouton posé par-dessus). */}
+                  <DrumRack track={track} onUpdateTrack={onUpdateTrack} onClose={onClose} />
               </div>
           </div>
       );
