@@ -309,6 +309,9 @@ import StemSeparationDialog, { AppliedStem, StemTarget } from './components/Stem
 import { buildStemTracks, insertStemTracks, stemsRightsFor } from './services/StemSeparation';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
+import { starterTracks } from './utils/starterTracks';
+import { signUpMakeMusic } from './services/makeMusicSignup';
+import { cloudRoute, MM_CLOUD_NOTICE, LOGIN_CLOUD_NOTICE } from './utils/cloudAccount';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
 import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
@@ -1057,6 +1060,8 @@ function Studio() {
   const makeMusicAccount = useMakeMusicAccount();
   const barUser = useMemo(() => accountForBar(user, makeMusicAccount), [user, makeMusicAccount]);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  // « Créer mon compte » (palette, guide, chat) : la fenêtre s'ouvre directement sur l'inscription Make Music.
+  const [authSignup, setAuthSignup] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
@@ -1181,7 +1186,8 @@ function Studio() {
     // Nouveau projet : 48 kHz (utils/projectRate). Un projet ouvert garde la sienne.
     sampleRate: NEW_PROJECT_RATE,
     isLoopActive: false, loopStart: 0, loopEnd: 8,
-    tracks: [
+    // Mode simple : BEAT + une seule piste REC (utils/starterTracks) ; mode avancé : gabarit complet.
+    tracks: starterTracks([
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
       { id: 'lead-couplet', name: 'LEAD COUPLET', type: TrackType.AUDIO, color: '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#3b82f6')], totalLatency: 0 },
@@ -1192,7 +1198,7 @@ function Studio() {
       createBusFx(),
       ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx'),
       createMasterTrack()
-    ],
+    ], simpleModeStore.get().simple),
     selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
     // Recalage de la prise sur le beat (latence de sortie) : actif par défaut,
     // sans quoi la voix arrivait en retard.
@@ -1603,10 +1609,9 @@ function Studio() {
   const handleBuyLicense = (instrumentId: string | number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
   const handleSaveCloud = async (projectName: string) => { 
-    if (!user) {
-      setAiNotification("⚠️ Connectez-vous pour sauvegarder dans le cloud");
-      return;
-    }
+    // Compte Make Music seulement : séance en ligne Make Music (utils/cloudAccount) ; aucun compte : se connecter.
+    const route = cloudRoute(user, makeMusicAccount);
+    if (route !== 'legacy') { if (route === 'makemusic') setTakeHomeOpen(true); setAiNotification(route === 'makemusic' ? MM_CLOUD_NOTICE : LOGIN_CLOUD_NOTICE); return; }
     setSaveState({ isSaving: true, progress: 10, message: 'Préparation...' });
     try {
       // Effets VST3 du PC rendus dans l'audio : le projet continue sur téléphone.
@@ -1633,10 +1638,8 @@ function Studio() {
   };
   
   const handleSaveAsCopy = async (n: string) => { 
-    if (!user) {
-      setAiNotification("⚠️ Connectez-vous pour sauvegarder une copie");
-      return;
-    }
+    const route = cloudRoute(user, makeMusicAccount);
+    if (route !== 'legacy') { if (route === 'makemusic') setTakeHomeOpen(true); setAiNotification(route === 'makemusic' ? MM_CLOUD_NOTICE : LOGIN_CLOUD_NOTICE); return; }
     setSaveState({ isSaving: true, progress: 10, message: 'Création de la copie...' });
     try {
       const copyName = `${n} (Copy)`;
@@ -5506,6 +5509,9 @@ function Studio() {
       setTimeout(() => setCloudProgress(null), 600);
     }
   }, [setCloudSession]);
+
+  // « Ouvrir un projet » d'un compte Make Music seulement : une de ses séances en ligne.
+  const openOnlineSession = (raw: string) => { const l = parseLink(raw); if (l) void openCloudSession(l); };
 
   // Ouverture par lien : /daw?session=<id>.<clé> (QR code, WhatsApp, espace client).
   useEffect(() => {
@@ -10267,6 +10273,7 @@ function Studio() {
         newProjectRate={newProjectRate}
         onNewProjectRate={setNewProjectRate}
         onOpenQuickMaster={() => setQuickMasterOpen(true)}
+        onOpenOnlineSession={openOnlineSession}
       />
       {quickMasterNode}
       {vocalCoachNode}
@@ -10334,6 +10341,7 @@ function Studio() {
       a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      a('Fichier', 'pal.signup', 'Créer mon compte Make Music (gratuit)', () => { setAuthSignup(true); setIsAuthOpen(true); }, { keywords: 'compte inscription inscrire créer account sign up register studiomakemusic connexion' }),
       ...(knownSubscriber() ? [a('Fichier', 'pal.manageSubscription', 'Gérer mon abonnement Nova Pro (carte, factures, résiliation)', () => { void manageSubscription().then(e => { if (e) setAiNotification(`⚠️ ${e}`); }); }, { keywords: 'abonnement résilier annuler arrêter facture carte paiement stripe pro compte' })] : []),
       a('Fichier', 'pal.lyricClip', '🎬 Clip pour TikTok / Reels (paroles synchronisées)', () => setLyricClipOpen(true), { keywords: 'clip vidéo video tiktok reels instagram paroles karaoké lyrics mp4 vertical' }),
       a('Fichier', 'pal.videoTake', '🎥 Filmer la prise (caméra, vidéo calée sur le son)', () => setVideoTakeOpen(true), { keywords: 'caméra camera webcam filmer vidéo video prise performance selfie video mix tiktok reels' }),
@@ -11028,7 +11036,7 @@ function Studio() {
           try { await autosaveNowRef.current?.('restore', true); } catch { /* */ }
           void recoverSession(v.id, { takes: false, label: `Version du ${new Date(v.savedAt).toLocaleString('fr-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} restaurée (ta version d'avant reste dans l'historique)` });
         }} />
-      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} />}
+      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} makeMusicEmail={makeMusicAccount?.email ?? null} onOpenOnlineSession={openOnlineSession} />}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
@@ -11182,6 +11190,7 @@ function Studio() {
         onStart={(r, n) => { void startCollab(r, n, { host: true }); }}
         gate={collabGate}
         joinError={collabJoinError}
+        onSignedUp={() => { setCollabGate(null); setArrivalSignedIn(true); }}
         onSignIn={async (email, password) => {
           await signInAccount(email, password);
           setCollabGate(null);
@@ -11201,15 +11210,10 @@ function Studio() {
         onCancelArrival={() => setCollabArrival(null)}
         onJoinCode={joinWithCode}
         signedIn={collabArrival ? arrivalSignedIn : undefined}
-        onSignUp={async (email, password) => {
-          // Compte créé sans quitter NOVA (avant : lien vers le site, puis revenir et se connecter).
-          const { data, error } = await catalogSupabase.auth.signUp({ email: email.trim(), password });
-          if (error) {
-            const m = String(error.message || '');
-            throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte » et entre ton mot de passe.'
-              : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${messageClair(error, 'réessaie dans un instant.')}`);
-          }
-          if (!data?.session) throw new Error('Compte créé ! Ouvre le mail de confirmation que tu viens de recevoir, puis reviens ici et touche « J’ai déjà un compte ».');
+        onSignUp={async (email, password, name) => {
+          // Compte Make Music créé sans quitter NOVA, avec les règles du site (services/makeMusicSignup).
+          const r = await signUpMakeMusic({ name: name || '', email, password }, { desktop: isNovaDesktop() });
+          if (r.status !== 'signed_in') throw new Error('Compte créé ! Ouvre le mail de confirmation que tu viens de recevoir (regarde aussi les spams), puis reviens ici et touche « J’ai déjà un compte ».');
           setArrivalSignedIn(true);
         }}
         guestRights={collab?.role === 'engineer' && state.collabGuestRights ? { value: state.collabGuestRights, onChange: setGuestRights } : null}
@@ -11493,7 +11497,7 @@ function Studio() {
           </PanelBoundary>
         );
       })()}
-      {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
+      {isAuthOpen && <AuthScreen initialStage={authSignup ? 'REGISTER' : 'LOGIN'} onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); setAuthSignup(false); }} onClose={() => { setIsAuthOpen(false); setAuthSignup(false); }} />}
       </Suspense>
       
       {addPluginMenu && <AddEffectMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)}

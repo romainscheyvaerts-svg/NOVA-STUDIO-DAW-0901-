@@ -21,6 +21,7 @@ import type { ProjectRate } from '../utils/projectRate';
 import { ProjectRatePicker } from './ProjectRateControls';
 import { useSimpleMode } from '../utils/simpleMode';
 import { isMakeMusicDisplay } from '../utils/accountDisplay';
+import OnlineSessionsList from './OnlineSessionsList';
 
 interface LandingPageProps {
   user: User | null;
@@ -46,6 +47,8 @@ interface LandingPageProps {
   onNewProjectRate?: (r: ProjectRate) => void;
   /** « Masteriser un morceau » : mastering d'un simple fichier, sans projet (lot 4a). */
   onOpenQuickMaster?: () => void;
+  /** Compte Make Music seulement : ouvrir une de ses séances en ligne (« Charger Projet »). */
+  onOpenOnlineSession?: (link: string) => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
@@ -65,6 +68,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   newProjectRate,
   onNewProjectRate,
   onOpenQuickMaster,
+  onOpenOnlineSession,
 }) => {
   const accountShown = account !== undefined ? account : user;
   const grille = useNovaPricing();
@@ -730,7 +734,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
                   )}
                 </div>
 
-                {!user || user.id === 'guest' ? (
+                {(!user || user.id === 'guest') && isMakeMusicDisplay(accountShown) && onOpenOnlineSession ? (
+                  // Compte Make Music seulement : ses séances en ligne (avant : « Connectez-vous », alors qu'il l'était).
+                  <div className="max-h-72 overflow-y-auto -mx-4">
+                    <OnlineSessionsList email={accountShown?.email || ''} testid="landing-online-sessions"
+                      onOpen={(l) => { setShowLoadModal(false); onOpenOnlineSession(l); }} />
+                  </div>
+                ) : !user || user.id === 'guest' ? (
                   <div className="text-center py-6">
                     <i className="fas fa-cloud text-3xl text-slate-700 mb-3"></i>
                     <p className="text-xs text-slate-500">Connectez-vous pour accéder à vos projets cloud</p>

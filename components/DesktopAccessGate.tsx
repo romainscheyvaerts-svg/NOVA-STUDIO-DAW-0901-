@@ -9,6 +9,7 @@ import {
   desktopSupportsGoogle, getDesktopTransport, googleLoginErrorMessage, startDesktopGoogleLogin,
   type GoogleLoginController, type GooglePhase,
 } from '../utils/desktopGoogleLogin';
+import { passwordOk, passwordRules, signUpMakeMusic, PASSWORD_MIN } from '../services/makeMusicSignup';
 
 /**
  * Application Windows uniquement : connexion obligatoire (compte Make Music
@@ -171,13 +172,10 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const signup = (e: React.FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      if (!name.trim()) throw new Error('Indique ton nom (ou ton nom d’artiste).');
-      const { error } = await catalogSupabase.auth.signUp({
-        email: email.trim(), password,
-        options: { emailRedirectTo: `${SITE}/auth`, data: { full_name: name.trim() } },
-      });
-      if (error) throw error;
+      // Même parcours que le site (règles, nom, lien de confirmation) : services/makeMusicSignup.
+      const r = await signUpMakeMusic({ name, email, password }, { desktop: true });
       setPassword('');
+      if (r.status === 'signed_in') { openWith({ id: r.userId, email: r.email }); return; }
       setStage('signup_sent');
     });
   };
@@ -295,11 +293,16 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                   <label className="block space-y-1.5"><span className="text-[12px] font-bold text-slate-300">E-mail</span>
                     <input className={input} type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required />
                   </label>
-                  <label className="block space-y-1.5"><span className="text-[12px] font-bold text-slate-300">Mot de passe (6 caractères minimum)</span>
-                    <input className={input} type="password" autoComplete="new-password" minLength={6} value={password} onChange={e => setPassword(e.target.value)} required />
+                  <label className="block space-y-1.5"><span className="text-[12px] font-bold text-slate-300">Mot de passe ({PASSWORD_MIN} caractères minimum)</span>
+                    <input className={input} type="password" autoComplete="new-password" minLength={PASSWORD_MIN} value={password} onChange={e => setPassword(e.target.value)} required aria-describedby="gate-pw-rules" />
                   </label>
+                  <ul id="gate-pw-rules" className="flex flex-wrap gap-1.5" aria-label="Le mot de passe doit contenir">
+                    {passwordRules(password).map(r => (
+                      <li key={r.id} data-ok={r.ok ? '1' : '0'} className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${r.ok ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300' : 'border-white/10 bg-white/[0.03] text-slate-400'}`}>{r.ok ? '✓ ' : ''}{r.label}</li>
+                    ))}
+                  </ul>
                   {error && <p className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-200" role="alert">{error}</p>}
-                  <button type="submit" disabled={busy || !email || password.length < 6 || !name.trim()} className={primary}>{busy ? 'Création…' : 'Créer mon compte'}</button>
+                  <button type="submit" disabled={busy || !email || !passwordOk(password) || !name.trim()} className={primary}>{busy ? 'Création…' : 'Créer mon compte'}</button>
                   <p className="text-center text-[12px] text-slate-400">Déjà un compte ? <button type="button" className={link} onClick={() => { setError(null); setStage('login'); }}>Se connecter</button></p>
                   <p className="text-center text-[11px] text-slate-500">En créant un compte, tu acceptes les <button type="button" className="underline" onClick={() => openExternal(`${SITE}/cgv`)}>conditions</button>.</p>
                 </form>

@@ -3,6 +3,8 @@ import { messageClair } from '../utils/friendlyError';
 import type { DAWState } from '../types';
 import { catalogSupabase } from '../services/supabase';
 import { claimSession, signInAccount } from '../services/SessionCloud';
+import MakeMusicSignupForm from './MakeMusicSignupForm';
+import { isNovaDesktop } from '../utils/desktopApp';
 import { createForkLink, ForkError, listForkLinks, openForkCopy, revokeForkLink, type ForkCopy, type SessionKey } from '../services/SessionFork';
 import { getPublicTrack, publishTrack, PublicTrackError, setPublished } from '../services/PublicTracks';
 import { exportAccess, type ExportAccess } from '../services/Billing';
@@ -89,29 +91,27 @@ const InlineLogin: React.FC<{ title: string; onDone: () => void; testid: string 
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
-      if (signUp) {
-        const { data, error } = await catalogSupabase.auth.signUp({ email: email.trim(), password });
-        if (error) {
-          const m = String(error.message || '');
-          throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte ».' : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${messageClair(error, 'réessaie dans un instant.')}`);
-        }
-        if (!data?.session) throw new Error('Compte créé ! Ouvre le mail de confirmation, puis reviens ici et touche « J’ai déjà un compte ».');
-      } else {
-        await signInAccount(email, password);
-      }
+      await signInAccount(email, password);
       onDone();
     } catch (e: any) { setErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } finally { setBusy(false); }
   };
+  // Compte Make Music créé ici, avec les règles du site (services/makeMusicSignup).
+  if (signUp) return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid={testid}>
+      <MakeMusicSignupForm compact desktop={isNovaDesktop()} testid={`${testid}-signup`} initialEmail={email}
+        onSignedIn={() => onDone()} onWantLogin={(em) => { setEmail(em); setSignUp(false); setErr(null); }} />
+    </div>
+  );
   return (
     <form onSubmit={submit} className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid={testid}>
-      <p className="text-[13px] font-bold text-white">{signUp ? 'Crée ton compte Make Music (gratuit, 1 minute)' : title}</p>
+      <p className="text-[13px] font-bold text-white">{title}</p>
       <input type="email" autoComplete="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" aria-label="E-mail" className={field} />
-      <input type="password" autoComplete={signUp ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)}
-        placeholder={signUp ? 'Choisis un mot de passe (6 caractères min.)' : 'Mot de passe'} aria-label="Mot de passe" className={field} />
+      <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}
+        placeholder="Mot de passe" aria-label="Mot de passe" className={field} />
       {err && <p role="alert" className="text-[12px] text-red-300">{err}</p>}
-      <button type="submit" disabled={busy || !email || !password} className={`${btn} w-full bg-white text-black`}>{busy ? 'Connexion…' : signUp ? 'Créer mon compte' : 'Me connecter'}</button>
-      <button type="button" onClick={() => { setSignUp(s => !s); setErr(null); }} className="min-h-11 w-full text-center text-[12px] text-cyan-300 underline">
-        {signUp ? "J'ai déjà un compte" : 'Pas encore de compte ? Crée-le ici (gratuit)'}
+      <button type="submit" disabled={busy || !email || !password} className={`${btn} w-full bg-white text-black`}>{busy ? 'Connexion…' : 'Me connecter'}</button>
+      <button type="button" onClick={() => { setSignUp(true); setErr(null); }} className="min-h-11 w-full text-center text-[12px] text-cyan-300 underline">
+        Pas encore de compte ? Crée-le ici (gratuit)
       </button>
     </form>
   );

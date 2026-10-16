@@ -7,6 +7,9 @@ import { agoShort, type HistoryEntry } from '../utils/collabHistory';
 import { GUEST_RIGHTS_HELP, type GuestRights } from '../utils/guestRights';
 import { useNovaPricing, proMoisTexte } from '../hooks/useNovaPricing';
 import { messageClair } from '../utils/friendlyError';
+import { passwordRules, PASSWORD_MIN } from '../services/makeMusicSignup';
+import MakeMusicSignupForm from './MakeMusicSignupForm';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /**
  * Collaboration à distance : inviter (un lien, un code à 6 caractères ; la
@@ -110,8 +113,10 @@ interface Props {
   arrival?: { sessionName: string; suggestedRole: CollabRole | null; host?: { role: CollabRole; name: string } | null } | null;
   /** Compte connecté (sinon : e-mail et mot de passe directement sur la carte d'arrivée). */
   signedIn?: boolean;
-  /** Créer un compte sans quitter NOVA. */
-  onSignUp?: (email: string, password: string) => Promise<void>;
+  /** Créer un compte sans quitter NOVA (compte Make Music, règles du site ; name = nom affiché). */
+  onSignUp?: (email: string, password: string, name: string) => Promise<void>;
+  /** Compte Make Music créé ET ouvert depuis la carte « Connecte-toi » (serveur sans confirmation d'e-mail). */
+  onSignedUp?: () => void;
   /** Ingé : ce que l'artiste invité peut modifier dans sa séance (utils/guestRights). */
   guestRights?: { value: GuestRights; onChange: (patch: Partial<GuestRights>) => void } | null;
   defaultName?: string;
@@ -212,6 +217,8 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [markerName, setMarkerName] = useState('');
   const [showRoles, setShowRoles] = useState(false);
   const [signUpMode, setSignUpMode] = useState(false);
+  // Carte « Connecte-toi » : « Pas encore de compte ? » ouvre le formulaire Make Music ici.
+  const [gateSignup, setGateSignup] = useState(false);
   const [joining, setJoining] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // Panneau ouvert : les notifications d'export passent à gauche (elles recouvraient son bouton principal).
@@ -262,7 +269,7 @@ const CollabPanel: React.FC<Props> = (p) => {
     if (inlineLogin) {
       setJoining(true);
       try {
-        if (signUpMode && p.onSignUp) await p.onSignUp(email, password); else await p.onSignIn!(email, password);
+        if (signUpMode && p.onSignUp) await p.onSignUp(email, password, arrivalName.trim()); else await p.onSignIn!(email, password);
         setPassword('');
       } catch (e: any) { setSignErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); setJoining(false); return; }
       setJoining(false);
@@ -277,7 +284,14 @@ const CollabPanel: React.FC<Props> = (p) => {
   const loginNearCode = !!codeErr && p.gate === 'login';
   const gateBlock = (
     <>
-      {p.gate === 'login' && p.onSignIn && (
+      {p.gate === 'login' && p.onSignIn && gateSignup && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <MakeMusicSignupForm compact desktop={isNovaDesktop()} testid="collab-signup" initialEmail={email}
+            onSignedIn={() => { setGateSignup(false); p.onSignedUp?.(); }}
+            onWantLogin={(em) => { setEmail(em); setGateSignup(false); setSignErr(null); }} />
+        </div>
+      )}
+      {p.gate === 'login' && p.onSignIn && !gateSignup && (
         <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid="collab-login">
           <p className="text-[12px] font-bold text-white">Connecte-toi avec ton compte Make Music</p>
           <input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
@@ -285,7 +299,7 @@ const CollabPanel: React.FC<Props> = (p) => {
           <button type="button" disabled={!email || !password} className={`${btn} w-full bg-white text-black`}
             onClick={async () => { setSignErr(null); try { await p.onSignIn!(email, password); setPassword(''); } catch (e: any) { setSignErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } }}>Se connecter</button>
           {signErr && <p className="text-[11px] text-red-300">{signErr}</p>}
-          <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Créer un compte sur studiomakemusic.com</a>
+          <button type="button" onClick={() => { setGateSignup(true); setSignErr(null); }} data-testid="collab-signup-open" className="block w-full min-h-10 text-center text-[12px] text-cyan-300 underline">Pas encore de compte ? Crée-le ici (gratuit)</button>
         </div>
       )}
       {p.gate === 'subscribe' && p.onSubscribe && (
@@ -354,7 +368,15 @@ const CollabPanel: React.FC<Props> = (p) => {
             <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid="arrival-login">
               <p className="text-[12px] font-bold text-white">{signUpMode ? 'Crée ton compte Make Music (gratuit, 1 minute)' : 'Ton compte Make Music'}</p>
               <input type="email" autoComplete="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" aria-label="E-mail" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
-              <input type="password" autoComplete={signUpMode ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={signUpMode ? 'Choisis un mot de passe (6 caractères min.)' : 'Mot de passe'} aria-label="Mot de passe" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
+              <input type="password" autoComplete={signUpMode ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={signUpMode ? `Choisis un mot de passe (${PASSWORD_MIN} caractères min.)` : 'Mot de passe'} aria-label="Mot de passe" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[15px] text-white" />
+              {signUpMode && (
+                // Règles du site studiomakemusic.com, cochées en direct (le compte sert aussi sur le site).
+                <ul className="flex flex-wrap gap-1.5" aria-label="Le mot de passe doit contenir" data-testid="arrival-password-rules">
+                  {passwordRules(password).map(r => (
+                    <li key={r.id} data-ok={r.ok ? '1' : '0'} className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${r.ok ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300' : 'border-white/10 bg-white/[0.03] text-slate-400'}`}>{r.ok ? '✓ ' : ''}{r.label}</li>
+                  ))}
+                </ul>
+              )}
               {signErr && <p role="alert" className="text-[12px] text-red-300">{signErr}</p>}
               {p.onSignUp && (
                 <button type="button" onClick={() => { setSignUpMode(m => !m); setSignErr(null); }} data-testid="arrival-signup-toggle" className="min-h-11 w-full text-center text-[12px] text-cyan-300 underline">

@@ -460,6 +460,19 @@ def _sub_of(headers: dict):
     return COMPTES[tok]["id"] if tok in COMPTES else None
 
 
+def _jwt_user(headers: dict) -> bool:
+    """Jeton d'un utilisateur connecté (simulé ou posé par un scénario), pas la clé anon."""
+    tok = _token_of(headers)
+    if tok in COMPTES:
+        return True
+    try:
+        part = tok.split(".")[1]
+        payload = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    except Exception:
+        return False
+    return payload.get("role") != "anon" and bool(payload.get("sub"))
+
+
 def _horodatage() -> str:
     """Heure « serveur » strictement croissante (curseur updated_at des clients)."""
     _HORLOGE["n"] += 1
@@ -581,6 +594,12 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
                 return Resp(400, cors, {"error": "Action inconnue"})
             return Resp(401, cors, {"error": "Connecte-toi pour continuer (QA hors production)."})
         if fn == "daw-session":
+            # « Ouvrir un projet » d'un compte Make Music connecté (16/10/2026) : comme la fonction en ligne,
+            # list_mine répond la liste (vide ici) à un utilisateur connecté, 401 sinon.
+            try: action = json.loads(body or b"{}").get("action")
+            except Exception: action = None
+            if action == "list_mine" and _jwt_user(h):
+                return Resp(200, cors, {"sessions": []})
             return Resp(401, cors, {"error": "Connecte-toi pour collaborer (QA hors production)."})
         if fn == "daw-listen":
             # Lien d'écoute client : sans simulateur propre au scénario (qa/listen_sim.py), aucun lien

@@ -112,6 +112,10 @@ BATTERIE = [
     # « Montre-moi » qui va jusqu'au bon bouton du menu ☰, étapes sans Ctrl+K au doigt, connexion à l'endroit du code
     # de collaboration, « Ouvrir un projet » sans compte, projet abîmé, LUFS / dBTP expliqués ; bureau et téléphone, sombre et clair.
     ("guidage", []),
+    # 1.5.3 · simple-compte (16/10/2026) : mode simple = BEAT + UNE piste REC (« + Piste voix », mode avancé complet, projet
+    # existant intact) ; « Créer un compte » = compte Make Music (règles du site, e-mail de confirmation, renvoi, non confirmé),
+    # fenêtre Nova Pro, palette, téléphone ; compte Make Music seul : séances en ligne dans « Ouvrir un projet ».
+    ("simple_compte", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

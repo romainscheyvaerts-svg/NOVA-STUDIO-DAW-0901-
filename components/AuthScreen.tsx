@@ -3,15 +3,20 @@ import React, { useState, useEffect } from 'react';
 import { AuthStage, User } from '../types';
 import { authService } from '../services/AuthService';
 import { isSupabaseConfigured } from '../services/supabase';
+import { resendConfirmation } from '../services/makeMusicSignup';
+import { isNovaDesktop } from '../utils/desktopApp';
+import MakeMusicSignupForm from './MakeMusicSignupForm';
 
 interface AuthScreenProps {
   onAuthenticated: (user: User) => void;
   /** Bouton ✕ / Échap : revenir là où on était sans se connecter. */
   onClose?: () => void;
+  /** « Créer mon compte » (palette, guide) : ouvrir directement l'inscription. */
+  initialStage?: 'LOGIN' | 'REGISTER';
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => {
-  const [stage, setStage] = useState<AuthStage>('LOGIN');
+const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose, initialStage = 'LOGIN' }) => {
+  const [stage, setStage] = useState<AuthStage>(initialStage);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -19,10 +24,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
   // Form States
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [username, setUsername] = useState('');
   const [verifyCode, setVerifyCode] = useState('');
   const [rememberMe, setRememberMe] = useState(false); // Nouvelle option
+  // Compte Make Music pas encore confirmé : « Renvoyer l'e-mail de confirmation ».
+  const [needsConfirm, setNeedsConfirm] = useState(false);
 
   // Check si Supabase est configuré
   const useRealAuth = isSupabaseConfigured();
@@ -32,6 +37,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
+    setNeedsConfirm(false);
     
     // On passe le flag rememberMe
     const result = await authService.login(email, password, rememberMe);
@@ -43,29 +49,23 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
       // Compte Make Music seulement : connecté (la barre du haut le montre), la fenêtre se ferme.
       onClose?.();
     } else {
+      setNeedsConfirm(!!result.needsConfirm);
       setError(result.message || "Erreur de connexion");
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirmPassword) {
-      setError("Les mots de passe ne correspondent pas.");
-      return;
-    }
-    
+  const handleResendConfirm = async () => {
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
-
-    const result = await authService.register(email, password, username);
-    setLoading(false);
-
-    if (result.success) {
-      setStage('VERIFY_EMAIL');
-    } else {
-      setError(result.message || "Erreur d'inscription");
+    try {
+      await resendConfirmation(email, { desktop: isNovaDesktop() });
+      setNeedsConfirm(false);
+      setSuccessMsg("E-mail de confirmation renvoyé : regarde aussi dans les spams.");
+    } catch (e: any) {
+      setError(e?.message || "Renvoi impossible : réessaie dans un instant.");
     }
+    setLoading(false);
   };
 
   const handleVerify = async (e: React.FormEvent) => {
@@ -131,7 +131,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-nv-bg flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Connexion">
+    <div className="fixed inset-0 z-[9999] bg-nv-bg flex items-center justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Connexion">
       {/* Background Ambience */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-900/20 via-nv-bg to-nv-bg"></div>
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
@@ -139,7 +139,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[100px]"></div>
       </div>
 
-      <div className="relative w-full max-w-md bg-nv-surface border border-white/10 rounded-[32px] p-8 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in duration-500">
+      <div className="relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto bg-nv-surface border border-white/10 rounded-[32px] p-6 sm:p-8 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in duration-500">
         {onClose && (
           <button type="button" onClick={onClose} aria-label="Fermer" title="Fermer (Échap)"
             className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors">
@@ -154,6 +154,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
           </div>
           <h1 className="text-2xl font-black uppercase tracking-[0.3em] text-white">Nova <span className="text-cyan-400">DAW</span></h1>
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-2">Next Gen Audio Production</p>
+          <p className="text-[11px] text-slate-400 mt-2 text-center">Ton compte Make Music : le même que sur studiomakemusic.com</p>
           {!useRealAuth && <span className="text-[8px] text-amber-500 font-mono mt-1">MODE SIMULATION (NO BACKEND)</span>}
         </div>
 
@@ -213,6 +214,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
               <button 
                 type="button" 
                 onClick={() => { setError(null); setSuccessMsg(null); setStage('REGISTER'); }}
+                data-testid="auth-signup-open"
                 className="text-[10px] font-bold text-cyan-400 hover:text-white transition-colors uppercase tracking-wide"
               >
                 Créer un compte
@@ -221,46 +223,15 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
           </form>
         )}
 
-        {/* --- REGISTER FORM --- */}
+        {/* --- REGISTER FORM : compte Make Music (studiomakemusic.com), règles du site --- */}
         {stage === 'REGISTER' && (
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1 block">Pseudo</label>
-                    <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="w-full h-10 bg-black/40 border border-white/10 rounded-xl px-3 text-white text-sm focus:border-cyan-500 focus:outline-none transition-colors" />
-                </div>
-                <div>
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1 block">Email</label>
-                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full h-10 bg-black/40 border border-white/10 rounded-xl px-3 text-white text-sm focus:border-cyan-500 focus:outline-none transition-colors" />
-                </div>
-            </div>
-            <div>
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1 block">Mot de passe</label>
-              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full h-10 bg-black/40 border border-white/10 rounded-xl px-3 text-white text-sm focus:border-cyan-500 focus:outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1 block">Confirmer</label>
-              <input type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full h-10 bg-black/40 border border-white/10 rounded-xl px-3 text-white text-sm focus:border-cyan-500 focus:outline-none transition-colors" />
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full h-12 bg-white hover:bg-slate-200 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-50 mt-2 flex items-center justify-center"
-            >
-              {loading ? <i className="fas fa-spinner fa-spin"></i> : "S'inscrire"}
-            </button>
-
-            <div className="text-center pt-1">
-              <button 
-                type="button" 
-                onClick={() => { setError(null); setSuccessMsg(null); setStage('LOGIN'); }}
-                className="text-[9px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-wide"
-              >
-                Retour Connexion
-              </button>
-            </div>
-          </form>
+          <MakeMusicSignupForm
+            initialEmail={email}
+            desktop={isNovaDesktop()}
+            testid="auth-signup"
+            onSignedIn={() => onClose?.()}
+            onWantLogin={(em) => { setEmail(em); setPassword(''); setError(null); setSuccessMsg(null); setStage('LOGIN'); }}
+          />
         )}
 
         {/* --- FORGOT PASSWORD FORM --- */}
@@ -357,6 +328,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
             <i className="fas fa-exclamation-circle text-red-500 text-xs"></i>
             <span className="text-[10px] font-bold text-red-400 uppercase tracking-wide">{error}</span>
           </div>
+        )}
+        {needsConfirm && stage === 'LOGIN' && (
+          <button type="button" onClick={() => void handleResendConfirm()} disabled={loading} data-testid="auth-resend-confirm"
+            className="mt-3 w-full min-h-11 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-[12px] font-bold text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-50">
+            Renvoyer l'e-mail de confirmation
+          </button>
         )}
         {successMsg && (
           <div className="mt-6 p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center justify-center space-x-2 animate-in slide-in-from-top-2">
