@@ -36,6 +36,11 @@ TOUS = ["CHORUS", "FLANGER", "DOUBLER", "STEREOSPREADER", "DENOISER", "MASTERSYN
 # en attente (avant : {"STEREOSPREADER", "MASTERSYNC"}, ancienne fenêtre sans data-nova-plugin).
 PAS_ENCORE = set()
 KINDS = ARGS[1:] or [k for k in TOUS if k not in PAS_ENCORE]
+# Le Stéréo n'est plus dans le menu « Ajouter un effet » (remplacé par le Doubleur, commit 9eca3b10) :
+# en --reel on ne peut pas l'ajouter ; sa façade est contrôlée par le banc (ici et qa/plugins_fin.py).
+HORS_MENU = {"STEREOSPREADER"}
+if REEL and not ARGS[1:]:
+    KINDS = [k for k in KINDS if k not in HORS_MENU]
 os.makedirs(OUT, exist_ok=True)
 
 # Recherche dans le menu « Ajouter un effet » (mode --reel).
