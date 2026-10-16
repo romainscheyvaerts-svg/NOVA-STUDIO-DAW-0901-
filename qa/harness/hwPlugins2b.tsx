@@ -15,6 +15,12 @@ import { VocalDoublerUI } from '../../plugins/DoublerPlugin';
 import { StereoSpreaderUI } from '../../plugins/StereoSpreaderPlugin';
 import { VocalDenoiserUI } from '../../plugins/DenoiserPlugin';
 import { MasterSyncUI } from '../../plugins/MasterSyncPlugin';
+import { VocalCompressorUI } from '../../plugins/CompressorPlugin';
+import SamplerEditor from '../../components/SamplerEditor';
+import DrumSamplerEditor from '../../components/DrumSamplerEditor';
+import DrumRack from '../../components/DrumRack';
+import SamplerPanel from '../../components/SamplerPanel';
+import { DEFAULT_SAMPLER } from '../../utils/melodicSampler';
 import { NovaHarmonizerUI } from '../../plugins/HarmonizerPlugin';
 import { NovaVoiceShifterUI } from '../../plugins/VoiceShifterPlugin';
 import { NovaTimeFxUI } from '../../plugins/TimeFxPlugin';
@@ -53,6 +59,10 @@ function fakeNode(kind: string) {
     analyzerL: analyser(0), analyzerR: analyser(0.9),
     // Gate de bruit (ex-Anti-bruit)
     getStatus: () => { const s = t(); const open = Math.sin(s * 2) > -0.2; return { reduction: open ? 1 : 0.2, reductionDb: open ? 0 : -14, inputLevel: -30 + 14 * Math.sin(s * 2), isOpen: open, isActive: !open, noiseFloorDb: -62, thresholdDb: -45, humHz: 50 }; },
+    // Compresseur (plugins-fin 1.5.1) : réduction (dB ≤ 0), crêtes d'entrée / de sortie (dBFS) qui bougent.
+    getReduction: () => { const s = t(); return -Math.max(0, 6 + 5 * Math.sin(s * 1.7)); },
+    getInputLevel: () => { const s = t(); return -14 + 8 * Math.sin(s * 1.7); },
+    getOutputLevel: () => { const s = t(); return -16 + 4 * Math.sin(s * 1.7 + 0.4); },
     // Analyse
     getParams: () => sync,
     updateParams: (p: any) => { if (kind === 'MASTERSYNC') sync = { ...sync, ...(p || {}) }; },
@@ -62,6 +72,7 @@ function fakeNode(kind: string) {
 }
 
 const LEGACY: Record<string, any> = {
+  COMPRESSOR: VocalCompressorUI,
   CHORUS: VocalChorusUI, FLANGER: StudioFlangerUI, DOUBLER: VocalDoublerUI, STEREOSPREADER: StereoSpreaderUI, DENOISER: VocalDenoiserUI,
 };
 const V21: Record<string, any> = {
@@ -72,7 +83,29 @@ const INIT: Record<string, any> = {
   DOUBLER: { detune: 0.4, width: 0.8, gainL: 0.7, gainR: 0.7, directOn: true, isEnabled: true },
 };
 
+/** Instruments (plugins-fin 1.5.1) : Sampler, Drum sampler, Drum Rack (piste factice, réglages remontés). */
+const DrumRackQa: React.FC = () => {
+  const [track, setTrack] = React.useState<any>(() => ({
+    id: 'qa-drums', name: 'Batterie', type: 'DRUM_RACK', clips: [], plugins: [], sends: [],
+    drumPads: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Pad ${i + 1}`, sampleName: ['Kick', 'Snare', 'Hi-hat', 'Clap'][i] || 'Empty', volume: 0.8, pan: 0, isMuted: false, isSolo: false, midiNote: 60 + i })),
+  }));
+  return <DrumRack track={track} onUpdateTrack={t => { setTrack(t); (window as any).__qaHwParams = { ...((window as any).__qaHwParams || {}), pads: t.drumPads }; }} onClose={() => {}} />;
+};
+
+/** Écran du Sampler mélodique (instrument MELODIC_SAMPLER) sur une piste factice ; réglages remontés. */
+const SamplerPanelQa: React.FC<{ mobile: boolean; Comp?: any }> = ({ mobile, Comp = SamplerPanel }) => {
+  const [s, setS] = React.useState<any>(() => ({ ...DEFAULT_SAMPLER }));
+  return <Comp track={{ id: 'qa-sampler-m', name: 'Sampler', melodicSampler: s } as any} isMobile={mobile} bpm={120}
+    onChange={(p: any) => { setS((x: any) => ({ ...x, ...p })); (window as any).__qaHwParams = { ...((window as any).__qaHwParams || {}), ...p }; }}
+    onClose={() => {}} onBackToSynth={() => {}} ensureEngine={async () => {}} notify={() => {}} sessionClips={[]} />;
+};
+
+let qaMobile = false;
 function ui(kind: string) {
+  if (kind === 'MELODIC_SAMPLER') return <SamplerPanelQa mobile={qaMobile} />;
+  if (kind === 'SAMPLER') return <SamplerEditor plugin={{ id: 'qa-sampler', name: 'Sampler', type: 'SAMPLER', isEnabled: true, params: {}, latency: 0 } as any} trackId="qa-sampler" onClose={() => {}} />;
+  if (kind === 'DRUM_SAMPLER') return <DrumSamplerEditor plugin={{ id: 'qa-drum', name: 'Drum sampler', type: 'DRUM_SAMPLER', isEnabled: true, params: {}, latency: 0 } as any} trackId="qa-drum" onClose={() => {}} />;
+  if (kind === 'DRUM_RACK_UI') return <DrumRackQa />;
   const node = fakeNode(kind);
   // Réglages remontés au projet (relus par les scénarios de gestes).
   const noop = (p: any) => { (window as any).__qaHwParams = { ...((window as any).__qaHwParams || {}), ...(p || {}) }; };
@@ -90,6 +123,7 @@ export function unmountHwPlugin() {
 
 export function mountHwPlugin(kind: string, mobile: boolean) {
   unmountHwPlugin();
+  qaMobile = mobile;
   (window as any).__qaHwParams = {};
   const host = document.createElement('div');
   host.setAttribute('data-qa-hw', kind);

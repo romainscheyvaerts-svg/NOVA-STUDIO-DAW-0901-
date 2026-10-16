@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
-import { paramFr, termHelp } from '../utils/pluginUi';
+import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, type KnobProps } from './hw';
+import { useHwCanvas, hwCtx } from './hw/screens';
 
 /**
  * PROFESSIONAL STEREO IMAGER v3.0
@@ -452,26 +452,120 @@ export class StereoSpreaderNode {
   }
 }
 
-const SpreaderKnob: React.FC<{ label: string, value: number, onChange: (v: number) => void, factor: number, suffix: string, color: string, displayVal?: number }> = ({ label, value, onChange, factor, suffix, color, displayVal }) => {
-  const safeValue = Number.isFinite(value) ? value : 0;
-  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, sensitivity: 150 });
+/**
+ * Fenêtre « Stéréo », dessinée comme un processeur d'image stéréo de studio (kit
+ * plugins/hw) : façade blanc nacré, écran goniomètre (image stéréo), corrélation
+ * de phase sur une échelle de LED et un afficheur, gros bouton Largeur, modules
+ * « Graves en mono » et « 3 bandes » avec boutons-poussoirs à LED.
+ * L'image et la corrélation s'animent hors React (canvas + rAF) : la façade ne se
+ * redessine plus à chaque image. Mêmes réglages, mêmes bornes, mêmes paramètres
+ * envoyés au moteur qu'avant (preuve : tests/pluginsFin.test.ts) ; l'affichage
+ * suit enfin les valeurs par défaut du moteur (« Graves en mono » allumé, largeur 0 %
+ * affichée 0 % et non 100 %).
+ */
+const STEREO_ACCENT = '#0891b2';
+/** Valeurs du moteur quand le projet ne précise rien (StereoSpreaderNode). */
+export const SPREADER_DEFAULTS: SpreaderParams = {
+  width: 1.0, balance: 0, monoFreq: 120, lowWidth: 0.8, midWidth: 1.2, highWidth: 1.5, lowMidFreq: 250, midHighFreq: 4000,
+  haasDelay: 0.015, haasAmount: 0.0, mode: 'STEREO', multiBand: false, safeMonoBass: true, isEnabled: true,
+};
+const ST_HINTS = {
+  width: 'Largeur stéréo : 0 % = mono, 100 % = image d’origine, 200 % = très large. Au-delà de 130 %, vérifie la compatibilité mono.',
+  balance: 'Balance : déplace l’image vers la gauche ou la droite.',
+  haasDelay: 'Décalage Haas : petit retard sur le côté droit (0 à 30 ms) qui élargit sans toucher au volume. Se règle avec la dose.',
+  haasAmount: 'Dose Haas : part du décalage appliquée. 0 % = pas d’effet Haas.',
+  safeMonoBass: 'Graves en mono : les graves restent au centre (kick, 808, basse), comme en club et sur un téléphone.',
+  monoFreq: 'Fréquence sous laquelle le son est remis en mono quand « Graves en mono » est enfoncé.',
+  multiBand: '3 bandes : règle la largeur des graves, des médiums et des aigus séparément.',
+  lowWidth: 'Largeur des graves (sous la 1re coupure).',
+  midWidth: 'Largeur des médiums (entre les deux coupures).',
+  highWidth: 'Largeur des aigus (au-dessus de la 2e coupure).',
+  lowMidFreq: 'Coupure graves / médiums.',
+  midHighFreq: 'Coupure médiums / aigus.',
+  corr: 'Compatibilité mono (corrélation de phase) : +1 = mono parfait, 0 = très large, sous 0 = des sons s’annulent quand on écoute en mono (téléphone, club).',
+};
+const pctW = (v: number) => `${Math.round(v * 100)} %`;
+const corrState = (c: number) => (c > 0.8 ? { t: 'Compatible mono', col: '#16a34a' } : c > 0.5 ? { t: 'Bonne image', col: '#16a34a' } : c > 0 ? { t: 'Très large', col: '#d97706' } : { t: 'Problème de phase', col: '#dc2626' });
 
-
-  const rotation = (safeValue * 270) - 135;
-  const display = displayVal !== undefined ? displayVal : Math.round(safeValue * factor);
-  
+/** Goniomètre + corrélation : tout est dessiné hors React (canvas, LED, afficheur). */
+const StereoScope: React.FC<{ node: StereoSpreaderNode; width: number }> = ({ node, width }) => {
+  const { wrapRef, canvasRef, size } = useHwCanvas();
+  const corr = useRef(1);
+  const lcd = useRef<HTMLSpanElement | null>(null);
+  const led = useRef<HTMLSpanElement | null>(null);
+  const live = useRef({ size, width });
+  live.current = { size, width };
+  useEffect(() => {
+    let raf = 0, lastTxt = '', lastAt = 0;
+    let dL: Float32Array | null = null, dR: Float32Array | null = null;
+    const loop = (t: number) => {
+      raf = requestAnimationFrame(loop);
+      const aL = node?.analyzerL, aR = node?.analyzerR;
+      if (!aL || !aR) return;
+      const n = aL.fftSize;
+      if (!dL || dL.length !== n) { dL = new Float32Array(n); dR = new Float32Array(n); }
+      try { aL.getFloatTimeDomainData(dL as any); aR.getFloatTimeDomainData(dR as any); } catch { return; }
+      let sLR = 0, sL = 0, sR = 0;
+      for (let i = 0; i < n; i++) { sLR += dL[i] * dR![i]; sL += dL[i] * dL[i]; sR += dR![i] * dR![i]; }
+      const den = Math.sqrt(sL * sR);
+      const c = den > 0 ? sLR / den : 1;
+      corr.current = c;
+      const { size: sz, width: wd } = live.current;
+      const ctx = hwCtx(canvasRef.current, sz);
+      if (ctx) {
+        const w = sz.w, h = sz.h, cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.42;
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+        ctx.moveTo(cx - R * 0.7, cy - R * 0.7); ctx.lineTo(cx + R * 0.7, cy + R * 0.7); ctx.moveTo(cx + R * 0.7, cy - R * 0.7); ctx.lineTo(cx - R * 0.7, cy + R * 0.7);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(34,211,238,0.18)';
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        ctx.strokeStyle = c > 0 ? 'rgba(103,232,249,0.75)' : 'rgba(248,113,113,0.8)';
+        ctx.lineWidth = 1.4;
+        const k = R * 0.85;
+        for (let i = 0; i < n; i += 2) {
+          const M = (dL[i] + dR![i]) * 0.707, S = (dL[i] - dR![i]) * 0.707;
+          const px = cx + S * k, py = cy - M * k;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        // Repère de largeur réglée (bas de l'écran).
+        const wv = Math.max(0, Math.min(2, wd)) * R * 0.5;
+        ctx.fillStyle = 'rgba(34,211,238,0.28)';
+        ctx.fillRect(cx - wv, h - 12, wv * 2, 5);
+      }
+      if (t - lastAt > 120) {
+        lastAt = t;
+        const st = corrState(c);
+        const txt = `${c >= 0 ? '+' : '−'}${Math.abs(c).toFixed(2).replace('.', ',')} · ${st.t}`;
+        if (txt !== lastTxt && lcd.current) { lcd.current.textContent = txt; lastTxt = txt; }
+        if (led.current) { led.current.style.setProperty('--led', st.col); led.current.dataset.on = 'true'; }
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [node, canvasRef]);
   return (
-    <div className="flex flex-col items-center space-y-2 group touch-none select-none">
-      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl">
-        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}` }} />
-        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[45px]">
-          <span className="text-[8px] font-mono font-bold" style={{ color }}>{display}{suffix}</span>
+    <div className="flex flex-col gap-2 w-full min-w-0">
+      <div className="hw-screen">
+        <div ref={wrapRef} className="hw-screen-glass" style={{ height: 168 }}>
+          <span className="hw-screen-label" style={{ top: 6, left: 8 }}>Image stéréo</span>
+          <span className="hw-screen-label" style={{ bottom: 6, left: 8 }}>G</span>
+          <span className="hw-screen-label" style={{ bottom: 6, right: 8 }}>D</span>
+          <canvas ref={canvasRef} className="hw-screen-canvas" aria-label="Image stéréo (goniomètre)" />
         </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2" title={ST_HINTS.corr}>
+        <SegmentMeter label="Phase" min={-1} max={1} segments={20} length={150} holdMs={0} read={() => corr.current}
+          colorAt={v => (v > 0.5 ? '#22c55e' : v > 0 ? '#f59e0b' : '#ef4444')} hint={ST_HINTS.corr}
+          scale={[{ v: -1, label: '−1' }, { v: 0, label: '0' }, { v: 1, label: '+1' }]} />
+        <span className="flex items-center gap-2">
+          <span ref={led} className="hw-led" data-on="false" style={{ ['--led' as any]: '#16a34a' }} aria-hidden="true" />
+          <span className="hw-lcd" data-nova-corr aria-live="off"><span ref={lcd}>+1,00 · Compatible mono</span></span>
+        </span>
       </div>
     </div>
   );
@@ -479,10 +573,10 @@ const SpreaderKnob: React.FC<{ label: string, value: number, onChange: (v: numbe
 
 export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParams: SpreaderParams, onParamsChange?: (p: SpreaderParams) => void }> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<SpreaderParams>(initialParams);
-  const [correlation, setCorrelation] = useState(1.0);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Ce que le moteur applique vraiment (valeurs du projet, sinon celles du moteur).
+  const view: SpreaderParams = { ...SPREADER_DEFAULTS, ...Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && !(typeof v === 'number' && !Number.isFinite(v)))) } as SpreaderParams;
 
+  // Mêmes envois qu'avant : réglages du projet + la valeur changée, au moteur et au projet.
   const updateParam = useCallback((key: keyof SpreaderParams, val: any) => {
     const newParams = { ...params, [key]: val };
     setParams(newParams);
@@ -490,258 +584,64 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
     if (onParamsChange) onParamsChange(newParams);
   }, [params, node, onParamsChange]);
 
-  // Vectorscope and correlation meter
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    
-    // Background grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(w/2, 0); ctx.lineTo(w/2, h);
-    ctx.moveTo(0, h/2); ctx.lineTo(w, h/2);
-    // Diagonal guides
-    ctx.moveTo(0, 0); ctx.lineTo(w, h);
-    ctx.moveTo(w, 0); ctx.lineTo(0, h);
-    ctx.stroke();
-    
-    // Draw safe zone circle
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(0, 242, 255, 0.1)';
-    ctx.arc(w/2, h/2, Math.min(w, h) * 0.4, 0, Math.PI * 2);
-    ctx.stroke();
-    
-    // Get analyzer data
-    const dataL = new Float32Array(node.analyzerL.fftSize);
-    const dataR = new Float32Array(node.analyzerR.fftSize);
-    node.analyzerL.getFloatTimeDomainData(dataL);
-    node.analyzerR.getFloatTimeDomainData(dataR);
-    
-    // Calculate instantaneous correlation
-    let sumLR = 0, sumL2 = 0, sumR2 = 0;
-    for (let i = 0; i < dataL.length; i++) {
-      sumLR += dataL[i] * dataR[i];
-      sumL2 += dataL[i] * dataL[i];
-      sumR2 += dataR[i] * dataR[i];
-    }
-    const denom = Math.sqrt(sumL2 * sumR2);
-    const corr = denom > 0 ? sumLR / denom : 1;
-    setCorrelation(corr);
-    
-    // Draw Lissajous/Vectorscope
-    ctx.beginPath();
-    
-    // Color based on correlation (green = in phase, red = out of phase)
-    const hue = corr > 0 ? 180 : 0; // cyan for positive, red for negative
-    const saturation = Math.abs(corr) * 100;
-    ctx.strokeStyle = `hsla(${hue}, ${saturation}%, 60%, 0.7)`;
-    ctx.lineWidth = 1.5;
-    
-    const scale = Math.min(w, h) * 0.35;
-    for (let i = 0; i < dataL.length; i += 2) {
-      const L = dataL[i];
-      const R = dataR[i];
-      // M/S encoding for visualization
-      const M = (L + R) * 0.707;
-      const S = (L - R) * 0.707;
-      const px = w/2 + S * scale;
-      const py = h/2 - M * scale;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.stroke();
-    
-    // Draw center dot
-    ctx.beginPath();
-    ctx.fillStyle = '#fff';
-    ctx.arc(w/2, h/2, 3, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Width indicator
-    const widthVisual = (params.width || 1) * 50;
-    ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
-    ctx.fillRect(w/2 - widthVisual, h - 15, widthVisual * 2, 8);
-    
-  }, [node, params.width]);
-
-  useEffect(() => {
-    let animFrame = 0;
-    const update = () => {
-      draw();
-      animFrame = requestAnimationFrame(update);
-    };
-    animFrame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(animFrame);
-  }, [draw]);
-
-  // Correlation meter color
-  const getCorrelationColor = () => {
-    if (correlation > 0.5) return '#10b981'; // Green - good
-    if (correlation > 0) return '#f59e0b';   // Yellow - caution
-    return '#ef4444';                         // Red - phase issues
-  };
-
-  const getCorrelationText = () => {
-    if (correlation > 0.8) return 'MONO SAFE';
-    if (correlation > 0.5) return 'GOOD';
-    if (correlation > 0) return 'WIDE';
-    return 'PHASE ISSUE';
-  };
+  const K = (id: keyof SpreaderParams, label: string, o: Pick<KnobProps, 'min' | 'max'> & Partial<KnobProps>) => (
+    <Knob paramId={id} label={label} hint={(ST_HINTS as any)[id]} value={view[id] as number} defaultValue={SPREADER_DEFAULTS[id] as number}
+      onChange={v => updateParam(id, v)} cap="graphite" arc={STEREO_ACCENT} {...o} />
+  );
+  const widthScale = [{ v: 0, label: '0' }, { v: 1, label: '100' }, { v: 2, label: '200' }];
+  const hz = (v: number) => (v >= 1000 ? `${numFrSt(v / 1000, 1)} kHz` : `${Math.round(v)} Hz`);
 
   return (
-    <div className="w-[560px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
-            <i className="fas fa-arrows-alt-h text-xl"></i>
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white tracking-tight leading-none">Stéréo</h2>
-            <p className="text-[11px] text-slate-400 mt-1">Élargit ou resserre l’image stéréo, sans casser le son en mono.</p>
+    <HwWindow type="STEREOSPREADER" width={620} accent={STEREO_ACCENT} accentInk="#ffffff"
+      idleHelp={<>Élargit ou resserre l’image stéréo, sans casser le son en mono. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="pearl" model="Stéréo" kicker="Image stéréo · compatibilité mono" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: STEREO_ACCENT }}>
+        <div className="flex flex-wrap sm:flex-nowrap items-start gap-4">
+          <div className="w-full sm:flex-1 min-w-0"><StereoScope node={node} width={view.width} /></div>
+          <div className="flex flex-row sm:flex-col items-center justify-center gap-5 sm:gap-2 w-full sm:w-auto">
+            {K('width', 'Largeur', { size: 'XL', min: 0, max: 2, step: 0.01, format: pctW, ariaLabel: 'Largeur stéréo', cap: 'silver', scale: widthScale })}
+            {K('balance', 'Balance', { size: 'M', min: -1, max: 1, step: 0.01, bipolar: true,
+              format: v => (Math.abs(v) < 0.005 ? 'centre' : `${v < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v) * 100)}`), scale: [{ v: -1, label: 'G' }, { v: 0, label: '0' }, { v: 1, label: 'D' }] })}
           </div>
         </div>
-        <button data-plugin-power 
-          onClick={() => updateParam('isEnabled', !params.isEnabled)}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-        >
-          <i className="fas fa-power-off"></i>
-        </button>
-      </div>
 
-      {/* Vectorscope + Correlation Meter */}
-      <div className="flex space-x-4">
-        {/* Vectorscope */}
-        <div className="flex-1 h-44 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden shadow-inner">
-          <canvas ref={canvasRef} width={340} height={176} className="w-full h-full" />
-          <div className="absolute top-3 left-4 text-[7px] font-black text-slate-600 uppercase tracking-widest">Image stéréo</div>
-          <div className="absolute bottom-2 left-0 right-0 flex justify-between px-4 text-[6px] font-black text-slate-700 uppercase">
-            <span>L</span>
-            <span>Mono</span>
-            <span>R</span>
-          </div>
-        </div>
-        
-        {/* Correlation Meter */}
-        <div className="w-24 h-44 bg-black/60 rounded-[24px] border border-white/5 p-3 flex flex-col justify-between">
-          <div className="text-[6px] font-black text-slate-600 uppercase tracking-widest text-center">Compatibilité mono</div>
-          
-          {/* Vertical meter */}
-          <div className="flex-1 flex flex-col items-center justify-center space-y-1">
-            <div className="w-8 h-28 bg-black/40 rounded-full relative overflow-hidden border border-white/5">
-              {/* Scale markers */}
-              <div className="absolute inset-x-0 top-1/2 h-px bg-white/20"></div>
-              <div className="absolute inset-x-0 top-1/4 h-px bg-white/10"></div>
-              <div className="absolute inset-x-0 top-3/4 h-px bg-white/10"></div>
-              
-              {/* Meter fill */}
-              <div 
-                className="absolute bottom-0 left-0 right-0 transition-all duration-100"
-                style={{ 
-                  height: `${((correlation + 1) / 2) * 100}%`,
-                  background: `linear-gradient(to top, ${getCorrelationColor()}, ${getCorrelationColor()}88)`
-                }}
-              />
-              
-              {/* Current value indicator */}
-              <div 
-                className="absolute left-0 right-0 h-1 bg-white shadow-lg"
-                style={{ bottom: `${((correlation + 1) / 2) * 100}%` }}
-              />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+          <HwSection title="Effet Haas">
+            <div className="flex flex-wrap items-start justify-around gap-2">
+              {K('haasDelay', 'Décalage', { size: 'M', min: 0, max: 0.03, step: 0.0005, format: v => `${numFrSt(v * 1000, 1)} ms`, ariaLabel: 'Décalage Haas',
+                scale: [{ v: 0, label: '0' }, { v: 0.015, label: '15' }, { v: 0.03, label: '30' }] })}
+              {K('haasAmount', 'Dose', { size: 'M', min: 0, max: 1, step: 0.01, format: v => `${Math.round(v * 100)} %`, ariaLabel: 'Dose Haas',
+                scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }] })}
             </div>
-            
-            {/* Scale labels */}
-            <div className="flex justify-between w-full text-[6px] font-mono text-slate-600">
-              <span>-1</span>
-              <span>+1</span>
+          </HwSection>
+          <HwSection title="Graves en mono">
+            <div className="flex flex-wrap items-start justify-around gap-2">
+              <div className="pt-5" data-nova-param="safeMonoBass">
+                <PushButton role="checkbox" active={!!view.safeMonoBass} onClick={() => updateParam('safeMonoBass', !view.safeMonoBass)} text="Mono"
+                  led="#16a34a" ariaLabel="Graves en mono" hint={ST_HINTS.safeMonoBass} dark />
+              </div>
+              {K('monoFreq', 'Sous', { size: 'M', min: 20, max: 400, step: 1, curve: 'log', format: hz, ariaLabel: 'Graves en mono sous', disabled: !view.safeMonoBass,
+                scale: [{ v: 20, label: '20' }, { v: 120, label: '120' }, { v: 400, label: '400' }] })}
             </div>
+          </HwSection>
+        </div>
+        <HwSection title="Largeur sur 3 bandes" className="mt-3">
+          <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+            <div className="pt-5" data-nova-param="multiBand">
+              <PushButton role="checkbox" active={!!view.multiBand} onClick={() => updateParam('multiBand', !view.multiBand)} text="3 bandes"
+                led={STEREO_ACCENT} ariaLabel="Largeur sur 3 bandes" hint={ST_HINTS.multiBand} dark />
+            </div>
+            {K('lowWidth', 'Graves', { size: 'M', min: 0, max: 2, step: 0.01, format: pctW, ariaLabel: 'Largeur des graves', disabled: !view.multiBand, scale: widthScale })}
+            {K('lowMidFreq', 'Coupure', { size: 'S', min: 100, max: 500, step: 1, curve: 'log', format: hz, ariaLabel: 'Coupure graves / médiums', disabled: !view.multiBand, ticks: 6 })}
+            {K('midWidth', 'Médiums', { size: 'M', min: 0, max: 2, step: 0.01, format: pctW, ariaLabel: 'Largeur des médiums', disabled: !view.multiBand, scale: widthScale })}
+            {K('midHighFreq', 'Coupure', { size: 'S', min: 2000, max: 8000, step: 10, curve: 'log', format: hz, ariaLabel: 'Coupure médiums / aigus', disabled: !view.multiBand, ticks: 6 })}
+            {K('highWidth', 'Aigus', { size: 'M', min: 0, max: 2, step: 0.01, format: pctW, ariaLabel: 'Largeur des aigus', disabled: !view.multiBand, scale: widthScale })}
           </div>
-          
-          {/* Status */}
-          <div className="text-center">
-            <div 
-              className="text-[9px] font-black uppercase"
-              style={{ color: getCorrelationColor() }}
-            >
-              {getCorrelationText()}
-            </div>
-            <div className="text-[8px] font-mono text-slate-500">
-              {correlation.toFixed(2)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Controls */}
-      <div className="grid grid-cols-4 gap-4">
-        <SpreaderKnob label="Largeur" value={(params.width || 1) / 2} factor={200} suffix="%" onChange={(v) => updateParam('width', v * 2)} color="#00f2ff" />
-        <SpreaderKnob label="Balance" value={((params.balance || 0) + 1) / 2} factor={100} suffix="" onChange={(v) => updateParam('balance', v * 2 - 1)} color="#a855f7" displayVal={Math.round((params.balance || 0) * 100)} />
-        <SpreaderKnob label="Haas Delay" value={(params.haasDelay || 0.015) / 0.03} factor={30} suffix="ms" onChange={(v) => updateParam('haasDelay', v * 0.03)} color="#f59e0b" />
-        <SpreaderKnob label="Haas Mix" value={params.haasAmount || 0} factor={100} suffix="%" onChange={(v) => updateParam('haasAmount', v)} color="#f59e0b" />
-      </div>
-
-      {/* Mode Options */}
-      <div className="flex items-center justify-between pt-4 border-t border-white/5">
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => updateParam('safeMonoBass', !params.safeMonoBass)}
-            className={`px-3 py-1.5 rounded-lg text-[7px] font-black uppercase transition-all border ${params.safeMonoBass ? 'bg-emerald-500 border-emerald-400 text-black' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            <i className="fas fa-lock mr-1"></i>Mono Bass
-          </button>
-          
-          <button 
-            onClick={() => updateParam('multiBand', !params.multiBand)}
-            className={`px-3 py-1.5 rounded-lg text-[7px] font-black uppercase transition-all border ${params.multiBand ? 'bg-cyan-500 border-cyan-400 text-black' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
-          >
-            Multi-Band
-          </button>
-        </div>
-
-        <button 
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center space-x-1 text-[7px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
-        >
-          <span>{showAdvanced ? 'Less' : 'More'}</span>
-          <i className={`fas fa-chevron-${showAdvanced ? 'up' : 'down'} text-[6px]`}></i>
-        </button>
-      </div>
-
-      {/* Advanced Controls (Multi-band) */}
-      {showAdvanced && params.multiBand && (
-        <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/5">
-          <SpreaderKnob label="Low Width" value={(params.lowWidth || 0.8) / 2} factor={200} suffix="%" onChange={(v) => updateParam('lowWidth', v * 2)} color="#ef4444" />
-          <SpreaderKnob label="Mid Width" value={(params.midWidth || 1.2) / 2} factor={200} suffix="%" onChange={(v) => updateParam('midWidth', v * 2)} color="#10b981" />
-          <SpreaderKnob label="High Width" value={(params.highWidth || 1.5) / 2} factor={200} suffix="%" onChange={(v) => updateParam('highWidth', v * 2)} color="#8b5cf6" />
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="pt-4 border-t border-white/5 flex justify-between items-center">
-        <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Traitement</span>
-          <span className="text-[9px] font-black text-slate-400">
-            {params.multiBand ? '3-Band M/S' : 'Full-Range M/S'}
-          </span>
-        </div>
-        <div className="flex items-center space-x-2">
-          <div 
-            className="w-2 h-2 rounded-full shadow-lg"
-            style={{ 
-              backgroundColor: params.isEnabled ? getCorrelationColor() : '#334155',
-              boxShadow: params.isEnabled ? `0 0 10px ${getCorrelationColor()}` : 'none'
-            }} 
-          />
-          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">
-            {params.isEnabled ? 'Active' : 'Bypass'}
-          </span>
-        </div>
-      </div>
-    </div>
+        </HwSection>
+      </Faceplate>
+    </HwWindow>
   );
 };
+
+const numFrSt = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
+
+export default StereoSpreaderUI;

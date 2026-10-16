@@ -35,7 +35,7 @@ const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
   DJFILTER: { cat: 'Effets trap', kind: 'filtre DJ', also: 'filtre passe-bas passe-haut' },
   GATEFX: { cat: 'Effets trap', kind: 'gate rythmique', also: 'stutter hachure' },
   TIMEFX: { cat: 'Effets trap', kind: 'tape stop, half-time', also: 'gross beat' },
-  MASTERSYNC: { cat: 'Master', kind: 'chaîne de master', also: 'mastering' },
+  MASTERSYNC: { cat: 'Master', kind: 'analyse tempo et tonalité', also: 'mastering tempo bpm tonalité calage' },
   LIMITER: { cat: 'Master', kind: 'limiteur', also: 'maximiseur limiter' },
   MASTERTRANSIENT: { cat: 'Master', kind: 'limiteur multibande', also: 'mastering transient' },
 };

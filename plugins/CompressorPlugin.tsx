@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import React, { useState, useEffect } from 'react';
 import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule, fadeInOnInsert, isOfflineContext } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { blockClockSource } from '../engine/blockClock';
 import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
 import { AutomationSet, MappedParam } from '../engine/automationParams';
+import { Faceplate, HwPresets, HwSection, HwWindow, Knob, PushButton, SegmentMeter, VuMeter, type KnobProps } from './hw';
+import { useHwCanvas, hwCtx } from './hw/screens';
 
 /** Préréglages affichés en français (les clés restent celles des projets). */
 const PRESET_LABELS: Record<string, string> = {
@@ -961,118 +962,95 @@ export const withCompressorDefaults = (p: Partial<CompressorParams> | null | und
   return out as CompressorParams;
 };
 
-export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, initialParams, onParamsChange }) => {
-  const [params, setParams] = useState<CompressorParams>(() => withCompressorDefaults(initialParams));
-  const [reduction, setReduction] = useState(0);
-  const [inputLevel, setInputLevel] = useState(-100);
-  const [outputLevel, setOutputLevel] = useState(-100);
-  const [inputPeak, setInputPeak] = useState(-100);
-  const [outputPeak, setOutputPeak] = useState(-100);
-  
-  const curveCanvasRef = useRef<HTMLCanvasElement>(null);
-  
-  const drawCurve = useCallback(() => {
-    const canvas = curveCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const w = canvas.width;
-    const h = canvas.height;
+/**
+ * Fenêtre du Compresseur, dessinée comme un compresseur de studio (kit plugins/hw) :
+ * façade bleu pétrole, écran de la courbe de compression, VU à aiguille de la
+ * réduction de gain, échelles de LED d'entrée et de sortie (animés hors React),
+ * caractères Clean / VCA / Opto / FET en boutons-poussoirs, préréglages dans la
+ * barre d'outils. Aide : infobulles + ligne d'info.
+ * Seule l'apparence a changé : mêmes réglages, mêmes bornes, mêmes préréglages et
+ * mêmes paramètres envoyés au moteur (preuve : tests/pluginsFin.test.ts).
+ */
+const COMP_ACCENT = '#fb923c';
+const COMP_MODES: { v: CompressorParams['mode']; label: string }[] = [
+  { v: 'CLEAN', label: 'Clean' }, { v: 'VCA', label: 'VCA' }, { v: 'OPTO', label: 'Opto' }, { v: 'FET', label: 'FET' },
+];
+const PRESET_HINTS: Record<string, string> = {
+  'Vocal Smooth': 'Opto 3:1, attaque lente : la voix reste naturelle et régulière.',
+  'Vocal Aggressive': 'FET 6:1, attaque rapide : la voix passe devant le beat.',
+  'Mix Bus Glue': 'VCA 2:1, mélange 50 % : soude le mix sans l’écraser.',
+  'Parallel Punch': 'FET 8:1 mélangé à 30 % : du punch sans perdre les attaques.',
+  'Transparent Limiter': 'Clean 20:1 avec 5 ms d’anticipation : un plafond propre (ajoute 5 ms de retard, compensé).',
+};
+const COMP_PRESETS = Object.entries(COMPRESSOR_PRESETS).map(([id, params]) => ({ id, name: PRESET_LABELS[id] || id, hint: PRESET_HINTS[id], params }));
+const COMP_HINTS = {
+  threshold: termHelp('Seuil'),
+  ratio: termHelp('Ratio'),
+  knee: termHelp('Genou'),
+  attack: termHelp('Attack'),
+  release: termHelp('Release'),
+  makeupGain: `${termHelp('Gain de sortie')} Grisé quand « Gain auto » est enfoncé.`,
+  mix: termHelp('Mélange'),
+  lookahead: termHelp('Anticipation'),
+  scHpFreq: "Filtre de détection : le compresseur ignore les graves sous cette fréquence pour décider quand agir (le kick ou la 808 ne le font plus « pomper »). Le son lui-même n'est pas filtré.",
+  autoMakeup: 'Gain auto : NOVA remonte tout seul le volume perdu par la compression.',
+  vu: 'Réduction de gain : de combien (dB) le compresseur baisse le son en ce moment. Sur une voix, 3 à 6 dB au VU, c’est bien.',
+};
+const msFr = (s: number) => { const ms = s * 1000; return `${ms < 10 ? numFr(ms, 1) : numFr(ms, 0)} ms`; };
+const signedFr = (v: number, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + numFr(Math.abs(v), d);
+
+/** Écran de la courbe de compression : redessiné quand un réglage change, jamais à chaque image. */
+const CompCurve: React.FC<{ threshold: number; ratio: number; knee: number; mode: string }> = React.memo(({ threshold, ratio, knee, mode }) => {
+  const { wrapRef, canvasRef, size } = useHwCanvas();
+  useEffect(() => {
+    const ctx = hwCtx(canvasRef.current, size);
+    if (!ctx) return;
+    const w = size.w, h = size.h;
     ctx.clearRect(0, 0, w, h);
-
-    const { threshold, ratio, knee } = params;
-
-    // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    const X = (db: number) => ((db + 60) / 60) * w;
+    const Y = (db: number) => h - ((db + 60) / 60) * h;
     ctx.lineWidth = 1;
-    for(let i = 0; i <= 6; i++) {
-      const x = (i / 6) * w;
-      const y = (i / 6) * h;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    for (let db = -60; db <= 0; db += 12) {
+      ctx.beginPath(); ctx.moveTo(X(db), 0); ctx.lineTo(X(db), h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, Y(db)); ctx.lineTo(w, Y(db)); ctx.stroke();
     }
-    
-    // 1:1 reference line
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.setLineDash([4, 4]);
-    ctx.moveTo(0, h);
-    ctx.lineTo(w, 0);
-    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(w, 0); ctx.stroke();
     ctx.setLineDash([]);
-    
-    // Threshold line
-    const threshX = ((threshold + 60) / 60) * w;
+    ctx.strokeStyle = 'rgba(251,146,60,0.45)';
+    ctx.beginPath(); ctx.moveTo(X(threshold), 0); ctx.lineTo(X(threshold), h); ctx.stroke();
+    // Même courbe qu'avant (genou doux quadratique, ratio exact) : celle qu'on entend.
     ctx.beginPath();
-    ctx.strokeStyle = 'rgba(249, 115, 22, 0.3)';
-    ctx.moveTo(threshX, 0);
-    ctx.lineTo(threshX, h);
-    ctx.stroke();
-
-    // Transfer curve
-    ctx.beginPath();
-    ctx.strokeStyle = '#f97316';
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = '#f9731666';
-
-    for(let i = 0; i <= w; i++) {
-      const inputDb = (i / w) * 60 - 60;
-      let outputDb = inputDb;
-
-      if (inputDb > threshold + knee / 2) {
-        outputDb = threshold + (inputDb - threshold) / ratio;
-      } else if (inputDb > threshold - knee / 2) {
-        const t = (inputDb - (threshold - knee / 2)) / knee;
-        outputDb = inputDb + (1 / ratio - 1) * knee * t * t / 2;
-      }
-
-      const x = i;
-      const y = h - ((outputDb + 60) / 60) * h;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    ctx.strokeStyle = COMP_ACCENT;
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(251,146,60,0.45)';
+    for (let i = 0; i <= w; i++) {
+      const inDb = (i / w) * 60 - 60;
+      let outDb = inDb;
+      if (inDb > threshold + knee / 2) outDb = threshold + (inDb - threshold) / ratio;
+      else if (inDb > threshold - knee / 2) { const t = (inDb - (threshold - knee / 2)) / knee; outDb = inDb + (1 / ratio - 1) * knee * t * t / 2; }
+      const y = Y(outDb);
+      if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
     }
     ctx.stroke();
     ctx.shadowBlur = 0;
-  }, [params]);
+  }, [size, threshold, ratio, knee, canvasRef]);
+  return (
+    <div ref={wrapRef} className="hw-screen-glass" style={{ height: 150 }} data-nova-comp-curve>
+      <span className="hw-screen-label" style={{ top: 6, left: 8 }}>Courbe · seuil <b>{numFr(threshold, 0)} dB</b></span>
+      <span className="hw-screen-label" style={{ bottom: 6, right: 8 }}>{mode} · <b>{numFr(ratio, 1)}:1</b></span>
+      <canvas ref={canvasRef} className="hw-screen-canvas" aria-label={`Courbe de compression : seuil ${numFr(threshold, 0)} dB, ratio ${numFr(ratio, 1)}:1`} />
+    </div>
+  );
+});
 
-  // Metering animation loop
-  useEffect(() => {
-    let animFrame = 0;
-    let peakHoldIn = -100;
-    let peakHoldOut = -100;
-    let peakDecay = 0;
-    
-    const update = () => {
-      const red = node.getReduction();
-      const inLvl = node.getInputLevel();
-      const outLvl = node.getOutputLevel();
-      
-      setReduction(red);
-      setInputLevel(inLvl);
-      setOutputLevel(outLvl);
-      
-      // Peak hold with decay
-      if (inLvl > peakHoldIn) peakHoldIn = inLvl;
-      if (outLvl > peakHoldOut) peakHoldOut = outLvl;
-      
-      peakDecay++;
-      if (peakDecay > 60) { // ~1 second at 60fps
-        peakHoldIn = Math.max(peakHoldIn - 1, inLvl);
-        peakHoldOut = Math.max(peakHoldOut - 1, outLvl);
-        peakDecay = 0;
-      }
-      
-      setInputPeak(peakHoldIn);
-      setOutputPeak(peakHoldOut);
-      
-      drawCurve();
-      animFrame = requestAnimationFrame(update);
-    };
-    
-    animFrame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(animFrame);
-  }, [node, drawCurve]);
-      
+export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, initialParams, onParamsChange }) => {
+  const [params, setParams] = useState<CompressorParams>(() => withCompressorDefaults(initialParams));
 
+  // Mêmes envois qu'avant : réglages complets au moteur et au projet.
   const updateParam = (key: keyof CompressorParams, value: any) => {
     const newParams = { ...params, [key]: value };
     setParams(newParams);
@@ -1080,6 +1058,7 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
     if (onParamsChange) onParamsChange(newParams);
   };
 
+  // Préréglage : seules ses valeurs vont au moteur, les réglages complets au projet (comme avant).
   const applyPreset = (presetName: string) => {
     const preset = COMPRESSOR_PRESETS[presetName];
     if (preset) {
@@ -1090,206 +1069,72 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
     }
   };
 
-  const togglePower = () => {
-    updateParam('isEnabled', !params.isEnabled);
-  };
-
-  // Meter bar component
-  const MeterBar: React.FC<{ level: number; peak: number; label: string }> = ({ level, peak, label }) => {
-    const levelPercent = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));
-    const peakPercent = Math.max(0, Math.min(100, ((peak + 60) / 60) * 100));
-    
-    return (
-      <div className="flex flex-col items-center">
-        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">{label}</span>
-        <div className="w-4 h-28 bg-black/60 rounded relative overflow-hidden border border-white/5">
-          <div 
-            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-green-500 via-yellow-500 to-red-500 transition-all duration-75"
-            style={{ height: `${levelPercent}%` }}
-          />
-          <div 
-            className="absolute left-0 right-0 h-0.5 bg-white transition-all duration-100"
-            style={{ bottom: `${peakPercent}%` }}
-          />
-        </div>
-        <span className="text-[7px] font-mono text-slate-400 mt-1">{Math.round(level)}</span>
-      </div>
-    );
-  };
-
-  // GR Meter
-  const GRMeter: React.FC<{ reduction: number }> = ({ reduction }) => {
-    const redDb = Math.abs(reduction);
-    const meterPercent = Math.min(100, (redDb / 24) * 100);
-    
-    return (
-      <div className="flex flex-col items-center" title="Réduction de gain : de combien (dB) le compresseur baisse la voix en ce moment">
-        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">Réd.</span>
-        <div className="w-4 h-28 bg-black/60 rounded relative overflow-hidden border border-white/5">
-          <div 
-            className="absolute top-0 left-0 right-0 bg-orange-500 transition-all duration-75"
-            style={{ height: `${meterPercent}%` }}
-          />
-        </div>
-        <span className="text-[7px] font-mono text-orange-500 mt-1">{Math.round(redDb)}</span>
-      </div>
-    );
-  };
-
-  return (
-    <div className="w-[580px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-500 border border-orange-500/20">
-            <i className="fas fa-compress-alt text-xl"></i>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white tracking-tight">
-              Compresseur
-            </h2>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Rend le volume de la voix plus régulier pour qu'elle reste devant le beat.
-            </p>
-          </div>
-        </div>
-        <button data-plugin-power 
-          onClick={togglePower}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled 
-            ? 'bg-orange-500 border-orange-400 text-black shadow-lg shadow-orange-500/40' 
-            : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-        >
-          <i className="fas fa-power-off text-sm"></i>
-        </button>
-      </div>
-
-      {/* Presets */}
-      <div className="flex space-x-2">
-        {Object.keys(COMPRESSOR_PRESETS).map(name => (
-          <button
-            key={name}
-            onClick={() => applyPreset(name)}
-            className="px-3 py-1.5 bg-white/5 hover:bg-orange-500/20 border border-white/10 hover:border-orange-500/50 rounded-lg text-[8px] font-black text-slate-400 hover:text-orange-400 uppercase tracking-wider transition-all"
-          >
-            {PRESET_LABELS[name] || name}
-          </button>
-        ))}
-      </div>
-
-      {/* Main display: curve + meters */}
-      <div className="flex space-x-4">
-        {/* Transfer curve */}
-        <div className="flex-1 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden h-40">
-          <canvas ref={curveCanvasRef} width={400} height={160} className="w-full h-full opacity-90" />
-          <div className="absolute top-3 left-4 text-[7px] font-black text-slate-600 uppercase tracking-widest">
-            Courbe de compression
-          </div>
-          {/* Mode indicator */}
-          <div className="absolute bottom-3 right-4 text-[8px] font-black text-orange-500 uppercase">
-            {params.mode}
-          </div>
-        </div>
-        
-        {/* Meters */}
-        <div className="flex space-x-2 bg-black/40 rounded-[24px] border border-white/5 p-3">
-          <MeterBar level={inputLevel} peak={inputPeak} label="Entrée" />
-          <GRMeter reduction={reduction} />
-          <MeterBar level={outputLevel} peak={outputPeak} label="Sortie" />
-        </div>
-      </div>
-
-      {/* Mode selector */}
-      <div className="flex items-center space-x-4">
-        <span className="text-[9px] font-bold text-slate-400">Caractère</span>
-        <div className="flex space-x-1">
-          {(['CLEAN', 'VCA', 'OPTO', 'FET'] as const).map(mode => (
-            <button
-              key={mode}
-              title={MODE_HELP[mode]}
-              onClick={() => updateParam('mode', mode)}
-              className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
-                params.mode === mode 
-                  ? 'bg-orange-500 border-orange-400 text-black' 
-                  : 'bg-white/5 border-white/10 text-slate-500 hover:text-white hover:border-white/20'
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main controls */}
-      <div className="grid grid-cols-6 gap-4">
-        <CompressorKnob label="Seuil" defaultValue={-18} value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
-        <CompressorKnob label="Ratio" defaultValue={4} value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={numFr(params.ratio)} />
-        <CompressorKnob label="Genou" defaultValue={12} value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
-        <CompressorKnob label="Attaque" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={numFr(params.attack * 1000)} />
-        <CompressorKnob label="Relâche" defaultValue={0.25} value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
-        <CompressorKnob label="Gain de sortie" defaultValue={1.6} value={params.makeupGain} min={0.25} max={4} factor={1} suffix="" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.autoMakeup ? 'auto' : gainDbFr(params.makeupGain)} disabled={params.autoMakeup} />
-      </div>
-
-      {/* Advanced controls */}
-      <div className="grid grid-cols-4 gap-4 pt-2 border-t border-white/5">
-        <CompressorKnob label="Mélange" defaultValue={1} value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
-        <CompressorKnob label="Anticipation" value={params.lookahead} min={0} max={0.005} factor={1000} suffix="ms" color="#06b6d4" onChange={(v) => updateParam('lookahead', v)} displayVal={numFr(params.lookahead * 1000)} />
-        
-        {/* Auto Makeup toggle */}
-        <div className="flex flex-col items-center justify-center space-y-2">
-          <span className="text-[9px] font-bold text-slate-400">Gain auto</span>
-          <button
-            onClick={() => updateParam('autoMakeup', !params.autoMakeup)}
-            role="switch" aria-checked={params.autoMakeup} aria-label="Gain de sortie automatique"
-            title="Gain auto : NOVA remonte tout seul le volume perdu par la compression"
-            className={`w-14 h-7 rounded-full transition-all relative ${params.autoMakeup ? 'bg-cyan-500' : 'bg-white/10'}`}
-          >
-            <div className={`w-5 h-5 rounded-full bg-white absolute top-1 transition-all ${params.autoMakeup ? 'left-8' : 'left-1'}`} />
-          </button>
-        </div>
-      </div>
-    </div>
+  const K = (id: 'threshold' | 'ratio' | 'knee' | 'attack' | 'release' | 'makeupGain' | 'mix' | 'lookahead' | 'scHpFreq', label: string, o: Pick<KnobProps, 'min' | 'max'> & Partial<KnobProps>) => (
+    <Knob paramId={id} label={label} hint={COMP_HINTS[id]} value={params[id] as number} onChange={v => updateParam(id, v)} cap="cream" arc={COMP_ACCENT} {...o} />
   );
-};
-
-const CompressorKnob: React.FC<{ 
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  color: string;
-  min: number;
-  max: number;
-  suffix: string;
-  displayVal: string | number;
-  factor?: number;
-  disabled?: boolean;
-  defaultValue?: number;
-}> = ({ label, value, onChange, color, min, max, suffix, displayVal, disabled, defaultValue }) => {
-  const safeValue = Number.isFinite(value) ? value : min;
-  const knob = useKnobInteraction(safeValue, onChange, { min, max, disabled, defaultValue });
-  const norm = (safeValue - min) / (max - min);
-  const rotation = (norm * 270) - 135;
-
-
+  const latencyMs = node && Number.isFinite(node.latency) ? node.latency * 1000 : 0;
+  const levelColor = (v: number) => (v > -1 ? '#ef4444' : v > -9 ? '#facc15' : '#4ade80');
+  const dbText = (v: number) => (v > -59.5 ? `${signedFr(v)} dB` : '— dB');
 
   return (
-    <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 group touch-none ${disabled ? 'opacity-40' : ''}`}>
-      <div 
-        {...knob.bind}
-        className={`w-11 h-11 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center transition-all shadow-xl relative ${disabled ? 'cursor-not-allowed' : 'cursor-ns-resize hover:border-orange-500/50'}`}
-      >
-        <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
-        <div 
-          className="absolute top-1/2 left-1/2 w-1 h-4 -ml-0.5 -mt-4 origin-bottom rounded-full transition-transform duration-75" 
-          style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color }} 
-        />
-      </div>
-      <div className="text-center">
-        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5">
-          <span className="text-[8px] font-mono font-bold text-white">{displayVal}{suffix}</span>
+    <HwWindow type="COMPRESSOR" width={660} accent={COMP_ACCENT} accentInk="#1c0d02" latencyMs={latencyMs}
+      toolbar={<HwPresets presets={COMP_PRESETS} current={params} onApply={pr => applyPreset(pr.id)} />}
+      idleHelp={<>Rend le volume de la voix plus régulier pour qu’elle reste devant le beat. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      <Faceplate finish="petrol" model="Compresseur" kicker="Compresseur de studio · 4 caractères" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: COMP_ACCENT }}>
+        <div className="flex flex-wrap sm:flex-nowrap items-stretch gap-3">
+          <div className="hw-screen w-full sm:flex-1 min-w-0">
+            <CompCurve threshold={params.threshold} ratio={params.ratio} knee={params.knee} mode={COMP_MODES.find(m => m.v === params.mode)?.label || params.mode} />
+          </div>
+          <div className="flex items-center justify-center gap-3 w-full sm:w-auto" aria-label="Mesures du compresseur">
+            <VuMeter read={() => -(node?.getReduction?.() || 0)} mode="gr" caption="Réduction de gain" readout hint={COMP_HINTS.vu}
+              dataAttrs={{ 'data-nova-gr-vu': '' }} style={{ width: 196, flex: '0 1 196px' }} />
+            <SegmentMeter label="Entrée" orientation="vertical" min={-60} max={0} segments={16} length={118} holdMs={1200} fallPerSec={24}
+              read={() => node?.getInputLevel?.() ?? -100} colorAt={levelColor} hint="Crête d'entrée (dB)"
+              scale={[{ v: -60, label: '−60' }, { v: -24, label: '−24' }, { v: 0, label: '0' }]} format={(_v, hold) => dbText(hold)} />
+            <SegmentMeter label="Sortie" orientation="vertical" min={-60} max={0} segments={16} length={118} holdMs={1200} fallPerSec={24}
+              read={() => node?.getOutputLevel?.() ?? -100} colorAt={levelColor} hint="Crête de sortie (dB)"
+              scale={[{ v: -60, label: '−60' }, { v: -24, label: '−24' }, { v: 0, label: '0' }]} format={(_v, hold) => dbText(hold)} />
+          </div>
         </div>
-      </div>
-    </div>
+
+        <HwSection title="Caractère" className="mt-3">
+          <div className="flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="Caractère du compresseur" data-nova-param="mode">
+            {COMP_MODES.map(m => (
+              <PushButton key={m.v} role="radio" active={params.mode === m.v} onClick={() => updateParam('mode', m.v)} text={m.label} led={COMP_ACCENT}
+                ariaLabel={`Caractère ${m.label}`} hint={MODE_HELP[m.v]} dark />
+            ))}
+          </div>
+        </HwSection>
+
+        <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3 mt-3">
+          {K('threshold', 'Seuil', { size: 'L', min: -60, max: 0, step: 0.1, defaultValue: -18, format: v => `${signedFr(v)} dB`,
+            scale: [{ v: -60, label: '−60' }, { v: -40, label: '−40' }, { v: -20, label: '−20' }, { v: 0, label: '0' }] })}
+          {K('ratio', 'Ratio', { size: 'L', min: 1, max: 20, step: 0.1, curve: 'log', defaultValue: 4, format: v => `${numFr(v, 1)}:1`,
+            scale: [{ v: 1, label: '1' }, { v: 2, label: '2' }, { v: 4, label: '4' }, { v: 10, label: '10' }, { v: 20, label: '20' }] })}
+          {K('knee', 'Genou', { size: 'M', min: 0, max: 40, step: 0.5, defaultValue: 12, format: v => `${numFr(v, v % 1 ? 1 : 0)} dB`,
+            scale: [{ v: 0, label: '0' }, { v: 20, label: '20' }, { v: 40, label: '40' }] })}
+          {K('attack', 'Attaque', { size: 'M', min: 0.0001, max: 0.1, curve: 'log', defaultValue: 0.003, format: msFr, ariaLabel: 'Attaque (attack)',
+            scale: [{ v: 0.0001, label: '0,1' }, { v: 0.003, label: '3' }, { v: 0.1, label: '100' }], sub: 'ms' })}
+          {K('release', 'Relâche', { size: 'M', min: 0.01, max: 1, curve: 'log', defaultValue: 0.25, format: msFr, ariaLabel: 'Relâche (release)',
+            scale: [{ v: 0.01, label: '10' }, { v: 0.1, label: '100' }, { v: 1, label: '1k' }], sub: 'ms' })}
+        </div>
+
+        <HwSection title="Sortie et mélange" className="mt-3">
+          <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+            {K('makeupGain', 'Sortie', { size: 'M', min: 0.25, max: 4, curve: 'log', defaultValue: 1.6, disabled: params.autoMakeup, ariaLabel: 'Gain de sortie',
+              format: v => (params.autoMakeup ? 'auto' : gainDbFr(v)), scale: [{ v: 0.25, label: '−12' }, { v: 1, label: '0' }, { v: 4, label: '+12' }] })}
+            <div className="flex flex-col items-center gap-1 pt-4" data-nova-param="autoMakeup">
+              <PushButton role="checkbox" active={!!params.autoMakeup} onClick={() => updateParam('autoMakeup', !params.autoMakeup)} text="Auto" label="Gain auto"
+                led="#4ade80" ariaLabel="Gain de sortie automatique" hint={COMP_HINTS.autoMakeup} dark valueText={params.autoMakeup ? 'enfoncé (gain automatique)' : 'relevé'} />
+            </div>
+            {K('mix', 'Mélange', { size: 'M', min: 0, max: 1, step: 0.01, defaultValue: 1, format: v => `${Math.round(v * 100)} %`,
+              scale: [{ v: 0, label: '0' }, { v: 0.5, label: '50' }, { v: 1, label: '100' }] })}
+            {K('lookahead', 'Anticip.', { size: 'S', min: 0, max: 0.005, step: 0.0001, defaultValue: 0, format: v => `${numFr(v * 1000, 1)} ms`, ariaLabel: 'Anticipation (lookahead)', ticks: 6 })}
+            {K('scHpFreq', 'Détection', { size: 'S', min: 20, max: 500, step: 1, curve: 'log', defaultValue: 80, format: v => `${Math.round(v)} Hz`, ariaLabel: 'Filtre de détection (coupe-bas)', ticks: 6 })}
+          </div>
+        </HwSection>
+      </Faceplate>
+    </HwWindow>
   );
 };
 

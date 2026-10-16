@@ -3,7 +3,9 @@ import { HwHelpProvider, InfoBar } from './help';
 
 export type HwFinish = 'cream' | 'black' | 'silver' | 'burgundy' | 'graphite' | 'bronze' | 'steel' | 'slate'
   // Vague 2B
-  | 'seafoam' | 'plum' | 'forest' | 'midnight' | 'hammer' | 'labgrey' | 'indigo' | 'vermilion' | 'mustard' | 'concrete' | 'jade' | 'cobalt' | 'avocado';
+  | 'seafoam' | 'plum' | 'forest' | 'midnight' | 'hammer' | 'labgrey' | 'indigo' | 'vermilion' | 'mustard' | 'concrete' | 'jade' | 'cobalt' | 'avocado'
+  // Fin des façades (1.5.1)
+  | 'petrol' | 'pearl' | 'rose' | 'sky' | 'sand' | 'lilac';
 
 /** Logo NOVA (étoile à quatre branches + mot), à l'encre de la façade. */
 export const NovaLogo: React.FC<{ className?: string; size?: number }> = ({ className, size = 13 }) => (

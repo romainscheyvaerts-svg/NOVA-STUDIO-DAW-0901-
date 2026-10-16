@@ -23,6 +23,8 @@ EFFETS = [("OPTO_VINTAGE", "opto vintage"), ("FET76", "fet 76"), ("LEVELER2A", "
           ("MASTERTRANSIENT", "mastering transient"), ("LIMITER", "nova limiter"), ("DEESSER", "de-esser"), ("VOCALSATURATOR", "saturation")]
 # Vague 2A : gros effets à écran.
 EFFETS += [("PROEQ12", "égaliseur"), ("REVERB", "réverbe"), ("DELAY", "delay"), ("AUTOTUNE", "justesse")]
+# 1.5.1 (plugins-fin) : le Compresseur a sa façade.
+EFFETS += [("COMPRESSOR", "compresseur")]
 # Sous-ensemble : QA_HW_EFFETS=PROEQ12,REVERB (types).
 if os.environ.get("QA_HW_EFFETS"):
     _keep = os.environ["QA_HW_EFFETS"].split(",")
@@ -82,7 +84,10 @@ def run(vp, effets):
             search = pg.locator("input[aria-label='Chercher un effet']")
             if search.count():
                 search.first.fill(q); pg.wait_for_timeout(400)
-            item = pg.locator("[data-testid='add-effect-menu'] [role=menuitem], [data-testid='add-effect-menu'] button").filter(has_text=re.compile(q.split()[0], re.I))
+            # L'entrée exacte de l'effet (data-fx-id) : « compresseur » trouve aussi Opto Vintage, FET 76…
+            item = pg.locator(f"[data-testid='add-effect-menu'] [data-fx-id='{typ}']")
+            if not item.count():
+                item = pg.locator("[data-testid='add-effect-menu'] [role=menuitem], [data-testid='add-effect-menu'] button").filter(has_text=re.compile(q.split()[0], re.I))
             if not item.count():
                 e["erreur"] = f"« {q} » absent du menu"; ok_all = False; pg.keyboard.press("Escape"); continue
             item.first.click(); pg.wait_for_timeout(1500)

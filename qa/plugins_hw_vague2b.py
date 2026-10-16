@@ -31,19 +31,24 @@ REEL = "--reel" in ARGS
 ARGS = [a for a in ARGS if a != "--reel"]
 OUT = ARGS[0] if ARGS else r"D:\1 WORK\CONTENU\nova-plugins-design\vague2b"
 TOUS = ["CHORUS", "FLANGER", "DOUBLER", "STEREOSPREADER", "DENOISER", "MASTERSYNC", "HARMONIZER", "VOICESHIFT",
-        "TIMEFX", "GATEFX", "GATE", "DJFILTER", "LOFI"]
-# Stéréo et Master gardent l'ancienne fenêtre (façade à la version suivante) : pas de
-# data-nova-plugin, donc hors de la liste par défaut (sinon la fenêtre restée ouverte
-# bloque les clics suivants au téléphone).
-PAS_ENCORE = {"STEREOSPREADER", "MASTERSYNC"}
+        "TIMEFX", "GATEFX", "GATE", "DJFILTER", "LOFI", "COMPRESSOR"]
+# 1.5.1 (plugins-fin) : Stéréo, Master et Compresseur ont aussi leur façade : plus aucun effet
+# en attente (avant : {"STEREOSPREADER", "MASTERSYNC"}, ancienne fenêtre sans data-nova-plugin).
+PAS_ENCORE = set()
 KINDS = ARGS[1:] or [k for k in TOUS if k not in PAS_ENCORE]
+# Le Stéréo n'est plus dans le menu « Ajouter un effet » (remplacé par le Doubleur, commit 9eca3b10) :
+# en --reel on ne peut pas l'ajouter ; sa façade est contrôlée par le banc (ici et qa/plugins_fin.py).
+HORS_MENU = {"STEREOSPREADER"}
+if REEL and not ARGS[1:]:
+    KINDS = [k for k in KINDS if k not in HORS_MENU]
 os.makedirs(OUT, exist_ok=True)
 
 # Recherche dans le menu « Ajouter un effet » (mode --reel).
 RECHERCHE = {
     "CHORUS": "chorus", "FLANGER": "flanger", "DOUBLER": "doubleur", "STEREOSPREADER": "stéréo", "DENOISER": "gate de bruit",
-    "MASTERSYNC": "master", "HARMONIZER": "harmoniseur", "VOICESHIFT": "voix grave", "TIMEFX": "tape stop",
+    "MASTERSYNC": "tempo", "HARMONIZER": "harmoniseur", "VOICESHIFT": "voix grave", "TIMEFX": "tape stop",
     "GATEFX": "gate rythmique", "GATE": "expandeur", "DJFILTER": "filtre dj", "LOFI": "lo-fi",
+    "COMPRESSOR": "compresseur",
 }
 
 MEASURE = """(k) => {
@@ -187,7 +192,10 @@ def reel():
                 search = pg.locator("input[aria-label='Chercher un effet']")
                 if search.count():
                     search.first.fill(q); pg.wait_for_timeout(400)
-                item = pg.locator("[data-testid='add-effect-menu'] [role=menuitem], [data-testid='add-effect-menu'] button").filter(has_text=re.compile(re.escape(q.split()[0]), re.I))
+                # L'entrée exacte de l'effet (data-fx-id) : « compresseur » trouve aussi Opto Vintage, FET 76…
+                item = pg.locator(f"[data-testid='add-effect-menu'] [data-fx-id='{typ}']")
+                if not item.count():
+                    item = pg.locator("[data-testid='add-effect-menu'] [role=menuitem], [data-testid='add-effect-menu'] button").filter(has_text=re.compile(re.escape(q.split()[0]), re.I))
                 if not item.count():
                     e["erreur"] = f"« {q} » absent du menu"; ok = False; pg.keyboard.press("Escape"); continue
                 item.first.click(); pg.wait_for_timeout(1500)
