@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
+import { messageClair } from '../utils/friendlyError';
 
 interface LoadProjectModalProps {
   isOpen: boolean;
@@ -17,24 +18,32 @@ interface LoadProjectModalProps {
 const LoadProjectModal: React.FC<LoadProjectModalProps> = ({ 
   isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates
 }) => {
-  const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>('CLOUD');
+  // Sans compte, les projets en ligne sont inaccessibles : on ouvre d'abord le fichier de l'appareil.
+  // Invité (« guest ») : pas de compte, comme sans utilisateur.
+  const signedIn = !!user && user.id !== 'guest';
+  const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>(() => (signedIn ? 'CLOUD' : 'LOCAL'));
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  // Liste en ligne illisible (réseau, serveur) : on le dit, au lieu de « aucun projet ».
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => { if (isOpen) setActiveTab(signedIn ? 'CLOUD' : 'LOCAL'); }, [isOpen, signedIn]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen && user && activeTab === 'CLOUD') {
+    if (isOpen && signedIn && activeTab === 'CLOUD') {
       fetchSessions();
     }
-  }, [isOpen, user, activeTab]);
+  }, [isOpen, signedIn, activeTab]);
 
   const fetchSessions = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await supabaseManager.listUserSessions();
       setSessions(data || []);
     } catch (e) {
       console.error("Error fetching sessions", e);
+      setLoadError(messageClair(e, 'Tes projets en ligne n’ont pas pu être lus : réessaie dans un instant.'));
     } finally {
       setLoading(false);
     }
@@ -56,7 +65,8 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+      role="dialog" aria-modal="true" aria-labelledby="load-title">
       <div className="w-full max-w-2xl h-[600px] max-h-[90dvh] bg-nv-surface border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         
         {/* Header */}
@@ -66,7 +76,7 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                     <i className="fas fa-folder-open text-lg"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Ouvrir un projet</h2>
+                    <h2 id="load-title" className="text-sm font-black text-white uppercase tracking-widest">Ouvrir un projet</h2>
                     <p className="text-[11px] text-slate-400">Tes projets enregistrés</p>
                 </div>
             </div>
@@ -105,22 +115,32 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
             {/* --- CLOUD TAB --- */}
             {activeTab === 'CLOUD' && (
                 <div className="h-full flex flex-col">
-                    {!user ? (
+                    {!signedIn ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-4">
                             <i className="fas fa-lock text-4xl text-slate-700"></i>
-                            <p className="text-xs text-slate-400">Connectez-vous pour accéder à vos sauvegardes Cloud.</p>
-                            <button onClick={() => { onClose(); onOpenAuth(); }} className="px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold rounded-lg uppercase tracking-wide transition-colors">
+                            <p className="text-xs text-slate-400 max-w-xs">Connecte-toi pour retrouver les projets que tu as sauvegardés en ligne.</p>
+                            <button onClick={() => { onClose(); onOpenAuth(); }} className="min-h-11 px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold rounded-lg uppercase tracking-wide transition-colors">
                                 Se connecter
+                            </button>
+                            <button type="button" onClick={() => setActiveTab('LOCAL')} className="min-h-11 text-[12px] text-cyan-300 underline">
+                                Pas de compte ? Ouvre ton fichier .zip (onglet « Fichier sur l'ordinateur »)
                             </button>
                         </div>
                     ) : loading ? (
                         <div className="flex-1 flex items-center justify-center">
                             <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
                         </div>
+                    ) : loadError ? (
+                        <div role="alert" className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3">
+                            <i className="fas fa-triangle-exclamation text-3xl text-amber-400" aria-hidden="true"></i>
+                            <p className="text-[13px] text-slate-300 max-w-xs">{loadError}</p>
+                            <button type="button" onClick={() => void fetchSessions()} className="min-h-11 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-bold">Réessayer</button>
+                        </div>
                     ) : sessions.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-50">
-                            <i className="fas fa-ghost text-3xl text-slate-600 mb-2"></i>
-                            <p className="text-[10px] uppercase font-bold text-slate-500">Aucun projet trouvé</p>
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-2">
+                            <i className="fas fa-folder-open text-3xl text-slate-600 mb-1" aria-hidden="true"></i>
+                            <p className="text-[13px] font-bold text-slate-300">Aucun projet en ligne pour l’instant</p>
+                            <p className="text-[12px] text-slate-400 max-w-xs">Dans ton projet, « Sauvegarder » (Ctrl+S) › « Sauvegarder » : il apparaîtra ici. Un fichier .zip ? Onglet « Fichier sur l'ordinateur ».</p>
                         </div>
                     ) : (
                         <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-2">
@@ -153,16 +173,16 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
             {/* --- LOCAL TAB --- */}
             {activeTab === 'LOCAL' && (
                 <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-6">
-                    <div 
+                    <button type="button"
                         className="w-full max-w-sm h-48 border-2 border-dashed border-white/10 rounded-3xl flex flex-col items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/5 transition-all cursor-pointer group"
                         onClick={() => fileInputRef.current?.click()}
                     >
                         <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                             <i className="fas fa-file-import text-2xl text-purple-400"></i>
                         </div>
-                        <h3 className="text-xs font-bold text-white uppercase">Importer un fichier .ZIP</h3>
-                        <p className="text-[9px] text-slate-500 mt-2">Cliquez pour parcourir</p>
-                    </div>
+                        <span className="block text-xs font-bold text-white uppercase">Choisir mon fichier .zip</span>
+                        <span className="block text-[11px] text-slate-400 mt-2 px-4">Le fichier créé par « Sauvegarder › Fichier sur cet appareil (.zip) »</span>
+                    </button>
                     <input 
                         type="file" 
                         ref={fileInputRef} 

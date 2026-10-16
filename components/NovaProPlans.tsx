@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import { euros, openCheckout, productFor, waitPaid, type BillingStatus, type Grille } from '../services/Billing';
 import { track } from '../utils/analytics';
 
@@ -59,7 +60,7 @@ const NovaProPlans: React.FC<Props> = ({ grille, status, onSubscribed, loggedIn 
       else setMsg("Paiement pas encore reçu. S'il est fait, il sera détecté à la prochaine ouverture.");
     } catch (e: any) {
       setBusy(null);
-      setMsg(`${e?.message || 'Paiement impossible'}. Vérifie ta connexion puis réessaie.`);
+      setMsg(messageClair(e, 'Paiement impossible : vérifie ta connexion, puis réessaie. Rien n’a été débité.'));
     }
   };
   const card = 'flex-1 min-w-[150px] rounded-2xl border p-3 text-left disabled:opacity-50';

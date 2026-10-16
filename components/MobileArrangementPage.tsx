@@ -735,7 +735,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <option value={0.5}>1/8</option>
           <option value={0.25}>1/16</option>
           <option value={2}>1/2</option>
-          <option value={4}>1 Bar</option>
+          <option value={4}>1 mesure</option>
         </select></>}
       </div>
 
@@ -1139,15 +1139,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Copy */}
             <button
               onClick={handleCopyClip}
+              aria-label="Copier le clip"
               className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
             >
               <i className="fas fa-copy text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">COPY</span>
+              <span className="text-[10px] font-semibold text-white/70">COPIER</span>
             </button>
 
             {/* Paste */}
             <button
               onClick={handlePasteClip}
+              aria-label="Coller le clip copié"
               disabled={!clipboard}
               className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                 clipboard 
@@ -1156,30 +1158,33 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               }`}
             >
               <i className="fas fa-paste text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">PASTE</span>
+              <span className="text-[10px] font-semibold text-white/70">COLLER</span>
             </button>
 
             {/* Duplicate */}
             <button
               onClick={handleDuplicateClip}
+              aria-label="Dupliquer le clip (copie juste après)"
               className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
             >
               <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">DUP</span>
+              <span className="text-[10px] font-semibold text-white/70">DOUBLER</span>
             </button>
 
             {/* Split */}
             <button
               onClick={handleSplitClip}
+              aria-label="Couper le clip en deux à la tête de lecture"
               className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
             >
               <i className="fas fa-cut text-yellow-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">SPLIT</span>
+              <span className="text-[10px] font-semibold text-white/70">COUPER</span>
             </button>
 
             {/* Reverse */}
             <button
               onClick={handleReverseClip}
+              aria-label="Inverser le clip (lecture à l'envers)"
               className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isReversed 
                   ? 'bg-purple-500/30 border border-purple-500/50' 
@@ -1187,7 +1192,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               }`}
             >
               <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">REV</span>
+              <span className="text-[10px] font-semibold text-white/70">INVERSER</span>
             </button>
 
             {/* Lot 1 : nettoyer la voix (bruit, niveau ; réverbe dans l'appli Windows), en premier des outils voix */}
@@ -1224,6 +1229,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 justesse (outils voix ensemble) : avant, après les fondus et le gain, hors de l'écran du téléphone. */}
             {selectedClip.clip.type !== 'MIDI' && (
               <button type="button" data-testid="mobile-breaths"
+                aria-label="Respirations : les baisser ou les retirer"
                 onClick={() => requestBreaths({ mode: 'dialog', trackIds: [selectedClip.trackId], reason: 'menu' })}
                 title="Respirations : baissées sur la lead, supprimées sur les backs (comme Breath Control de Waves)"
                 className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
@@ -1250,6 +1256,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
             {/* Mute */}
             <button
+              aria-label={selectedClip.clip.isMuted ? 'Réactiver le son du clip' : 'Rendre le clip muet'}
+              aria-pressed={!!selectedClip.clip.isMuted}
               onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
                 isMuted: !selectedClip.clip.isMuted 
               })}
@@ -1260,7 +1268,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               }`}
             >
               <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm mb-0.5 ${selectedClip.clip.isMuted ? 'text-red-400' : 'text-white/60'}`}></i>
-              <span className="text-[10px] font-semibold text-white/70">MUTE</span>
+              <span className="text-[10px] font-semibold text-white/70">MUET</span>
             </button>
 
             {/* Divider */}
@@ -1299,10 +1307,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 onDeleteClip?.(selectedClip.trackId, selectedClip.clip.id);
                 setSelectedClip(null);
               }}
+              aria-label="Supprimer le clip (Annuler dans le menu ☰ pour le retrouver)"
               className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
             >
               <i className="fas fa-trash text-red-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-red-400/80">DEL</span>
+              <span className="text-[8px] font-bold text-red-400/80">SUPPRIMER</span>
             </button>
           </div>
         </div>

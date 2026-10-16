@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import QRCode from 'qrcode';
 import {
   LocalCloudSession, sessionUrl, currentAccount, signInAccount, signOutAccount, assignSession, claimSession,
@@ -52,7 +53,7 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
   };
   const run = async (fn: () => Promise<string>) => {
     setAccountBusy(true); setAccountMsg(null);
-    try { setAccountMsg(await fn()); } catch (e: any) { setAccountMsg(`⚠️ ${e?.message || 'Erreur'}`); } finally { setAccountBusy(false); }
+    try { setAccountMsg(await fn()); } catch (e: any) { setAccountMsg(`⚠️ ${messageClair(e, 'Ça n’a pas marché : vérifie ta connexion, puis réessaie.')}`); } finally { setAccountBusy(false); }
   };
   const link = session ? { id: session.id, secret: session.secret } : null;
   const message = url ? `Ta session Make Music est prête : continue-la chez toi (iPad, ordinateur) ici 👉 ${url}` : '';

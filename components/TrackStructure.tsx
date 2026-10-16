@@ -634,7 +634,7 @@ export const MixerStructureButtons: React.FC<{ tracks: Track[] }> = ({ tracks })
       </button>
       <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">Pistes</span>
       <button type="button" data-testid="mixer-open-buses" onClick={() => structureBus.emit({ kind: 'panel', panel: 'buses' })}
-        className="w-10 h-10 rounded-xl border border-dashed border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 flex items-center justify-center" title="Bus nommés (I/O Setup de Pro Tools) : créer, renommer, voir qui envoie où" aria-label="Bus nommés">
+        className="w-10 h-10 rounded-xl border border-dashed border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 flex items-center justify-center" title="Bus : une piste de regroupement où plusieurs pistes se mélangent (toutes les voix, par exemple) pour les régler ensemble. Ici : créer, renommer, voir qui envoie où (I/O Setup de Pro Tools)." aria-label="Bus nommés">
         <i className="fas fa-project-diagram text-[11px]" />
       </button>
       <span className="text-[10px] font-bold text-cyan-300 whitespace-nowrap">Bus</span>

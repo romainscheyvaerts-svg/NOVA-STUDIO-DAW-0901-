@@ -1,4 +1,5 @@
 
+import { messageClair } from '../utils/friendlyError';
 import { waitPaid, billingStatus, loadPricing, exportAccess, forgetExportAccess, startExportPayment, euros, type ExportAccess, type Grille, type BillingStatus } from '../services/Billing';
 import { catalogIdsOf, projectUsesKits } from '../utils/exportProject';
 import ExportPaywall from './ExportPaywall';
@@ -19,6 +20,7 @@ import { keyToId3, type ChannelLayout } from '../utils/audioFormats';
 import { keyForFile } from '../utils/exportNaming';
 import { nomTonaliteCourt } from '../utils/musicKey';
 import { PLATFORM_TARGETS } from '../utils/masterAssistant';
+import { JARGON } from '../utils/jargon';
 import type { StemGrouping, ReturnsMode } from '../utils/stemPlan';
 import type { TailMode, RangeMode } from '../utils/exportTail';
 import { renderArrangement } from '../utils/arrangements';
@@ -214,7 +216,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       }
     } catch (e: any) {
       setPayWait(false);
-      setLoudnessReport(`⚠️ Paiement impossible : ${e?.message || 'erreur'}. Vérifie ta connexion puis réessaie.`);
+      setLoudnessReport(`⚠️ Paiement impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')} Rien n’a été débité.`);
     }
   };
   const handleExportRef = React.useRef<((queueOnly?: boolean) => Promise<void>) | null>(null);
@@ -545,7 +547,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                   </p>
                 )}
                 {onOpenShare && (
-                  <button type="button" onClick={() => onOpenShare()} disabled={isRendering} className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
+                  <button type="button" onClick={() => onOpenShare()} disabled={isRendering} data-testid="export-share" className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
                     <span className="text-2xl leading-none" aria-hidden="true">📲</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-black text-white">Extrait 30 s pour les réseaux</span>
@@ -832,7 +834,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         ) : (
                           <p className="text-[11px] text-nv-muted">Les stems gardent leur volume du mix (jamais normalisés) : posés à 0 dans une autre session, ils redonnent ton mix.</p>
                         )}
-                        <p className="text-[11px] text-nv-muted">À la fin, NOVA mesure le fichier : LUFS intégrés, crête vraie (dBTP) et LRA.</p>
+                        <p className="text-[11px] text-nv-muted" title={`${JARGON.lufs}
+${JARGON.dbtp}
+${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ressenti), crête vraie (dBTP) et LRA.</p>
                     </div>
 
                     {/* 4. INFOS DU FICHIER */}

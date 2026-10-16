@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import type { DAWState } from '../types';
 import { catalogSupabase } from '../services/supabase';
 import { claimSession, signInAccount } from '../services/SessionCloud';
@@ -92,14 +93,14 @@ const InlineLogin: React.FC<{ title: string; onDone: () => void; testid: string 
         const { data, error } = await catalogSupabase.auth.signUp({ email: email.trim(), password });
         if (error) {
           const m = String(error.message || '');
-          throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte ».' : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${m}`);
+          throw new Error(/already/i.test(m) ? 'Ce mail a déjà un compte : touche « J’ai déjà un compte ».' : /password/i.test(m) ? 'Mot de passe trop court : 6 caractères au moins.' : `Création du compte impossible : ${messageClair(error, 'réessaie dans un instant.')}`);
         }
         if (!data?.session) throw new Error('Compte créé ! Ouvre le mail de confirmation, puis reviens ici et touche « J’ai déjà un compte ».');
       } else {
         await signInAccount(email, password);
       }
       onDone();
-    } catch (e: any) { setErr(e?.message || 'Connexion impossible'); } finally { setBusy(false); }
+    } catch (e: any) { setErr(messageClair(e, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.')); } finally { setBusy(false); }
   };
   return (
     <form onSubmit={submit} className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3" data-testid={testid}>
@@ -213,7 +214,7 @@ const ShareDialog: React.FC<DialogProps> = (p) => {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {p.signedIn === false ? (
-            <div className="space-y-3">
+            <div className="space-y-3" data-testid="share-signin">
               <p className="text-[14px] text-slate-300">Connecte-toi : le lien et la page sont rattachés à ton compte, toi seul peux les gérer.</p>
               <InlineLogin title="Ton compte Make Music" testid="share-login" onDone={() => { /* useSignedIn suit la connexion */ }} />
             </div>
@@ -268,14 +269,14 @@ const ForkTab: React.FC<DialogProps> = (p) => {
       const url = forkUrl(r.link.token, baseUrl());
       if (await copyText(url)) { setCopied(r.link.id); window.setTimeout(() => setCopied(c => (c === r.link.id ? null : c)), 2500); }
       p.notify('🎁 Lien « Faire sa version » créé et copié : chacun aura sa propre copie, ton original ne bouge pas.');
-    } catch (e: any) { setErr(e?.message || 'Création impossible'); if ((e as ForkError)?.code === 'not_deployed') setOff(true); } finally { setBusy(null); }
+    } catch (e: any) { setErr(messageClair(e, 'Création impossible : réessaie.')); if ((e as ForkError)?.code === 'not_deployed') setOff(true); } finally { setBusy(null); }
   };
   const revoke = async (l: ForkLinkInfo) => {
     const s = p.currentSession();
     if (!s) return;
     setBusy('Désactivation…'); setErr(null);
     try { await withOwnedSession(s, k => revokeForkLink(k, l.id)); await refresh(); p.notify('Lien désactivé : il ne donne plus de copie (les copies déjà faites restent chez leurs auteurs).'); }
-    catch (e: any) { setErr(e?.message || 'Désactivation impossible'); } finally { setBusy(null); }
+    catch (e: any) { setErr(messageClair(e, 'Désactivation impossible : réessaie.')); } finally { setBusy(null); }
   };
 
   return (
@@ -387,14 +388,14 @@ const PublicTab: React.FC<DialogProps> = (p) => {
       }));
       setPage(pg); setEditing(false); setConsent(false);
       p.notify('🌍 Ton morceau est publié : copie le lien de la page ou le lecteur à intégrer.');
-    } catch (e: any) { setErr(e?.message || 'Publication impossible'); } finally { setBusy(null); }
+    } catch (e: any) { setErr(messageClair(e, 'Publication impossible : réessaie.')); } finally { setBusy(null); }
   };
   const toggle = async (on: boolean) => {
     const s = p.currentSession();
     if (!s || !page) return;
     setBusy(on ? 'Remise en ligne…' : 'Retrait de la page…'); setErr(null);
     try { setPage(await withOwnedSession(s, k => setPublished(k, on))); p.notify(on ? '🌍 Page de nouveau en ligne.' : 'Page retirée : le lien affiche « Ce morceau n’est plus publié ».'); }
-    catch (e: any) { setErr(e?.message || 'Modification impossible'); } finally { setBusy(null); }
+    catch (e: any) { setErr(messageClair(e, 'Modification impossible : réessaie.')); } finally { setBusy(null); }
   };
 
   const showForm = page === null || editing;

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import { createListenLink, listListenLinks, revokeListenLink, type SessionKey } from '../services/ListenLinks';
 import { listenHost, type ListenHostState } from '../services/ListenBroadcast';
 import {
@@ -66,7 +67,7 @@ const ListenLinksPanel: React.FC<Props> = ({ session, name, getMixStream }) => {
       setLinks(l); setLoadErr(null);
       listenHost.setLinks(l);
     } catch (e: any) {
-      setLoadErr(e?.status === 401 ? 'Connecte-toi à ton compte Make Music pour voir tes liens.' : e?.message || 'Liste indisponible');
+      setLoadErr(e?.status === 401 ? 'Connecte-toi à ton compte Make Music pour voir tes liens.' : messageClair(e, 'Liste indisponible : vérifie ta connexion, puis réessaie.'));
     }
   }, [session]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -93,7 +94,7 @@ const ListenLinksPanel: React.FC<Props> = ({ session, name, getMixStream }) => {
       setLinks(next);
       listenHost.setLinks(next);
     } catch (e: any) {
-      setErr(e?.status === 401 ? 'Connecte-toi à ton compte Make Music pour créer un lien.' : e?.message || 'Création impossible : réessaie.');
+      setErr(e?.status === 401 ? 'Connecte-toi à ton compte Make Music pour créer un lien.' : messageClair(e, 'Création impossible : réessaie.'));
     } finally { setBusy(null); }
   };
 
@@ -109,7 +110,7 @@ const ListenLinksPanel: React.FC<Props> = ({ session, name, getMixStream }) => {
       if (created?.link.id === l.id) setCreated(null);
       setToast(`Lien ${l.label ? `« ${l.label} » ` : ''}révoqué : il ne s'ouvre plus.`);
     } catch (e: any) {
-      setErr(e?.message || 'Révocation impossible : réessaie.');
+      setErr(messageClair(e, 'Révocation impossible : réessaie.'));
     } finally { setBusy(null); }
   };
 

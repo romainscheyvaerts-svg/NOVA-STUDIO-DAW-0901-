@@ -17,6 +17,7 @@ import { isVoiceTrack } from '../utils/vocalRoles';
 import { isStemSource } from '../utils/stemPlan';
 import { projectTimedWords, lyricLineTimes, lyricsFromWords } from '../utils/voiceLyrics';
 import { track as trackEvent } from '../utils/analytics';
+import { JARGON } from '../utils/jargon';
 import {
   DIST_PLATFORMS, platformOf, analyzeAudio, runChecks, summarize, ceilingFor, gainForPeak, gainToward, applyGainDb, removeDc,
   trimPoints, applyTrim, cloneChannels, splitTitle, sentenceCase, stripEmoji, isValidIsrc, normalizeIsrc, num,
@@ -422,7 +423,7 @@ const DistributionPanel: React.FC<{ getState: () => DAWState; getOwned?: () => (
               {DIST_PLATFORMS.map(p => (
                 <button key={p.id} type="button" role="radio" aria-checked={platformId === p.id} onClick={() => setPlatformId(p.id)} data-testid={`dist-platform-${p.id}`}
                   className={`nova-hit-tactile min-h-10 rounded-full border px-3 text-[12px] font-bold ${platformId === p.id ? 'border-nv-accent bg-nv-accent text-black' : 'border-nv-line text-nv-ink hover:bg-nv-accent/15'}`}>
-                  {p.label} <span className={platformId === p.id ? 'font-normal text-black/70' : 'font-normal text-nv-muted'}>{num(p.lufs, 0)} LUFS</span>
+                  {p.label} <span title={JARGON.lufs} className={platformId === p.id ? 'font-normal text-black/70' : 'font-normal text-nv-muted'}>{num(p.lufs, 0)} LUFS</span>
                 </button>
               ))}
             </div>

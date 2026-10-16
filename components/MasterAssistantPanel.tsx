@@ -5,6 +5,7 @@ import { runMasterNova, measureCurrentMix, isMasterNovaPlugin, MASTER_ID, Master
 import { matchBandLabel } from '../utils/referenceMatch';
 import { referencePlayer } from '../services/referenceTrack';
 import { truePeakOf } from '../utils/audioMeasure';
+import { LOUDNESS_TITLE } from '../utils/jargon';
 
 /**
  * Fenêtre « Master Nova » (V15) : mastering en un clic avec cible par
@@ -164,7 +165,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                   <button key={t.id} type="button" data-nova-cible={t.id} onClick={() => { setTargetId(t.id); setRefTarget(false); }} aria-pressed={on} title={t.hint}
                     className={`rounded-xl border px-3 py-2 text-left ${on ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
                     <div className="text-[12px] font-black">{t.label}</div>
-                    <div className={`text-[11px] font-mono ${on ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, 0)} LUFS · {fmtDb(t.ceiling)} dBTP</div>
+                    <div title={LOUDNESS_TITLE} className={`text-[11px] font-mono ${on ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, 0)} LUFS · {fmtDb(t.ceiling)} dBTP</div>
                   </button>
                 );
               })}
@@ -172,7 +173,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                 <div data-nova-cible="reference" aria-current="true" title="Cible posée par « Caler sur la référence » : le niveau de ton morceau de référence. Choisis une plateforme pour revenir à ses cibles."
                   className="rounded-xl border px-3 py-2 text-left bg-fuchsia-500 text-black border-fuchsia-400">
                   <div className="text-[12px] font-black">🎯 Comme la référence</div>
-                  <div className="text-[11px] font-mono text-black/70">{fmtDb(referencePlatformTarget(ref.lufs).lufs)} LUFS · {fmtDb(-1)} dBTP</div>
+                  <div title={LOUDNESS_TITLE} className="text-[11px] font-mono text-black/70">{fmtDb(referencePlatformTarget(ref.lufs).lufs)} LUFS · {fmtDb(-1)} dBTP</div>
                 </div>
               )}
             </div>

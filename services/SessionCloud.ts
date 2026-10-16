@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { messageClair } from '../utils/friendlyError';
 import { catalogSupabase } from './supabase';
 import { ProjectIO } from './ProjectIO';
 import { DAWState } from '../types';
@@ -209,7 +210,7 @@ export async function currentAccount(): Promise<{ email: string; isAdmin: boolea
 
 export async function signInAccount(email: string, password: string): Promise<void> {
   const { error } = await catalogSupabase.auth.signInWithPassword({ email: email.trim(), password });
-  if (error) throw new Error(error.message === 'Invalid login credentials' ? 'E-mail ou mot de passe incorrect' : error.message);
+  if (error) throw new Error(messageClair(error, 'Connexion impossible : vérifie ton e-mail et ton mot de passe, puis réessaie.'));
 }
 
 export const signOutAccount = () => catalogSupabase.auth.signOut();

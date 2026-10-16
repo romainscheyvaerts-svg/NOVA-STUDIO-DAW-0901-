@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { messageClair } from '../utils/friendlyError';
 import type { Track } from '../types';
 import {
   billingStatus, exportAccess, forgetExportAccess, loadPricing, startExportPayment, waitPaid,
@@ -54,7 +55,7 @@ export function useExportGate(open: boolean, projectKey: string | undefined, tra
       else if (!cancelled.current) setMessage("Paiement pas encore reçu. S'il est fait, rouvre cette fenêtre : il sera reconnu.");
     } catch (e: any) {
       setPaying(false);
-      setMessage(`Paiement impossible : ${e?.message || 'erreur'}. Vérifie ta connexion puis réessaie.`);
+      setMessage(`Paiement impossible : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')} Rien n’a été débité.`);
     }
   }, [projectKey, grille, ids, kits, scope, owned, recheck]);
   const cancelPay = useCallback(() => { cancelled.current = true; setPaying(false); }, []);

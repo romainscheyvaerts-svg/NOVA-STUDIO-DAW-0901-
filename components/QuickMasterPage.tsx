@@ -11,6 +11,7 @@ import { saveBlob } from '../utils/saveBlob';
 import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
 import { encodeWav } from '../utils/audioFormats';
+import { LOUDNESS_TITLE } from '../utils/jargon';
 
 /**
  * « Masteriser un morceau » (lot 4a) : le mastering d'un simple fichier, sans
@@ -354,7 +355,7 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <div className="min-w-0">
                   <p className="text-[13px] font-black truncate" title={file.name}>{file.name}</p>
-                  <p className="text-[11px] text-slate-400">{fmtTime(file.duration)} · {(file.sampleRate / 1000).toString().replace('.', ',')} kHz{before ? ` · ${fmtDb(before.lufs)} LUFS · crête ${fmtDb(before.truePeak)} dBTP` : ''}</p>
+                  <p className="text-[11px] text-slate-400" title={LOUDNESS_TITLE}>{fmtTime(file.duration)} · {(file.sampleRate / 1000).toString().replace('.', ',')} kHz{before ? ` · ${fmtDb(before.lufs)} LUFS · crête ${fmtDb(before.truePeak)} dBTP` : ''}</p>
                 </div>
                 <button type="button" onClick={() => trackInput.current?.click()} className="h-9 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-[12px] font-bold"><i className="fas fa-sync-alt mr-1.5" aria-hidden="true"></i>Changer de fichier</button>
               </div>
@@ -435,7 +436,7 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
                       title={PLATFORM_TARGETS.find(p => p.id === t.id)?.hint || 'Le même niveau que ton morceau de référence.'}
                       className={`rounded-xl border px-3 py-2 text-left ${t.id === targetId ? 'bg-amber-400 text-black border-amber-300' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
                       <div className="text-[12px] font-black truncate">{t.label}</div>
-                      <div className={`text-[11px] font-mono ${t.id === targetId ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, t.id === 'reference' ? 1 : 0)} LUFS · {fmtDb(t.ceiling, 0)} dBTP</div>
+                      <div title={LOUDNESS_TITLE} className={`text-[11px] font-mono ${t.id === targetId ? 'text-black/70' : 'text-slate-400'}`}>{fmtDb(t.lufs, t.id === 'reference' ? 1 : 0)} LUFS · {fmtDb(t.ceiling, 0)} dBTP</div>
                     </button>
                   ))}
                 </div>
