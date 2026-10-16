@@ -12,8 +12,6 @@ import { applyOneKnob, MACRO_ORDER, macroDef } from './oneKnob';
 import { applyVoicePreset, findVoicePreset, SEND_IDS, type ApplyVoicePresetOptions } from './voicePresets';
 import { lufsOf } from './audioMeasure';
 
-export const VOICE_CHAT_ACTIONS = ['DESCRIBE_SOUND', 'APPLY_VOICE_PRESET', 'ONE_KNOB'] as const;
-
 /** LUFS (mono) de l'audio d'une piste tel que le moteur le donne (getTrackSourceAudio). */
 export function lufsOfSource(src: { channels: Float32Array[]; sampleRate: number } | null | undefined): number | null {
   if (!src || !src.channels.length) return null;

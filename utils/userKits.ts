@@ -1,5 +1,5 @@
 import type { DrumMachine, DrumRow } from './drumKits';
-import { STEPS_PER_BAR, rowLength } from './drumPatterns';
+import { rowLength } from './drumPatterns';
 import { PadSampleInfo, userSampleId } from './drumSamples';
 
 /**
@@ -132,9 +132,6 @@ export function parseKit(raw: unknown): UserKit | null {
     samples,
   };
 }
-
-/** Pas vides d'un nouveau pad (utilisé par les tests). */
-export const blankSteps = (bars = 1) => new Array(STEPS_PER_BAR * bars).fill(0);
 
 // ===== Stockage local (IndexedDB) =====
 

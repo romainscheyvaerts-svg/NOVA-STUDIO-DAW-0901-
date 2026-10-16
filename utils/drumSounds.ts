@@ -8,7 +8,7 @@
  *   « url:<adresse> »        → fichier audio (bibliothèque du studio, plus tard)
  *   « kit:<id> »             → son des kits NOVA (utils/drumKitLibrary.ts), chargé à la demande
  */
-import { fetchScrambled, isKitRef, kitSoundLabel, loadKitSound } from './drumKitLibrary';
+import { fetchScrambled, isKitRef, loadKitSound } from './drumKitLibrary';
 import { openKitContainer } from './drumKitCodec';
 
 export interface DrumSoundInfo { id: string; name: string; category: DrumCategory }
@@ -35,12 +35,6 @@ export const DRUM_SOUNDS: DrumSoundInfo[] = [
   { id: 'perc-tom', name: 'Tom', category: 'perc' },
   { id: 'crash', name: 'Crash', category: 'cymbal' },
 ];
-
-export const soundName = (ref: string) => {
-  if (isKitRef(ref)) return kitSoundLabel(ref) || 'Son de kit';
-  const id = ref.replace(/^synth:/, '').split('@')[0];
-  return DRUM_SOUNDS.find(s => s.id === id)?.name || (ref.startsWith('url:') ? decodeURIComponent(ref.split('/').pop() || 'Sample') : id);
-};
 
 const midiToHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 

@@ -156,9 +156,6 @@ export function beatsInRange(m: TempoMap, t0: number, t1: number): { time: numbe
 }
 
 export function tempoAt(m: TempoMap, t: number): number { return segmentAtTime(m, t).bpm; }
-export function meterAt(m: TempoMap, t: number): { numerator: number; denominator: number } {
-  const s = segmentAtTime(m, t); return { numerator: s.num, denominator: s.den };
-}
 
 // --- Grille ---------------------------------------------------------------------------
 

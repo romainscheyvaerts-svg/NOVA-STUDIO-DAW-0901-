@@ -1,5 +1,5 @@
 import type { Clip, FreezeRef, Track } from '../types';
-import { isTrackFrozen, isVst, lastVstIndex, pluginsSignature } from '../utils/freeze';
+import { isTrackFrozen, isVst, pluginsSignature } from '../utils/freeze';
 import { vstAutomationSig } from '../utils/vstAutomation';
 
 /**
@@ -165,9 +165,6 @@ export function clearPreviewOnEngineer(t: Track): string | null {
   delete t.livePreview;
   return buf;
 }
-
-/** Artiste : la piste a-t-elle des VST à rendre ? (index du dernier, sinon -1) */
-export const previewUpTo = (t: Track): number => (hasArtistVst(t) ? lastVstIndex(t) : -1);
 
 // --- Artiste : rendus regroupés, un à la fois ---------------------------------------------
 

@@ -43,14 +43,6 @@ export const pluginDetail = (p: Pick<PluginInstance, 'type'>, autotune?: Autotun
 
 export const pluginIcon = (p: Pick<PluginInstance, 'type'>): string => ICONS[p.type] || 'fa-magic';
 
-/** Infobulle : nom complet, rôle, et comment l'ouvrir. */
-export const pluginTooltip = (p: Pick<PluginInstance, 'type' | 'name' | 'isEnabled'>, autotune?: AutotuneLabelInfo | null): string => {
-  const name = pluginDisplayName(p, autotune);
-  const detail = pluginDetail(p, autotune);
-  const kind = p.type === 'VST3' || (p.type === 'AUTOTUNE' && autotune?.engine === 'vst') ? 'plugin du PC' : 'effet NOVA';
-  return `${name}${detail ? ` · ${detail}` : ''} (${kind})${p.isEnabled ? '' : ' — désactivé'} : clic pour l'ouvrir`;
-};
-
 /** Tonalité courte pour les pastilles : « F# mineur » → « F#m », « Do majeur » → « Do ». */
 export const shortKey = (keyText: string): string =>
   keyText.replace(/\s*mineur\b/i, 'm').replace(/\s*majeur\b/i, '').replace(/\s*minor\b/i, 'm').replace(/\s*major\b/i, '').trim();

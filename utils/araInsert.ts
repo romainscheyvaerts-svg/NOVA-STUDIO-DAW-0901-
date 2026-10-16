@@ -170,9 +170,6 @@ export function araMissingMessage(kind: AraPluginKey, ctx: { bridgeConnected: bo
     : `${where} : la piste joue ses clips sans les retouches (rendu à faire sur le PC qui a ${label}).`;
 }
 
-/** Libellé court de l'insert (barre de l'effet, liste des inserts). */
-export const araInsertLabel = (kind: AraPluginKey) => `${ARA_LABEL[kind]} (ARA)`;
-
 /** Clips dont la position a changé entre deux documents (pour le journal / l'affichage). */
 export function araChangedRegions(a: AraDocument | null, b: AraDocument): { added: string[]; removed: string[]; moved: string[] } {
   const prev = new Map((a?.regions || []).map(r => [r.id, r] as const));

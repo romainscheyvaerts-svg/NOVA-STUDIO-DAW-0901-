@@ -180,11 +180,6 @@ export function renderArrangement<S extends DAWState>(s: S, a: SongArrangement, 
   return { state, report: { length: cur, sections: placed, missing: missing.length, muted, notes } };
 }
 
-/** Ajoute / retire une section (à la fin, ou à une position). */
-export function withSections(a: SongArrangement, sections: string[]): SongArrangement {
-  return { ...a, sections: sections.slice(0, 200) };
-}
-
 export function moveSection(a: SongArrangement, from: number, to: number): SongArrangement {
   const list = [...a.sections];
   if (from < 0 || from >= list.length) return a;

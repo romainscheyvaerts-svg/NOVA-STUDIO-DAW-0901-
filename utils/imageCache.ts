@@ -82,6 +82,3 @@ export function cachedImageUrl(url: string): Promise<string | null> {
   }
   return p;
 }
-
-/** Déjà prête (affichage immédiat, sans clignotement) ? */
-export const peekCachedImage = (url: string) => memo.get(url);

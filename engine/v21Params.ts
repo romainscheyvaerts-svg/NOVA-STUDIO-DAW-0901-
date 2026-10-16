@@ -44,8 +44,6 @@ export const HARMONY_INTERVALS: { deg: number; label: string; short: string }[] 
   { deg: -7, label: 'Octave en dessous', short: '8ve ↓' },
 ];
 
-export const intervalLabel = (deg: number) => HARMONY_INTERVALS.find(i => i.deg === Math.round(deg))?.label || `${deg > 0 ? '+' : ''}${Math.round(deg)} degrés`;
-
 export const HARMONIZER_SPECS: V21ParamSpec[] = [
   { id: 'voices', label: 'Nombre de voix', min: 1, max: 4, step: 1, unit: '', hint: "Nombre de voix d'harmonie ajoutées à la voix (1 à 4), comme les voix du Vocal Transformer / harmonies de Logic ou du Pitcher de FL Studio." },
   ...[1, 2, 3, 4].flatMap(i => [
@@ -201,7 +199,6 @@ export const GATE_RATES: { rate: number; label: string; hint: string }[] = [
   { rate: 6, label: '1/16 T', hint: 'Doubles croches en triolets : 6 pas par temps, les rolls trap.' },
   { rate: 8, label: '1/32', hint: 'Triples croches : 8 pas par temps, 16 pas = 2 temps (stutter rapide).' },
 ];
-export const gateRateLabel = (rate: number) => GATE_RATES.find(r => r.rate === Math.round(rate))?.label || `${Math.round(rate)} pas/temps`;
 
 export const GATEFX_SPECS: V21ParamSpec[] = [
   { id: 'rate', label: 'Division', min: 1, max: 8, step: 1, unit: 'pas', hint: 'Durée d’un pas, calée sur le tempo du projet : 1/16 = double croche (Step size de Gross Beat / ShaperBox).' },

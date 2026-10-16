@@ -11,7 +11,6 @@ const emit = () => listeners.forEach(l => l());
 
 export const openSynthPanel = (trackId: string) => { openTrackId = trackId; emit(); };
 export const closeSynthPanel = () => { openTrackId = null; emit(); };
-export const getSynthPanelTrack = () => openTrackId;
 
 export function useSynthPanelTrack(): string | null {
   return useSyncExternalStore(

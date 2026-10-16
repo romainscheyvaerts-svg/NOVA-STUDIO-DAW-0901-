@@ -35,7 +35,6 @@ export const loadKnowledge = (): Promise<KbEntry[]> => {
   }
   return kbPromise;
 };
-export const knowledgeLoaded = () => kb !== null;
 /** Tests / préchargement. */
 export const setKnowledge = (entries: KbEntry[]) => { kb = entries; };
 

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Clip, DAWState, Track, TrackType } from '../types';
 import { midiBus, isMidiFile, MidiBusEvent } from '../utils/midiBus';
 import { parseMidi, writeMidi, midiFileName, hasTempoChanges, initialBpm, noteCount, MidiFileData, DRUM_CHANNEL } from '../utils/midiFile';
-import { planMidiImport, partClip, partTrack, exportSources, novaToMidi, TempoMode, DRUM_ROW_IDS, hasMidi } from '../utils/midiImport';
+import { planMidiImport, partClip, partTrack, exportSources, novaToMidi, TempoMode, DRUM_ROW_IDS } from '../utils/midiImport';
 import { midiCapture, buildCapture, placeCapture } from '../utils/midiCapture';
 import { saveBlob } from '../utils/saveBlob';
 import { playheadStore } from '../utils/playheadStore';
@@ -322,6 +322,3 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
 };
 
 export default MidiHost;
-
-/** Pistes MIDI exportables (pour l'export du projet). */
-export const midiTrackCount = (tracks: Track[]) => tracks.filter(hasMidi).length;

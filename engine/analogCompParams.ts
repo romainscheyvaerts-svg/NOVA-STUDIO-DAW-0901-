@@ -185,8 +185,6 @@ export const ANALOG_SPECS: Record<string, AnalogKindSpec> = {
   VOXSTRIP,
 };
 
-export const analogSpec = (kind: string): AnalogKindSpec | undefined => ANALOG_SPECS[kind];
-
 export const analogDefaults = (kind: string) => () => ({ ...(ANALOG_SPECS[kind]?.defaults || {}), isEnabled: true });
 
 /** Réglages automatisables (éditeur d'automation, registre des effets). */

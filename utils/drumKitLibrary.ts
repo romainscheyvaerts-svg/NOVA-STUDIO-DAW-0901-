@@ -123,7 +123,6 @@ export function loadKitIndex(): Promise<KitIndex> {
   return indexPromise;
 }
 export const kitIndexIfLoaded = () => indexLoaded;
-export function onKitIndexLoaded(f: () => void): () => void { indexListeners.add(f); return () => indexListeners.delete(f); }
 /** Pour les tests. */
 export function setKitIndexForTests(ix: KitIndex | null) { indexLoaded = ix; indexPromise = ix ? Promise.resolve(ix) : null; }
 
@@ -399,7 +398,3 @@ export function usesKitSounds(t: { drumMachine?: DrumMachine | null; melodicSamp
 }
 
 export const KIT_BAKE_REFUSAL = 'Les sons des kits NOVA restent dans la boîte à rythmes : ils ne sont jamais rendus en fichier audio (gel, impression, sauvegarde). Exporte le morceau ou les stems pour les avoir en audio.';
-
-/** Toutes les références de sons de kit d'une boîte à rythmes (motifs compris). */
-export const kitRefsIn = (dm: DrumMachine | null | undefined): string[] =>
-  dm ? [...new Set(dm.rows.map(r => r.sound).filter(isKitRef))] : [];

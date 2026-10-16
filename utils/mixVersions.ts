@@ -195,6 +195,4 @@ export function versionStatusLine(v: MixVersion): string {
     : `Version ${v.n} : retouches demandées par ${d.by} le ${fmtDate(d.at)}${d.comment ? ` (« ${d.comment.slice(0, 120)} »)` : ''}`;
 }
 
-/** Qui peut quoi (l'interface ne propose que ça ; la réception le vérifie aussi). */
-export const canSendVersion = (role: CollabRole | null | undefined) => role === 'engineer' || role === null || role === undefined;
 export const canDecide = (role: CollabRole | null | undefined) => role === 'artist';

@@ -128,25 +128,6 @@ export function truePeakDb(buffer: AudioBuffer): number {
 export interface LoudnessResult { before: number; after: number; truePeak: number; gainDb: number; limitedByPeak: boolean }
 
 /**
- * Amène le mix à la loudness visée sans dépasser la crête vraie autorisée
- * (si la crête bloque, le gain est réduit et on le dit : pas de limiteur caché).
- */
-export function normalizeToLufs(buffer: AudioBuffer, targetLufs: number, ceilingDbtp = -1): LoudnessResult {
-  const before = integratedLufs(buffer);
-  if (!Number.isFinite(before)) return { before, after: before, truePeak: truePeakDb(buffer), gainDb: 0, limitedByPeak: false };
-  let gainDb = targetLufs - before;
-  const tp = truePeakDb(buffer);
-  let limitedByPeak = false;
-  if (tp + gainDb > ceilingDbtp) { gainDb = ceilingDbtp - tp; limitedByPeak = true; }
-  const g = Math.pow(10, gainDb / 20);
-  for (let c = 0; c < buffer.numberOfChannels; c++) {
-    const d = buffer.getChannelData(c);
-    for (let i = 0; i < d.length; i++) d[i] *= g;
-  }
-  return { before, after: before + gainDb, truePeak: tp + gainDb, gainDb, limitedByPeak };
-}
-
-/**
  * Plafond de crête vraie visé avant l'encodage MP3. L'encodeur ajoute de la
  * crête (souvent 0,5 dB, parfois plus sur un beat très compressé) : on garde
  * de la marge pour que le fichier MP3 décodé reste vers -1 dBTP au plus.

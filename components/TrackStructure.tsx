@@ -648,6 +648,3 @@ export const MixerStructureButtons: React.FC<{ tracks: Track[] }> = ({ tracks })
     </>
   );
 };
-
-/** Pistes d'un envoi en grand : utile pour savoir quel emplacement est libre. */
-export const sendSlotOfTrack = (t: Track, sendId: string) => sendSlots(t.sends).findIndex(s => s?.id === sendId);

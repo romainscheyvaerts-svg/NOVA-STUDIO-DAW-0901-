@@ -464,7 +464,6 @@ type BufferOf = (c: Clip) => Pick<AudioBuffer, 'numberOfChannels' | 'sampleRate'
 
 /** Cache des détections : même audio, même fenêtre, même sensibilité → même résultat. */
 const detectCache = new Map<string, BreathRegion[]>();
-export const clearBreathCache = () => detectCache.clear();
 
 export function detectClipBreaths(c: Clip, buf: NonNullable<ReturnType<BufferOf>>, sensitivity: BreathSensitivity): BreathRegion[] {
   const from = c.offset || 0;

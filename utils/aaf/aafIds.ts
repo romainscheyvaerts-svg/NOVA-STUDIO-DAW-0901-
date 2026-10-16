@@ -151,4 +151,3 @@ export const CONTAINERDEF_AAF = '4313b571-d8ba-11d2-809b-006008143e6f';
 export const USAGE_TOPLEVEL = '0d010102-0101-0700-060e-2b3404010101';
 /** Signature de fichier AAF (CLSID de l'en-tête CFB) : secteurs de 4096 et de 512 octets. */
 export const AAF_FILE_SIGNATURE_4K = '0d010201-0200-0000-060e-2b3403020101';
-export const AAF_FILE_SIGNATURE_512 = '42464141-000d-4d4f-060e-2b34010101ff';

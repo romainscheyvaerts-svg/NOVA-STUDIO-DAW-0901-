@@ -251,10 +251,6 @@ export function syncGroupFields(tracks: Track[], groups: TrackGroup[]): Track[] 
   return changed ? out : tracks;
 }
 
-/** La piste est-elle dans ce groupe (VCA : membres par groupe) ? */
-export const inGroup = (t: Pick<Track, 'groupId' | 'groupIds'>, groupId: string): boolean =>
-  t.groupId === groupId || !!t.groupIds?.includes(groupId);
-
 let gidSeq = 0;
 export const newGroupId = () => `grp-${Date.now().toString(36)}${(gidSeq++).toString(36)}`;
 
@@ -434,10 +430,6 @@ export const useEditGroups = (): GroupCtx => useSyncExternalStore(editGroupsStor
 /** Maj+Ctrl (ou Maj+Cmd) d'un événement souris / clavier. */
 export const invertFromEvent = (e?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } | null): boolean =>
   !!e && !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
-
-/** Message court : combien de pistes un geste a touchées par les groupes. */
-export const groupGestureNote = (n: number, inverted: boolean): string =>
-  inverted ? 'Maj+Ctrl : groupes inversés pour ce geste' : n > 1 ? `Groupe d’édition : ${n} pistes` : '';
 
 // ─── Gestes sur les clips jumeaux (rognage, fondus, gain) ──────────────────────
 

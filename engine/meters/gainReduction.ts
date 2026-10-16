@@ -28,10 +28,3 @@ export function readGainReduction(instance: any): number | null {
   } catch { /* effet en cours de libération */ }
   return null;
 }
-
-/** Somme des réductions (dB) ; `parts` vide = aucune dynamique sur la piste. */
-export function sumGainReduction(parts: GrPart[]): number {
-  let s = 0;
-  for (const p of parts) s += p.db;
-  return s;
-}

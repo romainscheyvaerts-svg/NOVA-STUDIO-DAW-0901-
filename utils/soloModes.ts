@@ -44,11 +44,6 @@ export const soloModeStore = {
 /** Mode de solo courant (re-rendu quand il change). */
 export const useSoloMode = (): SoloLatch => useSyncExternalStore(soloModeStore.subscribe, soloModeStore.get, soloModeStore.get);
 
-export const SOLO_MODE_LABEL: Record<SoloLatch, string> = {
-  latch: 'Verrouiller (les solos s’ajoutent)',
-  xor: 'X-OR (un solo annule les précédents)',
-};
-
 /**
  * X-OR : après un geste qui a mis `soloedNow` en solo, les autres pistes
  * perdent leur solo. Le master, les pistes du geste et les solos safe ne

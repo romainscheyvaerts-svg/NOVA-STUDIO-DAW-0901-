@@ -20,8 +20,6 @@ export interface RefusalInput { message?: string | null; status?: number | null;
 /** gate : fenêtre à ouvrir dans le panneau (connexion, Nova Pro pour l'hôte) ; message : texte à montrer. */
 export interface CollabRefusal { gate: 'login' | 'subscribe' | null; message: string | null }
 
-export const GUEST_FREE_TEXT = 'En invité, tu n’as rien à payer : un compte gratuit suffit.';
-
 export const MSG_HOST_NOT_PRO = 'L’hôte de cette séance n’a plus Nova Pro : demande-lui de le réactiver, puis rejoins à nouveau. En invité, tu n’as rien à payer.';
 export const MSG_OLD_SERVER_GUEST = 'Le serveur de collaboration n’accepte pas encore les invités gratuits (mise à jour en attente). Réessaie un peu plus tard : en invité, tu n’auras rien à payer.';
 export const MSG_SESSION_FULL = 'Cette séance est complète : demande à l’hôte de libérer une place, puis réessaie.';

@@ -84,7 +84,6 @@ export const TYPE_INT32 = '01010700-0000-0000-060e-2b3401040101';
 export const TYPE_UINT32 = '01010300-0000-0000-060e-2b3401040101';
 export const TYPE_INT64 = '01010800-0000-0000-060e-2b3401040101';
 export const TYPE_INT16 = '01010600-0000-0000-060e-2b3401040101';
-export const TYPE_STRING = '01100200-0000-0000-060e-2b3401040101';
 
 /** Nombre porté par une valeur indirecte (rationnel, entier…). */
 export function indirectNumber(v: IndirectValue | null): number | null {

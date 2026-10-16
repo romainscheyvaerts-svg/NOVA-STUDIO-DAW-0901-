@@ -188,8 +188,6 @@ export async function pullSession(link: CloudLink, onProgress?: (pct: number, ms
   return { state, info };
 }
 
-export const sessionInfo = (link: CloudLink) => call<CloudSessionInfo>('info', { id: link.id, secret: link.secret });
-export const listMySessions = () => call<{ sessions: CloudSessionInfo[] }>('list_mine').then(r => r.sessions);
 export const claimSession = (link: CloudLink) => call<{ ok: boolean; link: string | null }>('claim', { id: link.id, secret: link.secret });
 export const assignSession = (link: CloudLink, email: string) => call<{ ok: boolean }>('assign', { id: link.id, secret: link.secret, email });
 

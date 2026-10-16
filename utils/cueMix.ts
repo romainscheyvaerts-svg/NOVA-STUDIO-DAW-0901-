@@ -1,5 +1,4 @@
-import type { CueLevel, CueMix, RecordInput, Track } from '../types';
-import { channelsOf } from './multiRecord';
+import type { CueLevel, CueMix, Track } from '../types';
 
 /**
  * R15 · Mixes casque (cue mixes), comme les envois pré-fader de Pro Tools vers les
@@ -12,8 +11,6 @@ import { channelsOf } from './multiRecord';
  *  - la VOIX EN DIRECT d'une piste armée est mélangée DANS LE PONT (matrice entrée →
  *    sortie) : latence = tampon de la carte seulement, sans aller-retour navigateur.
  */
-
-export const CUE_MIN_MIXES = 2;
 
 export const pairLabel = (pair: number) => `Sorties ${2 * pair + 1}-${2 * pair + 2}`;
 
@@ -154,12 +151,6 @@ export function directMonitorRoutes(o: {
   }
   return routes.map(r => ({ ...r, gain: Math.round(r.gain * 1e6) / 1e6 }));
 }
-
-/** Canaux lus par une piste armée (auto = entrée des réglages, résolue par l'appelant). */
-export const armedChannels = (spec: RecordInput | null | undefined, auto: number[]): number[] => {
-  const ch = channelsOf(spec);
-  return ch.length ? ch : auto;
-};
 
 /**
  * Sorties de la carte de chaque canal envoyé au pont : master sur 1-2, puis chaque mix

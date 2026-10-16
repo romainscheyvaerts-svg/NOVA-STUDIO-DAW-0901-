@@ -157,8 +157,6 @@ export function toggleShuffleLock(): { locked: boolean; message: string } {
 
 // ------------------------------------------------------------- positions
 
-/** Fréquence d'échantillonnage par défaut (avant que le moteur audio ne soit lancé) : celle du projet. */
-export const SAMPLE_RATE = 48000;
 let rateProvider: (() => number | undefined | null) | null = null;
 /** Le studio donne la vraie fréquence de la session (contexte audio du moteur). */
 export const setSampleRateProvider = (fn: (() => number | undefined | null) | null) => { rateProvider = fn; };
@@ -260,6 +258,3 @@ export function trimEdgeTime(a: { settings: Pick<EditModeSettings, 'mode' | 'gri
   }
   return toSample(a.rawEdge, a.sr);
 }
-
-/** Pas de la grille courante en secondes. */
-export const currentGridStep = (bpm: number): number => gridStepSeconds(current.gridSize, bpm);

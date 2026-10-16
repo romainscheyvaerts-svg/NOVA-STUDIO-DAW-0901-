@@ -23,8 +23,6 @@ import { decodeSegment, encodeSegment, fromInt24, Pcm24Crc, toInt24 } from './li
 
 /** Durée d’un morceau envoyé pendant la prise (s) : au STOP, il reste ~1 s de son à envoyer. */
 export const LT_SEGMENT_SEC = 1;
-/** Opérations de la prise en direct (ignorées par les anciennes versions de NOVA). */
-export const LT_KINDS = ['take_seg', 'take_end', 'take_ok', 'take_need', 'take_wav'] as const;
 /** Morceaux annoncés par opération au plus (rattrapage après une coupure). */
 export const LT_BATCH = 12;
 

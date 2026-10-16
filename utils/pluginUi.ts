@@ -79,4 +79,3 @@ export const PARAM_FR: Record<string, string> = {
   Depth: 'Profondeur', Spread: 'Ouverture', Manual: 'Position', Balance: 'Balance', 'Haas Delay': 'Décalage Haas',
   'Haas Mix': 'Dose Haas', 'Low Width': 'Largeur graves', 'Mid Width': 'Largeur médiums', 'High Width': 'Largeur aigus',
 };
-export const paramFr = (label: string) => PARAM_FR[label] || label;
