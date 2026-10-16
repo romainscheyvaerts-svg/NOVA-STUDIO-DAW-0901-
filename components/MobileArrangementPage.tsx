@@ -20,6 +20,7 @@ import { MobileClipGain } from './ClipGainTools';
 import { KeptTakesCard, KeptZoneApi } from './KeptTakesZone';
 import { keptLanes, lastTakeNumber } from '../utils/keptTakes';
 import { listLanes } from '../utils/playlists';
+import { duplicateClip } from '../utils/mobileDuplicate';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -336,6 +337,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       return;
     }
 
+    // Outil Dupliquer : un tap sur un clip le copie juste après lui.
+    if (activeTool === 'DUPLICATE') {
+      showNotification(duplicateClip({ trackId, clip }, onDuplicateClip).message);
+      return;
+    }
+
     if (activeTool === 'SPLIT') {
       const splitTime = xToTime(relativeX) + clip.start;
       onSplitClip?.(trackId, clip.id, splitTime);
@@ -534,15 +541,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   // Duplicate selected clip
   const handleDuplicateClip = useCallback(() => {
     if (!selectedClip) return;
-    if (onDuplicateClip) {
-      onDuplicateClip(selectedClip.trackId, selectedClip.clip.id);
-      showNotification('✨ Clip dupliqué');
-    } else if (onUpdateClip) {
-      // Fallback: create new clip after current
-      // Would need onAddClip to fully work
-      showNotification('✨ Clip dupliqué');
-    }
-  }, [selectedClip, onDuplicateClip, onUpdateClip, showNotification]);
+    // Jamais « dupliqué » sans vraie copie (utils/mobileDuplicate).
+    showNotification(duplicateClip(selectedClip, onDuplicateClip).message);
+  }, [selectedClip, onDuplicateClip, showNotification]);
 
   // Split clip at current time
   const handleSplitClip = useCallback(() => {
@@ -617,7 +618,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   }, [selectedTrackForSends, tracks, onUpdateTrack]);
 
   // Tools config - Extended
-  const tools: { id: EditTool; icon: string; label: string }[] = [
+  const tools: { id: EditTool; icon: string; label: string }[] = ([
     { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Sélection' },
     // Deux icônes distinctes (G15) : avant, deux ciseaux identiques côte à côte.
     { id: 'TRIM', icon: 'fa-arrows-left-right', label: 'Rogner' },
@@ -625,7 +626,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     { id: 'ERASE', icon: 'fa-eraser', label: 'Gomme' },
     { id: 'FADE', icon: 'fa-wave-square', label: 'Fondus' },
     { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dupliquer' },
-  ];
+  ] as { id: EditTool; icon: string; label: string }[]).filter(tl => tl.id !== 'DUPLICATE' || !!onDuplicateClip);
 
   return (
     // pb : la barre de navigation du bas (fixed, h-16) recouvrait la barre
@@ -1079,9 +1080,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </div>
       </div>
 
-      {/* === NOTIFICATION TOAST === */}
+      {/* === NOTIFICATION TOAST === (2 s, ne bloque aucun bouton : les touchers passent au travers) */}
       {notification && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 fade-in duration-200">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-in slide-in-from-top-2 fade-in duration-200" role="status">
           <div className="bg-black/90 backdrop-blur-lg border border-cyan-500/30 rounded-xl px-4 py-2 shadow-xl">
             <span className="text-sm font-bold text-white">{notification}</span>
           </div>
@@ -1140,14 +1141,15 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <span className="text-[10px] font-semibold text-white/70">PASTE</span>
             </button>
 
-            {/* Duplicate */}
-            <button
+            {/* Duplicate (seulement si l'appli sait vraiment dupliquer) */}
+            {onDuplicateClip && <button
               onClick={handleDuplicateClip}
+              data-testid="mobile-dup"
               className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
             >
               <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
               <span className="text-[10px] font-semibold text-white/70">DUP</span>
-            </button>
+            </button>}
 
             {/* Split */}
             <button
