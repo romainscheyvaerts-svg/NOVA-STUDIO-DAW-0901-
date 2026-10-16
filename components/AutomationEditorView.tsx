@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { Track, AutomationLane, AutomationPoint } from '../types';
+import { Track, AutomationLane } from '../types';
 import AutomationLaneComponent from './AutomationLane';
 import { audioEngine } from '../engine/AudioEngine';
 import { playheadStore } from '../utils/playheadStore';

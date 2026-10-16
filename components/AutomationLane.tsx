@@ -105,7 +105,6 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     const isLight = document.documentElement.getAttribute('data-theme') === 'light';
     const BG_COLOR = isLight ? '#334155' : '#16191f'; 
     const GRID_COLOR = isLight ? 'rgba(255, 255, 255, 0.1)' : '#2a2e38';
-    const GUIDE_COLOR = isLight ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.3)';
 
     // Nettoyage
     ctx.clearRect(0, 0, canvas.width, canvas.height);

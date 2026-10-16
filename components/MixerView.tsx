@@ -4,7 +4,6 @@ import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
-import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
 import { VstLateBadge } from './VstLateAlert';
 import TrackCpuBadge from './TrackCpuBadge';
@@ -60,11 +59,6 @@ const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = (
 };
 
 // Track Group Colors (inspired by Pro Tools)
-const GROUP_COLORS = [
-  '#ef4444', '#f97316', '#f59e0b', '#84cc16', 
-  '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6',
-  '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'
-];
 
 // R11 : l'ancien VUMeter lisait le SPECTRE (getByteFrequencyData) et la droite
 // recopiait la gauche. Les tranches utilisent désormais de vrais mètres
@@ -560,8 +554,6 @@ const TrackGroupHeader: React.FC<{
   const [tempName, setTempName] = useState(group.name);
   
   const groupTracks = tracks.filter(t => group.trackIds.includes(t.id));
-  const isAnyMuted = groupTracks.some(t => t.isMuted);
-  const isAnySoloed = groupTracks.some(t => t.isSolo);
   
   return (
     <div 

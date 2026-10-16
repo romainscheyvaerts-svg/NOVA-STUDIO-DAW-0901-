@@ -102,8 +102,6 @@ export interface BridgeFetched {
 }
 
 // Types pour les messages WebSocket
-type ASIOMessageHandler = (data: any) => void;
-
 interface ASIOMessageHandlers {
   onDevices?: (devices: AudioDevice[], asioDevices: AudioDevice[]) => void;
   onConfigSet?: (success: boolean, config?: ASIOConfig, error?: string) => void;
@@ -596,58 +594,6 @@ export class ASIOBridgeClient {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// AUDIO WORKLET PROCESSOR POUR LE BRIDGE
-// ─────────────────────────────────────────────────────────────────
-
-/**
- * Code pour l'AudioWorklet qui envoie/reçoit l'audio via le bridge
- * À utiliser avec registerProcessor() dans un fichier worklet séparé
- */
-export const ASIOBridgeWorkletCode = `
-class ASIOBridgeProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.inputBuffer = [];
-    this.outputBuffer = [];
-    
-    this.port.onmessage = (event) => {
-      if (event.data.type === 'output') {
-        // Audio à envoyer vers les haut-parleurs
-        this.outputBuffer.push(event.data.audio);
-      }
-    };
-  }
-
-  process(inputs, outputs, parameters) {
-    const input = inputs[0];
-    const output = outputs[0];
-
-    // Envoyer l'entrée au bridge (micro)
-    if (input.length > 0) {
-      this.port.postMessage({
-        type: 'input',
-        audio: input.map(ch => ch.slice())
-      });
-    }
-
-    // Recevoir la sortie du bridge
-    if (this.outputBuffer.length > 0 && output.length > 0) {
-      const audioData = this.outputBuffer.shift();
-      for (let ch = 0; ch < output.length; ch++) {
-        if (audioData[ch]) {
-          output[ch].set(audioData[ch]);
-        }
-      }
-    }
-
-    return true;
-  }
-}
-
-registerProcessor('asio-bridge-processor', ASIOBridgeProcessor);
-`;
-
-// ─────────────────────────────────────────────────────────────────
 // SINGLETON INSTANCE
 // ─────────────────────────────────────────────────────────────────
 
@@ -661,13 +607,6 @@ export function getASIOBridge(): ASIOBridgeClient {
     asioBridgeInstance = new ASIOBridgeClient();
   }
   return asioBridgeInstance;
-}
-
-/**
- * Créer une nouvelle instance du bridge ASIO
- */
-export function createASIOBridge(host?: string, port?: number): ASIOBridgeClient {
-  return new ASIOBridgeClient(host, port);
 }
 
 export default ASIOBridgeClient;

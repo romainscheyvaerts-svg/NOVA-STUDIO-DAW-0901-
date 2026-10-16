@@ -190,9 +190,6 @@ export function placeClip<S extends Pick<DAWState, 'tracks' | 'clipBin'>>(s: S, 
   return { state: { ...s, tracks, clipBin }, clip };
 }
 
-/** Identifiants de sons gardés par la réserve (sauvegarde, historique). */
-export const binBufferIds = (s: Pick<DAWState, 'clipBin'>): string[] => (s.clipBin || []).map(c => c.bufferId).filter((x): x is string => !!x);
-
 export const fmtDuration = (sec: number) => {
   if (!Number.isFinite(sec)) return '–';
   const m = Math.floor(sec / 60), r = sec - m * 60;

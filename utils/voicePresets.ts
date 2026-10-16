@@ -184,7 +184,6 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 
 /** Temps de correction (ms) → réglage « vitesse » de Nova Tune (0-1, ms = 300 × v²). */
 export const tuneSpeedFromMs = (ms: number) => r2(Math.sqrt(Math.max(0, ms) / 300));
-export const tuneMsFromSpeed = (v: number) => Math.round(300 * v * v);
 
 const DENOISE_PARAMS = {
   threshold: -60, range: -30, attack: 0.002, hold: 0.08, release: 0.08, scFreq: 250, flip: false,

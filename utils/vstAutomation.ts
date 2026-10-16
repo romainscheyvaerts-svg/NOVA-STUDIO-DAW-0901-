@@ -116,6 +116,3 @@ export function vstAutomationSig(track: Pick<Track, 'automationLanes' | 'automat
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(36);
 }
-
-/** La piste porte-t-elle de l'automation jouée sur un de ses VST ? */
-export const hasVstAutomation = (track: Pick<Track, 'automationLanes' | 'automationMode' | 'plugins'>): boolean => vstAutomationSig(track) !== '';

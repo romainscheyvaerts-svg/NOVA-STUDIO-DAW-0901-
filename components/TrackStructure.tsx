@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { ContextMenuItem, PluginInstance, Track, TrackSend, TrackType } from '../types';
 import {
   ancestorsOf, busesOf, busListeners, createFolder, createVca, dissolveFolder, folderDescendants, isEffectivelyInactive,
-  moveIntoFolder, moveOutOfFolder, outputOf, PLUGIN_STATE_LABEL, pluginClickAction, pluginState, PluginState,
+  moveIntoFolder, moveOutOfFolder, outputOf, pluginClickAction, pluginState, PluginState,
   SEND_SLOT_LETTERS, sendSlots, setFolderOpen, setSendSlot, setTrackInputBus, setTrackOutput, setTracksHidden,
   setTracksInactive, showAndActivate, vcaMembers,
 } from '../utils/trackStructure';
@@ -648,6 +648,3 @@ export const MixerStructureButtons: React.FC<{ tracks: Track[] }> = ({ tracks })
     </>
   );
 };
-
-/** Pistes d'un envoi en grand : utile pour savoir quel emplacement est libre. */
-export const sendSlotOfTrack = (t: Track, sendId: string) => sendSlots(t.sends).findIndex(s => s?.id === sendId);

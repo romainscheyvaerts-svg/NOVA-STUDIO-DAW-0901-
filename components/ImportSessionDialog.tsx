@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { DAWState, PluginInstance, PluginType, Track } from '../types';
+import type { DAWState, PluginInstance, PluginType } from '../types';
 import { TrackType } from '../types';
 import {
   ALL_PARTS, applyImport, ImportChoice, ImportPart, ImportReport, importSummary, PART_LABELS, PART_PRESETS, planImport, SameNameMode,

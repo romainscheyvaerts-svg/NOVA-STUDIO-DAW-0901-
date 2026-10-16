@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { fadeInOnInsert, smoothSet } from './vocalDspUtils';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, type KnobProps } from './hw';
 import { useHwCanvas, hwCtx } from './hw/screens';
 
@@ -51,9 +51,6 @@ export class StereoSpreaderNode {
   public input: GainNode;
   public output: GainNode;
 
-  // Input splitter
-  private inputSplitter: ChannelSplitterNode;
-  
   // Multi-band crossover filters
   // Passe-haut sur le signal Side : au-dessous de cette frequence il ne reste
   // que le Mid, donc un grave strictement mono. C'est ce que promet le bouton
@@ -68,33 +65,18 @@ export class StereoSpreaderNode {
   private highBandHP: BiquadFilterNode;
   private highBandHP2: BiquadFilterNode;
   // Gains de sortie de chaque bande du signal Side, et voie directe pleine bande.
-  // Passe-tout de compensation sur la voie aigu (voir le cablage).
-  private compAigu1!: BiquadFilterNode;
-  private compAigu2!: BiquadFilterNode;
   private gLow!: GainNode;
   private gMid!: GainNode;
   private gHigh!: GainNode;
   private gDirect!: GainNode;
   
-  // M/S processing for each band
-  private lowMidGain: GainNode;
-  private lowSideGain: GainNode;
-  private midMidGain: GainNode;
-  private midSideGain: GainNode;
-  private highMidGain: GainNode;
-  private highSideGain: GainNode;
-  
   // Haas delay
   private haasDelayL: DelayNode;
   private haasDelayR: DelayNode;
-  private haasGain: GainNode;
   
   // Balance
   private balanceGainL: GainNode;
   private balanceGainR: GainNode;
-  
-  // Output merger
-  private outputMerger: ChannelMergerNode;
   
   // Analyzers for metering
   public analyzerL: AnalyserNode;
@@ -139,9 +121,6 @@ export class StereoSpreaderNode {
     this.correlationAnalyzer = ctx.createAnalyser();
     this.correlationAnalyzer.fftSize = 2048;
     
-    // Input splitter
-    this.inputSplitter = ctx.createChannelSplitter(2);
-    
     // Crossover filters (Linkwitz-Riley style - cascaded for 24dB/oct)
     this.lowBandLP = ctx.createBiquadFilter();
     this.lowBandLP.type = 'lowpass';
@@ -172,25 +151,13 @@ export class StereoSpreaderNode {
     this.highBandHP2.type = 'highpass';
     this.highBandHP2.Q.value = 0.707;
     
-    // M/S gains for each band
-    this.lowMidGain = ctx.createGain();
-    this.lowSideGain = ctx.createGain();
-    this.midMidGain = ctx.createGain();
-    this.midSideGain = ctx.createGain();
-    this.highMidGain = ctx.createGain();
-    this.highSideGain = ctx.createGain();
-    
     // Haas effect
     this.haasDelayL = ctx.createDelay(0.1);
     this.haasDelayR = ctx.createDelay(0.1);
-    this.haasGain = ctx.createGain();
     
     // Balance
     this.balanceGainL = ctx.createGain();
     this.balanceGainR = ctx.createGain();
-    
-    // Output merger
-    this.outputMerger = ctx.createChannelMerger(2);
     
     this.setupChain();
     // Plus de setInterval de mesure : il tournait 20 fois par seconde pour
@@ -304,8 +271,6 @@ export class StereoSpreaderNode {
     this.gMid.connect(sideGain);
 
     // Haas delay on one channel
-    const haasDelay = this.ctx.createDelay(0.1);
-    const haasMix = this.ctx.createGain();
     
     // M/S decode to stereo
     // L' = M + S
@@ -356,7 +321,6 @@ export class StereoSpreaderNode {
   }
 
   private applyParams() {
-    const now = this.ctx.currentTime;
     const safe = (v: number, def: number) => Number.isFinite(v) ? v : def;
     
     const width = safe(this.params.width, 1.0);

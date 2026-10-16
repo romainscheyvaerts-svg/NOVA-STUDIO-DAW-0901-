@@ -8,7 +8,7 @@
  * cours pour le piano roll). Tests : tests/chordTrack.test.ts.
  */
 import { useSyncExternalStore } from 'react';
-import { CHORD_QUALITIES, chordAt, ChordEvent, ChordQuality, detectChords } from './chordDetect';
+import { CHORD_QUALITIES, ChordEvent, ChordQuality, detectChords } from './chordDetect';
 import { monoSlice } from './spectrum';
 
 export type { ChordEvent } from './chordDetect';
@@ -70,9 +70,6 @@ export function replaceRange(chords: ChordEvent[], from: number, to: number, fou
   }
   return sanitizeChords([...keep, ...found]);
 }
-
-/** Accord joué à l'instant t (s). */
-export const chordAtTime = (chords: ChordEvent[] | undefined, t: number) => chordAt(chords, t);
 
 // ---------------------------------------------------------------------------
 // Collaboration

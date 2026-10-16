@@ -25,7 +25,6 @@ export type MixFields = Record<string, unknown>;
 export const PLUGIN_FIELD = 'plugin:';
 /** Automation (R7/R8/R9) : chaque couloir à part (« auto:<id> »), leur liste et le mode de lecture. */
 export const AUTO_FIELD = 'auto:';
-const BASE_FIELDS = ['volume', 'pan', 'isMuted', 'outputTrackId', 'sends', 'pluginOrder', 'structure', 'strip', 'autoOrder', 'automationMode'] as const;
 
 /**
  * Tranche de console (trim d'entrée, inversion de phase, somme mono, largeur
@@ -248,8 +247,6 @@ export const touchesAutomation = (fields: MixFields): boolean =>
 
 export const touchesPlugins = (fields: MixFields): boolean =>
   Object.keys(fields).some(k => k === 'pluginOrder' || k.startsWith(PLUGIN_FIELD));
-
-export const isBaseField = (f: string): boolean => (BASE_FIELDS as readonly string[]).includes(f);
 
 // ------------------------------------------- gain de clip, Heal, boucle (R5) en collaboration
 

@@ -1,6 +1,6 @@
 
 import { supabase, catalogSupabase } from './supabase';
-import { User, DAWState, Clip, Instrument, Instrumental, PendingUpload, Track } from '../types';
+import { DAWState, Instrument, Instrumental, PendingUpload } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { projectRateOf } from '../utils/projectRate';
@@ -816,7 +816,7 @@ export class SupabaseManager {
     const safeFilename = this.sanitizeFilename(filename.replace(/\.wav$/i, '')) + '.wav';
     const path = `${this.currentUser.id}/${safeProjectName}/${safeFilename}`;
     const BUCKET_NAME = 'audio-files'; 
-    const { data, error } = await supabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: true });
+    const { error } = await supabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: true });
     if (error) { console.error("Erreur Upload Storage:", error); throw error; }
     const { data: publicUrlData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path);
     return publicUrlData.publicUrl;
@@ -830,7 +830,7 @@ export class SupabaseManager {
     const filename = `${Date.now()}-${safeName}.${extension}`;
     const path = `${folder}/${filename}`;
     const BUCKET_NAME = 'instruments'; 
-    const { data, error } = await catalogSupabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: false });
+    const { error } = await catalogSupabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: false });
     if (error) { console.error(`Erreur upload ${folder}:`, error); throw error; }
     const { data: publicUrlData } = catalogSupabase.storage.from(BUCKET_NAME).getPublicUrl(path);
     return publicUrlData.publicUrl;

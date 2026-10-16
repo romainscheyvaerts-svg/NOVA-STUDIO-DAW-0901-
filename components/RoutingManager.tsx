@@ -1,6 +1,5 @@
 
 import { Track, TrackType } from '../types';
-import { trackDisplayName } from '../utils/sendLabels';
 
 /**
  * RoutingManager
@@ -70,37 +69,4 @@ export const getValidDestinations = (sourceTrackId: string, tracks: Track[]): Tr
     if (b.id === 'master') return 1;
     return a.name.localeCompare(b.name);
   });
-};
-
-export const getRouteLabel = (trackId: string, tracks: Track[]): string => {
-    if (trackId === 'master' || !trackId) return 'Master';
-    const t = tracks.find(trk => trk.id === trackId);
-    return t ? trackDisplayName(t, tracks) : 'Non reliée';
-};
-
-/**
- * Récupère les entrées disponibles (Inputs)
- * Pour l'instant, on liste "No Input" et "Microphone Default"
- * Dans le futur, on pourra lister les périphériques physiques via enumerateDevices
- */
-export const getAvailableInputs = async (): Promise<{id: string, label: string}[]> => {
-    const inputs = [
-        { id: 'none', label: 'No Input' },
-        { id: 'mic-default', label: 'Mic / Line 1' }
-    ];
-    
-    // Si on voulait lister tous les périphériques :
-    try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const audioInputs = devices.filter(d => d.kind === 'audioinput');
-        audioInputs.forEach((d, i) => {
-            if (d.deviceId !== 'default') {
-                inputs.push({ id: d.deviceId, label: d.label || `Input ${i + 2}` });
-            }
-        });
-    } catch(e) {
-        // Ignorer si pas de permissions encore
-    }
-    
-    return inputs;
 };

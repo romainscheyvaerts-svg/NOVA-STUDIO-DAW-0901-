@@ -3,7 +3,7 @@ import { waitPaid, billingStatus, loadPricing, exportAccess, forgetExportAccess,
 import { catalogIdsOf, projectUsesKits } from '../utils/exportProject';
 import ExportPaywall from './ExportPaywall';
 import React, { useState, useEffect } from 'react';
-import { DAWState, Track } from '../types';
+import { DAWState } from '../types';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
 import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';

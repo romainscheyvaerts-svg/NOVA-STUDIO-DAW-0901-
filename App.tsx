@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
 import { pickCleanTarget } from './utils/voiceCleanLabels';
@@ -10,7 +10,6 @@ import { dspMonitor, safeModeStore } from './engine/dspMonitor';
 import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
 import TransportBar from './components/TransportBar';
 import { LoudnessPanelHost, loudnessPanel } from './components/meters/LoudnessPanel';
-import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
 const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
@@ -67,7 +66,6 @@ const PluginManager = lazy(() => import('./components/PluginManager'));
 import { supabaseManager } from './services/SupabaseManager';
 import { dailyChallengeId } from './utils/dailyChallenge';
 import { detectSections, sectionColor } from './utils/songSections';
-import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge, BridgePlugin, SeparationResult } from './services/NovaBridge';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
@@ -83,7 +81,7 @@ import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
-import { canBakeTrack, hasVst, freezeSignature, trackBufferIds, isTrackFrozen } from './utils/freeze';
+import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
 import { useFrozenRefresh } from './hooks/useFrozenRefresh';
 import FrozenStaleNotice from './components/FrozenStaleNotice';
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
@@ -108,13 +106,13 @@ import { savedAgo } from './utils/revertToSaved';
 const RevertToSavedDialog = lazy(() => import('./components/RevertToSavedDialog'));
 import { midiInput } from './services/MidiInput';
 import { isMidiRecordTrack, applyMidiTake, applyLoopTake, MODE_LABELS } from './utils/midiRecord';
-import { midiLearn, LearnHit } from './utils/midiLearn';
+import { LearnHit } from './utils/midiLearn';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
-import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, tempoSignature } from './utils/tempoMap';
+import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp } from './utils/collabTempo';
 import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
@@ -156,7 +154,7 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
-import { listTakes, selectTakeActions, takeNumberOf, compTakeInZone, activeTakeInZone, CompZone, fmtTime } from './utils/takes';
+import { listTakes, compTakeInZone, activeTakeInZone, CompZone } from './utils/takes';
 import { playheadStore } from './utils/playheadStore';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
@@ -173,6 +171,10 @@ import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
 import ProGateModal from './components/ProGateModal';
+import { manageSubscription } from './components/ManageSubscription';
+import { knownSubscriber } from './utils/billingPortal';
+import { useMakeMusicAccount } from './hooks/useMakeMusicAccount';
+import { accountForBar } from './utils/accountDisplay';
 import CaptureGuard from './components/CaptureGuard';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, uploadParts, signPart, putPart, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
@@ -213,7 +215,7 @@ import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
 import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
 import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
 import { StructureTracksContext } from './components/TrackStructure';
-import { applyMixFields, touchesPlugins, touchesAutomation, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
+import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import { CollabRtc, RtcSignal, RtcQuality } from './services/CollabRtc';
 import { mixQualityLabel } from './utils/opusSdp';
@@ -252,7 +254,6 @@ import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment, isExport
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
-import { countVoiceTakes } from './utils/sessionSummary';
 import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
 import BeatLoadBanner from './components/BeatLoadBanner';
@@ -263,7 +264,7 @@ import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
 import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
-  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud, sha1 as sha1Cloud,
+  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, signInAccount, call as callCloud, sha1 as sha1Cloud,
 } from './services/SessionCloud';
 // Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
 const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
@@ -288,7 +289,6 @@ import { KIT_BAKE_REFUSAL, KIT_SOUND_DROP_EVENT, kitIndexIfLoaded, loadKitIndex,
 import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils/drumPatterns';
 import { padLoadKey } from './utils/drumSamples';
 import { loadPadBuffer } from './utils/padBuffers';
-import { loadDrumSound } from './utils/drumSounds';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
@@ -309,13 +309,13 @@ import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
-import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
+import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
 import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/trackPlaylists';
 import { useProToolsEcarts } from './hooks/useProToolsEcarts';
 import { useProToolsEcarts2 } from './hooks/useProToolsEcarts2';
 import { soloModeStore } from './utils/soloModes';
-import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
-import { compSwipe, compTapRange } from './utils/comping';
+import { droppedPassNote, patchMeta, nextTakeNumber, listLanes, duplicateTake, renameTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
+import { compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
 import { clearKept, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
@@ -1051,6 +1051,9 @@ function Studio() {
   };
 
   const [user, setUser] = useState<User | null>(defaultUser);
+  // Un seul compte affiché : l'ancien compte principal, sinon le compte Make Music (utils/accountDisplay).
+  const makeMusicAccount = useMakeMusicAccount();
+  const barUser = useMemo(() => accountForBar(user, makeMusicAccount), [user, makeMusicAccount]);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
@@ -1558,8 +1561,9 @@ function Studio() {
       try { await bakeVstBeforeSave(); await autosaveNow('manual', true); } catch (e) { console.warn('[Déconnexion] gel', e); }
     }
     await supabaseManager.signOut(); setUser(null);
-    // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
-    if (isNovaDesktop()) { try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ } }
+    // Une seule connexion : « Déconnexion » ferme aussi le compte Make Music (paiements, collaboration),
+    // sinon la barre le montrerait encore. Appli Windows : la porte de connexion revient.
+    try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ }
   };
   // Instrus / mélodies ACHETÉES sur studiomakemusic.com (compte Make Music) : avant,
   // le DAW ne les lisait jamais → l'export restait bloqué même après l'achat.
@@ -4003,8 +4007,6 @@ function Studio() {
     }, 50);
   }, [setState]);
   // --- Groupes de pistes (l'interface existait dans le mixer, sans aucun handler)
-  const GROUP_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
-                        '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'];
 
   // Groupes Pro Tools (R12, utils/editGroups) : une piste peut être dans plusieurs groupes.
   const handleCreateGroup = useCallback((trackIds: string[]) => {
@@ -10245,6 +10247,7 @@ function Studio() {
       )}
       <LandingPage 
         user={user}
+        account={barUser}
         onEnterStudio={handleEnterStudio}
         onEnterWithInstrumental={handleEnterWithInstrumental}
         onEnterWithMelody={handleEnterWithMelody}
@@ -10326,6 +10329,7 @@ function Studio() {
       a('Fichier', 'pal.sessionSetup', "Réglages de la session : fréquence d'échantillonnage", () => openSessionPanel('reglages'), { pt: 'Session Setup', keywords: 'fréquence échantillonnage sample rate 44.1 48 96 khz' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
       a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      ...(knownSubscriber() ? [a('Fichier', 'pal.manageSubscription', 'Gérer mon abonnement Nova Pro (carte, factures, résiliation)', () => { void manageSubscription().then(e => { if (e) setAiNotification(`⚠️ ${e}`); }); }, { keywords: 'abonnement résilier annuler arrêter facture carte paiement stripe pro compte' })] : []),
       a('Fichier', 'pal.lyricClip', '🎬 Clip pour TikTok / Reels (paroles synchronisées)', () => setLyricClipOpen(true), { keywords: 'clip vidéo video tiktok reels instagram paroles karaoké lyrics mp4 vertical' }),
       a('Fichier', 'pal.videoTake', '🎥 Filmer la prise (caméra, vidéo calée sur le son)', () => setVideoTakeOpen(true), { keywords: 'caméra camera webcam filmer vidéo video prise performance selfie video mix tiktok reels' }),
       a('Fichier', 'pal.sendStudio', 'Envoyer au studio Make Music (projet, stems, notes, réservation)', () => setStudioSendOpen(true), { keywords: 'studio make music réserver réservation envoyer ingé stems session' }),
@@ -10437,7 +10441,7 @@ function Studio() {
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
-          user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
+          user={barUser} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
           onImportAudio={handleNewAudioImport}
           isMobileLayout={isMobile}

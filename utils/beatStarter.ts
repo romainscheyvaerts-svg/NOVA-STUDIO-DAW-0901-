@@ -19,7 +19,7 @@ import { newChordId, replaceRange } from './chordTrack';
 import type { DrumMachine, DrumRow } from './drumKits';
 import { makeDrumMachine, drumPadsFor } from './drumKits';
 import { commitActive, drumSongClips, rowStepsPerBar, type StepRate } from './drumPatterns';
-import { applyKitDef, KIT_PAD_LAYOUT, type KitDef, type KitIndex, type KitRole } from './drumKitLibrary';
+import { applyKitDef, KIT_PAD_LAYOUT, type KitDef, type KitIndex } from './drumKitLibrary';
 import { BASS808_TRACK_ID, kit808Style } from './bass808';
 import { DEFAULT_SAMPLER, normalizeSampler } from './melodicSampler';
 import { settingsForInstrument, instrumentPreset } from './instrumentPresets';

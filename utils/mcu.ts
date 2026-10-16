@@ -22,8 +22,6 @@ import {
  * Logique pure : tests/controlSurface.test.ts.
  */
 
-/** En-tête SysEx Mackie (fabricant 00 00 66) + modèle (0x14 = MCU principale). */
-export const MCU_SYSEX = [0xf0, 0x00, 0x00, 0x66, 0x14];
 export const MCU_LCD_WIDTH = 56;
 
 /** Notes des boutons par tranche (base + n° de tranche). */

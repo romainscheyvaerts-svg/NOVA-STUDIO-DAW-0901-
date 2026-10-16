@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Marker } from '../types';
 import { lyricBlocks, prompterLine, regionAnchors } from '../utils/lyricsTiming';
 import { cabinButtons, cabinLink, cabinPosition, type CabinCmd, type CabinState } from '../utils/cabinRemote';

@@ -9,7 +9,7 @@ import {
 } from '../utils/clipGain';
 import { gridStepSeconds, snapToGrid } from '../utils/grid';
 import { LANE_HEIGHT } from '../utils/automationDraw';
-import { normalize, paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
+import { paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
 import { canvasTheme } from '../utils/canvasTheme';
 import { getEditCommands, bufferDurationOf } from '../hooks/useEditCommands';
 import {

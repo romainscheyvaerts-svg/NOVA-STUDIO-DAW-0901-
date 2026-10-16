@@ -324,7 +324,6 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     setMenu({ kind, x: Math.max(8, Math.min(window.innerWidth - w - 8, r.left)), y: r.bottom + 6 });
   };
   const getRowFromY = (y: number, scrollTop: number) => Math.max(0, Math.min(rows.length - 1, Math.floor((y + scrollTop) / currentRowHeight)));
-  const getPitchFromY = (y: number, scrollTop: number) => rows[getRowFromY(y, scrollTop)];
   const getYFromPitch = (pitch: number) => rowOf(pitch) * currentRowHeight;
   const getTimeFromX = (x: number, scrollLeft: number) => (x + scrollLeft) / zoomX;
 

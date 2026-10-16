@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { registryBrowserItems } from '../engine/pluginRegistry';
 import MobileContainer from './MobileContainer';
-import { PluginType, User, PluginMetadata } from '../types';
+import { PluginType, User } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
 import { useSimpleMode } from '../utils/simpleMode';
 import SoundLibrary from './SoundLibrary';

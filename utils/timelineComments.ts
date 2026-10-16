@@ -157,11 +157,6 @@ export function editText(c: TimelineComment, text: string, clock: HybridClock): 
   return { ...c, text: { v: cleanText(text), s: clock.tick() } };
 }
 
-export function movePos(c: TimelineComment, time: number, end: number | null, clock: HybridClock): TimelineComment {
-  const t = r6(Math.max(0, time));
-  return { ...c, pos: { v: { t, end: finite(end) && end > t + 1e-3 ? r6(end) : null }, s: clock.tick() } };
-}
-
 // ─── Fusion ────────────────────────────────────────────────────────────────────
 
 const replyKey = (r: CommentReply) => `${String(r.createdAt).padStart(15, '0')}|${r.id}`;

@@ -4,15 +4,13 @@
  * Professional MIDI processing inspired by Ableton Live and Logic Pro
  * 
  * Features:
- * - Arpeggiator (multiple patterns, rates, gate)
+ * - Arpeggiator patterns (arpSequence, figé en notes par utils/midiTools)
  * - Chord Generator (various chord types)
  * - Scale Quantizer
- * - Humanizer (timing/velocity variations)
  */
 
 import { CHORD_INTERVALS as SHARED_CHORD_INTERVALS } from '../utils/scales';
 
-import { MidiNote } from '../types';
 
 // ============================================
 // ARPEGGIATOR (inspired by Ableton/Logic)
@@ -32,32 +30,6 @@ export type ArpPattern =
 
 export type ArpRate = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4T' | '1/8T' | '1/16T';
 
-export interface ArpeggiatorSettings {
-  enabled: boolean;
-  pattern: ArpPattern;
-  rate: ArpRate;
-  gate: number;        // 0-200% (note length relative to rate)
-  octaves: number;     // 1-4 octaves
-  swing: number;       // -100 to +100
-  velocity: 'AS_PLAYED' | 'FULL' | 'ACCENT';
-  accentEvery: number; // Accent every N notes (0 = off)
-  hold: boolean;       // Hold notes after release
-  retrigger: boolean;  // Restart pattern on new note
-}
-
-export const DEFAULT_ARP_SETTINGS: ArpeggiatorSettings = {
-  enabled: false,
-  pattern: 'UP',
-  rate: '1/8',
-  gate: 80,
-  octaves: 1,
-  swing: 0,
-  velocity: 'AS_PLAYED',
-  accentEvery: 0,
-  hold: false,
-  retrigger: true,
-};
-
 // Rate to beat multiplier
 const RATE_TO_BEATS: Record<ArpRate, number> = {
   '1/1': 4,
@@ -70,96 +42,6 @@ const RATE_TO_BEATS: Record<ArpRate, number> = {
   '1/8T': 0.5 / 1.5,
   '1/16T': 0.25 / 1.5,
 };
-
-class Arpeggiator {
-  private settings: ArpeggiatorSettings = { ...DEFAULT_ARP_SETTINGS };
-  private heldNotes: number[] = [];
-  private currentIndex: number = 0;
-  private lastNoteTime: number = 0;
-  private patternSequence: number[] = [];
-  
-  public setSettings(settings: Partial<ArpeggiatorSettings>) {
-    this.settings = { ...this.settings, ...settings };
-    if (settings.pattern || settings.octaves) {
-      this.buildPattern();
-    }
-  }
-  
-  public getSettings(): ArpeggiatorSettings {
-    return { ...this.settings };
-  }
-  
-  public noteOn(pitch: number) {
-    if (!this.heldNotes.includes(pitch)) {
-      this.heldNotes.push(pitch);
-      this.heldNotes.sort((a, b) => a - b);
-      this.buildPattern();
-      if (this.settings.retrigger) {
-        this.currentIndex = 0;
-      }
-    }
-  }
-  
-  public noteOff(pitch: number) {
-    if (!this.settings.hold) {
-      this.heldNotes = this.heldNotes.filter(n => n !== pitch);
-      this.buildPattern();
-    }
-  }
-  
-  public releaseAll() {
-    this.heldNotes = [];
-    this.patternSequence = [];
-    this.currentIndex = 0;
-  }
-  
-  public hasNotes(): boolean {
-    return this.heldNotes.length > 0;
-  }
-  
-  /**
-   * Get next note(s) to play based on current time and BPM
-   */
-  public process(currentTime: number, bpm: number): { pitch: number; velocity: number; duration: number }[] {
-    if (!this.settings.enabled || this.patternSequence.length === 0) {
-      return [];
-    }
-    
-    const beatDuration = 60 / bpm;
-    const stepDuration = beatDuration * RATE_TO_BEATS[this.settings.rate];
-    
-    // Apply swing
-    const swingOffset = this.currentIndex % 2 === 1 
-      ? stepDuration * (this.settings.swing / 100) * 0.3 
-      : 0;
-    
-    const timeSinceLastNote = currentTime - this.lastNoteTime;
-    
-    if (timeSinceLastNote >= stepDuration + swingOffset) {
-      const pitch = this.patternSequence[this.currentIndex];
-      const noteDuration = stepDuration * (this.settings.gate / 100);
-      
-      // Velocity handling
-      let velocity = 100;
-      if (this.settings.velocity === 'ACCENT' && this.settings.accentEvery > 0) {
-        velocity = this.currentIndex % this.settings.accentEvery === 0 ? 127 : 80;
-      } else if (this.settings.velocity === 'FULL') {
-        velocity = 127;
-      }
-      
-      this.currentIndex = (this.currentIndex + 1) % this.patternSequence.length;
-      this.lastNoteTime = currentTime;
-      
-      return [{ pitch, velocity, duration: noteDuration }];
-    }
-    
-    return [];
-  }
-  
-  private buildPattern() {
-    this.patternSequence = arpSequence(this.heldNotes, this.settings.pattern, this.settings.octaves);
-  }
-}
 
 /**
  * Suite de notes jouée par l'arpégiateur (pure, réutilisée par l'outil
@@ -416,113 +298,3 @@ export function quantizePitchToScale(pitch: number, rootNote: number, scale: Sca
 
 /** Notes de la gamme (intervalles depuis la tonique). */
 export const scaleIntervals = (scale: ScaleType): number[] => SCALE_INTERVALS[scale] || SCALE_INTERVALS.CHROMATIC;
-
-// ============================================
-// HUMANIZER (timing/velocity variations)
-// ============================================
-
-export interface HumanizerSettings {
-  enabled: boolean;
-  timingVariation: number;   // 0-100% (randomize timing)
-  velocityVariation: number; // 0-100% (randomize velocity)
-  maxTimingMs: number;       // Max timing deviation in ms
-}
-
-class Humanizer {
-  private settings: HumanizerSettings = {
-    enabled: false,
-    timingVariation: 30,
-    velocityVariation: 20,
-    maxTimingMs: 30,
-  };
-  
-  public setSettings(settings: Partial<HumanizerSettings>) {
-    this.settings = { ...this.settings, ...settings };
-  }
-  
-  public humanize(note: { time: number; velocity: number }): { time: number; velocity: number } {
-    if (!this.settings.enabled) return note;
-    
-    // Random timing offset
-    const timingOffset = (Math.random() - 0.5) * 2 * 
-      (this.settings.timingVariation / 100) * 
-      (this.settings.maxTimingMs / 1000);
-    
-    // Random velocity variation
-    const velocityOffset = (Math.random() - 0.5) * 2 * 
-      (this.settings.velocityVariation / 100) * 40;
-    
-    return {
-      time: note.time + timingOffset,
-      velocity: Math.max(1, Math.min(127, Math.round(note.velocity + velocityOffset))),
-    };
-  }
-}
-
-// ============================================
-// MAIN SERVICE
-// ============================================
-
-class MidiEffectsService {
-  private static instance: MidiEffectsService;
-  
-  public arpeggiator = new Arpeggiator();
-  public chordGenerator = new ChordGenerator();
-  public scaleQuantizer = new ScaleQuantizer();
-  public humanizer = new Humanizer();
-  
-  private constructor() {}
-  
-  public static getInstance(): MidiEffectsService {
-    if (!MidiEffectsService.instance) {
-      MidiEffectsService.instance = new MidiEffectsService();
-    }
-    return MidiEffectsService.instance;
-  }
-  
-  /**
-   * Process a MIDI note through all enabled effects
-   */
-  public processNoteOn(
-    pitch: number, 
-    velocity: number
-  ): { pitch: number; velocity: number; delay: number }[] {
-    // 1. Scale quantize
-    const quantizedPitch = this.scaleQuantizer.quantize(pitch);
-    
-    // 2. Generate chord
-    let notes = this.chordGenerator.generateChord(quantizedPitch, velocity);
-    
-    // 3. If arpeggiator is on, just add notes to arp (arp handles output separately)
-    if (this.arpeggiator.getSettings().enabled) {
-      notes.forEach(n => this.arpeggiator.noteOn(n.pitch));
-      return []; // Arpeggiator will output notes via process()
-    }
-    
-    // 4. Humanize
-    notes = notes.map(n => ({
-      ...n,
-      ...this.humanizer.humanize({ time: 0, velocity: n.velocity }),
-    }));
-    
-    return notes;
-  }
-  
-  public processNoteOff(pitch: number) {
-    if (this.arpeggiator.getSettings().enabled) {
-      const quantizedPitch = this.scaleQuantizer.quantize(pitch);
-      // Also release chord notes
-      const chordNotes = this.chordGenerator.generateChord(quantizedPitch, 100);
-      chordNotes.forEach(n => this.arpeggiator.noteOff(n.pitch));
-    }
-  }
-  
-  /**
-   * Process arpeggiator (call this in the audio loop)
-   */
-  public processArpeggiator(currentTime: number, bpm: number) {
-    return this.arpeggiator.process(currentTime, bpm);
-  }
-}
-
-export const midiEffectsService = MidiEffectsService.getInstance();

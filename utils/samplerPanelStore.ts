@@ -10,7 +10,6 @@ const emit = () => listeners.forEach(l => l());
 
 export const openSamplerPanel = (trackId: string) => { openTrackId = trackId; emit(); };
 export const closeSamplerPanel = () => { openTrackId = null; emit(); };
-export const getSamplerPanelTrack = () => openTrackId;
 
 export function useSamplerPanelTrack(): string | null {
   return useSyncExternalStore(

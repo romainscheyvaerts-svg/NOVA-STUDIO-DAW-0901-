@@ -20,7 +20,6 @@ export const LUFS_FLOOR = -70;
 const ABS_GATE_E = Math.pow(10, (LUFS_FLOOR + 0.691) / 10);
 
 export const energyToLufs = (e: number): number => (e > 0 ? -0.691 + 10 * Math.log10(e) : -Infinity);
-export const lufsToEnergy = (l: number): number => Math.pow(10, (l + 0.691) / 10);
 
 /** Moyenne des énergies au-dessus des deux portillons (BS.1770-4) ; -Infinity si rien ne passe. */
 export function gatedLoudness(blocks: ArrayLike<number>, count: number, relativeLu = -10): number {

@@ -81,5 +81,3 @@ export function runEditCommand(id: EditCommandId, arg?: any): boolean {
   }
   return false;
 }
-
-export const hasEditCommand = (id: EditCommandId) => (stacks.get(id)?.length || 0) > 0;

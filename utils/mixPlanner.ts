@@ -224,13 +224,6 @@ const setPos = (out: PluginSetting[], p: KnownPlugin, role: string, pos: number,
   return true;
 };
 
-const setText = (out: PluginSetting[], p: KnownPlugin, role: string, wanted: RegExp, why: string) => {
-  const prm = roleParam(p, role);
-  const v = prm?.values?.find(x => wanted.test(x));
-  if (!prm || !v) return false;
-  out.push({ name: prm.name, text: v, why });
-  return true;
-};
 
 const bypassOff = (out: PluginSetting[], p: KnownPlugin) => {
   const prm = roleParam(p, 'bypass');

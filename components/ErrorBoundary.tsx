@@ -1,7 +1,6 @@
 import { logClientError } from '../utils/errorLog';
 import { openFeedback } from '../services/feedback';
 import React, { ErrorInfo, ReactNode } from 'react';
-import { ContextMenuItem } from '../types';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;

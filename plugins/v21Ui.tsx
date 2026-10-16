@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { V21ParamSpec, V21Preset } from '../engine/v21Params';
 import { panToText } from '../utils/db';
-import { Faceplate, HwPresets, HwWindow, Knob, ToggleSwitch, type HwFinish, type KnobProps } from './hw';
+import { Faceplate, HwPresets, HwWindow, Knob, type HwFinish, type KnobProps } from './hw';
 
 /**
  * Briques communes des fenêtres V21 (Harmoniseur, Voix grave / aiguë, Tape
@@ -53,25 +53,6 @@ export function useV21Params<T extends Record<string, any>>(defaults: T, initial
 }
 
 /**
- * Mesures du nœud (hauteur, vitesse…), lues ~15 fois par seconde. Redessine le
- * composant à chaque lecture : à réserver aux petits afficheurs ; pour une
- * valeur seule, préférer useV21Meter (ne redessine que si elle change).
- */
-export function useV21Meters(node: any) {
-  const [m, setM] = useState<any>({});
-  useEffect(() => {
-    let raf = 0, lastT = 0;
-    const loop = (t: number) => {
-      if (t - lastT > 66) { lastT = t; const mm = node?.getMeters?.(); if (mm) setM(mm); }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [node]);
-  return m;
-}
-
-/**
  * Une mesure du nœud (nombre, texte, booléen), lue ~15 fois par seconde : le
  * composant ne se redessine que si la valeur change. À utiliser dans de petits
  * afficheurs (LED, LCD) pour que la façade entière ne se redessine pas.
@@ -106,19 +87,6 @@ export const V21Knob: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v
   <Knob paramId={spec.id} label={label || spec.label} ariaLabel={spec.label} hint={spec.hint} min={spec.min} max={spec.max} step={spec.step}
     value={Number.isFinite(+value) ? +value : (defaultValue ?? spec.min)} defaultValue={defaultValue} onChange={onChange} format={v => formatV21(spec, v)}
     bipolar={spec.min < 0 && spec.max > 0} {...rest} />
-);
-
-/** Compatibilité : un ancien « curseur » V21 est désormais un bouton rotatif. */
-export const V21Slider: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; accent?: string; label?: string; compact?: boolean }> = ({ spec, value, onChange, label }) => (
-  <V21Knob spec={spec} value={value} onChange={onChange} label={label} size="M" cap="black" ticks={11} />
-);
-
-/** Interrupteur à levier 2 positions pour un réglage oui / non. */
-export const V21Toggle: React.FC<{ spec: V21ParamSpec; value: number; onChange: (v: number) => void; onLabel?: string; offLabel?: string; label?: string }> = ({ spec, value, onChange, onLabel = 'Oui', offLabel = 'Non', label }) => (
-  <span data-nova-param={spec.id}>
-    <ToggleSwitch label={label || spec.label} hint={spec.hint} value={value >= 0.5 ? 1 : 0} onChange={onChange}
-      options={[{ v: 1, label: onLabel }, { v: 0, label: offLabel }]} />
-  </span>
 );
 
 /**

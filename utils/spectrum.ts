@@ -72,15 +72,6 @@ export function decimate(x: ArrayLike<number>, factor: number): Float32Array {
   return out;
 }
 
-/** Canaux mélangés en mono. */
-export function mixToMono(channels: Float32Array[]): Float32Array {
-  if (channels.length === 1) return channels[0];
-  const n = channels[0]?.length || 0;
-  const out = new Float32Array(n);
-  for (const c of channels) for (let i = 0; i < n; i++) out[i] += c[i] / channels.length;
-  return out;
-}
-
 /** Tranche [start, end[ (s) d'un AudioBuffer, en mono. */
 export function monoSlice(buffer: { sampleRate: number; length: number; numberOfChannels: number; getChannelData(c: number): Float32Array }, start: number, end: number): Float32Array {
   const sr = buffer.sampleRate;

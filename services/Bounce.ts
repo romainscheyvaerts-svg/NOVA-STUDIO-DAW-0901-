@@ -18,7 +18,6 @@ import { bakeRefusal, canBakeTrack, freezeIndex, isFreezeStale, isVst } from '..
 import { splitClipsAt, idGenerator } from '../utils/timeSelection';
 import { engineView } from '../utils/trackStructure';
 import { busUpstream, captureGraph, captureIds, trackContentEnd, trackContentStart } from '../utils/commit';
-import { PRE_VOLUME } from '../utils/preFxEdits';
 
 /** Queue par défaut (réverbe, délai) : comme le gel (services/VstFreeze FREEZE_TAIL_SECONDS). */
 export const DEFAULT_TAIL = 3;
@@ -222,6 +221,3 @@ export async function renderBusPrint(tracks: Track[], busId: string, opts: { tai
   const id = `print-${bus.id}-${Date.now().toString(36)}`;
   return { clip: registerClip(r.buffer, id, { name: `${bus.name} (imprimé)`, color: bus.color, start: r.start }) };
 }
-
-/** Le volume avant effets (dessiné) passe dans le rendu : à retirer de la piste rendue. */
-export const PRE_VOLUME_LANE = PRE_VOLUME;

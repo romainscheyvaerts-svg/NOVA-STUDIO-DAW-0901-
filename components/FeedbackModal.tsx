@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  FEEDBACK_LIMITS, FeedbackCategory, FeedbackError, FeedbackFrequency, FeedbackStatus, HistoryItem, OPEN_FEEDBACK_EVENT,
+  FEEDBACK_LIMITS, FeedbackCategory, FeedbackError, FeedbackFrequency, FeedbackStatus, HistoryItem, 
   OpenFeedbackOptions, feedbackStore, flushFeedbackQueue, formatRef, getFeedbackUserEmail, getHistory, getQueue,
   refreshFeedbackStatuses, submitFeedback,
 } from '../services/feedback';

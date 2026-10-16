@@ -22,9 +22,6 @@ import type { AutomationPoint, Clip, ClipGainPoint } from '../types';
 /** Bornes d'un point (Pro Tools : −144 … +36 dB ; ici −60 dB ≈ silence). */
 export const GAIN_POINT_MIN_DB = -60;
 export const GAIN_POINT_MAX_DB = 24;
-/** Pas du nudge de gain (Pro Tools : Ctrl+Maj+↑ / ↓) et pas fin. */
-export const GAIN_NUDGE_DB = 0.5;
-export const GAIN_NUDGE_FINE_DB = 0.1;
 /** Rampe anti-clic posée aux bords d'une zone modifiée (s). */
 export const GAIN_EDGE_RAMP = 0.005;
 
@@ -214,9 +211,6 @@ export function offsetGainRange(pts: ClipGainPoint[] | undefined, a: number, b: 
   ];
   return dedupe(out);
 }
-
-/** Ligne remise à plat (0 dB) : plus de points. */
-export const clearGainLine = (): Partial<Clip> => ({ gainPoints: undefined });
 
 // ----------------------------------------------------------------------- crayon
 

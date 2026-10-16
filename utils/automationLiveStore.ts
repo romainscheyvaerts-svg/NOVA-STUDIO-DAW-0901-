@@ -34,7 +34,6 @@ export const clearLive = (keep?: Set<string>) => {
   for (const key of [...values.keys()]) if (!keep?.has(key)) { values.delete(key); notify(key); }
 };
 
-export const liveKeys = () => [...values.keys()];
 export const getLive = (key: string) => values.get(key);
 
 const subscribe = (key: string, fn: () => void) => {

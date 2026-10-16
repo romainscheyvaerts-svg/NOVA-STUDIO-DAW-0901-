@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { DAWState, Clip } from '../types';
+import { DAWState } from '../types';
 import { wavOf } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';

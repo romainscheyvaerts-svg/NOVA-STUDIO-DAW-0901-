@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, useHwHelp, type KnobProps } from './hw';
 import { HwPresetSelect, hwCtx, useHwCanvas } from './hw/screens';
-import { paramFr, termHelp } from '../utils/pluginUi';
-import { PluginParameter } from '../types';
+import { termHelp } from '../utils/pluginUi';
 import { EnvelopeDucker, SMOOTH, setParamSmooth, TimelineLfo } from './vocalDspUtils';
 
 /**
@@ -621,7 +620,6 @@ export class ReverbNode {
 
   /** Reglages appliques en continu (sans regenerer la reponse). */
   private applyLiveParams() {
-    const now = this.ctx.currentTime;
     const T = SMOOTH;
     const p = this.params;
 
@@ -705,7 +703,6 @@ export class ReverbNode {
     }
 
     const baseERTimes = [0.012, 0.022, 0.035, 0.048, 0.065, 0.085];
-    const now = this.ctx.currentTime;
     const size = clamp(safeNum(this.params.size, 0.7), 0, 1);
     const width = clamp(safeNum(this.params.width, 1), 0, 2);
 

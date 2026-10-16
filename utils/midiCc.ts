@@ -106,14 +106,6 @@ export function ccValueAt(pts: MidiCcPoint[] | undefined, t: number, def: number
   return ans < 0 ? def : pts[ans].v;
 }
 
-/** Points dont l'instant est dans [a, b[. */
-export const pointsBetween = (pts: MidiCcPoint[] | undefined, a: number, b: number): MidiCcPoint[] =>
-  (pts || []).filter(p => p.t >= a - 1e-9 && p.t < b - 1e-9);
-
-/** Le clip a-t-il des contrôleurs ? */
-export const hasCc = (c: Pick<Clip, 'cc'> | undefined | null): boolean =>
-  !!c?.cc && Object.values(c.cc).some(p => Array.isArray(p) && p.length > 0);
-
 // ---------------------------------------------------------------------------
 // Sustain : la pédale allonge les notes
 // ---------------------------------------------------------------------------

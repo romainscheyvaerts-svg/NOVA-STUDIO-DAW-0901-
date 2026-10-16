@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, useHwHelp, type KnobProps } from './hw';
 import { hwCtx, useHwCanvas } from './hw/screens';
-import { paramFr, termHelp } from '../utils/pluginUi';
+import { termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
-import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth, fadeInOnInsert, TimelineLfo } from './vocalDspUtils';
 
 /**
  * PROFESSIONAL TAPE DELAY ENGINE v3.0

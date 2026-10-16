@@ -220,7 +220,7 @@ export function analyzeBreaths(x: Float32Array, sr: number, options: BreathDetec
 
   // 3. Trames candidates (assez basses, assez au-dessus du bruit) : leurs
   //    caractéristiques de souffle. Les autres trames non silencieuses = mots.
-  type Kind = 0 | 1 | 2 | 3 | 4; // 0 silence, 1 mot (fort ou chanté), 2 sifflante, 3 souffle, 4 autre (douteux)
+  // kind : 0 silence, 1 mot (fort ou chanté), 2 sifflante, 3 souffle, 4 autre (douteux)
   const kind = new Uint8Array(nFrames);
   const centroid = new Float64Array(nFrames), hf = new Float64Array(nFrames), flat = new Float64Array(nFrames), nsdf = new Float64Array(nFrames);
   const N = sr > 30000 ? 1024 : 512;
@@ -464,7 +464,6 @@ type BufferOf = (c: Clip) => Pick<AudioBuffer, 'numberOfChannels' | 'sampleRate'
 
 /** Cache des détections : même audio, même fenêtre, même sensibilité → même résultat. */
 const detectCache = new Map<string, BreathRegion[]>();
-export const clearBreathCache = () => detectCache.clear();
 
 export function detectClipBreaths(c: Clip, buf: NonNullable<ReturnType<BufferOf>>, sensitivity: BreathSensitivity): BreathRegion[] {
   const from = c.offset || 0;

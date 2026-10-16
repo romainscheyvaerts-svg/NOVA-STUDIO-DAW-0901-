@@ -28,7 +28,6 @@ const readPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)
 const ACCEPT = 'audio/*,.wav,.mp3,.flac,.aif,.aiff,.m4a,.ogg';
 
 const fmtTime = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
-const fmtSigned = (v: number) => `${v > 0.05 ? '+' : ''}${fmtDb(v)}`;
 
 interface RefTrack { name: string; analysis: QmAnalysis }
 

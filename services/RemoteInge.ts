@@ -38,9 +38,6 @@ export const remoteInviteUrl = (l: CloudLink): string => {
   return `${base}?inge=${encodeURIComponent(linkToString(l))}`;
 };
 
-/** Lien pour un 2e artiste sur le même lien (même ingé, chacun ses pistes). */
-export const remoteArtistInviteUrl = (l: CloudLink): string => `${remoteInviteUrl(l)}&ri=artist`;
-
 export class RemoteIngeClient {
   readonly collab: CollabClient;
 

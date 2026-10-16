@@ -19,9 +19,12 @@ import { catalogStatus, isQuotaError } from '../utils/catalogStatus';
 import type { ProjectRate } from '../utils/projectRate';
 import { ProjectRatePicker } from './ProjectRateControls';
 import { useSimpleMode } from '../utils/simpleMode';
+import { isMakeMusicDisplay } from '../utils/accountDisplay';
 
 interface LandingPageProps {
   user: User | null;
+  /** Compte affiché en haut (compte principal, sinon compte Make Music : utils/accountDisplay). */
+  account?: User | null;
   onEnterStudio: () => void;
   onEnterWithInstrumental: (instrumental: Instrumental) => void;
   /** Mélodie : projet « instru sur mélodie » (batterie, puis voix si on veut). */
@@ -46,6 +49,7 @@ interface LandingPageProps {
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
   user, 
+  account,
   onEnterStudio, 
   onEnterWithInstrumental, 
   onEnterWithMelody,
@@ -61,6 +65,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onNewProjectRate,
   onOpenQuickMaster,
 }) => {
+  const accountShown = account !== undefined ? account : user;
   const grille = useNovaPricing();
   // Mode simple (le site par défaut) : l'accueil ne montre que choisir une instru, un projet vierge
   // et rouvrir un projet ; le reste (fréquence, modèle, masteriser, ton instru, appli Windows) est
@@ -84,7 +89,6 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = user?.email?.toLowerCase() === 'romain.scheyvaerts@gmail.com';
 
   // Défi du jour : la même prod que sur le site (Beat Swipe), pour tout le monde.
   const challenge = React.useMemo(() => {
@@ -336,11 +340,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
         <ThemeToggleButton />
         <InstallAppButton />
         {/* Bouton connexion / menu utilisateur */}
-        {user && user.id !== 'guest' ? (
-          <div className="flex items-center gap-3">
+        {accountShown && accountShown.id !== 'guest' ? (
+          <div className="flex items-center gap-3" data-testid="landing-account">
             <div className="text-right">
-              <p className="text-xs font-bold text-white">{user.username || user.email}</p>
-              <p className="text-[10px] text-slate-500">{!user.plan || /^free$/i.test(user.plan) ? 'Gratuit' : user.plan}</p>
+              <p className="text-xs font-bold text-white">{accountShown.username || accountShown.email}</p>
+              <p className="text-[10px] text-slate-500">{isMakeMusicDisplay(accountShown) ? 'Compte Make Music' : !accountShown.plan || /^free$/i.test(accountShown.plan) ? 'Gratuit' : accountShown.plan}</p>
             </div>
             <button
               onClick={onLogout}

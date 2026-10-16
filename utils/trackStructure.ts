@@ -30,9 +30,6 @@ export type PluginState = 'active' | 'bypass' | 'inactive';
 export const pluginState = (p: Pick<PluginInstance, 'isEnabled' | 'isInactive'>): PluginState =>
   p.isInactive ? 'inactive' : p.isEnabled ? 'active' : 'bypass';
 
-/** L'effet traite-t-il le son (ni bypass, ni inactif) ? */
-export const isPluginProcessing = (p: Pick<PluginInstance, 'isEnabled' | 'isInactive'>): boolean => !!p.isEnabled && !p.isInactive;
-
 /** Effet avec un nouvel état. « active » enlève aussi l'inactivité ; « inactive » garde le bypass tel quel. */
 export const withPluginState = (p: PluginInstance, state: PluginState): PluginInstance => {
   if (state === 'inactive') return { ...p, isInactive: true };
@@ -98,9 +95,6 @@ export const sendSlots = (sends: TrackSend[] | undefined): (TrackSend | null)[] 
   return out;
 };
 
-/** Emplacement (0-9) d'un envoi dans la piste. */
-export const sendSlotOf = (sends: TrackSend[] | undefined, sendId: string): number => sendSlots(sends).findIndex(s => s?.id === sendId);
-
 /** Pose (ou remplace) l'envoi de l'emplacement `slot` ; null le retire. */
 export const setSendSlot = (sends: TrackSend[] | undefined, slot: number, send: TrackSend | null): TrackSend[] => {
   const slots: (TrackSend | null)[] = sendSlots(sends).map((s, i) => (s ? { ...s, slot: i } : null));
@@ -112,13 +106,6 @@ export const setSendSlot = (sends: TrackSend[] | undefined, slot: number, send: 
     slots[slot] = { ...(prev && prev.id === send.id ? prev : {}), ...send, slot };
   } else slots[slot] = null;
   return slots.filter((s): s is TrackSend => !!s);
-};
-
-/** Gain linéaire par canal d'un pan équi-puissance (-1 … 1), comme le StereoPannerNode sur une source mono. */
-export const panGains = (pan: number): [number, number] => {
-  const p = Math.max(-1, Math.min(1, pan || 0));
-  const x = (p + 1) / 2;
-  return [Math.cos(x * Math.PI / 2), Math.sin(x * Math.PI / 2)];
 };
 
 // ─── Bus nommés (I/O Setup) ────────────────────────────────────────────────────
@@ -231,10 +218,6 @@ export const setTrackInputBus = (tracks: Track[], trackId: string, busId: string
 
 // ─── Dossiers ──────────────────────────────────────────────────────────────────
 
-export const isFolder = (t: Pick<Track, 'folder'> | undefined): boolean => !!t?.folder;
-export const isRoutingFolder = (t: Pick<Track, 'folder'> | undefined): boolean => t?.folder?.kind === 'routing';
-export const isBasicFolder = (t: Pick<Track, 'folder'> | undefined): boolean => t?.folder?.kind === 'basic';
-
 /** Dossiers parents, du plus proche au plus lointain (boucles coupées). */
 export const ancestorsOf = (t: Track, byId: Map<string, Track>): Track[] => {
   const out: Track[] = [];
@@ -249,9 +232,6 @@ export const ancestorsOf = (t: Track, byId: Map<string, Track>): Track[] => {
 };
 
 const mapOf = (tracks: Track[]) => new Map(tracks.map(t => [t.id, t]));
-
-/** Profondeur dans les dossiers (0 = racine). */
-export const folderDepth = (t: Track, tracks: Track[]): number => ancestorsOf(t, mapOf(tracks)).length;
 
 /** Enfants directs d'un dossier. */
 export const folderChildren = (folderId: string, tracks: Track[]): Track[] => tracks.filter(t => t.parentFolderId === folderId);
@@ -630,9 +610,6 @@ export const engineView = (tracks: Track[]): EngineView => {
   viewCache.set(out, view);
   return view;
 };
-
-/** Pistes jouées par le moteur (raccourci). */
-export const playedTracks = (tracks: Track[]): Track[] => engineView(tracks).tracks;
 
 /** Empreinte du routage effectif : change dès qu'une piste doit être recâblée à cause d'une autre. */
 export const structureSig = (tracks: Track[]): string => {

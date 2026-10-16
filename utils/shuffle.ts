@@ -217,8 +217,6 @@ export function openGapAt(clips: Clip[], at: number, len: number, o: ShuffleOpti
   return { clips: shiftFrom(out, pos, len), at: pos };
 }
 
-export const openGap = (clips: Clip[], at: number, len: number, o: ShuffleOptions = {}): Clip[] => openGapAt(clips, at, len, o).clips;
-
 /** Insère des clips (positionnés à partir de `at`) en Shuffle : la suite avance. */
 export function shuffleInsert(clips: Clip[], inserted: Clip[], at: number, o: ShuffleOptions = {}): Clip[] {
   if (!inserted.length) return clips;

@@ -280,9 +280,6 @@ export function ampEnvAt(env: SynthEnv, peak: number, start: number, t: number, 
   return v;
 }
 
-/** Durée totale d'une voix relâchée à `r` (relâchement + queue). */
-export const releaseTail = (env: SynthEnv) => Math.max(MIN_RELEASE, env.r) * RELEASE_TAIL;
-
 // --- Répartition des voix (dans le temps) ----------------------------------------------
 
 export interface VoiceSlot {

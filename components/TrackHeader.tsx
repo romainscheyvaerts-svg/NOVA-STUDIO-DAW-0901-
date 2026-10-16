@@ -381,16 +381,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     onUpdate({ ...track, plugins });
   };
 
-  const getAbbr = (type: string, name?: string) => {
-    if (type === 'VST3') return name ? name.substring(0, 4).toUpperCase() : 'VST3';
-    
-    const map: Record<string, string> = { 
-      'AUTOTUNE': 'TUNE', 'COMPRESSOR': 'COMP', 'STEREOSPREADER': 'MS', 
-      'DEESSER': 'DS', 'DENOISER': 'NGATE', 'PROEQ12': 'EQ12', 'VOCALSATURATOR': 'SAT',
-      'MELODIC_SAMPLER': 'KEYS', 'DRUM_SAMPLER': 'DRUM'
-    };
-    return map[type] || type.substring(0, 4);
-  };
 
   // Pro Tools (utils/soloMute) : Alt+clic = toutes les pistes, Ctrl+clic sur S = solo safe.
   const handleMuteToggle = (e: React.MouseEvent | React.TouchEvent) => {
@@ -408,7 +398,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
   const canHaveSends = (track.type === TrackType.AUDIO || track.type === TrackType.BUS || track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK) && track.id !== 'instrumental' && track.id !== 'master';
   const isMidiOrSampler = track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK;
-  const isAudio = track.type === TrackType.AUDIO;
 
   const getTrackIcon = () => {
       if (track.type === TrackType.MIDI) return 'fa-music';

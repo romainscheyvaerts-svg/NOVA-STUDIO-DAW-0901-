@@ -83,10 +83,6 @@ export async function getSessionMeta(): Promise<SavedSessionMeta | null> {
   return meta;
 }
 
-export async function clearSession(): Promise<void> {
-  try { await run('readwrite', s => s.delete(KEY)); } catch { /* rien à effacer */ }
-}
-
 /** « il y a 5 min », « hier »… */
 export function formatAgo(ts: number): string {
   const min = Math.round((Date.now() - ts) / 60000);
