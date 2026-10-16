@@ -48,3 +48,20 @@ const MobileNoticeInline: React.FC<MobileNoticeInlineProps> = ({ notice, blocked
 };
 
 export default MobileNoticeInline;
+
+/**
+ * Téléphone, page Morceau : l'avancement des imports et des calages (« Chargement : … », « ✅ Importé : … »)
+ * posé dans la page, au-dessus des pistes. En pastille flottante (en bas, au-dessus des onglets), il
+ * recouvrait la barre du clip pendant 3 s juste après le chargement d'une instru.
+ */
+export const MobileStatusInline: React.FC<{ text: string | null }> = ({ text }) => {
+  if (!text) return null;
+  const busy = !/^[✅❌]/.test(text);
+  return (
+    <div role="status" aria-live="polite" data-testid="mobile-status"
+      className="shrink-0 mx-2 my-1.5 flex items-center gap-2.5 rounded-xl border border-nv-line/15 bg-nv-raised px-3 py-2 text-[12px] font-medium text-nv-ink">
+      {busy && <i className="fas fa-circle-notch fa-spin text-cyan-400" aria-hidden="true"></i>}
+      <span className="min-w-0">{text}</span>
+    </div>
+  );
+};

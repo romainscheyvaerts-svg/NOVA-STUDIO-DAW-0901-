@@ -128,8 +128,12 @@ def barre_clip(b):
     for theme in ("dark", "light"):
         ctx, page, log = ouvrir(b, "tel390", theme, f"barre_clip_{theme}")
         studio(page, True)
-        # La pastille « ✅ Importé : … » (3 s) passe au-dessus de la barre du clip : on la laisse partir.
-        page.wait_for_function("() => !/Importé :/.test(document.body.innerText)", timeout=15000)
+        # Juste après le chargement (« ✅ Importé : … » encore là) : posé dans la page, il ne couvre plus la barre du clip.
+        statut = page.locator("[data-testid=mobile-status]").locator("visible=true")
+        check(f"téléphone ({theme}) : « Importé » posé dans la page Morceau (pas en pastille flottante)",
+              statut.count() == 1 and "Importé" in statut.first.inner_text()
+              and page.evaluate("() => getComputedStyle(document.querySelector('[data-testid=mobile-status]')).position") == "static",
+              statut.all_inner_texts())
         clip = page.locator("[data-clip-id]").locator("visible=true").first
         if not clip.count():
             clip = page.get_by_text("SCH", exact=True).locator("visible=true").first
@@ -257,6 +261,9 @@ def collab_code(b):
               box is not None and box["y"] < H - 60, box)
         shot(page, f"6_{vp}_{theme}_collab_code_sans_compte")
         balayer(page, f"{vp} ({theme}) collaboration code sans compte")
+        page.evaluate("() => document.activeElement && document.activeElement.blur && document.activeElement.blur()")
+        page.keyboard.press("Escape"); page.wait_for_timeout(400)
+        check(f"{vp} ({theme}) collaboration : Échap ferme le panneau", page.locator('[aria-labelledby="collab-title"]').count() == 0)
         errs = fermer(page, log, ctx)
         check(f"{vp} ({theme}) collaboration : aucune erreur dans la console", not errs, [e["text"][:160] for e in errs[:3]])
 

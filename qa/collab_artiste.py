@@ -676,6 +676,12 @@ def run_format(p, vp):
     P.m(niveau_talkback_chez_max_db=mix_level(E, ":talk", 2))
     P.shot(T, "T08_parle_a_max")
     up()
+    # 16/10/2026 (guidage) : Échap ferme le panneau Collaboration comme les autres fenêtres ; fermer ne quitte pas la séance.
+    if E.locator("[aria-labelledby='collab-title']").count():
+        E.evaluate("() => document.activeElement && document.activeElement.blur && document.activeElement.blur()")
+        E.keyboard.press("Escape"); E.wait_for_timeout(500)
+        check(f"{vp} : Échap ferme le panneau Collaboration de Max, sans quitter la séance",
+              E.locator("[aria-labelledby='collab-title']").count() == 0 and collab(E, "c.role()") is not None, collab(E, "c.role()"))
     close_panel(E)
     a = audit(T, P.touch)
     if a["jargon"]:

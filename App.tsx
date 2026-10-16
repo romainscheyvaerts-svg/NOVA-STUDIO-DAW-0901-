@@ -303,7 +303,7 @@ import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
-import MobileNoticeInline from './components/MobileNoticeInline';
+import MobileNoticeInline, { MobileStatusInline } from './components/MobileNoticeInline';
 import { messageClair } from './utils/friendlyError';
 import StemSeparationDialog, { AppliedStem, StemTarget } from './components/StemSeparationDialog';
 import { buildStemTracks, insertStemTracks, stemsRightsFor } from './services/StemSeparation';
@@ -10685,7 +10685,7 @@ function Studio() {
                 <MobileArrangementPage
                   toolbarExtras={mobilePills}
                   tipCard={<><HowToNudgeCard inline blocked={!!nextStep || !!state.isRecording || countInBeat !== null} /><NotificationsInline simple={simpleMode} blocked={!!state.isRecording || countInBeat !== null || notifOpen} /></>}
-                  topCard={<><MobileNoticeInline notice={aiNotice} blocked={!!state.isRecording || countInBeat !== null} /><NextStepCard inline isMobile
+                  topCard={<><MobileStatusInline text={externalImportNotice} /><MobileNoticeInline notice={aiNotice} blocked={!!state.isRecording || countInBeat !== null} /><NextStepCard inline isMobile
                     open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
                     trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}
                     besideSidebar={false} onAction={handleNextStep} onClose={() => setNextStep(null)}
@@ -10818,7 +10818,8 @@ function Studio() {
           passe a TransportBar en prop statusMessage, declaree et destructuree,
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
-      {externalImportNotice && (
+      {/* Téléphone, page Morceau : posé dans la page (MobileStatusInline) ; en flottant, il couvrait la barre du clip. */}
+      {externalImportNotice && !(isMobile && activeMobileTab === 'ARRANGEMENT') && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
