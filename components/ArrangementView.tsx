@@ -74,6 +74,8 @@ import { RedoSpotsOverlay } from './RepunchUI';
 import SoloMuteIndicators from './SoloMuteIndicators';
 import { dragRefusal, explainLockedDrag } from '../utils/clipLock';
 import { runEditCommand } from '../utils/editCommands';
+import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
+import FollowPlayheadButton from './FollowPlayheadButton';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -587,40 +589,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // --- Suivi du playhead pendant la lecture ---
   // La tete de lecture sortait de l'ecran et il fallait defiler a la main.
   const autoScrollRef = useRef(false);
-  const followSuspendedUntilRef = useRef(0);
-
+  // Défilement à la main pendant la lecture : suivi suspendu jusqu'au prochain Play ou « Suivre ».
+  const follow = useFollowPlayhead(scrollContainerRef, isPlaying, autoScrollRef);
   // (Le suivi lui-meme est fait par l'abonnement a playheadStore, plus bas :
   // il ne provoque plus de rendu React a chaque image.)
 
-  const isSyncingScroll = useRef(false);
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    if (isSyncingScroll.current) return;
-    
-    isSyncingScroll.current = true;
-    if (target === scrollContainerRef.current) {
-        // Defilement a l'initiative de l'utilisateur : on laisse le suivi
-        // tranquille quelques secondes pour ne pas le ramener de force.
-        if (autoScrollRef.current) autoScrollRef.current = false;
-        else followSuspendedUntilRef.current = Date.now() + 3000;
-        setScrollLeft(target.scrollLeft);
-        setScrollTop(target.scrollTop);
-        if (sidebarContainerRef.current) sidebarContainerRef.current.scrollTop = target.scrollTop;
-    } else if (target === sidebarContainerRef.current) {
-        if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = target.scrollTop;
-            setScrollTop(target.scrollTop);
-        }
-    }
-    
-    requestAnimationFrame(() => { isSyncingScroll.current = false; });
-  };
-  
-  const handleSidebarWheel = (e: React.WheelEvent) => {
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && scrollContainerRef.current) {
-        scrollContainerRef.current.scrollLeft += e.deltaX;
-    }
-  };
 
   // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
   const { simple } = useSimpleMode();
@@ -940,6 +913,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const handleMinimapMouseDown = (e: React.MouseEvent) => {
       const canvas = minimapRef.current; if (!canvas || !scrollContainerRef.current) return;
+      follow.noteUserScroll();
       const rect = canvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const scale = canvas.width / Math.max(totalContentWidth, 1);
@@ -951,6 +925,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const onMove = (moveEvent: MouseEvent) => {
           const moveRect = canvas.getBoundingClientRect();
           const currentX = moveEvent.clientX - moveRect.left;
+          follow.noteUserScroll();
           if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = Math.max(0, (currentX / scale) - (viewportW / 2));
       };
       const onUp = () => { setIsDraggingMinimap(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -2461,7 +2436,7 @@ const drawPlayhead = useCallback(() => {
 
     // Suivi du playhead pendant la lecture : on avance d'une "page" plutot que
     // de recentrer en continu (bien moins fatigant a l'oeil, comme les DAW).
-    if (isPlayingRef.current && Date.now() >= followSuspendedUntilRef.current) {
+    if (isPlayingRef.current && !follow.suspendedRef.current) {
         const playheadX = t * zoomH;
         const viewStart = scroll.scrollLeft;
         const cw = viewportWidthRef.current || scroll.clientWidth;
@@ -2819,6 +2794,7 @@ useEffect(() => {
             </div>
         </div>
         <div className="flex items-center space-x-3 shrink-0">
+             <FollowPlayheadButton suspended={follow.suspended} onResume={follow.resume} />
              {!simple && <ChordLaneToggleButton />}
              <i className="fas fa-search-plus text-[10px]"></i>
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
@@ -2843,6 +2819,7 @@ useEffect(() => {
       {/* SINGLE SCROLL CONTAINER - sidebar is sticky left, canvas is sticky top */}
       <div 
           ref={scrollContainerRef} 
+          data-follow={follow.suspended ? "suspendu" : "actif"}
           className="flex-1 overflow-auto relative custom-scroll"
           onMouseDown={handleMouseDown}
           onDoubleClick={(e) => {
