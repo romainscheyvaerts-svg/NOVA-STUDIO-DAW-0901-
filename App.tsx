@@ -10334,6 +10334,7 @@ function Studio() {
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
       a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne / Elastic Pitch', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
       a('Voix', 'pal.melodyne', 'Ouvrir le clip dans Melodyne (ARA)', () => openNovaWindow('ara-melodyne', { targets: clipTargets }), { pt: 'ARA Melodyne', keywords: 'melodyne ara justesse', disabledReason: needClip }),
+      a('Édition', 'pal.stems', 'Séparer le clip en stems (voix, instru, batterie, basse)', () => { if (clipTargets[0]) onSeparateStemsStable(clipTargets[0].trackId, clipTargets[0].clipId); }, { pt: 'Stem Splitter (Logic) · Splitter (BandLab)', keywords: 'stems séparer separation voix instru acapella karaoké batterie basse demucs isoler extraire', disabledReason: needClip }),
       // Pistes et mix
       a('Pistes', 'pal.audioTrack', 'Nouvelle piste audio', () => handleCreateTrack(TrackType.AUDIO, 'AUDIO'), { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste audio nouvelle' }),
       a('Pistes', 'pal.bus', 'Nouveau bus (groupe de pistes)', () => handleCreateTrack(TrackType.BUS, 'BUS'), { pt: 'New Aux Input', keywords: 'bus aux sous-groupe' }),

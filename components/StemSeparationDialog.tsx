@@ -8,6 +8,7 @@ import {
 import { billingStatus, exportAccess } from '../services/Billing';
 import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
 import { openNovaWindow } from '../utils/novaWindows';
+import StemsWebPanel, { StemsWebPill } from './StemsWebPanel';
 
 /**
  * « Séparer en stems » (menu du clip) : comme Stem Splitter dans Logic, Stem Separation
@@ -16,6 +17,7 @@ import { openNovaWindow } from '../utils/novaWindows';
  * voix lead / chœurs téléchargés à la première séparation qui les demande) ; fermer la
  * fenêtre ne l'arrête pas : une pastille en bas à droite garde la progression et Annuler.
  * Après la séparation : « Basse → MIDI », « Piano → MIDI »… (fenêtre Audio → MIDI).
+ * Sur le site sans l'appli (lot 6c) : 2 ou 4 stems calculés dans le navigateur (StemsWebPanel).
  */
 
 export interface StemTarget { trackId: string; clipId: string; clipName: string }
@@ -231,7 +233,8 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
 
   // --- Pastille (fenêtre fermée, séparation qui continue ou vient de finir) ---------------
   if (!target) {
-    if (!current) return null;
+    // Séparation dans le navigateur (lot 6c) : sa propre pastille.
+    if (!current) return <StemsWebPill />;
     return (
       <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-[650] sm:w-80 rounded-2xl border border-cyan-500/30 bg-nv-surface/95 p-3 shadow-2xl space-y-2" data-testid="stems-pill" title={STEMS_TOOLTIP}>
         <div className="flex items-center justify-between gap-2">
@@ -254,20 +257,10 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
   const installEv = module?.install;
 
   let body: React.ReactNode;
-  if (availability === 'web') {
-    body = (
-      <div className="space-y-3" data-testid="stems-web">
-        <p className="text-[12px] text-slate-300">
-          La séparation de stems (2, 4 ou 6 stems, voix lead / chœurs) tourne <b>sur ton PC</b>, gratuitement, dans l’appli Windows <b>Nova Studio</b> :
-          le site seul (ordinateur ou téléphone) n’a pas la puissance de calcul nécessaire.
-        </p>
-        <p className="text-[11px] text-slate-400">Ouvre ton projet dans l’appli Windows (il est dans ton compte), puis clic droit sur le clip → « Séparer en stems ».</p>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button type="button" onClick={onClose} className={`${secondary} sm:flex-1`}>Fermer</button>
-          <a href={DESKTOP_APP_DOWNLOAD_URL} className={`${primary} sm:flex-[2] flex items-center justify-center`}>Télécharger Nova Studio pour Windows</a>
-        </div>
-      </div>
-    );
+  if (availability === 'web' && licence !== 'checking' && licence !== 'refused' && licence !== 'error') {
+    // Site sans l'appli (lot 6c) : 2 ou 4 stems calculés dans le navigateur ; 6 stems et voix
+    // lead / chœurs restent dans l'appli Windows (Demucs en local, bien plus rapide).
+    body = <StemsWebPanel target={target} getClipBuffer={getClipBuffer} onApply={onApply} onClose={onClose} rights={rights} onMidi={toMidi} />;
   } else if (availability === 'connect') {
     body = (
       <div className="space-y-3" data-testid="stems-connect">

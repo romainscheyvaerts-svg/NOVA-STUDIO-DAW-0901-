@@ -20,8 +20,10 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    // Ne garder que la version courante… sauf le cache des kits (sons déjà écoutés, hors ligne).
-    await Promise.all(keys.filter(k => k !== CACHE && !k.startsWith('nova-kits-')).map(k => caches.delete(k)));
+    // Ne garder que la version courante… sauf le cache des kits (sons déjà écoutés, hors ligne)
+    // et celui des modèles d'IA téléchargés à la demande (séparation de stems dans le navigateur,
+    // ~250 Mo : ne jamais le faire retélécharger à chaque nouvelle version du site).
+    await Promise.all(keys.filter(k => k !== CACHE && !k.startsWith('nova-kits-') && !k.startsWith('nova-models-')).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
 });

@@ -108,6 +108,10 @@ BATTERIE = [
     # Lot 6 BandLab (14/10/2026) : 6 stems, voix lead / chœurs, stem → MIDI, licence des beats, premier
     # téléchargement de modèle (pont de test 8806 + module stems installé ; bureau et téléphone).
     ("stems6", []),
+    # Lot 6c BandLab (16/10/2026) : stems DANS LE NAVIGATEUR (Demucs v4 en ONNX, WebGPU puis repli processeur),
+    # téléchargement du modèle annoncé, annulé puis gardé, 2 et 4 stems calés, réseau mobile, conseil du PC au téléphone,
+    # licence des beats ; bureau et téléphone, sombre et clair (fichiers servis en local sur le port 8798).
+    ("stems_web", []),
 ]
 
 
