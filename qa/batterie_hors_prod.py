@@ -107,7 +107,7 @@ BATTERIE = [
     # Nettoyage 1.5.2 (16/10/2026) : 💳 « Gérer mon abonnement » (portail Stripe simulé : abonné seulement, message clair si
     # indisponible, nouvel onglet, palette), bureau et téléphone, sombre et clair ; ▶ suivi de la tête de lecture suspendu
     # par un défilement à la main, « Suivre », reprise au Play ; « DUP » du téléphone qui duplique vraiment.
-    ("gerer_abonnement", []), ("suivi_lecture", []),
+    ("gerer_abonnement", []), ("suivi_lecture", []), ("compte_unique", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

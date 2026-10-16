@@ -39,6 +39,9 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => 
     
     if (result.success && result.user) {
       onAuthenticated(result.user);
+    } else if (result.success) {
+      // Compte Make Music seulement : connecté (la barre du haut le montre), la fenêtre se ferme.
+      onClose?.();
     } else {
       setError(result.message || "Erreur de connexion");
     }

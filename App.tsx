@@ -173,6 +173,8 @@ import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialog
 import ProGateModal from './components/ProGateModal';
 import { manageSubscription } from './components/ManageSubscription';
 import { knownSubscriber } from './utils/billingPortal';
+import { useMakeMusicAccount } from './hooks/useMakeMusicAccount';
+import { accountForBar } from './utils/accountDisplay';
 import CaptureGuard from './components/CaptureGuard';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, uploadParts, signPart, putPart, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
@@ -1049,6 +1051,9 @@ function Studio() {
   };
 
   const [user, setUser] = useState<User | null>(defaultUser);
+  // Un seul compte affiché : l'ancien compte principal, sinon le compte Make Music (utils/accountDisplay).
+  const makeMusicAccount = useMakeMusicAccount();
+  const barUser = useMemo(() => accountForBar(user, makeMusicAccount), [user, makeMusicAccount]);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
@@ -1556,8 +1561,9 @@ function Studio() {
       try { await bakeVstBeforeSave(); await autosaveNow('manual', true); } catch (e) { console.warn('[Déconnexion] gel', e); }
     }
     await supabaseManager.signOut(); setUser(null);
-    // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
-    if (isNovaDesktop()) { try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ } }
+    // Une seule connexion : « Déconnexion » ferme aussi le compte Make Music (paiements, collaboration),
+    // sinon la barre le montrerait encore. Appli Windows : la porte de connexion revient.
+    try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ }
   };
   // Instrus / mélodies ACHETÉES sur studiomakemusic.com (compte Make Music) : avant,
   // le DAW ne les lisait jamais → l'export restait bloqué même après l'achat.
@@ -10241,6 +10247,7 @@ function Studio() {
       )}
       <LandingPage 
         user={user}
+        account={barUser}
         onEnterStudio={handleEnterStudio}
         onEnterWithInstrumental={handleEnterWithInstrumental}
         onEnterWithMelody={handleEnterWithMelody}
@@ -10434,7 +10441,7 @@ function Studio() {
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
-          user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
+          user={barUser} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
           onImportAudio={handleNewAudioImport}
           isMobileLayout={isMobile}

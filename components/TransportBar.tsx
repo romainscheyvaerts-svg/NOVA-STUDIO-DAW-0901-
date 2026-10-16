@@ -992,7 +992,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {/* Invité (pas de compte) : « Connexion », pas d'avatar ni de déconnexion. */}
         {user && user.id !== 'guest' ? (
             <div {...barItem('compte', 12)} className="hidden md:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
+                <div title={`Connecté : ${user.email}`} data-testid="bar-account" className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
                 <button onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter" className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
             </div>
         ) : (

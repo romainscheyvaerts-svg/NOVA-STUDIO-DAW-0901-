@@ -1,6 +1,6 @@
 
 import { User } from "../types";
-import { supabase, isSupabaseConfigured } from "./supabase";
+import { supabase, isSupabaseConfigured, catalogSupabase } from "./supabase";
 import { supabaseManager } from "./SupabaseManager";
 import { authServiceMessage } from "../utils/authStatus";
 
@@ -124,16 +124,31 @@ class AuthService {
   /**
    * Connexion avec option "Se souvenir de moi"
    */
-  public async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; user?: User; message?: string }> {
+  public async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; user?: User; message?: string; makeMusicOnly?: boolean }> {
     // --- MODE RÉEL ---
     if (isSupabaseConfigured() && supabase) {
+        // Une seule connexion pour tout NOVA : les mêmes identifiants (tapés par la personne)
+        // ouvrent aussi son compte Make Music (paiements, collaboration, séances en ligne), celui
+        // de studiomakemusic.com. Aucun jeton n'est copié d'un projet à l'autre.
+        const makeMusic = (async () => {
+            try {
+                const r = await catalogSupabase.auth.signInWithPassword({ email: email.trim(), password });
+                return !r.error && !!r.data?.user;
+            } catch { return false; }
+        })();
         let data: any, error: any;
         try {
             ({ data, error } = await supabase.auth.signInWithPassword({ email, password }));
         } catch (e: any) {
+            if (await makeMusic) return { success: true, makeMusicOnly: true };
             return { success: false, message: authMessage(e) };
         }
-        if (error) return { success: false, message: authMessage(error) };
+        if (error) {
+            // Compte Make Music seulement (le cas courant : compte créé sur studiomakemusic.com).
+            if (await makeMusic) return { success: true, makeMusicOnly: true };
+            return { success: false, message: authMessage(error) };
+        }
+        await makeMusic;
 
         if (data.user) {
             this.currentUser = this.mapSupabaseUser(data.user);
