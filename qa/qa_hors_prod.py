@@ -592,6 +592,14 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
             return Resp(401, cors, {"error": "Connecte-toi pour gérer les liens d'écoute (QA hors production)."})
         if fn == "nova-chat":
             return Resp(503, cors, {"error": "Assistant indisponible (QA hors production)."})
+        if fn == "nova-push":
+            # Notifications (Lot 7) : comme le serveur SANS clé VAPID posée → NOVA cache la fonction, sans erreur.
+            # qa/notifications.py simule une clé et les abonnements avec ses propres routes.
+            try: action = json.loads(body or b"{}").get("action")
+            except Exception: action = None
+            if action == "config":
+                return Resp(200, cors, {"public_key": None})
+            return Resp(401, cors, {"error": "Connecte-toi pour les notifications (QA hors production)."})
         return None
 
     # ---------------- REST (PostgREST)

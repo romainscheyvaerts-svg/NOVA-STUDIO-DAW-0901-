@@ -35,6 +35,7 @@ const UNIQUE: Record<string, string[][]> = {
   daw_session_invites: [['code']],
   nova_export_uses: [['user_id', 'project_key']],
   studio_booking_requests: [['package_id']],
+  nova_notifications: [['user_id', 'dedup_key']],
 };
 
 type Filter = (row: any) => boolean;
@@ -89,7 +90,7 @@ class Query implements PromiseLike<any> {
       this.db.seq[this.table] = (this.db.seq[this.table] || 0) + 1;
       r.seq = this.db.seq[this.table];
     }
-    if (this.table === 'nova_export_uses' && r.id === undefined) {
+    if ((this.table === 'nova_export_uses' || this.table === 'nova_notifications') && r.id === undefined) {
       this.db.seq[this.table] = (this.db.seq[this.table] || 0) + 1;
       r.id = this.db.seq[this.table];
     }

@@ -87,6 +87,10 @@ BATTERIE = [
     # première prise → écoute → fenêtre d'export), bureau et téléphone, sans compte et connecté ; inventaire des écrans,
     # aucune pastille flottante qui recouvre un bouton.
     ("premier_parcours", []),
+    # Lot 7 BandLab (16/10/2026) : 🔔 notifications (Web Push) : aucune permission au chargement, carte discrète après le
+    # 1er commentaire, « Activer » (faux PushManager), réglages (tout couper / par type, désabonnement réel), notification
+    # touchée → commentaire ouvert, autre séance, sans clé (caché), refus, appli Windows ; bureau et téléphone, sombre et clair.
+    ("notifications", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

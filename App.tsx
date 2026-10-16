@@ -333,6 +333,9 @@ import { araInsertMetadata, araInsertOf, isAraInsert, withAraInsertFirst } from 
 import { araMenuPlugins, useAraInserts } from './hooks/useAraInserts';
 // « ❓ Comment faire ? » : parcours pas à pas (utils/guides), « Montre-moi », « Et après ? ».
 import HowToHost, { HowToNextRow, HowToNudgeCard } from './components/HowToHost';
+// Lot 7 · Notifications (Web Push) : réglages, demande au bon moment, ouverture d'une notification.
+import NotificationsHost, { NotificationsInline } from './components/NotificationsHost';
+import { pushStore } from './services/PushNotify';
 import { howTo } from './utils/howTo';
 import { GUIDES, guidesForPrompt, howToIntro, matchHowToQuestion, projectFacts } from './utils/guides';
 
@@ -4601,6 +4604,7 @@ function Studio() {
   const [shareAuto, setShareAuto] = useState<'demo' | null>(null);
   const [lyricClipOpen, setLyricClipOpen] = useState(false);
   const [videoTakeOpen, setVideoTakeOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   // Comping : zones où garder une prise (parties du morceau, boucle).
   const compZones = useMemo<CompZone[]>(() => {
     const zones: CompZone[] = [];
@@ -10340,6 +10344,7 @@ function Studio() {
       a('Vues', 'pal.memory', 'Repères (Memory Locations)', () => openNovaWindow('memory-locations'), { keys: k('pt.memoryWindow'), pt: 'Memory Locations (Ctrl+5)', keywords: 'marqueur repère marker' }),
       a('Vues', 'pal.collab', 'Collaborer à distance (artiste, ingé, beatmaker)', () => setCollabOpen(true), { keywords: 'collab collaboration distance ingé' }),
       a('Vues', 'pal.reviews', 'Commentaires et versions (retours)', () => reviews.openAt(null), { keywords: 'commentaire retour version valider frame.io note timeline' }),
+      ...(pushStore.get().availability === 'yes' ? [a('Vues', 'pal.notifications', '🔔 Notifications : commentaires, versions, invitations, prises reçues', () => setNotifOpen(true), { keywords: 'notification notifications alerte prévenir push cloche réglages commentaire version invitation prise reçue couper' })] : []),
       a('Aide', 'pal.howto', '❓ Comment faire ? Les démarches pas à pas', () => howTo.open(), { keywords: 'aide comment faire tuto tutoriel guide parcours démarche étapes help how to montre-moi' }),
       ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
@@ -10636,7 +10641,7 @@ function Studio() {
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
                   toolbarExtras={mobilePills}
-                  tipCard={<HowToNudgeCard inline blocked={!!nextStep || !!state.isRecording || countInBeat !== null} />}
+                  tipCard={<><HowToNudgeCard inline blocked={!!nextStep || !!state.isRecording || countInBeat !== null} /><NotificationsInline simple={simpleMode} blocked={!!state.isRecording || countInBeat !== null || notifOpen} /></>}
                   topCard={<NextStepCard inline isMobile
                     open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
                     trigger={nextStep || 'take'} actions={nextStepActions} beatTitle={getCatalogBeat(state.tracks)?.title}
@@ -10805,6 +10810,10 @@ function Studio() {
       <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
         onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
         busy={!!nextStep || countInBeat !== null} simple={simpleMode} />
+      <NotificationsHost open={notifOpen} onOpen={() => setNotifOpen(true)} onClose={() => setNotifOpen(false)} isMobile={isMobile} simple={simpleMode}
+        inCollab={!!collab} meKey={collab?.key || 'local'} comments={state.timelineComments} versions={state.mixVersions}
+        busy={!!state.isRecording || countInBeat !== null || !!nextStep} sessionId={cloudSession?.id || null}
+        openComment={id => reviews.openAt(id)} openVersion={id => reviews.openAt(id, 'versions')} seek={t => handleSeek(Math.max(0, t))} />
 
       {/* R23 : changer de beat (fenêtre + carte Avant / Après), passage refait (avant / après) */}
       {r23.swap && <BeatSwapDialog api={r23} compact={isMobile} onChooseFile={(f) => { void r23.chooseSource({ kind: 'file', url: URL.createObjectURL(f), name: f.name, file: f }); }} />}
