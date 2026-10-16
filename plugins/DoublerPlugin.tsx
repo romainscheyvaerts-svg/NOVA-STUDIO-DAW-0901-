@@ -1,7 +1,7 @@
 
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 import React, { useEffect, useRef, useState } from 'react';
-import { setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { setParamSmooth, fadeInOnInsert, TimelineLfo } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { Faceplate, HwWindow, Knob, PushButton } from './hw';
 

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { loadWorkletModule } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { createDeesserCore } from '../engine/deesserCore';

@@ -1,6 +1,6 @@
 
 import { AutomationSet, MappedParam, parseEqKey } from '../engine/automationParams';
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { gainDbFr } from '../utils/pluginUi';
 import { Faceplate, HwSection, HwWindow, Knob, Led, PushButton, useHwHelp } from './hw';
 import { fmtHzFr, frNum, useHwCanvas } from './hw/screens';

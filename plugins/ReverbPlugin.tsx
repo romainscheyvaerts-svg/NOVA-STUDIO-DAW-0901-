@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, useHwHelp, type KnobProps } from './hw';
 import { HwPresetSelect, hwCtx, useHwCanvas } from './hw/screens';
-import { paramFr, termHelp } from '../utils/pluginUi';
-import { PluginParameter } from '../types';
+import { termHelp } from '../utils/pluginUi';
 import { EnvelopeDucker, SMOOTH, setParamSmooth, TimelineLfo } from './vocalDspUtils';
 
 /**

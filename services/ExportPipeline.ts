@@ -22,7 +22,7 @@ import { exportSpan, finalLength, applyTail, type TailSettings } from '../utils/
 import { withoutSoloSafe } from '../utils/soloMute';
 import { planStems, withoutGuides, type StemGrouping, type ReturnsMode, MASTER } from '../utils/stemPlan';
 import { extensionOf, stemFileNames } from '../utils/exportNaming';
-import { integratedLufs, truePeakDb, MP3_TRUE_PEAK_CEILING } from '../utils/loudness';
+import { integratedLufs, truePeakDb } from '../utils/loudness';
 import { loudnessRangeOf } from '../utils/audioMeasure';
 import { PLATFORM_TARGETS } from '../utils/masterAssistant';
 

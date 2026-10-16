@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { fadeInOnInsert, smoothSet } from './vocalDspUtils';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, type KnobProps } from './hw';
 import { useHwCanvas, hwCtx } from './hw/screens';
 

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule, fadeInOnInsert, isOfflineContext } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { blockClockSource } from '../engine/blockClock';

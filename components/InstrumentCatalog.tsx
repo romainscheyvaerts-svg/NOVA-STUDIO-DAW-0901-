@@ -3,7 +3,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Instrumental, User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
-import { stripeManager } from '../services/StripeManager';
 // Panneau admin (ajout d'instrus) : chargé à la demande, seul l'admin l'ouvre.
 const AdminPanel = React.lazy(() => import('./AdminPanel'));
 import { audioEngine } from '../engine/AudioEngine';

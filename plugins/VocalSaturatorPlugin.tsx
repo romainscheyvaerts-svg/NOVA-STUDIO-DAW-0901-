@@ -2,7 +2,6 @@
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { gainDbFr, termHelp } from '../utils/pluginUi';
 
 const SAT_MODES: Record<string, { label: string; help: string }> = {

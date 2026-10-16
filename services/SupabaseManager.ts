@@ -1,6 +1,6 @@
 
 import { supabase, catalogSupabase } from './supabase';
-import { User, DAWState, Clip, Instrument, Instrumental, PendingUpload, Track } from '../types';
+import { DAWState, Instrument, Instrumental, PendingUpload } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { projectRateOf } from '../utils/projectRate';

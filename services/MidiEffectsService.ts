@@ -12,7 +12,6 @@
 
 import { CHORD_INTERVALS as SHARED_CHORD_INTERVALS } from '../utils/scales';
 
-import { MidiNote } from '../types';
 
 // ============================================
 // ARPEGGIATOR (inspired by Ableton/Logic)

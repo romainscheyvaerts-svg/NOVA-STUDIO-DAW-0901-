@@ -1,8 +1,8 @@
 
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
 import { soloSilencedIds } from '../utils/soloMute';
-import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad, AutomationPoint } from '../types';
-import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
+import { Track, Clip, PluginInstance, TrackType, PluginParameter, AutomationPoint } from '../types';
+import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice } from '../services/ASIOBridge';
 import { ASIOInput } from './ASIOInput';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';

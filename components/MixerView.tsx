@@ -4,7 +4,6 @@ import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
-import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
 import { VstLateBadge } from './VstLateAlert';
 import TrackCpuBadge from './TrackCpuBadge';
