@@ -6,7 +6,7 @@ import {
 } from '../utils/timelineComments';
 import {
   canDecide, createVersion, decide, DecisionKind, MixAudioRef, MixVersion, mergeVersions, MIX_VERSIONS_KIND, nextVersionN, readVersionsOp,
-  versionStatusLine, versionSig,
+  versionStatusLine, versionSig, versionSnapshotComment,
 } from '../utils/mixVersions';
 
 /**
@@ -165,7 +165,8 @@ export function useTimelineComments(state: DAWState, d: CommentsDeps) {
         try { audio = await dd.bounce(t => setBusy(`Version ${n} : ${t}`)); } catch (e) { console.warn('[Versions] bounce', e); audio = null; }
       }
       let sessionVersion: number | null = null;
-      try { sessionVersion = (await dd.saveSnapshot?.(`Version ${n} envoyée à l'artiste${opts.note?.trim() ? ` : ${opts.note.trim()}` : ''}`)) ?? null; } catch { /* historique indisponible */ }
+      // Instantané de séance : auteur et date toujours écrits dedans (décision du 16/10/2026).
+      try { sessionVersion = (await dd.saveSnapshot?.(versionSnapshotComment(n, me, Date.now(), opts.note))) ?? null; } catch { /* historique indisponible */ }
       const s1 = dd.stateRef.current;
       const end = Math.max(0, ...s1.tracks.filter(t => !t.isGuide).flatMap(t => t.clips.map(c => c.start + c.duration)));
       const v = createVersion({

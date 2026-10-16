@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HybridClock, createComment } from '../utils/timelineComments';
-import { createVersion, decide, mergeVersions, nextVersionN, readVersionsOp, versionSig, versionState, versionStatusLine, MixVersion, fmtDate } from '../utils/mixVersions';
+import { createVersion, decide, mergeVersions, nextVersionN, readVersionsOp, versionSig, versionState, versionStatusLine, MixVersion, fmtDate, versionSnapshotComment } from '../utils/mixVersions';
 import { guestOpVerdict, DEFAULT_GUEST_RIGHTS } from '../utils/guestRights';
 import { ProjectIO } from '../services/ProjectIO';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -116,5 +116,18 @@ describe('chantier 11 · enregistré dans le projet', () => {
     expect(back.timelineComments).toHaveLength(1);
     expect(back.mixVersions).toHaveLength(1);
     expect(sameSignature(projectSignature(s), projectSignature({ ...s, timelineComments: [...s.timelineComments!] }))).toBe(false);
+  });
+});
+
+describe('versions de collaboration : auteur et date toujours portés (décision du 16/10/2026)', () => {
+  it('la version et son instantané de séance disent qui l’a envoyée et quand', () => {
+    const at = new Date(2026, 9, 16, 11, 32).getTime();
+    expect(versionSnapshotComment(2, { name: 'Max' }, at, 'voix plus devant')).toBe(`Version 2 envoyée à l'artiste par Max le ${fmtDate(at)} : voix plus devant`);
+    expect(fmtDate(at)).toBe('16/10/2026 à 11:32');
+    expect(versionSnapshotComment(3, { name: '  ' }, at)).toBe(`Version 3 envoyée à l'artiste par un membre le ${fmtDate(at)}`);
+    const v = createVersion({ n: 1 }, { key: 'k-max', name: 'Max' }, new HybridClock('k-max'));
+    expect(v.sentBy).toBe('Max');
+    expect(Number.isFinite(v.sentAt) && v.sentAt > 0).toBe(true);
+    expect(versionStatusLine(v)).toMatch(/^Version 1 envoyée par Max le \d\d\/\d\d\/\d{4} à \d\d:\d\d/);
   });
 });

@@ -552,7 +552,7 @@ const DistributionPanel: React.FC<{ getState: () => DAWState; getOwned?: () => (
           {done && (
             <div role="status" className="mb-2 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-200" data-testid="dist-done">
               <p className="font-black">✅ Paquet prêt : {done.name} ({num(done.size / 1024 / 1024, 1)} Mo)</p>
-              <p className="mt-0.5">Envoie le WAV à ton distributeur (DistroKid, TuneCore, CD Baby…), recopie les infos de « Credits_et_metadonnees.txt » et joins la pochette.</p>
+              <p className="mt-0.5" data-testid="dist-done-neutre">Tes fichiers sont prêts pour n'importe quel distributeur : envoie le WAV, recopie les infos de « Credits_et_metadonnees.txt » et joins la pochette.</p>
             </div>
           )}
           {!stats ? (

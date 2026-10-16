@@ -171,6 +171,18 @@ export function fmtDate(ms: number): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} à ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * Note de l'instantané de séance (historique R21) pris à l'envoi d'une version :
+ * il porte toujours l'auteur et la date (décision de Romain, 16/10/2026), même
+ * hors de NOVA (copie de l'historique, autre appareil).
+ * « Version 2 envoyée à l'artiste par Max le 16/10/2026 à 11:32 : voix plus devant ».
+ */
+export function versionSnapshotComment(n: number, who: { name: string }, at: number, note?: string): string {
+  const by = cleanText(who.name || '').slice(0, 60) || 'un membre';
+  const extra = cleanText(note || '').trim();
+  return `Version ${n} envoyée à l'artiste par ${by} le ${fmtDate(at)}${extra ? ` : ${extra}` : ''}`;
+}
+
 export type VersionState = 'waiting' | 'approved' | 'changes';
 export const versionState = (v: MixVersion): VersionState => v.decision.v?.kind ?? 'waiting';
 

@@ -219,7 +219,27 @@ def click_track(page, name):
     page.locator(f"span[title='{name}']").first.click(); page.wait_for_timeout(300)
 
 
+def open_side_browser(page):
+    """Navigateur latéral (store, FX, VST). Depuis la 1.4.9 il est FERMÉ d'office en mode avancé
+    sous 1920 px (utils/sidebarPref), et son bouton peut être replié dans le menu ☰ (data-bar-folded) :
+    on l'ouvre comme l'utilisateur, par le bouton de la barre ou par le menu ☰."""
+    if page.locator("aside [data-testid='browser-tab-vst']").count():
+        return
+    btn = page.get_by_role("button", name="Afficher le navigateur").locator("visible=true")
+    if btn.count():
+        btn.first.click()
+    else:
+        page.locator("[data-testid='transport-menu']").first.click(); page.wait_for_timeout(400)
+        page.get_by_text("Afficher le navigateur", exact=True).locator("visible=true").first.click()
+    page.locator("aside [data-testid='browser-tab-vst']").wait_for(timeout=8000)
+    page.wait_for_timeout(300)
+
+
 def side_tab(page, label):
+    open_side_browser(page)
+    if label == "VST":
+        page.locator("aside [data-testid='browser-tab-vst']").first.click(); page.wait_for_timeout(700)
+        return
     page.locator("aside button").filter(has_text=re.compile(rf"^\s*{label}\s*$")).first.click(); page.wait_for_timeout(700)
 
 

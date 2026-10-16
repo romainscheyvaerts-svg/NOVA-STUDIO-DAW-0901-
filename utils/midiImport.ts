@@ -12,12 +12,18 @@
  *
  * Export : un clip (le clip commence au tick 0), une piste ou toutes les
  * pistes MIDI (positions absolues dans le morceau), au format 1.
+ *
+ * Glissés par note (piano roll pro) : exportés tels qu'on les entend (Synthé
+ * NOVA et 808 : la note qui sonne glisse → pitch bend, voir utils/midiSlides ;
+ * autres instruments : notes normales), relus en notes glissées.
  */
 import { Clip, MidiNote, Track, TrackType } from '../types';
 import { quartersAt, segmentAtTime, type TempoMap } from './tempoMap';
 import {
   DEFAULT_PPQ, DRUM_CHANNEL, MidiFileData, MidiFileNote, MidiFileTrack, initialBpm, secondsToTicks, ticksToSeconds,
 } from './midiFile';
+import { absorbedSlides } from './pianoRollPro';
+import { playableNotes } from './midiCc';
 
 export type TempoMode = 'project' | 'file';
 
@@ -110,6 +116,8 @@ export function planMidiImport(data: MidiFileData, opts: { projectBpm: number; t
           velocity: Math.max(1, Math.min(127, n.velocity)) / 127,
           // Note GM d'origine gardée : l'aller-retour .mid ne ramène pas tout à 7 notes.
           ...(onPad ? { gm: n.pitch } : {}),
+          // Glissé relu depuis les pitch bends (utils/midiSlides).
+          ...(n.slide && !isDrums ? { slide: true } : {}),
         };
       });
       parts.push({ name, isDrums, channel: ch, program: tr.program, notes });
@@ -187,6 +195,21 @@ function drumPitchOut(t: Track, pitch: number): number {
 export interface ExportSource { track: Track; clips: Clip[] }
 
 /**
+ * La piste joue-t-elle les glissés par note ? Synthé NOVA et 808 (comme
+ * engine/AudioEngine) ; les autres instruments jouent une note glissée comme
+ * une note normale, et l'export suit ce qu'on entend.
+ */
+export const playsSlides = (t: Track): boolean =>
+  t.type === TrackType.MIDI && !(t as any).melodicSampler && !isDrumTrack(t) && !!(t.novaSynth || t.bass808);
+
+/** Identifiants des notes glissées portées d'un clip (même décision qu'en lecture). */
+export function slideIdsOf(clip: Clip): Set<string> {
+  const notes = clip.notes || [];
+  if (!notes.some(n => n.slide)) return new Set();
+  return new Set(Array.from(absorbedSlides(playableNotes(clip))).map(n => n.id));
+}
+
+/**
  * Construit le fichier : une piste .mid par piste NOVA. `relativeTo` : instant
  * (s) qui devient le tick 0 (début du clip exporté seul, sinon 0).
  */
@@ -205,7 +228,9 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
     const gmDrums = !drums && track.midiChannel === 10;
     const ch = drums || gmDrums ? DRUM_CHANNEL : MELODIC[nextCh++ % MELODIC.length];
     const notes: MidiFileNote[] = [];
+    const slidy = playsSlides(track);
     for (const c of clips) {
+      const slideIds = slidy ? slideIdsOf(c) : null;
       for (const n of c.notes || []) {
         if (n.muted) continue; // note muette (R16) : jamais exportée
         const abs = c.start + n.start - origin;
@@ -219,6 +244,7 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
           startTick,
           durationTicks: Math.max(1, endTick - startTick),
           channel: ch,
+          ...(slideIds?.has(n.id) ? { slide: true } : {}),
         });
       }
     }

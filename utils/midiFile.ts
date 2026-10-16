@@ -11,9 +11,13 @@
  * - Tempo (FF 51), mesure (FF 58), nom de piste (FF 03), programme (Cx).
  * - Canal 10 (index 9) = batterie General MIDI.
  *
+ * - Glissés par note (piano roll pro) : écrits en pitch bend avec la plage
+ *   annoncée par RPN 0, relus en notes glissées (utils/midiSlides).
+ *
  * Les positions restent en ticks : la conversion en secondes (carte des
  * tempos) est faite par `ticksToSeconds` / `secondsToTicks`.
  */
+import { planSlideBends, slidesFromBends, GM_BEND_RANGE, type ReadBend } from './midiSlides';
 
 export interface MidiFileNote {
   pitch: number;
@@ -23,6 +27,12 @@ export interface MidiFileNote {
   durationTicks: number;
   /** 0-15 (9 = batterie) */
   channel: number;
+  /**
+   * Glissé porté (piano roll pro) : la note qui sonne glisse jusqu'à celle-ci
+   * pendant sa durée. Écrit en pitch bend sur le canal de la note qui sonne
+   * (utils/midiSlides), relu depuis les pitch bends.
+   */
+  slide?: boolean;
 }
 
 export interface MidiFileTrack {
@@ -113,6 +123,10 @@ export function parseMidi(input: ArrayBuffer | Uint8Array): MidiFileData {
     if (id !== 'MTrk') { r.pos = chunkEnd; t--; continue; } // bloc inconnu : ignoré
     const tr = new Reader(b, chunkEnd); tr.pos = r.pos;
     const track: MidiFileTrack = { notes: [] };
+    // Pitch bends et plage annoncée (RPN 0) par canal : glissés par note.
+    const bends: ReadBend[] = [];
+    const rpn = new Map<number, number>(); // canal → (CC101 << 7) | CC100
+    const bendRange = new Map<number, number>();
     const open = new Map<number, { tick: number; vel: number }[]>(); // clé = canal*128 + note
     let tick = 0;
     let status = 0;
@@ -160,6 +174,15 @@ export function parseMidi(input: ArrayBuffer | Uint8Array): MidiFileData {
           continue;
         }
         const d2 = tr.u8() & 0x7f;
+        if (kind === 0xe0) { bends.push({ tick, channel: ch, value: (d2 << 7) | d1, range: bendRange.get(ch) ?? GM_BEND_RANGE }); continue; }
+        if (kind === 0xb0) {
+          const cur = rpn.get(ch) ?? 0x3fff;
+          if (d1 === 101) rpn.set(ch, (d2 << 7) | (cur & 0x7f));
+          else if (d1 === 100) rpn.set(ch, (cur & 0x3f80) | d2);
+          else if (d1 === 6 && cur === 0) bendRange.set(ch, d2 + ((bendRange.get(ch) ?? 0) % 1));
+          else if (d1 === 38 && cur === 0) bendRange.set(ch, Math.floor(bendRange.get(ch) ?? GM_BEND_RANGE) + d2 / 100);
+          continue;
+        }
         if (kind === 0x90 && d2 > 0) {
           const key = ch * 128 + d1;
           const q = open.get(key) || [];
@@ -176,6 +199,7 @@ export function parseMidi(input: ArrayBuffer | Uint8Array): MidiFileData {
     // Notes jamais relâchées : fermées en fin de piste.
     open.forEach((q, key) => q.forEach(o => track.notes.push({ pitch: key % 128, velocity: o.vel, startTick: o.tick, durationTicks: Math.max(1, tick - o.tick), channel: Math.floor(key / 128) })));
     track.notes.sort((a, c) => a.startTick - c.startTick || a.pitch - c.pitch);
+    if (bends.length) track.notes = slidesFromBends(track.notes, bends, ppq) as MidiFileNote[];
     endTick = Math.max(endTick, tick);
     tracks.push(track);
     r.pos = chunkEnd;
@@ -211,6 +235,8 @@ export interface WriteOptions {
   runningStatus?: boolean;
   /** Nom du morceau (piste de tempo). */
   title?: string;
+  /** Plage du pitch bend des glissés (demi-tons ; défaut ±24, élargie si un glissé va plus loin). */
+  bendRange?: number;
 }
 
 const vlqBytes = (v: number): number[] => {
@@ -225,8 +251,8 @@ const textBytes = (s: string): number[] => Array.from(new TextEncoder().encode(s
 type Ev = { tick: number; order: number; bytes: number[]; status?: number };
 
 /** Événements d'une piste, triés : à tick égal, méta, Note Off puis Note On. */
-function trackEvents(tr: MidiFileTrack, extraMeta: Ev[] = []): Ev[] {
-  const evs: Ev[] = [...extraMeta];
+function trackEvents(tr: MidiFileTrack, extraMeta: Ev[] = [], extra: Ev[] = []): Ev[] {
+  const evs: Ev[] = [...extraMeta, ...extra];
   if (tr.name) evs.push({ tick: 0, order: 0, bytes: [0xff, 0x03, ...vlqBytes(textBytes(tr.name).length), ...textBytes(tr.name)] });
   const chans = new Set(tr.notes.map(n => n.channel & 0x0f));
   if (tr.program !== undefined) chans.forEach(ch => { if (ch !== DRUM_CHANNEL) evs.push({ tick: 0, order: 1, status: 0xc0 | ch, bytes: [tr.program! & 0x7f] }); });
@@ -286,13 +312,17 @@ export function writeMidi(data: Omit<MidiFileData, 'format'> & { format?: 0 | 1 
     meta.push({ tick: Math.round(t.tick), order: 0, bytes: [0xff, 0x51, 0x03, (us >> 16) & 0xff, (us >> 8) & 0xff, us & 0xff] });
   }
 
+  // Glissés par note → pitch bends (RPN 0 en tête de piste) ; sans glissé, rien ne change.
+  const slides = data.tracks.some(t => t.notes.some(n => n.slide)) ? planSlideBends(data.tracks, ppq, opts.bendRange) : null;
+  const tracks: MidiFileTrack[] = slides ? data.tracks.map((t, i) => ({ ...t, notes: slides.notes[i] as MidiFileNote[] })) : data.tracks;
+  const extraOf = (i: number): Ev[] => (slides ? slides.events[i] : []);
   const chunks: number[][] = [];
   if (format === 0) {
-    const all: MidiFileTrack = { name: data.tracks.length === 1 ? data.tracks[0].name : undefined, notes: data.tracks.flatMap(t => t.notes), program: data.tracks.find(t => t.program !== undefined)?.program };
-    chunks.push(chunk('MTrk', encodeTrack(trackEvents(all, meta), rs)));
+    const all: MidiFileTrack = { name: tracks.length === 1 ? tracks[0].name : undefined, notes: tracks.flatMap(t => t.notes), program: tracks.find(t => t.program !== undefined)?.program };
+    chunks.push(chunk('MTrk', encodeTrack(trackEvents(all, meta, tracks.flatMap((_, i) => extraOf(i))), rs)));
   } else {
     chunks.push(chunk('MTrk', encodeTrack(meta.sort((a, b) => a.tick - b.tick), rs)));
-    for (const t of data.tracks) chunks.push(chunk('MTrk', encodeTrack(trackEvents(t), rs)));
+    tracks.forEach((t, i) => chunks.push(chunk('MTrk', encodeTrack(trackEvents(t, [], extraOf(i)), rs))));
   }
   const header = chunk('MThd', [0, format, (chunks.length >> 8) & 0xff, chunks.length & 0xff, (ppq >> 8) & 0xff, ppq & 0xff]);
   const out = new Uint8Array(header.length + chunks.reduce((s, c) => s + c.length, 0));

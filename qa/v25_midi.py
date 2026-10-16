@@ -294,10 +294,23 @@ def scenario_pc(pg, errs):
     pg.keyboard.press("Escape"); pg.wait_for_timeout(600)
 
     # --- 6. Menu MIDI de la barre de transport + export de toutes les pistes ---
-    pg.locator("[data-nova-midi-menu]").first.click(); pg.wait_for_timeout(300)
+    # 1.5.x : la barre replie le bouton MIDI dans le menu ☰ quand la place manque (utils/barFit,
+    # attribut data-bar-folded) : on passe alors par le menu ☰, comme l'utilisateur.
+    midi_btn = pg.locator("[data-nova-midi-menu]").first
+    bar_item = pg.locator("[data-bar-item='midi-fichiers']")
+    folded = (bar_item.count() and bar_item.first.get_attribute("data-bar-folded") is not None) or not midi_btn.is_visible()
+    RES["mesures"]["menu_midi_par"] = "menu ☰ (bouton MIDI replié)" if folded else "bouton MIDI de la barre"
+    if folded:
+        pg.locator("[data-testid='transport-menu']").first.click(); pg.wait_for_timeout(500)
+        export_all = pg.locator("[data-testid='m-midi-export']").first
+        export_all.scroll_into_view_if_needed()
+    else:
+        midi_btn.click(); pg.wait_for_timeout(300)
+        export_all = pg.locator("[data-testid='midi-export-all']").first
     shot(pg, f"v25_{vp}_11_menu_midi")
+    ok("menu_midi_accessible", export_all.is_visible(), RES["mesures"]["menu_midi_par"])
     with pg.expect_download(timeout=15000) as dl2:
-        pg.locator("[data-testid='midi-export-all']").click()
+        export_all.click()
     p_all = OUT / "export_toutes_pistes_v25.mid"
     dl2.value.save_as(str(p_all))
     allb = pg.evaluate(PARSE_JS, base64.b64encode(p_all.read_bytes()).decode())
@@ -402,3 +415,4 @@ with sync_playwright() as p:
 (OUT / f"resultat_v25_{WHICH}.json").write_text(json.dumps(RES, ensure_ascii=False, indent=1), encoding="utf-8")
 bad = [k for k, v in RES["etapes"].items() if not v["ok"]]
 print("\nKO :", bad if bad else "aucun")
+sys.exit(1 if bad else 0)
