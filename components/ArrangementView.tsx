@@ -2416,22 +2416,22 @@ useEffect(() => {
 }, [drawTimeline]);
 
 // --- Calque de la tete de lecture (et curseur d'enregistrement) ---
-// Redessine a chaque image depuis playheadStore, sans rendu React : on efface
-// seulement la bande de l'ancienne position.
-const overlayRef = useRef<HTMLCanvasElement>(null);
-const lastPlayheadXRef = useRef<number | null>(null);
+// Suit playheadStore sans rendu React. Un trait (div) deplace par le GPU (translate3d) :
+// plus de canvas plein ecran redessine 60 fois/s (PC peu puissants : c'etait le plus gros
+// poste du compositeur pendant la lecture).
+const overlayRef = useRef<HTMLDivElement>(null);
+const playheadLineRef = useRef<HTMLDivElement>(null);
+const overlayWidthRef = useRef(0);
 const isPlayingRef = useRef(isPlaying);
 isPlayingRef.current = isPlaying;
 const viewportWidthRef = useRef(viewportSize.width);
 viewportWidthRef.current = viewportSize.width;
 
 const drawPlayhead = useCallback(() => {
-    const ov = overlayRef.current;
+    const line = playheadLineRef.current;
     const scroll = scrollContainerRef.current;
-    if (!ov || !scroll) return;
-    const ctx = ov.getContext('2d');
-    if (!ctx) return;
-    const w = ov.width, h = ov.height;
+    if (!line || !scroll) return;
+    const w = overlayWidthRef.current;
     const t = playheadStore.get();
 
     // Suivi du playhead pendant la lecture : on avance d'une "page" plutot que
@@ -2446,36 +2446,24 @@ const drawPlayhead = useCallback(() => {
         }
     }
 
-    const last = lastPlayheadXRef.current;
-    if (last !== null) ctx.clearRect(Math.floor(last) - 7, 0, 15, h);
-    lastPlayheadXRef.current = null;
 
     if (minimapPlayheadRef.current) {
         minimapPlayheadRef.current.style.transform = `translateX(${t * zoomH * minimapScaleRef.current}px)`;
     }
 
-    const phX = Math.round(t * zoomH - scroll.scrollLeft) + 0.5;
+    const phX = Math.round(t * zoomH - scroll.scrollLeft);
     if (phX >= 0 && phX <= w) {
-        const color = isRecording ? '#ef4444' : '#00f2ff';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
-        ctx.fillStyle = color;
-        ctx.beginPath(); ctx.moveTo(phX - 5, 0); ctx.lineTo(phX + 5, 0); ctx.lineTo(phX, 10); ctx.fill();
-        lastPlayheadXRef.current = phX;
+        line.style.transform = `translate3d(${phX}px,0,0)`;
+        if (line.style.display) line.style.display = '';
+    } else if (line.style.display !== 'none') {
+        line.style.display = 'none';
     }
-}, [zoomH, isRecording]);
+}, [zoomH]);
 
 useEffect(() => {
-    // Taille du calque : relue seulement quand la disposition change.
+    // Largeur du calque : relue seulement quand la disposition change.
     const ov = overlayRef.current;
-    if (ov) {
-        const cw = ov.clientWidth, ch = ov.clientHeight;
-        if (cw > 0 && ch > 0 && (ov.width !== cw || ov.height !== ch)) {
-            ov.width = cw; ov.height = ch;
-            lastPlayheadXRef.current = null;
-        }
-    }
+    if (ov) overlayWidthRef.current = ov.clientWidth;
     drawPlayhead();
     return playheadStore.subscribe(drawPlayhead);
 }, [drawPlayhead, scrollLeft, viewportSize.width, viewportSize.height, headerWidth, isPlaying]);
@@ -2996,9 +2984,10 @@ useEffect(() => {
               zIndex: 20
           }} 
       />
-      {/* Calque de la tete de lecture, redessine a chaque image sans toucher au reste */}
-      <canvas
+      {/* Calque de la tete de lecture : un trait deplace par le GPU, sans redessin */}
+      <div
           ref={overlayRef}
+          data-testid="playhead-layer"
           style={{
               position: 'absolute',
               top: TOOLBAR_H,
@@ -3009,9 +2998,17 @@ useEffect(() => {
               height: `calc(100% - ${TOOLBAR_H}px)`,
               pointerEvents: 'none',
               // Au-dessus du couloir d'accords et des couloirs de prises : la tête de lecture les traverse.
-              zIndex: 42
+              zIndex: 42,
+              overflow: 'hidden',
+              contain: 'strict',
           }}
-      />
+      >
+          <div ref={playheadLineRef} data-testid="playhead-line"
+              style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 11, marginLeft: -5, willChange: 'transform', color: isRecording ? '#ef4444' : '#00f2ff' }}>
+              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 5, width: 1, background: 'currentColor' }} />
+              <div style={{ position: 'absolute', top: 0, left: 0, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '10px solid currentColor' }} />
+          </div>
+      </div>
       {/* 📌 Prises gardées : bandeau (fin de prise, état vide) et lignes au-dessus de chaque piste */}
       {keptZone && takeLanes && visibleTracks.some(t => aboveH(t) > 0) && (
         <div data-testid="kept-layer" data-zoom-h={zoomH} data-scroll-left={scrollLeft} data-zoom-v={zoomV} style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>

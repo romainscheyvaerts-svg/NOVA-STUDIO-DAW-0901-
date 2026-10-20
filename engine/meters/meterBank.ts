@@ -89,6 +89,8 @@ class NovaMeterBank extends AudioWorkletProcessor {
 try { registerProcessor('nova-meter-bank-v1', NovaMeterBank); } catch (e) {}
 `;
 const FIELDS = 10;
+/** Crête (linéaire) sous laquelle un message compte comme du silence : −100 dBFS. */
+const SIGNAL_FLOOR = 1e-5;
 
 export type TapMode = 'pre' | 'post';
 
@@ -252,10 +254,13 @@ class MeterBank {
     const t0 = performance.now();
     const now = t0;
     const d = msg.d;
+    // Silence partout (studio à l'arrêt) : l'horloge d'affichage peut dormir (PC peu puissants).
+    let signal = false;
     for (let o = 0; o + FIELDS <= d.length; o += FIELDS) {
       const slot = d[o];
       const id = owners[slot];
       if (!id) continue;
+      if (d[o + 2] > SIGNAL_FLOOR || d[o + 3] > SIGNAL_FLOOR) signal = true;
       let st = this.points.get(id);
       if (!st) { st = freshState(); this.points.set(id, st); }
       this.apply(st, d, o, now);
@@ -265,6 +270,7 @@ class MeterBank {
         if (ex.g.length) { this.gonio = Float32Array.from(ex.g); this.gonioAt = now; }
       }
     }
+    if (signal) meterClock.wake(now);
     this.stats.messages++;
     this.stats.handleMs += performance.now() - t0;
   }
@@ -352,7 +358,11 @@ class MeterClock {
   private subs = new Set<Frame>();
   private raf = 0;
   private last = 0;
+  /** Dernier message des mètres : sans signal, l'horloge s'arrête (PC peu puissants : 0 image/s au repos). */
+  private lastData = 0;
   readonly minFrameMs = 1000 / 30 - 2;
+  /** Après le dernier message : la retombée et le maintien de crête finissent de se dessiner. */
+  readonly idleAfterMs = HOLD_MS + 500;
   /** Images dessinées et temps passé à dessiner (rapport de coût). */
   readonly stats = { frames: 0, drawMs: 0 };
 
@@ -367,11 +377,20 @@ class MeterClock {
     this.raf = requestAnimationFrame(this.tick);
   }
 
+  /** Un message est arrivé : l'horloge repart si elle dormait. */
+  wake(now = performance.now()) {
+    this.lastData = now;
+    if (this.subs.size) this.start();
+  }
+
   private tick = (now: number) => {
+    if (now - this.last >= this.minFrameMs) {
+      this.last = now;
+      this.run(now);
+    }
+    // Plus de signal depuis la retombée : on s'arrête (wake() relance).
+    if (now - this.lastData > this.idleAfterMs) { this.raf = 0; return; }
     this.raf = requestAnimationFrame(this.tick);
-    if (now - this.last < this.minFrameMs) return;
-    this.last = now;
-    this.run(now);
   };
 
   private run(now: number) {

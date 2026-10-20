@@ -168,6 +168,7 @@ const lireModeHorloge = (): ClockMode => {
  * lecture, ni de la barre de transport ni du reste du studio.
  * Clic : bascule minutes:secondes ⇄ mesures | temps | ticks (mémorisé).
  */
+const CLOCK_FRAME_MS = 1000 / 30;
 const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: number; compact?: boolean }> = ({ bpm, numerator, denominator, compact = false }) => {
   const ref = useRef<HTMLSpanElement>(null);
   const [mode, setMode] = useState<ClockMode>(lireModeHorloge);
@@ -177,12 +178,23 @@ const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: num
   const format = (t: number) => mode === 'BARS' ? (useMap ? formatBarsBeats(map, t) : formatMesures(t + 1e-6, bpm, numerator, denominator)) : formatClock(t + 1e-6);
   useEffect(() => {
     let last = '';
-    const update = () => {
+    let lastAt = 0;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const write = () => {
+      pending = null;
+      lastAt = performance.now();
       const txt = format(playheadStore.get());
       if (txt !== last && ref.current) { ref.current.textContent = txt; last = txt; }
     };
-    update();
-    return playheadStore.subscribe(update);
+    // 30 i/s au plus (l'œil ne lit pas mieux), dernière position toujours affichée : PC peu puissants.
+    const update = () => {
+      const wait = CLOCK_FRAME_MS - (performance.now() - lastAt);
+      if (wait <= 0) write();
+      else if (!pending) pending = setTimeout(write, wait);
+    };
+    write();
+    const off = playheadStore.subscribe(update);
+    return () => { off(); if (pending) clearTimeout(pending); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, bpm, numerator, denominator, map]);
   const toggle = () => setMode(m => {
@@ -204,7 +216,8 @@ const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: num
           {mode === 'BARS' ? 'Mesure' : 'Position'}
         </span>
       )}
-      <span ref={ref} className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center whitespace-pre" style={{ color: 'var(--accent-text)' }}>{format(playheadStore.get())}</span>
+      {/* Boîte isolée : le texte qui change ne relance pas la mise en page de toute la barre. */}
+      <span ref={ref} className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center whitespace-pre" style={{ color: 'var(--accent-text)', display: 'inline-block', minWidth: mode === 'BARS' ? '11ch' : '8ch', contain: 'layout paint style' }}>{format(playheadStore.get())}</span>
     </button>
   );
 };

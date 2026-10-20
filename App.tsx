@@ -156,6 +156,7 @@ import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat 
 import { parseLocalCommand } from './utils/novaCommands';
 import { listTakes, compTakeInZone, activeTakeInZone, CompZone } from './utils/takes';
 import { playheadStore } from './utils/playheadStore';
+import { playheadFrameMs } from './utils/perfMode';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
@@ -1311,9 +1312,12 @@ function Studio() {
   // state.currentTime n'est mis a jour qu'a l'arret, a la pause et aux sauts.
   useEffect(() => {
     let animId: number;
-    const updateLoop = () => {
+    // Mode léger (PC peu puissants) : tête de lecture à 30 images/s ; l'audio n'est pas touché.
+    const frameMs = playheadFrameMs();
+    let lastFrame = 0;
+    const updateLoop = (now: number) => {
       if (stateRef.current.isPlaying) {
-         playheadStore.set(audioEngine.getCurrentTime());
+         if (!frameMs || now - lastFrame >= frameMs - 2) { lastFrame = now; playheadStore.set(audioEngine.getCurrentTime()); }
          animId = requestAnimationFrame(updateLoop);
       }
     };

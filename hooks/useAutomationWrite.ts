@@ -101,12 +101,16 @@ export function useAutomationWrite(deps: AutomationWriteDeps) {
   }, []);
 
   // Échantillonnage de l'écriture + faders qui suivent la courbe pendant la lecture.
+  // PC peu puissants : la boucle ne tourne QUE pendant la lecture (avant : 60 i/s en permanence,
+  // la moitié du coût du studio au repos). Relancée par « nova:transport-start », et par un
+  // contrôle léger (2 fois/s) pour les lectures lancées par un autre chemin.
   useEffect(() => {
     let raf = 0;
     const sorted = new WeakMap<object, ReturnType<typeof sortedPoints>>();
+    const start = () => { if (!raf && audioEngine.getIsPlaying()) raf = requestAnimationFrame(loop); };
     const loop = () => {
+      if (!audioEngine.getIsPlaying()) { raf = 0; return; }
       raf = requestAnimationFrame(loop);
-      if (!audioEngine.getIsPlaying()) return;
       automationRecorder.tick();
       const time = audioEngine.getCurrentTime();
       for (const track of depsRef.current.stateRef.current.tracks) {
@@ -126,8 +130,11 @@ export function useAutomationWrite(deps: AutomationWriteDeps) {
         if (out !== null) publishLive(liveKey(trackId, param), out);
       }
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    const onStart = () => setTimeout(start, 0);
+    window.addEventListener('nova:transport-start', onStart);
+    const watch = window.setInterval(start, 500);
+    start();
+    return () => { cancelAnimationFrame(raf); raf = 0; window.removeEventListener('nova:transport-start', onStart); window.clearInterval(watch); };
   }, []);
 
 }

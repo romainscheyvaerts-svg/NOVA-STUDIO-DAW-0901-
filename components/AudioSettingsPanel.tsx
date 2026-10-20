@@ -10,6 +10,7 @@ import { useSimpleMode } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
 import StorageProtectionCard from './StorageProtectionCard';
 import DesktopUpdateSettings from './DesktopUpdateSettings';
+import PerfModeSetting from './PerfModeSetting';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
 import { rateLabel } from '../utils/projectRate';
 
@@ -432,6 +433,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusS
                 <SimpleModeToggle />
                 <StorageProtectionCard />
                 <DesktopUpdateSettings />
+                <PerfModeSetting />
 
                 {/* AUDIO I/O - Hidden when ASIO is active with a device selected */}
                 {!(asioConnected && selectedAsioDevice) && (

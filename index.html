@@ -28,12 +28,32 @@
       } catch (e) {}
       document.documentElement.setAttribute('data-theme', t);
     })();
+    // Mode léger (PC peu puissants, utils/perfMode.ts) posé avant tout affichage :
+    // choix de l'utilisateur (« leger » / « complet »), sinon détection (≤ 2 cœurs, ou ≤ 4 cœurs et ≤ 4 Go).
+    (function () {
+      var lite = false;
+      try {
+        var p = localStorage.getItem('nova_perf');
+        if (p === 'leger') lite = true;
+        else if (p !== 'complet') {
+          var c = navigator.hardwareConcurrency || 8, m = navigator.deviceMemory || 8;
+          lite = c <= 2 || (c <= 4 && m <= 4);
+        }
+      } catch (e) {}
+      if (lite) document.documentElement.setAttribute('data-perf', 'lite');
+    })();
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Polices embarquees : le DAW tourne aussi dans l'application iPhone,
        ou dependre du reseau pour la typographie n'a pas de sens.
        Inter et JetBrains Mono sont variables : un fichier chacune. -->
   <style>
+    /* Voiles plein écran derrière les fenêtres : sans flou (le flou de tout l'écran coûtait
+       jusqu'à 95 % du GPU d'un PC modeste pendant la lecture ; le voile est déjà sombre). */
+    .fixed.inset-0[class*="backdrop-blur"] { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+    /* Mode léger (PC peu puissants) : plus aucun flou, plus d'animations décoratives en boucle. */
+    html[data-perf="lite"] *, html[data-perf="lite"] *::before, html[data-perf="lite"] *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+    html[data-perf="lite"] .animate-pulse, html[data-perf="lite"] .animate-ping, html[data-perf="lite"] .animate-bounce { animation: none !important; }
     /* Nova « montre » un réglage : halo pulsé + bulle d'explication */
     .nova-spotlight { position: relative; z-index: 60; outline: 3px solid #22d3ee !important; outline-offset: 3px; border-radius: 10px; animation: nova-spot 1s ease-in-out infinite; }
     @keyframes nova-spot { 0%,100% { box-shadow: 0 0 0 0 rgba(34,211,238,.65); } 50% { box-shadow: 0 0 0 10px rgba(34,211,238,0); } }
