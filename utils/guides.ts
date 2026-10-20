@@ -593,6 +593,25 @@ export const GUIDES: Guide[] = [
     prereqs: ['appli-windows', 'compte'],
   },
   {
+    id: 'mise-a-jour-appli', emoji: '🔄', title: 'Mettre à jour l’appli Nova Studio (Windows)',
+    keywords: 'mise a jour maj update nouvelle version installer appli application windows logiciel programme automatique',
+    summary: 'L’appli Windows se met à jour toute seule ; tu peux aussi chercher une nouvelle version tout de suite.',
+    steps: [
+      { text: 'Ouvre « Réglages audio » (en mode simple : ☰ › « Plus d’outils »).', action: 'pal.audio',
+        target: ['[aria-label="Réglages audio"]', tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('app-update-settings') } },
+      { text: 'Dans « Mises à jour de Nova Studio », clique « Rechercher maintenant ».', action: 'pal.appUpdate', target: tid('app-update-check') },
+      { text: 'Quand « Nova Studio X.Y.Z est prête » s’affiche : « Redémarrer et mettre à jour », ou ferme simplement Nova Studio.', target: tid('app-update-apply'), manual: true },
+    ],
+    result: 'La nouvelle version est installée, Nova Studio se rouvre et affiche « Mis à jour ✓ » avec les nouveautés.',
+    pitfalls: [
+      'Jamais pendant un enregistrement, une lecture ou une collaboration : arrête-les d’abord.',
+      'Sur le site (navigateur), rien à faire : il est toujours à jour.',
+      'Ancienne version de l’appli (1.5.2 ou avant) : télécharge la nouvelle une fois avec le bouton de la carte, ensuite tout est automatique.',
+    ],
+    prereqs: ['appli-windows', 'internet'],
+    doIt: () => [cmd('pal.appUpdate', 'Rechercher une mise à jour de Nova Studio')],
+  },
+  {
     id: 'stems', emoji: '🪓', title: 'Séparer un morceau en stems',
     keywords: 'stems separer separation voix batterie basse acapella instrumental demucs extraire isoler',
     summary: 'Voix, batterie, basse et le reste, chacun sur sa piste.',

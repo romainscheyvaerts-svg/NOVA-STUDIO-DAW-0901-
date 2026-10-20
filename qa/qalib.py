@@ -113,6 +113,12 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
         return route.continue_()
 
     ctx.route("**/*", guard)
+    # Manifeste de mise à jour de l'appli Windows (1.5.3) : vide par défaut (« {} », ignoré par la
+    # page, sans erreur console), pour que la carte « nouvelle version disponible » n'apparaisse pas
+    # au hasard d'une construction dans les scénarios qui simulent une ancienne appli.
+    # qa/desktop_maj_auto.py sert le sien.
+    ctx.route("**/downloads/nova-studio-latest.json*", lambda route, request: route.fulfill(
+        status=200, content_type="application/json", body="{}"))
     qa_hors_prod.install(ctx, log)
     # QA_CHORD_LANE=1 : couloir d'accords affiché (sous la règle) dans tous les modes,
     # pour rejouer les gestes de l'arrangement avec le couloir.

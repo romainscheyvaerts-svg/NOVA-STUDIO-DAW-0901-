@@ -22,6 +22,7 @@ import { ProjectRatePicker } from './ProjectRateControls';
 import { useSimpleMode } from '../utils/simpleMode';
 import { isMakeMusicDisplay } from '../utils/accountDisplay';
 import OnlineSessionsList from './OnlineSessionsList';
+import DesktopUpdateCard from './DesktopUpdateCard';
 
 interface LandingPageProps {
   user: User | null;
@@ -301,6 +302,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
   return (
     <div className="nova-grille fixed inset-0 bg-nv-bg flex flex-col overflow-hidden">
+      {/* Appli Windows : nouvelle version prête / disponible (dans la page, pousse le contenu). */}
+      <DesktopUpdateCard />
       {/* Echec d'ecoute : le bouton revenait a son etat initial sans rien dire */}
       {previewError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-2.5 rounded-xl

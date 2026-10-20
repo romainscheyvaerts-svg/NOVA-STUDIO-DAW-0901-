@@ -257,6 +257,8 @@ import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrac
 import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
 import BeatLoadBanner from './components/BeatLoadBanner';
+import DesktopUpdateCard from './components/DesktopUpdateCard';
+import { requestDesktopUpdateCheck, useDesktopBusyProbe } from './utils/appUpdate';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
@@ -8614,6 +8616,8 @@ function Studio() {
     };
     return () => { delete (window as any).__novaBeforeClose; };
   }, [bakeVstBeforeSave, autosaveNow]);
+  // Appli Windows : jamais de redémarrage pour une mise à jour pendant une prise, une lecture ou une collab.
+  useDesktopBusyProbe(() => ({ recording: !!stateRef.current.isRecording, playing: !!stateRef.current.isPlaying, collab: !!collabRef.current }));
 
   // Au studio, pont VST connecté : les pistes VST modifiées sont regelées pendant
   // les pauses (45 s sans lecture), pour que la fermeture et l'envoi soient immédiats.
@@ -10389,6 +10393,7 @@ function Studio() {
       a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
       a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
+      a('Réglages', 'pal.appUpdate', 'Rechercher une mise à jour de Nova Studio', () => { requestDesktopUpdateCheck(); setIsAudioSettingsOpen(true); }, { keywords: 'mise a jour maj update nouvelle version installer appli windows automatique', disabledReason: isNovaDesktop() ? undefined : 'Seulement dans l’appli Nova Studio pour Windows (le site est toujours à jour).' }),
       a('Réglages', 'pal.surfaces', 'Préférences › Surfaces de contrôle (Mackie Control, HUI)', () => { setAudioSettingsFocus('surfaces'); setIsAudioSettingsOpen(true); }, { pt: 'Setup › Peripherals › MIDI Controllers', keywords: 'surface controle mackie mcu hui x-touch faderport icon uf8 fader motorise contrôleur' }),
       a('Réglages', 'pal.theme', `Thème ${theme === 'light' ? 'sombre' : 'clair'}`, () => toggleTheme(), { keywords: 'thème clair sombre dark light' }),
       a('Réglages', 'pal.simple', simpleNow ? 'Passer en mode avancé (console, routage, automation)' : 'Passer en mode simple', () => simpleModeStore.setPref(!simpleNow), { keywords: 'mode simple avancé' }),
@@ -10463,7 +10468,9 @@ function Studio() {
         </TransportBar>
         </PanelBoundary>
       </div>
-      
+      {/* Appli Windows : nouvelle version prête / disponible (dans la page, sous le transport). */}
+      <DesktopUpdateCard />
+
       {/* Même projet ouvert dans un autre onglet : cet onglet ne sauvegarde pas (utils/tabLock). */}
       {tabLock.role === 'guest' && tabLock.projectId === state.id && (
         <div className="fixed inset-x-0 top-3 z-[670] flex justify-center px-4 pointer-events-none" role="alert" data-testid="tab-lock-banner">

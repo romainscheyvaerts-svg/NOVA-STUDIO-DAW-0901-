@@ -23,7 +23,11 @@ fenêtre (et la session en cours) avec lui ; le superviseur le relance.
 Variables d'environnement (tests / développement) :
   NOVA_DESKTOP_URL=http://localhost:5177/   page chargée depuis le réseau (pas d'interface embarquée)
   NOVA_DESKTOP_UI_DIR=...                   interface embarquée à utiliser (défaut : _internal/ui)
-  NOVA_DESKTOP_NO_UPDATE=1                  pas de recherche de mise à jour de l'interface
+  NOVA_DESKTOP_NO_UPDATE=1                  aucune mise à jour (ni de l'interface, ni du programme)
+  NOVA_DESKTOP_UPDATE_TEST_ORIGIN=http://127.0.0.1:8802
+                                            TESTS : manifeste de mise à jour du programme servi en local
+                                            (voir app_update.py ; 127.0.0.1 / localhost seulement)
+  NOVA_DESKTOP_APP_UPDATE_DELAY=40          délai avant la 1re recherche de mise à jour du programme (s)
   NOVA_DESKTOP_DEBUG=1                      outils de développement (F12), raccourcis navigateur
   NOVA_DESKTOP_CDP_PORT=9333                port de débogage distant (tests automatisés)
   NOVA_DESKTOP_DATA_DIR=...                 dossier de données (profil WebView2, journaux, interface)
@@ -62,6 +66,7 @@ BG = (12, 13, 16)                       # #0c0d10, couleur de fond du DAW
 BOOT_TIMEOUT_S = float(os.environ.get("NOVA_DESKTOP_BOOT_TIMEOUT", "40"))
 UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_UPDATE_DELAY", "25"))
 UPDATE_EVERY_S = 6 * 3600
+APP_UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_APP_UPDATE_DELAY", "40"))
 
 FROZEN = getattr(sys, "frozen", False)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +74,7 @@ RES_DIR = getattr(sys, "_MEIPASS", HERE)
 if not FROZEN:
     sys.path.insert(0, HERE)
 
+import app_update  # noqa: E402
 import capture_guard  # noqa: E402
 import google_login  # noqa: E402
 import ui_bundle  # noqa: E402
@@ -442,7 +448,7 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
-        features: Object.freeze(['google-login', 'stems', 'voice', 'reveal-download', 'pick-folder']),
+        features: Object.freeze(['google-login', 'stems', 'voice', 'reveal-download', 'pick-folder', 'app-update']),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d }),
         hwnd: %(hwnd)d
       }),
@@ -630,7 +636,7 @@ class UiState:
                              name="prune", daemon=True).start()
 
 
-def run_window(url: str, url_mode: bool) -> None:
+def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = None) -> None:
     wv2 = webview2_dir()
     os.environ["PATH"] = wv2 + os.pathsep + os.environ.get("PATH", "")
     import clr  # pythonnet (.NET Framework 4.x, présent sur tout Windows 10/11)
@@ -685,6 +691,8 @@ def run_window(url: str, url_mode: bool) -> None:
             self.offline = False
             self.boot_checked = False
             self.updater_started = False
+            self.update_hello = False      # la page affiche elle-même la carte de mise à jour
+            self.booted_at = 0.0
             self.crashes = []
             self.tuned = set()
             self.no_focus = bool(os.environ.get("NOVA_DESKTOP_WINDOW"))  # tests : jamais de vol du focus
@@ -939,7 +947,9 @@ def run_window(url: str, url_mode: bool) -> None:
                     state = "?"
                 if state.endswith("|up"):
                     log.info(f"[{since_start_ms()} ms] DAW démarré ({ui.active.id if ui.active else 'en ligne'})")
+                    self.booted_at = self.booted_at or time.time()
                     self.start_updater()
+                    self.start_app_updater()
                     return
                 time.sleep(0.2)
             if self.allow_close:
@@ -977,7 +987,9 @@ def run_window(url: str, url_mode: bool) -> None:
                     if v is not None and v is not ui.active and (ui.pending is None or v.id != ui.pending.id):
                         ui.pending = v
                         ui_bundle.prune(ui.cache, {v.id} | ({ui.active.id} if ui.active else set()), log.info)
-                        self.form.BeginInvoke(Action(self.show_update_toast))
+                        # une nouvelle version du programme (qui contient aussi l'interface) passe avant
+                        if updater is None or updater.ready_manifest() is None:
+                            self.form.BeginInvoke(Action(self.show_update_toast))
                 except Exception as e:
                     log.warning(f"mise à jour de l'interface impossible pour l'instant : {e}")
                 time.sleep(UPDATE_EVERY_S)
@@ -985,6 +997,75 @@ def run_window(url: str, url_mode: bool) -> None:
         def show_update_toast(self):
             try:
                 self.core.ExecuteScriptAsync(UPDATE_TOAST_JS)
+            except Exception:
+                pass
+
+        # ── mise à jour du programme (app_update.py) ────────────────────
+        def start_app_updater(self):
+            if updater is None or getattr(self, "app_updater_started", False):
+                return
+            self.app_updater_started = True
+            updater.post = self.on_app_update_state
+            threading.Thread(target=updater.loop, args=(APP_UPDATE_FIRST_DELAY_S, UPDATE_EVERY_S),
+                             name="app-update", daemon=True).start()
+
+        def on_app_update_state(self, st: dict):
+            """État de la mise à jour -> page. Interface trop ancienne pour la carte (aucun
+            « hello » reçu 10 s après le démarrage) : petit bandeau injecté à la place."""
+            if self.update_hello:
+                self.post_to_page(st)
+            elif st.get("phase") == "ready" and self.booted_at and time.time() - self.booted_at > 10:
+                script = app_update.FALLBACK_TOAST_JS % json.dumps(st)
+
+                def go():
+                    try:
+                        self.core.ExecuteScriptAsync(script)
+                    except Exception:
+                        pass
+                try:
+                    self.form.BeginInvoke(Action(go))
+                except Exception:
+                    pass
+
+        def on_app_update_message(self, cmd: str):
+            if updater is None:
+                if cmd in ("hello", "check"):
+                    self.update_hello = True
+                    self.post_to_page({"type": "nova-desktop-update", "installed": APP_VERSION, "phase": "off",
+                                       "auto": False, "available": None, "error": "", "busy": None,
+                                       "busyText": "", "dismissed": False, "justUpdated": None,
+                                       "lastCheck": 0, "progress": 0})
+                return
+            if cmd == "hello":
+                self.update_hello = True
+                updater.post = self.on_app_update_state
+                updater.push()
+            elif cmd == "check":
+                threading.Thread(target=updater.check, kwargs={"manual": True}, name="app-update-check",
+                                 daemon=True).start()
+            elif cmd in ("auto:on", "auto:off"):
+                updater.set_auto(cmd == "auto:on")
+            elif cmd == "later":
+                updater.later()
+            elif cmd == "seen":
+                updater.seen_announce()
+            elif cmd == "apply":
+                threading.Thread(target=self.apply_app_update, name="app-update-apply", daemon=True).start()
+
+        def apply_app_update(self):
+            """« Redémarrer et mettre à jour » : jamais pendant un enregistrement, une lecture ou
+            une collaboration ; sinon sauvegarde (comme la croix), installation, relance."""
+            try:
+                probe = self.eval_js(app_update.BUSY_PROBE_JS, 5)
+            except Exception:
+                probe = None
+            reason = updater.request_apply(probe)
+            if reason is not None:
+                log.info(f"mise à jour du programme reportée ({reason})")
+                return
+            log.info("mise à jour du programme demandée : sauvegarde, installation puis relance")
+            try:
+                self.form.BeginInvoke(Action(self.form.Close))
             except Exception:
                 pass
 
@@ -1047,6 +1128,11 @@ def run_window(url: str, url_mode: bool) -> None:
                 # Pont Pro Tools : sélecteur de dossier de Windows (seulement pour le DAW).
                 if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
                     self.pick_folder(msg[len("nova-desktop:pick-folder:"):])
+                return
+            if msg.startswith("nova-desktop:update:"):
+                # Mise à jour du programme : seulement depuis le DAW.
+                if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
+                    self.on_app_update_message(msg[len("nova-desktop:update:"):])
                 return
             if msg == "nova-desktop:apply-update" and ui.pending is not None:
                 log.info(f"mise à jour appliquée tout de suite : {ui.pending.id}")
@@ -1350,6 +1436,16 @@ def main() -> int:
         return run_asio_control_panel(argv[1] if len(argv) > 1 else "")
 
     _setup_app_logging()
+    updater = make_updater()
+    if updater is not None and app_update.install_in_progress(updater.dir):
+        # Installation d'une mise à jour en cours (lancée à la fermeture) : l'appli sera ouverte
+        # par le script d'installation dès qu'elle sera finie.
+        try:
+            app_update.request_relaunch_after_install(updater.dir)
+        except OSError:
+            pass
+        log.info("mise à jour en cours d'installation : Nova Studio s'ouvrira juste après")
+        return 0
     url = os.environ.get("NOVA_DESKTOP_URL") or ""
     relaunch = False
     for a in argv:
@@ -1367,17 +1463,48 @@ def main() -> int:
         log.info("déjà ouvert : fenêtre existante ramenée au premier plan")
         return 0
 
+    if updater is not None:
+        try:
+            updater.startup()
+            if updater.startup_install(os.getpid()):
+                # Mise à jour prête mais pas installée à la fermeture : installée maintenant
+                # (fenêtre de progression de l'installateur), puis l'appli se rouvre seule.
+                log.info("mise à jour installée avant d'ouvrir la fenêtre ; relance ensuite")
+                return 0
+        except Exception:
+            log.exception("mise à jour au démarrage")
+
     supervisor = None
     if os.environ.get("NOVA_DESKTOP_NO_BRIDGES") != "1":
         supervisor = BridgeSupervisor()
         supervisor.start()
     try:
-        run_window(url, url_mode)
+        run_window(url, url_mode, updater)
     finally:
         if supervisor:
             supervisor.stop()
+        if updater is not None:
+            try:
+                updater.on_exit(os.getpid())
+            except Exception:
+                log.exception("mise à jour à la fermeture")
         log.info("Nova Studio fermé")
     return 0
+
+
+def make_updater() -> "app_update.Updater | None":
+    """Mise à jour du programme : appli installée seulement (pas en développement), sauf
+    origine de test explicite ; coupée par NOVA_DESKTOP_NO_UPDATE=1."""
+    if os.environ.get("NOVA_DESKTOP_NO_UPDATE") == "1":
+        return None
+    if not FROZEN and not os.environ.get(app_update.TEST_ORIGIN_ENV):
+        return None
+    try:
+        return app_update.Updater(APP_VERSION, data_dir(), f"NovaStudioDesktop/{APP_VERSION}",
+                                  log=log.info, relaunch_cmd=self_command())
+    except Exception:
+        log.exception("mise à jour du programme indisponible")
+        return None
 
 
 if __name__ == "__main__":
