@@ -73,3 +73,22 @@ describe('lecture des plugins à la 1re ouverture : liste suivie sans clic', () 
     expect(FakeWS.lists).toBe(3);                       // lecture finie : plus aucune requête
   });
 });
+
+describe('groupes Waves pas encore lus, chargement long', () => {
+  it('reconnaît un WaveShell pas déplié, pas un plugin Waves déjà lu', async () => {
+    const { isUnreadShell, unreadShellText } = await import('../components/VstBrowserTab');
+    const base = { id: 'x', vendor: '', category: 'Effect', path: 'C:/VST3/WaveShell1-VST3 17.4_x64.vst3', uid: '', isInstrument: null } as any;
+    expect(isUnreadShell({ ...base, name: 'WaveShell1-VST3 17.4_x64', pluginName: null })).toBe(true);
+    expect(isUnreadShell({ ...base, name: 'C6 Stereo', pluginName: 'C6 Stereo', shell: 'WaveShell1-VST3 17.4_x64' })).toBe(false);
+    expect(isUnreadShell({ ...base, name: 'Auto-Tune Pro', path: 'C:/VST3/Auto-Tune Pro.vst3', pluginName: null })).toBe(false);
+    expect(unreadShellText(false)).toMatch(/Waves Central/);
+  });
+  it('message de chargement long : licence, sans jargon', async () => {
+    const { vstSlowLoadText, VST_SLOW_LOAD_MS } = await import('../engine/VSTPluginNode');
+    expect(VST_SLOW_LOAD_MS).toBe(20000);
+    const t = vstSlowLoadText('Auto-Tune Pro');
+    expect(t).toMatch(/Auto-Tune Pro met longtemps/);
+    expect(t).toMatch(/licence/);
+    expect(t).not.toMatch(/pont/i);
+  });
+});

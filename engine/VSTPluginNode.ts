@@ -122,6 +122,10 @@ const bridgeCaps = (): Partial<BridgeState> => {
 export const VST_CRASH_RETRIES = 2;
 export const VST_CRASH_WINDOW_MS = 10 * 60 * 1000;
 export const VST_CRASH_RETRY_DELAY_MS = 1000;
+/** Chargement d'un VST plus long que ça : message au musicien (licence, fenêtre cachée…). */
+export const VST_SLOW_LOAD_MS = 20000;
+export const vstSlowLoadText = (name: string) =>
+  `⏳ ${name} met longtemps à s'ouvrir. Il attend sûrement sa licence : cherche une fenêtre ${name} (ou iLok / Antares Central / Waves Central) dans la barre des tâches de Windows. Si sa licence n'est pas activée sur ce PC, il ne pourra pas s'ouvrir : ton projet continue sans lui.`;
 /** Plantages récents par plugin (survit à la reconstruction du nœud). */
 const crashHistory = new Map<string, number[]>();
 /** Tests : oublie les plantages mémorisés. */
@@ -198,6 +202,9 @@ export class VSTPluginNode {
   /** Plantage à répétition ou quarantaine : plus de relance automatique (reconnexion comprise). */
   private crashDisabled = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Message « met longtemps à s'ouvrir » : une fois par plugin posé. */
+  private slowTimer: ReturnType<typeof setTimeout> | null = null;
+  private slowNoticeShown = false;
   /** (R9) Réglage → index de l'AudioParam du worklet ; réglages déclarés au pont pour ce chargement. */
   private autoIndex = new Map<string, number>();
   private autoArmed = new Set<string>();
@@ -527,6 +534,7 @@ export class VSTPluginNode {
   dispose() {
     this.disposed = true;
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    if (this.slowTimer) { clearTimeout(this.slowTimer); this.slowTimer = null; }
     this.unsubs.forEach(u => u());
     this.unsubs = [];
     this.teardown();
@@ -641,6 +649,17 @@ export class VSTPluginNode {
     const path = this.plugin.params?.localPath;
     if (!path) return;
     this.setStatus('loading');
+    // Chargement anormalement long (licence en attente, fenêtre du plugin cachée, plugin bloqué) :
+    // on le dit au musicien au lieu de laisser tourner sans explication.
+    if (!this.quiet && !this.slowNoticeShown) {
+      if (this.slowTimer) clearTimeout(this.slowTimer);
+      this.slowTimer = setTimeout(() => {
+        this.slowTimer = null;
+        if (this.disposed || seq !== this.loadSeq || this.status !== 'loading' || this.slowNoticeShown) return;
+        this.slowNoticeShown = true;
+        try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: vstSlowLoadText(this.plugin.name || 'Le plugin') })); } catch { /* hors navigateur */ }
+      }, VST_SLOW_LOAD_MS);
+    }
     try {
       const node = await this.ensureWorklet();
       if (this.disposed || seq !== this.loadSeq) return;

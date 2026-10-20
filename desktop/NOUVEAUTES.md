@@ -7,6 +7,11 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.6
+- Waves : les groupes de plugins sont lus jusqu'au bout (plus de temps la 1re fois), et relus à chaque ouverture s'ils ont échoué.
+- Un plugin qui met longtemps à s'ouvrir (licence en attente) : Nova te dit quoi faire au lieu de tourner sans fin.
+- Plus de « pont VST » à connecter : les plugins démarrent et redémarrent tout seuls.
+
 ## 1.5.5
 - Tes plugins VST3 (Waves, Antares…) sont détectés tout seuls à la première ouverture, sans clic.
 - Onglet VST : la lecture des plugins s'affiche (compteur) et la liste se complète au fur et à mesure.

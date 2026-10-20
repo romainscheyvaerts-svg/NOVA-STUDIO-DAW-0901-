@@ -29,7 +29,16 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
         </div>
       )}
       {desktop ? (
-        <p className="text-xs text-slate-300">Le pont VST est intégré à Nova Studio et démarre avec l'application : clique sur « Connecter le pont VST ».</p>
+        // Appli Windows : tout est intégré, rien à lancer. Pas de mot technique (« pont ») :
+        // la partie qui fait tourner les plugins démarre et redémarre toute seule.
+        <div role="status" data-testid="vst-desktop-starting" className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3 text-xs text-slate-300 space-y-1">
+          <p className="font-bold text-cyan-100"><i className="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>
+            {(bridge.attempt || 0) > 0 && bridge.error ? 'Tes plugins redémarrent…' : 'Préparation de tes plugins…'}
+          </p>
+          <p>{(bridge.attempt || 0) > 0 && bridge.error
+            ? "Un plugin s'est arrêté : Nova relance tout seul la partie qui fait tourner tes plugins. Ton projet n'est pas touché."
+            : 'Nova démarre la partie qui fait tourner tes plugins VST (Waves, Antares…). Rien à installer : ça prend quelques secondes.'}</p>
+        </div>
       ) : (
         <ol className="text-xs space-y-1.5 list-decimal pl-4 text-slate-300">
           <li>Lance <b>NovaVSTBridge.exe</b> sur ton PC et garde sa fenêtre ouverte.</li>
@@ -42,16 +51,23 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
         disabled={bridge.status === 'connecting'}
         className="w-full h-11 rounded-xl bg-cyan-500 text-black text-xs font-black uppercase tracking-wide hover:bg-cyan-400 disabled:opacity-60 transition-colors"
       >
-        {bridge.status === 'connecting' ? 'Connexion…' : bridge.status === 'reconnecting' ? `Reconnexion au pont… (essai ${bridge.attempt || 1}) · réessayer` : 'Connecter le pont VST'}
+        {desktop
+          ? (bridge.status === 'connecting' ? 'Connexion…' : 'Réessayer maintenant')
+          : bridge.status === 'connecting' ? 'Connexion…' : bridge.status === 'reconnecting' ? `Reconnexion au pont… (essai ${bridge.attempt || 1}) · réessayer` : 'Connecter le pont VST'}
       </button>
+      {desktop && (bridge.attempt || 0) >= 6 && (
+        <p role="status" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+          Toujours pas prêt après {bridge.attempt} essais : ferme Nova Studio et rouvre-le. Si ça recommence, lance « Diagnostic plugins Nova » depuis la clé USB.
+        </p>
+      )}
       {bridge.status === 'unavailable' && (
         <p role="status" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
           {desktop
-            ? 'Pont VST pas encore prêt (il démarre avec Nova Studio). Réessaie dans quelques secondes ; sinon, ferme et relance Nova Studio.'
+            ? 'Tes plugins ne sont pas encore prêts (ils démarrent avec Nova Studio). Réessaie dans quelques secondes ; sinon, ferme et relance Nova Studio.'
             : 'Pont VST introuvable. Vérifie que NovaVSTBridge.exe est lancé sur ce PC, puis réessaie.'}
         </p>
       )}
-      {bridge.status === 'idle' && bridge.error && (
+      {!desktop && bridge.status === 'idle' && bridge.error && (
         <p role="status" className="text-xs text-amber-300">{bridge.error}</p>
       )}
       {!desktop && <DesktopAppDownload compact />}
@@ -64,6 +80,12 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
 };
 
 /** Onglet « VST » du navigateur (ordinateur seulement). */
+/** Groupe de plugins (WaveShell de Waves) que le pont n'a pas encore pu déplier. */
+export const isUnreadShell = (p: BridgePlugin): boolean => !p.shell && !p.pluginName && /shell/i.test(p.name);
+export const unreadShellText = (reading: boolean) => reading
+  ? 'Groupe de plugins Waves : Nova est en train de le lire, ses plugins vont apparaître un par un dans la liste.'
+  : "Groupe de plugins Waves pas encore lu : Nova réessaie à chaque ouverture. Vérifie que Waves Central est installé et que tes licences Waves sont sur ce PC, puis rouvre Nova Studio.";
+
 const VstBrowserTab: React.FC<{
   onAddPlugin: (trackId: string, type: PluginType, metadata: any, options?: { openUI: boolean }) => void;
   selectedTrackId: string | null;
@@ -97,6 +119,11 @@ const VstBrowserTab: React.FC<{
   };
 
   const add = (p: BridgePlugin) => {
+    // Groupe (WaveShell de Waves) pas encore déplié : il ne se charge pas tel quel.
+    if (isUnreadShell(p)) {
+      try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: unreadShellText(!!lecture) })); } catch { /* hors navigateur */ }
+      return;
+    }
     // Melodyne / VocAlign (ARA) : insert de piste comme dans Pro Tools (pont v12) : tous les clips
     // de la piste sont confiés au plugin, son éditeur s'ancre en bas de la fenêtre Édition.
     const ara = araInsertMetadata(p);
@@ -124,7 +151,7 @@ const VstBrowserTab: React.FC<{
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-widest">
-        <span className="text-emerald-400 font-black"><i className="fas fa-circle text-[6px] mr-1 align-middle"></i>Pont VST connecté</span>
+        <span className="text-emerald-400 font-black"><i className="fas fa-circle text-[6px] mr-1 align-middle"></i>{isNovaDesktop() ? 'Plugins prêts' : 'Pont VST connecté'}</span>
         <button onClick={() => { void refresh(true); }} className="text-slate-500 hover:text-white p-1" title="Chercher à nouveau les plugins installés" aria-label="Chercher à nouveau les plugins installés">
           <i className={`fas fa-sync-alt ${loadingList ? 'animate-spin' : ''}`}></i>
         </button>
@@ -174,7 +201,7 @@ const VstBrowserTab: React.FC<{
             <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA (comme Pro Tools)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{isUnreadShell(p) ? (lecture ? 'Groupe Waves : lecture en cours…' : 'Groupe Waves pas encore lu (clique pour savoir pourquoi)') : null}{isUnreadShell(p) ? null : (p.vendor || 'VST3')}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA (comme Pro Tools)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
           </div>
         </div>
       ))}

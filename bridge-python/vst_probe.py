@@ -38,6 +38,9 @@ logger = logging.getLogger('NovaBridge.Probe')
 MARK = "@@NOVA@@"
 PER_PLUGIN_TIMEOUT_S = 15.0
 FIRST_TIMEOUT_S = 40.0      # démarrage de l'enfant (exécutable PyInstaller) + 1er plugin
+# Shell (WaveShell de Waves : des centaines de plugins dans un fichier) : 1re lecture sur un PC
+# (service de licences Waves qui démarre, inventaire de tous les plugins) bien plus longue.
+SHELL_TIMEOUT_S = 180.0
 WORKERS = 6
 CACHE_VERSION = 2
 
@@ -51,6 +54,22 @@ OLD_CLASS_CAP = 512
 
 def is_instrument_subcats(sub: str) -> bool:
     return any(s.strip().lower().startswith("instrument") for s in (sub or "").split("|"))
+
+
+def is_shell(bundle: str) -> bool:
+    """Fichier à plusieurs plugins (« WaveShell1-VST3 17.4_x64.vst3 »)."""
+    return "shell" in os.path.basename(bundle).lower()
+
+
+# Shells dont la lecture a échoué (ou rendu une liste vide) : relus une fois par démarrage du pont,
+# au lieu de rester un « groupe » pour toujours (lecture coupée trop tôt, service Waves pas prêt…).
+_shells_retried: set = set()
+
+
+def _shell_needs_retry(bundle: str, hit: dict) -> bool:
+    if not is_shell(bundle) or bundle in _shells_retried:
+        return False
+    return hit.get("st") != "ok" or not hit.get("c")
 
 
 def dll_of(bundle: str) -> Optional[str]:
@@ -440,7 +459,8 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Probe],
                 cur = None
                 done = i + 1
                 on_done()
-            deadline = time.time() + PER_PLUGIN_TIMEOUT_S
+            slow = cur is not None and is_shell(remaining[cur])
+            deadline = time.time() + (SHELL_TIMEOUT_S if slow else PER_PLUGIN_TIMEOUT_S)
         if cur is not None and dialog is None and not finished:
             # Sans réponse : une fenêtre (même cachée) du plugin ou de son aide ?
             try:
@@ -563,6 +583,9 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
         hit = cache.get(b)
         if hit and isinstance(hit.get("c"), list) and len(hit["c"]) == OLD_CLASS_CAP:
             hit = None  # liste coupée par l'ancienne limite : relue
+        if hit and _shell_needs_retry(b, hit):
+            _shells_retried.add(b)
+            hit = None
         if hit and hit.get("m") == fp[0] and hit.get("s") == fp[1]:
             c = hit.get("c")
             results[b] = {"c": [tuple(x) for x in c] if isinstance(c, list) else None,
@@ -613,7 +636,9 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
         # appartenir à un autre enfant : la fenêtre n'était pas vue, ou l'enfant
         # s'arrêtait quand l'autre était fermé.
         for _ in range(2 if workers > 1 else 0):
-            again = [b for b in todo if (fresh.get(b) or {}).get("st") in ("crash", "hang")]
+            # (Un shell resté muet a déjà eu SHELL_TIMEOUT_S : relu au prochain démarrage, pas ici.)
+            again = [b for b in todo if (fresh.get(b) or {}).get("st") in ("crash", "hang")
+                     and not (is_shell(b) and (fresh.get(b) or {}).get("st") == "hang")]
             if not again:
                 break
             second: Dict[str, Probe] = {}
