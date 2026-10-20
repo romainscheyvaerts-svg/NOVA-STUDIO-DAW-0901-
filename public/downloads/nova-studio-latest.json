@@ -1,12 +1,12 @@
 {
-  "version": "1.5.5",
-  "url": "downloads/NovaStudioSetup-1.5.5.exe",
-  "sha256": "43a8a39ae19e19eeb8ae398df687f10dd9879c852d6baf5051b05231ca61f5a7",
-  "size": 51129919,
-  "date": "2026-10-20T22:04:41+02:00",
+  "version": "1.5.6",
+  "url": "downloads/NovaStudioSetup-1.5.6.exe",
+  "sha256": "998674f6e81492743b8e12572e587197b6e70d182fc2561a040d697f5d9f1954",
+  "size": 51129843,
+  "date": "2026-10-20T22:27:04+02:00",
   "notes": [
-    "Tes plugins VST3 (Waves, Antares…) sont détectés tout seuls à la première ouverture, sans clic.",
-    "Onglet VST : la lecture des plugins s'affiche (compteur) et la liste se complète au fur et à mesure.",
-    "Les plugins Waves apparaissent en premier."
+    "Waves : les groupes de plugins sont lus jusqu'au bout (plus de temps la 1re fois), et relus à chaque ouverture s'ils ont échoué.",
+    "Un plugin qui met longtemps à s'ouvrir (licence en attente) : Nova te dit quoi faire au lieu de tourner sans fin.",
+    "Plus de « pont VST » à connecter : les plugins démarrent et redémarrent tout seuls."
   ]
 }
