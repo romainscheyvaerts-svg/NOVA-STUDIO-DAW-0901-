@@ -48,6 +48,7 @@ const ExportPaywall: React.FC<Props> = ({ access, grille, status, paying, onPayE
     const texte = access.via === 'admin' ? null
       : access.via === 'licence' ? <>✅ <b>Licence achetée : export offert</b>{giftTotal > 0 ? <> + <b>{dureeOfferte(giftTotal)} de Nova Pro offert{giftTotal > 31 ? 's' : ''}</b> ({joursOffertsLabel(giftDays)})</> : null}.</>
       : access.via === 'achat' ? <>✅ <b>Export de ce projet payé</b> : refais ton mix et réexporte autant que tu veux.</>
+      : access.via === 'edition' ? <>✅ <b>Nova Studio hors ligne</b> : exports illimités, sans compte ni Internet.</>
       : giftDays > 0 ? <>🎁 <b>Nova Pro offert</b> ({joursOffertsLabel(giftDays)}) : exports illimités.</>
       : <>⭐ <b>Nova Pro</b> : exports illimités.</>;
     if (!texte) return null;

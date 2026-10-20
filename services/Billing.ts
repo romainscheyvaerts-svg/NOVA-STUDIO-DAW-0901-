@@ -1,5 +1,5 @@
 import { catalogSupabase } from './supabase';
-import { isNovaDesktop } from '../utils/desktopApp';
+import { isNovaDesktop, isOfflineEdition } from '../utils/desktopApp';
 import { leavePage } from '../utils/saveBeforeLeave';
 
 /**
@@ -121,6 +121,8 @@ const estActionInconnue = (e: unknown) => /action inconnue/i.test(String((e as E
 
 /** Grille de prix du serveur (en cache pour la session ; un échec réseau est retenté). */
 export function loadPricing(force = false): Promise<Grille> {
+  // Édition hors ligne : rien à vendre, aucun appel au serveur.
+  if (isOfflineEdition()) return Promise.resolve({ ...ANCIENNE_GRILLE, unavailable: true, legacy: false });
   if (grilleCache && !force) return grilleCache;
   const p = billing<any>('pricing').then((g): Grille => ({
     version: String(g.version),
@@ -168,7 +170,8 @@ export const euros = (cents: number | null | undefined): string => {
 
 export interface ProStatus {
   active: boolean;
-  source: 'abonnement' | 'cadeau' | 'admin' | null;
+  /** « edition » : appli Windows hors ligne (clé USB), Nova Pro sur place. */
+  source: 'abonnement' | 'cadeau' | 'admin' | 'edition' | null;
   paid: boolean;
   interval: 'month' | 'year' | null;
   until: string | null;
@@ -184,7 +187,20 @@ export interface BillingStatus {
   features?: { exports_illimites: boolean; collab_hote: boolean; import_instrus: boolean };
   melodie_offerte?: { droit: boolean; restantes: number; par_mois: number };
 }
+/**
+ * Édition hors ligne de l'appli Windows (clé USB, sans compte ni Internet) : Nova Pro sur place,
+ * jamais admin. La règle du serveur reste celle de decisionExport (novaTarifs.ts) : une instru
+ * du catalogue non achetée ne sort jamais dans le mix.
+ */
+export const OFFLINE_EDITION_STATUS: BillingStatus = {
+  plans: [], admin: false,
+  pro: { active: true, source: 'edition', paid: false, interval: null, until: null,
+    cadeau: { active: false, until: null, days_left: 0, total_days: 0, sources: [] } },
+  features: { exports_illimites: true, collab_hote: false, import_instrus: true },
+};
+
 export async function billingStatus(): Promise<BillingStatus> {
+  if (isOfflineEdition()) return OFFLINE_EDITION_STATUS;
   try { return await billing('status'); } catch { return { plans: [], admin: false }; }
 }
 
@@ -207,8 +223,8 @@ export const hasPlan = (st: Pick<BillingStatus, 'plans' | 'admin'> & Partial<Pic
 
 export interface ExportAccess {
   unlocked: boolean;
-  /** Pourquoi c'est débloqué : admin, Nova Pro, projet payé, licence achetée. */
-  via: 'admin' | 'pro' | 'achat' | 'licence' | null;
+  /** Pourquoi c'est débloqué : admin, Nova Pro, projet payé, licence achetée, édition hors ligne. */
+  via: 'admin' | 'pro' | 'achat' | 'licence' | 'edition' | null;
   /** Pourquoi c'est bloqué : instru / mélodie du catalogue pas achetée, ou à payer. */
   reason: 'catalogue_non_achete' | 'paiement' | 'erreur' | null;
   missing: { id: string; title: string | null; kind: string }[];
@@ -237,7 +253,16 @@ const unlockedCache = new Map<string, ExportAccess>();
 const cacheKey = (q: ExportQuery) => `${q.projectKey}|${q.scope}|${q.kits ? 1 : 0}|${[...q.catalogIds].sort().join(',')}|${[...(q.owned || [])].sort().join(',')}`;
 
 /** Le serveur dit si ce projet peut sortir en fichier audio. Débloqué : gardé en mémoire (jamais dans le navigateur). */
+/** Édition hors ligne : même décision que le serveur pour un compte Nova Pro sans licence achetée. */
+export function offlineEditionAccess(q: ExportQuery): ExportAccess {
+  const missing = q.catalogIds.map(id => ({ id: String(id), title: null, kind: 'beat' }));
+  const base = { missing, login_required: false, kits: q.kits, pro: null, legacy: false } as const;
+  if (q.scope === 'mix' && missing.length) return { ...base, unlocked: false, via: null, reason: 'catalogue_non_achete' };
+  return { ...base, unlocked: true, via: 'edition', reason: null };
+}
+
 export async function exportAccess(q: ExportQuery): Promise<ExportAccess> {
+  if (isOfflineEdition()) return offlineEditionAccess(q);
   const k = cacheKey(q);
   const hit = unlockedCache.get(k);
   if (hit) return hit;
@@ -303,7 +328,7 @@ export async function startExportPayment(q: ExportQuery, g: Grille): Promise<{ s
 const unlockedLegacy = new Set<string>();
 
 export async function isExportVoicesUnlocked(projectKey: string): Promise<boolean> {
-  if (unlockedLegacy.has(projectKey)) return true;
+  if (isOfflineEdition() || unlockedLegacy.has(projectKey)) return true;
   try {
     const r = await billing<{ unlocked: boolean }>('export_unlocked', { project_key: projectKey });
     if (r.unlocked) unlockedLegacy.add(projectKey);

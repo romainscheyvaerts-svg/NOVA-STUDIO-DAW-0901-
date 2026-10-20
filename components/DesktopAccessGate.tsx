@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { catalogSupabase } from '../services/supabase';
-import { isNovaDesktop } from '../utils/desktopApp';
+import { isNovaDesktop, isOfflineEdition } from '../utils/desktopApp';
 import { useNovaPricing, exportTexte } from '../hooks/useNovaPricing';
 import {
   decideGate, friendlyAuthError, isNetworkError, readAccessCache, writeAccessCache,
@@ -55,7 +55,8 @@ const openExternal = (url: string) => { window.open(url, '_blank', 'noopener'); 
 
 const DesktopAccessGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const desktop = isNovaDesktop();
-  if (!desktop) return <>{children}</>;
+  // Édition hors ligne (clé USB) : pas de compte demandé, le studio s'ouvre directement.
+  if (!desktop || isOfflineEdition()) return <>{children}</>;
   return <Gate>{children}</Gate>;
 };
 

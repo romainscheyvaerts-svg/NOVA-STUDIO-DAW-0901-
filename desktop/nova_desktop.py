@@ -56,7 +56,7 @@ from urllib.parse import unquote, urlparse
 T_START = time.perf_counter()
 
 APP_NAME = "Nova Studio"
-APP_VERSION = "1.5.3"
+APP_VERSION = "1.5.4"
 ASIO_PORT = 8766
 VST_PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
 CLOSE_TIMEOUT_S = float(os.environ.get("NOVA_DESKTOP_CLOSE_TIMEOUT", "90"))
@@ -113,6 +113,39 @@ def webview2_dir() -> str:
 def bundled_ui_dir() -> str:
     return os.environ.get("NOVA_DESKTOP_UI_DIR") or (
         resource("ui") if FROZEN else os.path.join(HERE, "build", "ui-bundle"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Édition (« standard », ou « hors-ligne » : clé USB, sans compte ni Internet)
+# ─────────────────────────────────────────────────────────────────────────────
+
+EDITION_KEY = r"Software\Make Music\Nova Studio"
+EDITIONS = ("standard", "hors-ligne")
+
+
+def read_edition() -> str:
+    """Posée par l'installateur hors ligne (HKCU, valeur « Edition ») et gardée par les mises à jour,
+    qui passent par l'installateur standard sans toucher au registre. Tests : NOVA_DESKTOP_EDITION."""
+    forced = os.environ.get("NOVA_DESKTOP_EDITION", "").strip().lower()
+    if forced in EDITIONS:
+        return forced
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, EDITION_KEY) as k:
+            value, _ = winreg.QueryValueEx(k, "Edition")
+        value = str(value).strip().lower()
+        return value if value in EDITIONS else "standard"
+    except OSError:
+        return "standard"
+
+
+def page_features(edition: str) -> list:
+    """Ce que sait faire l'appli (window.__novaDesktop.features). Hors ligne : pas de connexion Google."""
+    base = ["google-login", "stems", "voice", "reveal-download", "pick-folder", "app-update"]
+    return [f for f in base if not (edition == "hors-ligne" and f == "google-login")]
+
+
+EDITION = read_edition()
 
 
 def self_command(*args: str) -> list:
@@ -448,7 +481,8 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
-        features: Object.freeze(['google-login', 'stems', 'voice', 'reveal-download', 'pick-folder', 'app-update']),
+        edition: %(edition)s,
+        features: Object.freeze(%(features)s),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d }),
         hwnd: %(hwnd)d
       }),
@@ -773,6 +807,7 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             core.AddScriptToExecuteOnDocumentCreatedAsync(MARKER_JS % {
                 "hwnd": page_hwnd,
                 "version": json.dumps(APP_VERSION), "asio": ASIO_PORT, "vst": VST_PORT,
+                "edition": json.dumps(EDITION), "features": json.dumps(page_features(EDITION)),
                 "ui": json.dumps(ui.active.id if ui.active else "online")})
             try:
                 core.Environment.ProcessInfosChanged += lambda s_, e_: self.tune_webview_processes()
@@ -1456,7 +1491,7 @@ def main() -> int:
     url_mode = bool(url)
     url = url or DEFAULT_URL
     log.info(f"===== Nova Studio {APP_VERSION} (pid {os.getpid()}) — "
-             f"{url if url_mode else 'interface embarquée, adresse ' + url}")
+             f"{url if url_mode else 'interface embarquée, adresse ' + url} — édition {EDITION}")
     log.info(f"processus : {tune_process()}")
 
     if not acquire_single_instance(wait_s=20 if relaunch else 0):

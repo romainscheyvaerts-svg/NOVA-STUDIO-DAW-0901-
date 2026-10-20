@@ -131,6 +131,7 @@ BATTERIE = [
     # téléchargement repris + SHA-256, carte « est prête » dans la page, refus pendant lecture / prise / collab,
     # installation à la fermeture puis relance, « Mis à jour ✓ », appli ancienne (carte web), réglages.
     ("desktop_maj_auto", []),
+    ("desktop_hors_ligne", []),
 ]
 
 

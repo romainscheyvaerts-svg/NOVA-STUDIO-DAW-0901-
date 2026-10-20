@@ -48,7 +48,7 @@ export async function masterExportAccess(fileKey: string): Promise<MasterExportA
   const [grille, a]: [Grille, ExportAccess] = await Promise.all([loadPricing(), exportAccess(masterExportQuery(fileKey))]);
   const price = grille.unavailable ? null : euros(grille.export.cents);
   const base = { price, loginRequired: !!a.login_required, grille };
-  if (a.unlocked) return { ...base, kind: a.via === 'admin' ? 'admin' : a.via === 'pro' ? 'pro' : 'unlocked' };
+  if (a.unlocked) return { ...base, kind: a.via === 'admin' ? 'admin' : a.via === 'pro' || a.via === 'edition' ? 'pro' : 'unlocked' };
   if (a.reason === 'erreur') return { ...base, kind: 'error', message: a.message || 'Vérification impossible, réessaie.' };
   return { ...base, kind: 'pay' };
 }

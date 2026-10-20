@@ -15,6 +15,11 @@ export interface NovaDesktopInfo {
   /** Version de l'interface au démarrage (« ui-<empreinte> »), ou « online » (site chargé en ligne). */
   ui?: string;
   bridges?: { asio: number; vst: number };
+  /**
+   * (1.5.4) « hors-ligne » : édition de la clé USB (installateur NovaStudioSetup-HorsLigne.exe),
+   * sans compte ni Internet : pas de porte de connexion, Nova Pro débloqué sur place.
+   */
+  edition?: 'standard' | 'hors-ligne';
   /** Ce que sait faire l'appli (« google-login », « reveal-download », « app-update » depuis la 1.5.3…). */
   features?: string[];
   /**
@@ -40,3 +45,6 @@ export const getNovaDesktop = (): NovaDesktopInfo | null => {
 
 /** Vrai quand la page tourne dans l'application Windows (ponts intégrés). */
 export const isNovaDesktop = (): boolean => getNovaDesktop() !== null;
+
+/** Édition hors ligne de l'appli Windows (clé USB) : ni compte, ni serveur pour décider des droits. */
+export const isOfflineEdition = (): boolean => getNovaDesktop()?.edition === 'hors-ligne';

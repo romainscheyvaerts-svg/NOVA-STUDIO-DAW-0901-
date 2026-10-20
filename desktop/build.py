@@ -312,11 +312,12 @@ def find_iscc() -> str:
     sys.exit("ISCC.exe introuvable (node_modules/innosetup-compiler)")
 
 
-def inno(version: str) -> str:
-    step(8, "Inno Setup…")
+def inno(version: str, hors_ligne: bool = False) -> str:
+    step(8, "Inno Setup (édition hors ligne, clé USB)…" if hors_ligne else "Inno Setup…")
     iscc = find_iscc()
-    subprocess.check_call([iscc, f"/DAppVersion={version}", *inno_sign_args(), "/Q", "installer.iss"], cwd=HERE)
-    out = os.path.join(DIST, "NovaStudioSetup.exe")
+    extra = ["/DHORS_LIGNE"] if hors_ligne else []
+    subprocess.check_call([iscc, f"/DAppVersion={version}", *extra, *inno_sign_args(), "/Q", "installer.iss"], cwd=HERE)
+    out = os.path.join(DIST, "NovaStudioSetup-HorsLigne.exe" if hors_ligne else "NovaStudioSetup.exe")
     print(f"      {out} : {os.path.getsize(out) / 1e6:.1f} Mo")
     return out
 
@@ -418,6 +419,8 @@ def main() -> None:
         step(7, "Signature de NovaStudio.exe…")
         sign(os.path.join(DIST, "NovaStudio", "NovaStudio.exe"))
     setup = inno(version)
+    # Édition hors ligne : reste dans dist/ (clé USB), jamais publiée sur le site.
+    inno(version, hors_ligne=True)
     if "--no-copy" not in argv:
         downloads = os.path.join(REPO, "public", "downloads")
         m = publish_update(setup, version, downloads,

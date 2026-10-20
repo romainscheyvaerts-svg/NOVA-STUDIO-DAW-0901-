@@ -7,6 +7,11 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.4
+- Nouvelle édition « hors ligne » sur clé USB : Nova Studio s'ouvre sans compte et sans Internet.
+- Nova Pro offert par le studio : affiché « sans limite » au lieu d'un décompte en jours.
+- Corrections et améliorations de stabilité.
+
 ## 1.5.3
 - Nova Studio se met maintenant à jour tout seul : la nouvelle version se télécharge en arrière-plan.
 - Tu es prévenu quand elle est prête : « Redémarrer et mettre à jour » ou « Plus tard ».

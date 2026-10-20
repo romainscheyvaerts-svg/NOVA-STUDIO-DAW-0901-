@@ -30,7 +30,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=dist
+#ifdef HORS_LIGNE
+; Édition hors ligne (clé USB) : même appli, sans compte ni Internet (voir [Registry]).
+OutputBaseFilename=NovaStudioSetup-HorsLigne
+#else
 OutputBaseFilename=NovaStudioSetup
+#endif
 SetupIconFile=assets\nova.ico
 UninstallDisplayIcon={app}\NovaStudio.exe
 UninstallDisplayName=Nova Studio
@@ -57,6 +62,14 @@ Name: "desktopicon"; Description: "Créer un raccourci sur le Bureau"; GroupDesc
 [Files]
 Source: "dist\NovaStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "vendor\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
+
+#ifdef HORS_LIGNE
+[Registry]
+; Lue par nova_desktop.py (read_edition). Les mises à jour passent par l'installateur standard,
+; qui n'a pas de section [Registry] : l'édition est gardée. Retirée à la désinstallation.
+Root: HKCU; Subkey: "Software\Make Music\Nova Studio"; ValueType: string; ValueName: "Edition"; ValueData: "hors-ligne"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKCU; Subkey: "Software\Make Music"; Flags: uninsdeletekeyifempty
+#endif
 
 [InstallDelete]
 ; Mise à jour propre : on repart d'un dossier _internal vide (anciennes DLL).
