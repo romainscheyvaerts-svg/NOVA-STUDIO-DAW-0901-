@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PluginInstance, Track } from '../types';
 import { useBridgeState, useVstNodeInfo } from '../hooks/useNovaBridge';
 import { liveVstNodes } from '../engine/VSTPluginNode';
@@ -6,6 +6,21 @@ import { isFreezeStale, isPluginBaked } from '../utils/freeze';
 import { BridgeConnectPanel } from './VstBrowserTab';
 import { SidechainPanel } from './SidechainPanel';
 import { coupures } from '../utils/vstAdaptiveBuffer';
+
+/**
+ * Ouvrir un VST = ouvrir SA fenêtre, tout de suite (comme dans les autres DAW) : ce panneau-ci
+ * s'efface dès que la fenêtre du plugin est ouverte. Alt enfoncé à l'ouverture : le panneau
+ * reste (presets Nova, side-chain, latence). Il reste aussi quand il y a quelque chose à dire
+ * (chargement, erreur, plugin en retard, piste gelée).
+ */
+let altHeld = false;
+if (typeof window !== 'undefined') {
+  const track = (e: KeyboardEvent | MouseEvent) => { altHeld = !!e.altKey; };
+  window.addEventListener('keydown', track, true);
+  window.addEventListener('keyup', track, true);
+  window.addEventListener('pointerdown', track as any, true);
+  window.addEventListener('blur', () => { altHeld = false; });
+}
 
 interface VSTPluginWindowProps {
   plugin: PluginInstance;
@@ -37,17 +52,32 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
   const stale = !!track && baked && isFreezeStale(track);
   const vendor = plugin.params?.vendor;
 
-  const openEditor = async () => {
+  const openEditor = async (): Promise<boolean> => {
     setOpenError(null);
     setOpening(true);
     try {
-      await liveVstNodes.get(plugin.id)?.openEditor();
+      const node = liveVstNodes.get(plugin.id);
+      if (!node) throw new Error("Le plugin n'est pas encore prêt.");
+      await node.openEditor();
+      return true;
     } catch (e: any) {
       setOpenError(e?.message || "La fenêtre du plugin n'a pas pu s'ouvrir.");
+      return false;
     } finally {
       setOpening(false);
     }
   };
+
+  // Ouverture directe de la fenêtre du plugin (une fois), puis ce panneau se ferme.
+  const keepPanel = useRef(altHeld);
+  const autoDone = useRef(false);
+  const ready = !baked && bridge.status === 'connected' && plugin.isEnabled && info?.status === 'active';
+  const needsAttention = !!info && (info.dropoutsTotal > 0 || info.bufferGrown);
+  useEffect(() => {
+    if (!ready || autoDone.current || keepPanel.current) return;
+    autoDone.current = true;
+    void openEditor().then(ok => { if (ok && !needsAttention) onClose(); });
+  }, [ready]);
 
   let body: React.ReactNode;
   if (baked) {
@@ -101,7 +131,7 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
         >
           <i className="fas fa-external-link-alt mr-2"></i>{opening ? 'Ouverture…' : 'Ouvrir la fenêtre du plugin'}
         </button>
-        <p className="text-[11px] text-slate-500">La fenêtre s'ouvre sur ton PC. Tes réglages sont enregistrés dans le projet quand tu la fermes.</p>
+        <p className="text-[11px] text-slate-500">La fenêtre s'ouvre sur ton PC. Tes réglages sont enregistrés dans le projet quand tu la fermes. Astuce : garde Alt enfoncé en ouvrant l'effet pour afficher ce panneau (presets, side-chain).</p>
         {track?.isTrackArmed && (
           <p className="text-[11px] text-slate-400">Piste armée : l'effet est contourné pendant l'enregistrement pour que ton retour casque reste sans retard.</p>
         )}

@@ -66,6 +66,18 @@ class ShellRetry(unittest.TestCase):
         finally:
             (vst_probe._load_cache, vst_probe._save_cache, vst_probe._fingerprint, vst_probe._run_child, vst_probe.platform.system) = saved
 
+    def test_shell_vide_masque(self):
+        plugins = [{"name": "WaveShell1-VST3 14.12_x64", "vendor": "", "path": r"C:\VST3\WaveShell1-VST3 14.12_x64.vst3", "is_instrument": None, "category": "Effect"},
+                   {"name": "WaveShell1-VST3 17.4_x64", "vendor": "", "path": SHELL, "is_instrument": None, "category": "Effect"},
+                   {"name": "Bizarre", "vendor": "", "path": r"C:\VST3\Bizarre.vst3", "is_instrument": None, "category": "Effect"}]
+        res = {plugins[0]["path"]: {"c": [], "st": "ok"},
+               SHELL: {"c": [("C6 Stereo", "Fx|Dynamics", "Waves"), ("C6 Mono", "Fx|Dynamics", "Waves")], "st": "ok"},
+               plugins[2]["path"]: {"c": None, "st": "hang"}}
+        names = [p["name"] for p in vst_probe.apply_classes(plugins, res)]
+        self.assertNotIn("WaveShell1-VST3 14.12_x64", names)   # vide : masqué
+        self.assertIn("C6 Stereo", names)
+        self.assertIn("Bizarre", names)                         # illisible (pas un shell) : gardé
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

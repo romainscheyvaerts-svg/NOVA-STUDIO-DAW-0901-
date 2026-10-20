@@ -41,7 +41,8 @@ FIRST_TIMEOUT_S = 40.0      # démarrage de l'enfant (exécutable PyInstaller) +
 # Shell (WaveShell de Waves : des centaines de plugins dans un fichier) : 1re lecture sur un PC
 # (service de licences Waves qui démarre, inventaire de tous les plugins) bien plus longue.
 SHELL_TIMEOUT_S = 180.0
-WORKERS = 6
+# Lecture des plugins en parallèle : 6 enfants au plus, la moitié des cœurs (PC peu puissants : 2).
+WORKERS = max(2, min(6, (os.cpu_count() or 4) // 2))
 CACHE_VERSION = 2
 
 # Une classe : (nom, sous-catégories[, éditeur]), ex. ("Vital", "Instrument|Synth", "Matt Tytel")
@@ -535,6 +536,10 @@ def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
             e["license"] = "activation"
             e["license_title"] = r.get("t")
         if not classes:
+            # Shell lu mais vide (ancienne version de Waves sans plugin installé : WaveShell 14.x…) :
+            # rien à proposer, pas de « groupe » trompeur dans la liste.
+            if st == "ok" and isinstance(classes, list) and is_shell(e["path"]):
+                continue
             out.append(e)
             continue
         if len(classes) == 1:
