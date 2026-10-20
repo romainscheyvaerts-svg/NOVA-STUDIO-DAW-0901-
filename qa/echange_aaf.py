@@ -129,7 +129,7 @@ def palette(page, query, want):
 
 
 def open_import(page):
-    palette(page, "séance pro tools aaf importer", "pal.aafImport")
+    palette(page, "importer séance aaf logiciel studio", "pal.aafImport")
     page.locator("[data-testid=aaf-import-dialog]").wait_for(timeout=8000)
 
 
@@ -197,7 +197,7 @@ def scenario_export(page):
     truth = project_truth()
     exported = {}
     for mode in ("lie", "integre"):
-        palette(page, "exporter séance pro tools aaf", "pal.aafExport")
+        palette(page, "exporter séance aaf logiciel studio", "pal.aafExport")
         page.locator("[data-testid=aaf-export-dialog]").wait_for(timeout=8000)
         if mode == "integre":
             page.locator("[data-testid=aaf-embedded]").check()

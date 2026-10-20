@@ -7,6 +7,12 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.7
+- Plus léger sur les PC peu puissants : presque rien ne tourne quand le studio est à l'arrêt.
+- « Mode léger » (Réglages audio) : activé tout seul sur les petits PC, moins d'effets visuels, le son n'est pas touché.
+- Ouvrir un plugin VST ouvre directement sa fenêtre.
+- Waves : plus de groupes vides dans la liste des plugins.
+
 ## 1.5.6
 - Waves : les groupes de plugins sont lus jusqu'au bout (plus de temps la 1re fois), et relus à chaque ouverture s'ils ont échoué.
 - Un plugin qui met longtemps à s'ouvrir (licence en attente) : Nova te dit quoi faire au lieu de tourner sans fin.
