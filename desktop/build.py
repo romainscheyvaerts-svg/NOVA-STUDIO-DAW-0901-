@@ -12,13 +12,18 @@ Construction de l'application Windows « Nova Studio » et de son installateur.
   6. contrôle des DLL d'exécution Visual C++ (copiées si une dépendance en a besoin)
   7. signature de NovaStudio.exe (facultative, voir plus bas)
   8. Inno Setup (paquet npm innosetup-compiler) -> dist/NovaStudioSetup.exe (signé aussi si configuré)
-  9. copie dans public/downloads/NovaStudioSetup.exe
+  9. publication dans public/downloads/ : NovaStudioSetup.exe (lien du site),
+     NovaStudioSetup-<version>.exe (mises à jour automatiques) et nova-studio-latest.json
+     (manifeste lu par l'appli : version, url, sha256, size, date, notes de desktop/NOUVEAUTES.md).
+     Poids du dépôt : seul le DERNIER installateur versionné est gardé, les anciens sont retirés.
 
 Usage : build.bat                       (tout, interface = vite build de HEAD)
         build.bat --ui-ref origin/main  (interface = ce qui est en ligne, branche main)
         build.bat --ui-online           (interface = copie exacte du site en ligne)
         build.bat --skip-ui             (réutilise build/ui-bundle tel quel)
         build.bat --no-copy             (sans copier dans public/downloads)
+        NOVA_UPDATE_MIN_VERSION=1.5.0   (facultatif) les versions plus anciennes se mettent à jour
+                                        même si l'utilisateur a coupé les mises à jour automatiques
 
 Signature de code (facultative ; sans certificat, Windows SmartScreen avertit au 1er lancement) :
   NOVA_SIGN_PFX=C:\\certs\\makemusic.pfx  NOVA_SIGN_PFX_PASSWORD=...   certificat en fichier
@@ -28,8 +33,11 @@ Signature de code (facultative ; sans certificat, Windows SmartScreen avertit au
   NOVA_SIGN_TIMESTAMP=http://timestamp.digicert.com                   serveur d'horodatage
   NOVA_SIGNTOOL=C:\\...\\signtool.exe                                   sinon cherché dans Windows Kits
 """
+import datetime
 import glob
+import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -313,6 +321,85 @@ def inno(version: str) -> str:
     return out
 
 
+# ── publication de la mise à jour (manifeste lu par l'appli, voir app_update.py) ──
+
+NOTES_FILE = os.path.join(HERE, "NOUVEAUTES.md")
+LATEST_JSON = "nova-studio-latest.json"
+SETUP_NAME = "NovaStudioSetup.exe"
+DEFAULT_NOTES = ["Corrections et améliorations de stabilité."]
+
+
+def read_notes(path: str, version: str) -> list:
+    """Lignes « - … » de la section « ## <version> » de NOUVEAUTES.md (6 au plus)."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    notes, inside = [], False
+    for line in lines:
+        t = line.strip()
+        if t.startswith("## "):
+            inside = t[3:].strip().lstrip("v") == version
+            continue
+        if inside and t[:2] in ("- ", "* "):
+            notes.append(t[2:].strip())
+    return [n for n in notes if n][:6]
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def publish_update(setup: str, version: str, downloads: str, notes_file: str = NOTES_FILE,
+                   min_version: "str | None" = None, now: "datetime.datetime | None" = None,
+                   say=print) -> dict:
+    """Copie l'installateur dans downloads/ (nom fixe + nom versionné), retire les anciens
+    installateurs versionnés, puis écrit le manifeste (en dernier, de façon atomique : il ne
+    pointe jamais vers un fichier absent)."""
+    if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
+        raise ValueError(f"version invalide : {version!r}")
+    if min_version is not None and not re.fullmatch(r"\d+(\.\d+){1,3}", min_version):
+        raise ValueError(f"minVersion invalide : {min_version!r}")
+    os.makedirs(downloads, exist_ok=True)
+    versioned = f"NovaStudioSetup-{version}.exe"
+    shutil.copyfile(setup, os.path.join(downloads, versioned))
+    shutil.copyfile(setup, os.path.join(downloads, SETUP_NAME))
+    removed = []
+    for old in glob.glob(os.path.join(downloads, "NovaStudioSetup-*.exe")):
+        if os.path.basename(old) != versioned:
+            os.remove(old)
+            removed.append(os.path.basename(old))
+    notes = read_notes(notes_file, version)
+    if len(notes) < 1:
+        say(f"      ATTENTION : pas de section « ## {version} » dans {os.path.basename(notes_file)} ; "
+            f"nouveautés par défaut")
+        notes = list(DEFAULT_NOTES)
+    manifest = {
+        "version": version,
+        "url": f"downloads/{versioned}",
+        "sha256": _sha256(setup),
+        "size": os.path.getsize(setup),
+        "date": (now or datetime.datetime.now().astimezone()).isoformat(timespec="seconds"),
+        "notes": notes,
+    }
+    if min_version:
+        manifest["minVersion"] = min_version
+    out = os.path.join(downloads, LATEST_JSON)
+    tmp = out + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, out)
+    if removed:
+        say(f"      anciens installateurs retirés : {', '.join(sorted(removed))}")
+    return manifest
+
+
 def main() -> None:
     argv = sys.argv[1:]
     version = app_version()
@@ -332,10 +419,12 @@ def main() -> None:
         sign(os.path.join(DIST, "NovaStudio", "NovaStudio.exe"))
     setup = inno(version)
     if "--no-copy" not in argv:
-        dst = os.path.join(REPO, "public", "downloads", "NovaStudioSetup.exe")
-        old = os.path.getsize(dst) if os.path.exists(dst) else 0
-        shutil.copyfile(setup, dst)
-        step(9, f"Copié dans {dst} ({old / 1e6:.1f} Mo -> {os.path.getsize(dst) / 1e6:.1f} Mo)")
+        downloads = os.path.join(REPO, "public", "downloads")
+        m = publish_update(setup, version, downloads,
+                           min_version=os.environ.get("NOVA_UPDATE_MIN_VERSION") or None)
+        step(9, f"Publié dans {downloads} : {SETUP_NAME} + {os.path.basename(m['url'])} "
+                f"({m['size'] / 1e6:.1f} Mo, sha256 {m['sha256'][:12]}…) + {LATEST_JSON} "
+                f"({len(m['notes'])} nouveautés)")
     else:
         step(9, "(copie ignorée)")
 

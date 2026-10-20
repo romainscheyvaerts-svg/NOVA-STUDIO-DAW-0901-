@@ -104,11 +104,37 @@ aucune variable d'environnement de type clé/secret.
 - **Changement du site seulement** (DAW, composants…) : rien à faire. Une fois le site
   déployé sur Vercel, les applis installées le téléchargent toutes seules (bandeau
   « Mise à jour prête » ; appliqué au redémarrage).
-- **Changement de l'appli ou des ponts** (`desktop/`, `bridge-python/`) : changer
-  `APP_VERSION` dans `nova_desktop.py` (repris par l'installateur et par
-  `window.__novaDesktop.version`), `build.bat --ui-online`, tester, committer
-  `public/downloads/NovaStudioSetup.exe`, publier le site. Les utilisateurs réinstallent
-  par-dessus (leurs données sont gardées).
+- **Changement de l'appli ou des ponts** (`desktop/`, `bridge-python/`, hôtes natifs) :
+  1. changer `APP_VERSION` dans `nova_desktop.py` (repris par l'installateur, par
+     `window.__novaDesktop.version` et par le manifeste) ;
+  2. écrire 3 à 6 lignes « - … » sous `## <version>` dans `desktop/NOUVEAUTES.md` ;
+  3. `build.bat --ui-online`, tester ;
+  4. committer `public/downloads/` : `NovaStudioSetup.exe` (lien du site),
+     `NovaStudioSetup-<version>.exe` et `nova-studio-latest.json` (build.py a retiré
+     l'ancien installateur versionné : un seul gros fichier de plus par version) ;
+  5. publier le site. Les applis **1.5.3 et plus** se mettent à jour toutes seules (voir
+     ci-dessous) ; les **1.5.2 et avant** voient une carte « Une nouvelle version de Nova
+     Studio est disponible » (leur interface vient du site) avec le bouton de téléchargement,
+     puis sont à leur tour automatiques.
+  `NOVA_UPDATE_MIN_VERSION=1.5.0` (facultatif) : les versions plus anciennes s'installent même
+  si l'utilisateur a coupé les mises à jour automatiques.
+
+### Mise à jour automatique du programme (1.5.3, `app_update.py`)
+
+| | |
+|---|---|
+| Manifeste | `https://nova-studio-daw-0901-9kzo.vercel.app/downloads/nova-studio-latest.json` (`version`, `url`, `sha256`, `size`, `date`, `notes`, `minVersion?`), écrit par `build.py`. Lu en HTTPS, origine fixe, redirections refusées, installateur seulement sous `/downloads/` du même site, jamais de version plus ancienne. |
+| Quand | 40 s après le démarrage du DAW puis toutes les 6 h ; « Rechercher maintenant » dans Réglages audio › « Mises à jour de Nova Studio » (ou Ctrl+K, ou le chat). |
+| Téléchargement | En arrière-plan dans `%LOCALAPPDATA%\NovaStudio\updates\` : fichier `.part` repris (en-tête Range) après une coupure, 5 essais espacés ; taille + SHA-256 contrôlés, puis renommé. Revérifié juste avant le lancement (par Python, puis par le script). Un fichier non vérifié n'est jamais lancé. |
+| Prévenir | Carte dans la page, sous la barre de transport (et en haut de l'accueil) : « Nova Studio X.Y.Z est prête », nouveautés, **Redémarrer et mettre à jour** / **Plus tard**. Interface trop ancienne (pas de réponse de la page) : petit bandeau injecté. |
+| Installer | Sans rien faire : à la **fermeture** de l'appli (installateur `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS`, rien ne s'affiche). Appli tuée / PC éteint : au **démarrage suivant**, avant la fenêtre (`/SILENT` : la petite fenêtre de progression de l'installateur), puis relance. Un script PowerShell caché (`updates\install-<v>.ps1`, `CREATE_NO_WINDOW`) attend la fin du processus, revérifie l'installateur, le lance, écrit `install-result.json`, relance l'appli si demandé. Jamais pendant un arrêt de Windows. |
+| Jamais pendant… | … un enregistrement, une lecture ou une collaboration : l'appli lit `window.__novaBusy()` avant de redémarrer (message clair sinon). |
+| Échec | L'ancienne version reste en place ; l'erreur est journalisée (`logs\app.log`, `updates\install.log`) ; une seule tentative par version et par jour (`updates\state.json`). |
+| Après | « Mis à jour en X.Y.Z ✓ » avec les nouveautés, une seule fois. |
+| Couper | `NOVA_DESKTOP_NO_UPDATE=1` (interface et programme) ; réglage « Mises à jour automatiques ». Tests : `NOVA_DESKTOP_UPDATE_TEST_ORIGIN=http://127.0.0.1:<port>` (boucle locale uniquement). |
+
+Tests : `python desktop\test\test_app_update.py` (unitaires, faux site local) et
+`qa/desktop_maj_auto.py` (bout en bout avec un FAUX installateur : rien n'est installé).
 
 ### Signature de code (facultative)
 
@@ -199,6 +225,8 @@ désinstallation : `"C:\chemin\unins000.exe" /VERYSILENT`.
 
 - `nova_desktop.py` — l'application (fenêtre, interface embarquée, superviseur des ponts, priorités)
 - `ui_bundle.py` — interface embarquée : choix de la version, téléchargement et vérification des mises à jour
+- `app_update.py` — mise à jour du programme (manifeste, téléchargement vérifié, installation à la fermeture)
+- `NOUVEAUTES.md` — nouveautés de chaque version (champ `notes` du manifeste, affiché aux utilisateurs)
 - `build_ui.py` — construction de l'interface embarquée (`build\ui-bundle\`)
 - `offline.html` — page hors ligne (seulement sans interface embarquée utilisable)
 - `NovaStudio.spec` — recette PyInstaller (inclut `../bridge-python/*.py` et l'interface)

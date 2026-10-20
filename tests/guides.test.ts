@@ -73,9 +73,10 @@ const stepSelectors = (s: GuideStep): string[] => [
 
 describe('base des parcours : forme', () => {
   // 1.5.1 : 30 au plus (« Faire sa version » et « Page publique » s'ajoutent ; la liste se cherche par mots).
-  it('15 à 30 parcours, ids uniques, chaque fiche complète', () => {
+  // 1.5.3 : 35 au plus (« Mettre à jour l'appli » et les chantiers 1.5.3 s'ajoutent).
+  it('15 à 35 parcours, ids uniques, chaque fiche complète', () => {
     expect(GUIDES.length).toBeGreaterThanOrEqual(15);
-    expect(GUIDES.length).toBeLessThanOrEqual(30);
+    expect(GUIDES.length).toBeLessThanOrEqual(35);
     expect(new Set(GUIDES.map(g => g.id)).size).toBe(GUIDES.length);
     for (const g of GUIDES) {
       expect(g.title.length, g.id).toBeGreaterThan(5);

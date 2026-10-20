@@ -127,6 +127,10 @@ BATTERIE = [
     # téléchargement du modèle annoncé, annulé puis gardé, 2 et 4 stems calés, réseau mobile, conseil du PC au téléphone,
     # licence des beats ; bureau et téléphone, sombre et clair (fichiers servis en local sur le port 8798).
     ("stems_web", []),
+    # 1.5.3 : mise à jour automatique de l'appli Windows (faux site 8802 + FAUX installateur, rien n'est installé) :
+    # téléchargement repris + SHA-256, carte « est prête » dans la page, refus pendant lecture / prise / collab,
+    # installation à la fermeture puis relance, « Mis à jour ✓ », appli ancienne (carte web), réglages.
+    ("desktop_maj_auto", []),
 ]
 
 

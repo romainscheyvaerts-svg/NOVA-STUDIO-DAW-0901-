@@ -15,6 +15,8 @@ export interface NovaDesktopInfo {
   /** Version de l'interface au démarrage (« ui-<empreinte> »), ou « online » (site chargé en ligne). */
   ui?: string;
   bridges?: { asio: number; vst: number };
+  /** Ce que sait faire l'appli (« google-login », « reveal-download », « app-update » depuis la 1.5.3…). */
+  features?: string[];
   /**
    * (1.5) Fenêtre de la page (HWND du contrôle WebView2) : l'éditeur d'un insert ARA
    * (Melodyne) s'y ancre en fenêtre enfant, en bas de la fenêtre Édition (comme Pro Tools).

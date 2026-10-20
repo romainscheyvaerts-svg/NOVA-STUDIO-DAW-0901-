@@ -30,6 +30,8 @@ hiddenimports += collect_submodules('websockets')
 # Inclus par défaut ; NOVA_EXCLUDE_ARA=1 pour l'exclure.
 # Anti-enregistrement d'écran (importé par nova_desktop.py, listé par sûreté).
 hiddenimports += ['capture_guard']
+# Mise à jour du programme (importé par nova_desktop.py, listé par sûreté).
+hiddenimports += ['app_update']
 hiddenimports += ['ara_host', 'ara_service']
 _ara = '../nova-ara-host/build/NovaARAHost_artefacts/Release/NovaARAHost.exe'
 if os.environ.get('NOVA_EXCLUDE_ARA') != '1' and os.path.isfile(_ara):

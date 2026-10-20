@@ -294,6 +294,11 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
     if (/\b(mix auto|styles?|choisis un style|mixe ma voix|mix|mixe)\b/.test(msg) && !/\b(ecoute|analyse|verifie|check)\b|\bmon mix\b/.test(msg)) return say('Voici les styles de mix : choisis-en un, je règle tout.', { action: 'OPEN_MIX_STYLES', payload: {} });
   }
 
+  // --- Appli Windows : mise à jour du programme (1.5.3) ---
+  if (/\b(mise a jour|mises a jour|mettre a jour|maj|update|nouvelle version)\b/.test(msg) && /\b(nova studio|appli|application|logiciel|programme|windows|nova)\b/.test(msg)
+    && !/\b(session|projet|seance|piste|beat|instru)\b/.test(msg))
+    return say('🔄 Je cherche une nouvelle version de Nova Studio : regarde « Mises à jour de Nova Studio » dans les réglages. Elle s\'installe toute seule quand tu fermes l\'appli (jamais pendant une prise).', { action: 'RUN_COMMAND', payload: { id: 'pal.appUpdate' } } as AIAction);
+
   // --- Session ---
   // 1.5.1 · lot 9 : « Faire sa version » (une copie pour chacun) et page publique du morceau.
   if (/\b(sa version|leur version|chacun sa (copie|version)|faire sa version|fork|copie (privee|pour chacun)|plusieurs (rappeurs|artistes))\b/.test(msg))

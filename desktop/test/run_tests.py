@@ -108,6 +108,8 @@ def launch(cmd, url, data_dir, bridges=False, extra_env=None):
         "NOVA_DESKTOP_DATA_DIR": data_dir,
         "NOVA_DESKTOP_CDP_PORT": str(CDP),
         "NOVA_DESKTOP_EXTRA_ARGS": "--use-fake-device-for-media-stream",
+        # aucune mise à jour (interface ni programme) pendant les tests
+        "NOVA_DESKTOP_NO_UPDATE": "1",
     })
     if not bridges:
         env["NOVA_DESKTOP_NO_BRIDGES"] = "1"
