@@ -38,7 +38,7 @@ export function midiClipMenuItems(trackId: string, clip: Clip, close: () => void
 export function midiTrackMenuItems(track: Track | undefined, close: () => void): ContextMenuItem[] {
   if (!track) return [];
   const items: ContextMenuItem[] = [];
-  if (hasMidi(track)) items.push({ label: 'Exporter la piste en .mid', icon: 'fa-file-export', title: 'Toutes les notes de la piste, à leur place dans le morceau (Export MIDI de Pro Tools et Logic)',
+  if (hasMidi(track)) items.push({ label: 'Exporter la piste en .mid', icon: 'fa-file-export', title: 'Toutes les notes de la piste, à leur place dans le morceau (comme l’export MIDI des autres DAW)',
     onClick: () => { midiBus.emit({ type: 'export', scope: 'track', trackId: track.id }); close(); } });
   if (track.type === TrackType.MIDI || track.type === TrackType.DRUM_RACK || track.type === TrackType.SAMPLER) items.push({ label: 'Importer un .mid sur cette piste…', icon: 'fa-file-import',
     title: 'Pack MIDI, mélodie d’un autre DAW : les notes arrivent sur cette piste à la tête de lecture',
@@ -108,7 +108,7 @@ export const MidiExportRow: React.FC<{ tracks: Track[] }> = ({ tracks }) => {
   if (!n) return null;
   return (
     <button type="button" data-testid="export-midi" onClick={() => midiBus.emit({ type: 'export', scope: 'all' })}
-      title="Fichier MIDI standard (format 1) pour l’ouvrir dans un autre DAW : Ableton, FL Studio, Logic, Pro Tools"
+      title="Fichier MIDI standard (format 1) pour l’ouvrir dans un autre DAW : Ableton, FL Studio, Logic…"
       className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center gap-3">
       <span className="text-2xl leading-none" aria-hidden="true">🎹</span>
       <span className="min-w-0 flex-1">

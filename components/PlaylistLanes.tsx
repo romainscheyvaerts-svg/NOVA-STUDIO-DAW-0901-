@@ -73,7 +73,7 @@ export const TakeLaneHeaders: React.FC<HeaderProps> = ({ track, lanes, api, onMe
             <span className="w-1 self-stretch rounded-full shrink-0" style={{ background: takeColor(l.n), opacity: used ? 1 : 0.4 }} />
             <button type="button" aria-pressed={solo}
               aria-label={solo ? `Revenir à ta voix finale` : `Écouter ${l.name} seule`}
-              title={solo ? 'Revenir à ta voix finale (tout le comp)' : `Écouter ${l.name} seule (comme le solo d'une playlist de Pro Tools)`}
+              title={solo ? 'Revenir à ta voix finale (tout le comp)' : `Écouter ${l.name} seule (comme le solo d'une playlist)`}
               onClick={() => api.onAudition(track.id, solo ? null : l.n)}
               className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center text-[11px] ${solo ? 'bg-cyan-400 text-black' : 'bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'}`}>
               <i className="fas fa-headphones" />
@@ -151,7 +151,7 @@ export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, to
     <>
       {lanes.map((l, i) => (
         <div key={l.n} {...(kept ? { 'data-kept-row': l.n } : { 'data-take-lane-row': l.n })}
-          title={`${l.title}\nBalaie un passage pour le garder dans ta voix finale (Quick Swipe Comping de Logic, comping de Pro Tools) · Tap : remplace le passage à cet endroit`}
+          title={`${l.title}\nBalaie un passage pour le garder dans ta voix finale (Quick Swipe Comping de Logic, comping) · Tap : remplace le passage à cet endroit`}
           className="absolute left-0 right-0 border-t border-white/5 cursor-crosshair select-none"
           style={{ top: top + i * TAKE_LANE_H, height: TAKE_LANE_H, pointerEvents: inert ? 'none' : 'auto', touchAction: 'pan-y' }}
           onWheel={onWheel}

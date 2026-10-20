@@ -698,7 +698,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           {([false, true] as const).map(on => (
             <button key={String(on)} type="button" role="radio" aria-checked={snapToGrid === on}
               onClick={() => setSnapToGrid(on)}
-              title={on ? 'Grille : les clips se calent sur les temps (mode Grid de Pro Tools)' : 'Libre : les clips vont exactement où tu les poses (mode Slip de Pro Tools)'}
+              title={on ? 'Grille : les clips se calent sur les temps (mode Grid)' : 'Libre : les clips vont exactement où tu les poses (mode Slip)'}
               className={`nova-hit h-10 px-2.5 rounded text-[11px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/45'}`}>
               {on ? 'Grille' : 'Libre'}
             </button>
@@ -869,7 +869,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     <button type="button" data-testid={`beat-key-${track.id}`}
                       onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
                       aria-label={`Changer la tonalité de ${track.name}`}
-                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Pro Tools : Elastic Audio · Live : Transpose · FL : Pitch)"
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Elastic Audio · Live : Transpose · FL : Pitch)"
                       className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-arrows-up-down"></i>
                     </button>

@@ -13,22 +13,22 @@ export interface GridOption {
 }
 
 export const GRID_OPTIONS: GridOption[] = [
-  { value: '1/1', label: 'Mesure', title: 'Une mesure (Pro Tools : grille 1 bar)' },
-  { value: '1/2', label: '1/2', title: 'Blanche (Pro Tools : grille 1/2)' },
-  { value: '1/4', label: '1/4 (temps)', title: 'Noire, un temps (Pro Tools : grille 1/4)' },
-  { value: '1/8', label: '1/8', title: 'Croche (Pro Tools : grille 1/8)' },
-  { value: '1/16', label: '1/16', title: 'Double croche (Pro Tools : grille 1/16)' },
-  { value: '1/32', label: '1/32', title: 'Triple croche, pour caler un hi-hat ou une syllabe (Pro Tools : grille 1/32)' },
-  { value: '1/4T', label: '1/4 triolet', title: 'Triolet de noires (Pro Tools : grille 1/4 avec triolet)' },
-  { value: '1/8T', label: '1/8 triolet', title: 'Triolet de croches, les flows en triolets (Pro Tools : grille 1/8 avec triolet)' },
-  { value: '1/16T', label: '1/16 triolet', title: 'Triolet de doubles, les rolls de hi-hats trap (Pro Tools : grille 1/16 avec triolet)' },
+  { value: '1/1', label: 'Mesure', title: 'Une mesure (grille 1 bar)' },
+  { value: '1/2', label: '1/2', title: 'Blanche (grille 1/2)' },
+  { value: '1/4', label: '1/4 (temps)', title: 'Noire, un temps (grille 1/4)' },
+  { value: '1/8', label: '1/8', title: 'Croche (grille 1/8)' },
+  { value: '1/16', label: '1/16', title: 'Double croche (grille 1/16)' },
+  { value: '1/32', label: '1/32', title: 'Triple croche, pour caler un hi-hat ou une syllabe (grille 1/32)' },
+  { value: '1/4T', label: '1/4 triolet', title: 'Triolet de noires (grille 1/4 avec triolet)' },
+  { value: '1/8T', label: '1/8 triolet', title: 'Triolet de croches, les flows en triolets (grille 1/8 avec triolet)' },
+  { value: '1/16T', label: '1/16 triolet', title: 'Triolet de doubles, les rolls de hi-hats trap (grille 1/16 avec triolet)' },
   // En temps (Pro Tools : échelle min:sec et timecode) : pour l'image, un podcast, un son sans tempo.
-  { value: 'ms:10', label: '10 ms', title: '10 millisecondes (Pro Tools : grille min:sec 10 ms)', kind: 'temps' },
-  { value: 'ms:100', label: '100 ms', title: '100 millisecondes (Pro Tools : grille min:sec 100 ms)', kind: 'temps' },
-  { value: 'ms:1000', label: '1 s', title: 'Une seconde (Pro Tools : grille min:sec 1 s)', kind: 'temps' },
-  { value: 'fps:24', label: '1 image 24', title: 'Une image à 24 images/s, cinéma (Pro Tools : grille timecode 1 frame)', kind: 'temps' },
-  { value: 'fps:25', label: '1 image 25', title: 'Une image à 25 images/s, vidéo européenne (Pro Tools : grille timecode 1 frame)', kind: 'temps' },
-  { value: 'fps:30', label: '1 image 30', title: 'Une image à 30 images/s, vidéo des réseaux (Pro Tools : grille timecode 1 frame)', kind: 'temps' },
+  { value: 'ms:10', label: '10 ms', title: '10 millisecondes (grille min:sec 10 ms)', kind: 'temps' },
+  { value: 'ms:100', label: '100 ms', title: '100 millisecondes (grille min:sec 100 ms)', kind: 'temps' },
+  { value: 'ms:1000', label: '1 s', title: 'Une seconde (grille min:sec 1 s)', kind: 'temps' },
+  { value: 'fps:24', label: '1 image 24', title: 'Une image à 24 images/s, cinéma (grille timecode 1 frame)', kind: 'temps' },
+  { value: 'fps:25', label: '1 image 25', title: 'Une image à 25 images/s, vidéo européenne (grille timecode 1 frame)', kind: 'temps' },
+  { value: 'fps:30', label: '1 image 30', title: 'Une image à 30 images/s, vidéo des réseaux (grille timecode 1 frame)', kind: 'temps' },
 ];
 
 /** Grille en temps (ms, images) : son pas en secondes, sinon null (grille musicale). */

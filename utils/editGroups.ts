@@ -37,9 +37,9 @@ export const ALL_GROUP_NAME = '<TOUT>';
 
 export const GROUP_KIND_LABEL: Record<GroupKind, string> = { edit: 'Édition', mix: 'Mix', both: 'Édition et mix' };
 export const GROUP_KIND_HINT: Record<GroupKind, string> = {
-  edit: 'Pro Tools « Edit » : sélection, coupe, rognage, fondus, nudge et déplacements faits ensemble',
-  mix: 'Pro Tools « Mix » : volume, muet, solo… liés dans la console',
-  both: 'Pro Tools « Edit and Mix » : l’édition ET le mix liés',
+  edit: '« Edit » : sélection, coupe, rognage, fondus, nudge et déplacements faits ensemble',
+  mix: '« Mix » : volume, muet, solo… liés dans la console',
+  both: '« Edit and Mix » : l’édition ET le mix liés',
 };
 export const MIX_ATTR_LABEL: Record<MixAttr, { short: string; label: string; pt: string }> = {
   volume: { short: 'Vol', label: 'Volume (relatif)', pt: 'Main Volume' },

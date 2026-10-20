@@ -201,7 +201,7 @@ const VstBrowserTab: React.FC<{
             <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
-            <div className="text-[9px] text-slate-500 truncate">{isUnreadShell(p) ? (lecture ? 'Groupe Waves : lecture en cours…' : 'Groupe Waves pas encore lu (clique pour savoir pourquoi)') : null}{isUnreadShell(p) ? null : (p.vendor || 'VST3')}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA (comme Pro Tools)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{isUnreadShell(p) ? (lecture ? 'Groupe Waves : lecture en cours…' : 'Groupe Waves pas encore lu (clique pour savoir pourquoi)') : null}{isUnreadShell(p) ? null : (p.vendor || 'VST3')}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
           </div>
         </div>
       ))}
@@ -210,7 +210,7 @@ const VstBrowserTab: React.FC<{
           <i className="fas fa-plug text-2xl text-slate-600 mb-2"></i>
           <p className="text-[11px] text-slate-500">{loadingList || lecture ? 'Recherche des plugins…' : 'Aucun plugin VST3 trouvé.'}</p>
           {!loadingList && !lecture && !searchTerm.trim() && (
-            <p className="mt-1 text-[10px] text-slate-500">Nova lit les plugins VST3 (dossier C:\Program Files\Common Files\VST3). Les plugins installés seulement pour Pro Tools (AAX) n'y sont pas : réinstalle-les en cochant VST3.</p>
+            <p className="mt-1 text-[10px] text-slate-500">Nova lit les plugins VST3 (dossier C:\Program Files\Common Files\VST3). Les plugins installés seulement en AAX n'y sont pas : réinstalle-les en cochant VST3.</p>
           )}
         </div>
       )}

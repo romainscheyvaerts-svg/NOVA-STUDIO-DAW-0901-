@@ -397,7 +397,7 @@ function rangeCommands(
       }
       if (!made) { d().notify('Consolider : aucun clip audio dans la plage.'); return false; }
       apply(out);
-      d().notify(`🧱 Plage consolidée : ${made} clip${made > 1 ? 's' : ''} d'un seul tenant (sans effets, comme « Consolidate » dans Pro Tools). Ctrl+Z pour revenir.`);
+      d().notify(`🧱 Plage consolidée : ${made} clip${made > 1 ? 's' : ''} d'un seul tenant (sans effets, comme « Consolidate »). Ctrl+Z pour revenir.`);
       return true;
     },
     fadesFromSelection: () => {

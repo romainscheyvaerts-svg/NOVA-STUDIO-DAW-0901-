@@ -28,7 +28,7 @@ const SessionMenuItems: React.FC<{ onDone: () => void; phone?: boolean }> = ({ o
           <i className="w-5 text-center text-slate-300 fas fa-file-import"></i><span>Importer depuis une session</span>
         </button>
         <button type="button" data-testid="menu-aaf-import" className={item} onClick={() => { openAafImport(); onDone(); }}>
-          <i className="w-5 text-center text-slate-300 fas fa-file-audio"></i><span>Importer une séance Pro Tools (AAF)</span>
+          <i className="w-5 text-center text-slate-300 fas fa-file-audio"></i><span>Importer une séance AAF</span>
         </button>
       </>
     )}

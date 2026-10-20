@@ -1,10 +1,10 @@
 {
  "format": "nova-template-spec",
  "version": 1,
- "name": "LENNON · session de départ Romain (Pro Tools)",
- "description": "Copie fidèle de la session Pro Tools de départ de Romain (LENNON) : 78 pistes, dossiers, bus, retours d'effets, PRE MASTER → MASTER. Tous les effets sont prévus ACTIFS à la création du projet (option « activer tous les effets ») ; l'état d'origine de chaque insert est noté (state / wasInactiveInProTools).",
+ "name": "LENNON · session de départ Romain",
+ "description": "Copie fidèle de la session de départ de Romain (LENNON) : 78 pistes, dossiers, bus, retours d'effets, PRE MASTER → MASTER. Tous les effets sont prévus ACTIFS à la création du projet (option « activer tous les effets ») ; l'état d'origine de chaque insert est noté.",
  "privateTo": "romain",
- "source": "Relevé Pro Tools du 08/10/2026 (PTSL + fenêtres de plugins), D:\\1 WORK\\CONTENU\\nova-modeles\\lennon",
+ "source": "Relevé de la session d’origine du 08/10/2026 (script + fenêtres de plugins), D:\\1 WORK\\CONTENU\\nova-modeles\\lennon",
  "sampleRate": 44100,
  "bpm": 140,
  "timeSignature": "4/4",
@@ -58,7 +58,7 @@
     "ALL RFF"
    ],
    "deduced": true,
-   "note": "Bus qui sortent dans ALL VOX (« pré » ALL VOX). Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+   "note": "Bus qui sortent dans ALL VOX (« pré » ALL VOX). Membres déduits des bus (fenêtre des groupes de la session d’origine non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
   },
   {
    "name": "FX ALL",
@@ -80,7 +80,7 @@
     "PAR COMPR"
    ],
    "deduced": true,
-   "note": "Pistes qui sortent dans le bus FX ALL (dossier SEND FX). Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+   "note": "Pistes qui sortent dans le bus FX ALL (dossier SEND FX). Membres déduits des bus (fenêtre des groupes de la session d’origine non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
   },
   {
    "name": "BASS DRUM",
@@ -91,7 +91,7 @@
     "808 BUS"
    ],
    "deduced": true,
-   "note": "Pistes qui sortent dans le bus BASS DRUM. Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+   "note": "Pistes qui sortent dans le bus BASS DRUM. Membres déduits des bus (fenêtre des groupes de la session d’origine non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
   },
   {
    "name": "INSTRUMENT",
@@ -101,7 +101,7 @@
     "KEYS BUS"
    ],
    "deduced": true,
-   "note": "Instru et claviers. Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+   "note": "Instru et claviers. Membres déduits des bus (fenêtre des groupes de la session d’origine non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
   }
  ],
  "tracks": [
@@ -225,7 +225,7 @@
      "plugin": "AIR Lo-Fi",
      "slot": "b",
      "state": "active",
-     "note": "Avid Lo-Fi (AAX seulement) → AIR Lo-Fi (VST3 installé, même famille d'effet). ",
+     "note": "Lo-Fi d’origine (AAX seulement) → AIR Lo-Fi (VST3 installé, même famille d'effet). ",
      "readings": {
       "Quantization": "Linear",
       "Sample Rate": "Off",
@@ -242,7 +242,7 @@
      "slot": "e",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     }
    ],
    "sends": [
@@ -639,7 +639,7 @@
      "slot": "a",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Solid State Logic",
@@ -681,7 +681,7 @@
      "slot": "e",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Plugin Alliance",
@@ -870,14 +870,14 @@
      "slot": "b",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "AIR Music Technology",
      "plugin": "AIR Lo-Fi",
      "slot": "c",
      "state": "active",
-     "note": "Avid Lo-Fi (AAX seulement) → AIR Lo-Fi (VST3 installé, même famille d'effet). ",
+     "note": "Lo-Fi d’origine (AAX seulement) → AIR Lo-Fi (VST3 installé, même famille d'effet). ",
      "readings": {
       "Quantization": "Linear",
       "Sample Rate": "Off",
@@ -894,7 +894,7 @@
      "slot": "d",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Wavesfactory",
@@ -902,7 +902,7 @@
      "slot": "f",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Blue Cat Audio",
@@ -993,7 +993,7 @@
      "slot": "b",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "McDSP",
@@ -1038,7 +1038,7 @@
      "slot": "b",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Universal Audio (UADx)",
@@ -1109,7 +1109,7 @@
      "slot": "d",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Universal Audio (UADx)",
@@ -1193,7 +1193,7 @@
      "slot": "a",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Soundtheory",
@@ -1201,7 +1201,7 @@
      "slot": "b",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "iZotope",
@@ -1209,7 +1209,7 @@
      "slot": "c",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "Sonnox",
@@ -4100,7 +4100,7 @@
      "slot": "d",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée (AAE -7058) : « plugin désactivé ». Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée (erreur -7058) : « plugin désactivé ». Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "FabFilter",
@@ -4414,7 +4414,7 @@
      "slot": "d",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée (AAE -7058) : « plugin désactivé ». Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée (erreur -7058) : « plugin désactivé ». Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     },
     {
      "vendor": "FabFilter",
@@ -9207,7 +9207,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -9706,7 +9706,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -10122,7 +10122,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -10479,7 +10479,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -11150,7 +11150,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. Insert en BYPASS dans la session.",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. Insert en BYPASS dans la session.",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -11416,7 +11416,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -11721,7 +11721,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -12165,7 +12165,7 @@
        }
       ]
      },
-     "note": "Avid EQ3 7-Band (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
+     "note": "EQ 7 bandes d’origine (AAX seulement, pas de VST3) → égaliseur 12 bandes de NOVA, réglages convertis. ",
      "readings": {
       "Input": "0.0 dB",
       "Output": "0.0 dB",
@@ -13000,7 +13000,7 @@
      "slot": "j",
      "state": "inactive",
      "wasInactiveInProTools": true,
-     "note": "Activation refusée dans Pro Tools : AAE -7058 plugin non autorise"
+     "note": "Activation refusée dans la session d’origine : erreur -7058, plugin non autorisé"
     }
    ]
   }

@@ -98,29 +98,29 @@ export async function buildProToolsZip(state: DAWState, opts: NovaExportOptions)
   const result = await writeAaf(plan.input);
   const name = safeName(state.name);
   const zip = new JSZip();
-  const folder = `${name} (Pro Tools)`;
+  const folder = `${name}`;
   zip.file(`${folder}/${name}.aaf`, result.aaf);
   for (const f of result.files) zip.file(`${folder}/${f.path}`, f.bytes);
   zip.file(`${folder}/LISEZ-MOI.txt`, readme(name, plan, result, opts));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-  return { blob, fileName: `${name} (Pro Tools).zip`, result, plan };
+  return { blob, fileName: `${name}.zip`, result, plan };
 }
 
 function readme(name: string, plan: NovaExportPlan, r: AafExportResult, opts: NovaExportOptions): string {
   const lines = [
-    `Séance « ${name} » exportée par NOVA pour Pro Tools`,
+    `Séance « ${name} » exportée par NOVA pour ton logiciel de studio (AAF)`,
     '',
     `Contenu : ${r.stats.tracks} piste(s), ${r.stats.clips} clip(s), ${r.stats.mediaFiles} fichier(s) BWF 24 bits à ${plan.input.sampleRate / 1000} kHz.`,
     opts.embed ? 'Les sons sont intégrés dans le fichier AAF (le dossier Audio Files est une copie de secours).'
       : `Les sons sont dans le dossier « ${MEDIA_FOLDER} », à côté du fichier AAF : gardez-les ensemble.`,
     '',
-    'Dans Pro Tools :',
+    'Dans ton logiciel de studio :',
     `  1. Décompressez ce dossier sur le disque de vos séances.`,
     `  2. Fichier › Ouvrir… et choisissez « ${name}.aaf » (nouvelle séance),`,
     '     ou Fichier › Importer › Données de session… dans une séance ouverte.',
-    `  3. Si Pro Tools demande les fichiers audio : « Relier manuellement » puis le dossier « ${MEDIA_FOLDER} ».`,
+    `  3. Si le logiciel demande les fichiers audio : « Relier manuellement » puis le dossier « ${MEDIA_FOLDER} ».`,
     '',
-    'Secours : chaque fichier BWF est horodaté (bext TimeReference). Glissez-les dans Pro Tools en mode Spot',
+    'Secours : chaque fichier BWF est horodaté (bext TimeReference). Glissez-les dans ton logiciel de studio en mode Spot',
     '(« Horodatage d\'origine ») : ils se posent à l\'échantillon près.',
   ];
   if (plan.skipped.length) lines.push('', 'Non exporté :', ...plan.skipped.map(s => `  - ${s}`));

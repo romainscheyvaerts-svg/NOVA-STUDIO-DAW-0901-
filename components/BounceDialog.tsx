@@ -95,7 +95,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
 
   const tailRow = (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-nv-line p-2">
-      <label className="flex min-h-[32px] cursor-pointer items-center gap-2 text-[12px]" title="Garde la fin de la réverbe / du délai après le dernier son (Pro Tools : « Add tail »)">
+      <label className="flex min-h-[32px] cursor-pointer items-center gap-2 text-[12px]" title="Garde la fin de la réverbe / du délai après le dernier son (« Add tail »)">
         <input type="checkbox" checked={withTail} onChange={e => setWithTail(e.target.checked)} className="accent-cyan-500" />
         Inclure la queue (réverbe, délai)
       </label>
@@ -121,7 +121,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
           <>
             <p className="text-[12px] text-nv-muted">Plage de {fmt(range.end - range.start)} sur {range.trackIds.length} piste{range.trackIds.length > 1 ? 's' : ''}.</p>
             <button type="button" disabled={!!busy} onClick={() => void doRange(false)} data-testid="bounce-dry"
-              title="Un seul clip par piste, clips seuls, sans effets (Pro Tools : Consolidate Clip, Alt+Maj+3)"
+              title="Un seul clip par piste, clips seuls, sans effets (Consolidate Clip, Alt+Maj+3)"
               className={`${btn} w-full border border-nv-line text-left hover:bg-nv-accent/10`}>
               <i className="fas fa-layer-group mr-2" />Sans effets <span className="font-normal text-nv-muted">· un seul clip, à la même place</span>
             </button>
@@ -145,7 +145,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
                   <label className="block text-[12px]">
                     <span className="mb-1 block font-bold">Effets inclus</span>
                     <select value={upTo} onChange={e => setUpTo(Number(e.target.value))} data-testid="commit-upto"
-                      title="Pro Tools : « Commit up to » — les effets suivants restent actifs sur la nouvelle piste"
+                      title="« Commit up to » — les effets suivants restent actifs sur la nouvelle piste"
                       className="w-full rounded-lg border border-nv-line bg-nv-well px-2 py-2 text-[12px] text-nv-ink">
                       <option value={-2}>Tous les effets ({plugins.length})</option>
                       {plugins.map((p, i) => i < plugins.length - 1 && (
@@ -157,7 +157,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
                 {tailRow}
                 {vstNeeded && <p role="alert" className="rounded-lg bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">Cette piste a des VST : connecte le pont (appli Windows Nova Studio), sinon le rendu gelé à jour est utilisé s'il existe.</p>}
                 <button type="button" disabled={!!busy} onClick={() => void doCommit()} data-testid="commit-run"
-                  title="Pro Tools 2020+ : Commit · Logic : Bounce in Place (remplacer) · Ableton : Freeze and Flatten"
+                  title="Commit · Logic : Bounce in Place (remplacer) · Ableton : Freeze and Flatten"
                   className={`${btn} w-full bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-check-double mr-2" />Commit</button>
               </>
             )}
@@ -175,7 +175,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
                   Couper le bus après l'impression
                 </label>
                 <button type="button" disabled={!!busy} onClick={() => void doPrint()} data-testid="print-run"
-                  title="Pro Tools : enregistrer un bus sur une piste audio (print) · Logic : Bounce in Place d'un aux · Ableton : Resample"
+                  title="enregistrer un bus sur une piste audio (print) · Logic : Bounce in Place d'un aux · Ableton : Resample"
                   className={`${btn} w-full bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-print mr-2" />Imprimer</button>
               </>
             )}

@@ -49,19 +49,19 @@ export const DEFAULT_EDIT_MODE: EditModeSettings = { mode: 'GRID', gridKind: 'RE
 export const EDIT_MODE_INFO: Record<EditMode, { short: string; label: string; color: string; keys: string; hint: string }> = {
   SHUFFLE: {
     short: 'SHUF', label: 'Shuffle', color: '#f97316', keys: 'F1 ou Alt+1',
-    hint: 'Shuffle (Pro Tools, F1) : les clips se collent les uns aux autres. Déplacer un clip pousse les suivants ; supprimer, couper ou rogner recolle la suite ; coller insère et pousse le reste. Clic droit ou Ctrl+clic : Shuffle Lock (verrou).',
+    hint: 'Shuffle (F1) : les clips se collent les uns aux autres. Déplacer un clip pousse les suivants ; supprimer, couper ou rogner recolle la suite ; coller insère et pousse le reste. Clic droit ou Ctrl+clic : Shuffle Lock (verrou).',
   },
   SLIP: {
     short: 'SLIP', label: 'Slip', color: '#22c55e', keys: 'F2 ou Alt+2',
-    hint: 'Slip (Pro Tools, F2) : déplacement et rognage libres, à l’échantillon près. Ctrl ou Maj pendant le glissement : calé sur la grille.',
+    hint: 'Slip (F2) : déplacement et rognage libres, à l’échantillon près. Ctrl ou Maj pendant le glissement : calé sur la grille.',
   },
   SPOT: {
     short: 'SPOT', label: 'Spot', color: '#eab308', keys: 'F3 ou Alt+3',
-    hint: 'Spot (Pro Tools, F3) : un clic sur un clip (appui long au doigt) ouvre « Position exacte » — mesures|temps|ticks, min:s.ms ou échantillons, pour le début, la fin ou le point de synchro.',
+    hint: 'Spot (F3) : un clic sur un clip (appui long au doigt) ouvre « Position exacte » — mesures|temps|ticks, min:s.ms ou échantillons, pour le début, la fin ou le point de synchro.',
   },
   GRID: {
     short: 'GRID', label: 'Grid', color: '#3b82f6', keys: 'F4 ou Alt+4 (2e appui : relatif)',
-    hint: 'Grid (Pro Tools, F4) : clips, bords, sélection et curseur se calent sur la grille. Absolu : le début du clip (ou son point de synchro) tombe sur la grille. Relatif (2e appui sur F4) : le clip avance par pas de grille et garde son décalage. Ctrl ou Maj pendant le glissement : libre.',
+    hint: 'Grid (F4) : clips, bords, sélection et curseur se calent sur la grille. Absolu : le début du clip (ou son point de synchro) tombe sur la grille. Relatif (2e appui sur F4) : le clip avance par pas de grille et garde son décalage. Ctrl ou Maj pendant le glissement : libre.',
   },
 };
 

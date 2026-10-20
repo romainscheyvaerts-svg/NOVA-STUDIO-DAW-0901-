@@ -461,7 +461,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     <button type="button" data-takes-button={track.id}
       onClick={(e) => { e.stopPropagation(); onToggleTakes?.(track.id); }}
       aria-expanded={!!takesOpen}
-      title={`${takesOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists de Pro Tools ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
+      title={`${takesOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
       className={`${absolute ? 'absolute z-10 right-1.5 bottom-1.5' : 'shrink-0'} h-6 px-2 rounded-full text-[10px] font-black flex items-center gap-1 border whitespace-nowrap ${takesOpen ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-black/70 text-cyan-200 border-cyan-400/50 hover:bg-cyan-500/20 [[data-theme=light]_&]:bg-white [[data-theme=light]_&]:text-cyan-700'}`}>
       <i className="fas fa-layer-group text-[9px]" />Prises ({n})<i className={`fas ${takesOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px]`} />
     </button>
@@ -534,7 +534,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {track.name}
                 {track.comment && (
                   <button type="button" data-testid={`header-comment-${track.id}`} aria-label={`Commentaire : ${track.comment}`}
-                    title={`💬 ${track.comment} — Pro Tools : Comments (clic : notes de la session)`}
+                    title={`💬 ${track.comment} — Comments (clic : notes de la session)`}
                     onClick={e => { e.stopPropagation(); openSessionPanel('notes'); }}
                     className="ml-1 align-middle text-[9px] text-amber-300 hover:text-amber-200"><i className="fas fa-comment-alt" /></button>
                 )}
@@ -718,7 +718,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 data-nova-arm-midi={track.id}
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
-                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus (comme le bouton d'armement de Pro Tools, l'armement d'enregistrement de Live, le Record de FL)"}
+                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus (comme le bouton d'armement, l'armement d'enregistrement de Live, le Record de FL)"}
                 aria-label={`Armer l'enregistrement MIDI : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
               >

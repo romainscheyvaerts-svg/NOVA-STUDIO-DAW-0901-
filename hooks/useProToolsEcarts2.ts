@@ -66,8 +66,8 @@ export function useProToolsEcarts2(d: ProToolsEcarts2Deps) {
         if (!out.size) { dd().notify('Rien à copier : la plage ne contient aucun clip.'); return true; }
         apply(out);
         dd().notify(arg?.move
-          ? `✂️ Plage de ${fmtT(sel.start)} à ${fmtT(sel.end)} déplacée vers la playlist ${made.join(', ')} (retirée de la version qu’on entend). « Playlist d’avant » (Maj+← en préréglage Pro Tools) pour l’écouter, Ctrl+Z pour annuler.`
-          : `⧉ Plage de ${fmtT(sel.start)} à ${fmtT(sel.end)} copiée dans la playlist ${made.join(', ')} ; on entend toujours la même version. « Playlist d’avant » (Maj+← en préréglage Pro Tools) pour l’écouter.`);
+          ? `✂️ Plage de ${fmtT(sel.start)} à ${fmtT(sel.end)} déplacée vers la playlist ${made.join(', ')} (retirée de la version qu’on entend). « Playlist d’avant » (Maj+← en préréglage Studio pro) pour l’écouter, Ctrl+Z pour annuler.`
+          : `⧉ Plage de ${fmtT(sel.start)} à ${fmtT(sel.end)} copiée dans la playlist ${made.join(', ')} ; on entend toujours la même version. « Playlist d’avant » (Maj+← en préréglage Studio pro) pour l’écouter.`);
         return true;
       },
 

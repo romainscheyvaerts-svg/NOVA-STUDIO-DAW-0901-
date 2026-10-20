@@ -38,12 +38,12 @@ function EntryRow({ e, fps }: { e: PtEntry; fps: TimecodeFps }) {
     <li data-testid="pt-entry" data-status={e.status} data-file={e.file} className="rounded-xl bg-white/[0.03] px-2.5 py-2 text-[12px] leading-snug">
       <span className="font-bold text-slate-100">{icon} {e.file}</span>
       <span className="block text-[11px] text-slate-400">
-        {e.status === 'ok' && <>Envoyée vers Pro Tools{e.updated ? ' (mise à jour)' : ''} · Spot à {positionLabel(e.position, e.sampleRate)} · TC {tc}</>}
+        {e.status === 'ok' && <>Envoyée vers ton logiciel de studio{e.updated ? ' (mise à jour)' : ''} · Spot à {positionLabel(e.position, e.sampleRate)} · TC {tc}</>}
         {e.status === 'envoi' && <>Écriture…</>}
         {e.status === 'attente' && <>{e.error} : clique « Autoriser le dossier ».</>}
         {e.status === 'erreur' && <span className="text-red-300">{e.error}</span>}
       </span>
-      {e.renamed && <span className="block text-[11px] text-amber-200">L’original est ouvert dans Pro Tools : nouvelle version écrite à côté.</span>}
+      {e.renamed && <span className="block text-[11px] text-amber-200">L’original est ouvert dans ton logiciel de studio : nouvelle version écrite à côté.</span>}
       {e.status === 'ok' && (
         <span className="block truncate text-[10px] text-slate-500" title={e.path}>
           {typeof e.ms === 'number' ? `Écrite en ${(e.ms / 1000).toFixed(1).replace('.', ',')} s` : 'Écrite'}{e.target === 'bridge' && e.path ? ` · ${e.path}` : e.target === 'download' ? ' · Téléchargements' : ''}
@@ -99,15 +99,15 @@ export const ProToolsPanel: React.FC<Props> = ({ existing }) => {
   };
   const sendExisting = () => {
     const n = sink.sendExisting(existing());
-    setNote(n ? `${n} prise${n > 1 ? 's' : ''} déjà dans la séance envoyée${n > 1 ? 's' : ''} vers Pro Tools.` : 'Toutes les prises de l’artiste sont déjà dans le dossier.');
+    setNote(n ? `${n} prise${n > 1 ? 's' : ''} déjà dans la séance envoyée${n > 1 ? 's' : ''} vers ton logiciel de studio.` : 'Toutes les prises de l’artiste sont déjà dans le dossier.');
   };
 
   return (
     <div className="p-4 space-y-2 border-b border-white/5" data-testid="pt-panel">
-      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Pont Pro Tools</p>
+      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Pont studio</p>
       <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2">
         <input type="checkbox" data-testid="pt-enabled" checked={s.enabled} onChange={e => sink.setSettings({ enabled: e.target.checked })} className="mt-0.5 h-5 w-5 accent-cyan-400" />
-        <span className="text-[12px] leading-snug text-slate-200"><b>Dossier Pro Tools</b> — chaque prise de l’artiste est aussi écrite en WAV horodaté (BWF), prête à importer en Spot dans Pro Tools.</span>
+        <span className="text-[12px] leading-snug text-slate-200"><b>Dossier des prises</b> — chaque prise de l’artiste est aussi écrite en WAV horodaté (BWF), prête à importer en Spot dans ton logiciel de studio.</span>
       </label>
       {s.enabled && (
         <div className="space-y-2 rounded-xl bg-white/[0.02] p-2.5">
@@ -117,7 +117,7 @@ export const ProToolsPanel: React.FC<Props> = ({ existing }) => {
               <div className="flex gap-2">
                 <input value={folderDraft} onChange={e => setFolderDraft(e.target.value)} onBlur={() => commitFolder(folderDraft)}
                   onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitFolder(folderDraft); }}
-                  placeholder={defaultFolder || 'Documents\\Nova Studio\\Pro Tools'} aria-label="Dossier Pro Tools" data-testid="pt-folder"
+                  placeholder={defaultFolder || 'Documents\\Nova Studio\\Prises studio'} aria-label="Dossier des prises" data-testid="pt-folder"
                   className="h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/40 px-3 text-[12px] text-white" />
                 {desktopFolderPicker() && <button type="button" onClick={() => { void pickWindowsFolder(); }} className={`${btn} bg-white/10 text-white`}>Choisir…</button>}
               </div>
@@ -161,11 +161,11 @@ export const ProToolsPanel: React.FC<Props> = ({ existing }) => {
             </fieldset>
           </div>
           {!tcOk && <p className="text-[11px] text-red-300">Format attendu : HH:MM:SS:FF (ex. 01:00:00:00).</p>}
-          <p className="text-[11px] text-slate-500">Même départ que dans Pro Tools (Setup › Session › Start). Dans Pro Tools : mode Spot, glisse le fichier sur une piste, puis « Original Time Stamp ».</p>
+          <p className="text-[11px] text-slate-500">Même départ que ta séance (Setup › Session › Start). Dans ton logiciel de studio : mode Spot, glisse le fichier sur une piste, puis « Original Time Stamp ».</p>
           <button type="button" data-testid="pt-existing" onClick={sendExisting} className={`${btn} w-full bg-white/10 text-white`}>Envoyer aussi les prises déjà dans la séance</button>
           {note && <p role="status" className="text-[11px] text-sky-200">{note}</p>}
           {sink.entries.length > 0 && (
-            <ul className="max-h-48 space-y-1 overflow-y-auto" aria-label="Prises envoyées vers Pro Tools" data-testid="pt-entries">
+            <ul className="max-h-48 space-y-1 overflow-y-auto" aria-label="Prises envoyées vers ton logiciel de studio" data-testid="pt-entries">
               {sink.entries.slice(0, 12).map(e => <EntryRow key={e.clipId} e={e} fps={s.fps} />)}
             </ul>
           )}
@@ -226,7 +226,7 @@ export const MixSourcePicker: React.FC<{ mixOutOn: boolean }> = ({ mixOutOn }) =
             </div>
           )}
           {msg && <p role="status" data-testid="pt-mix-verdict" data-verdict={v?.error ? 'erreur' : v?.verdict} className={`text-[11px] font-bold ${msg.warn ? 'text-amber-200' : 'text-emerald-300'}`}>{msg.warn ? '⚠️ ' : '🟢 '}{msg.text}</p>}
-          <p className="text-[11px] text-slate-500">{mixOutOn ? 'Cette entrée part en direct chez l’artiste (Opus stéréo 510 kb/s).' : 'Active « Diffuser mon mix en direct » pour l’envoyer à l’artiste.'} Dans Pro Tools, envoie la sortie de ta séance vers cette entrée (câble virtuel ou loopback de la carte).</p>
+          <p className="text-[11px] text-slate-500">{mixOutOn ? 'Cette entrée part en direct chez l’artiste (Opus stéréo 510 kb/s).' : 'Active « Diffuser mon mix en direct » pour l’envoyer à l’artiste.'} Dans ton logiciel de studio, envoie la sortie de ta séance vers cette entrée (câble virtuel ou loopback de la carte).</p>
         </div>
       )}
     </div>

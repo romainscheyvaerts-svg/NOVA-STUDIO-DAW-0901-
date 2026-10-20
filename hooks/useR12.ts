@@ -108,7 +108,7 @@ export function useR12(state: DAWState, d: R12Deps) {
       const s = dRef.current.stateRef.current;
       const next = !s.groupSettings?.suspended;
       dRef.current.setState(prev => setSuspended(prev as DAWState & GroupsState, next));
-      dRef.current.notify(next ? '⏸ Tous les groupes sont suspendus (Pro Tools : Suspend All Groups). Ctrl+Maj+G pour les reprendre.' : '▶ Groupes repris.');
+      dRef.current.notify(next ? '⏸ Tous les groupes sont suspendus (Suspend All Groups). Ctrl+Maj+G pour les reprendre.' : '▶ Groupes repris.');
       return true;
     },
     insertTime: () => {

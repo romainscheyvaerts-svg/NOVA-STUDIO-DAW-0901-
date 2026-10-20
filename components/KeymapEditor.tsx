@@ -140,9 +140,9 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               className="h-9 rounded-lg bg-cyan-500 px-4 text-[13px] font-black text-black disabled:opacity-40">
               {presetChoice === settings.preset ? (customCount ? 'Revenir à ce jeu' : 'Jeu actif') : `Appliquer « ${presetById(presetChoice).name} »`}
             </button>
-            <label className="flex items-center gap-2 text-[12px] text-nv-muted" title="Pro Tools sous Windows lit les touches par leur place sur un clavier US : en AZERTY, Annuler (Ctrl+Z) est sur la touche W.">
+            <label className="flex items-center gap-2 text-[12px] text-nv-muted" title="Les logiciels de studio sous Windows lisent les touches par leur place sur un clavier US : en AZERTY, Annuler (Ctrl+Z) est sur la touche W.">
               <input type="checkbox" className="h-4 w-4 accent-cyan-500" checked={settings.usLayout} onChange={e => keymapStore.setUsLayout(e.target.checked)} data-testid="keymap-uslayout" />
-              Touches par position (clavier US, comme Pro Tools)
+              Touches par position (clavier US, comme dans les studios pro)
             </label>
             <label className="flex items-center gap-2 text-[12px] text-nv-muted" title="Sans plage sélectionnée, Ctrl+F fait des fondus rapides sur les clips au lieu d’ouvrir la recherche du navigateur.">
               <input type="checkbox" className="h-4 w-4 accent-cyan-500" checked={settings.ctrlFFades} onChange={e => keymapStore.setCtrlFFades(e.target.checked)} data-testid="keymap-ctrlf" />
@@ -224,7 +224,7 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       {custom && <span className="ml-2 rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">perso</span>}
                       {inConflict && <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">conflit</span>}
                     </p>
-                    <p className="text-[11px] text-nv-muted">{d.category}{d.context !== 'global' ? ` · ${CONTEXT_LABEL[d.context]}` : ''}{d.pt ? ` · Pro Tools : ${d.pt}` : ''}</p>
+                    <p className="text-[11px] text-nv-muted">{d.category}{d.context !== 'global' ? ` · ${CONTEXT_LABEL[d.context]}` : ''}{d.pt ? ` · Équivalent : ${d.pt}` : ''}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
                     {d.fixed ? (

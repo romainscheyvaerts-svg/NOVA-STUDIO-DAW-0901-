@@ -241,7 +241,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
     const track = tracks.find(t => t.id === first.trackId);
     if (clip) propsView = (
       <ClipPropsDialog open title={props.focus === 'color' ? 'Couleur du clip' : 'Renommer le clip'}
-        ptHint={props.focus === 'color' ? 'Pro Tools : Clip Color' : 'Pro Tools : Rename Clip (Ctrl+Maj+R, ou double-clic)'}
+        ptHint={props.focus === 'color' ? 'Clip Color' : 'Rename Clip (Ctrl+Maj+R, ou double-clic)'}
         name={clip.name} color={clip.color || track?.color || '#00f2ff'} focus={props.focus}
         countLabel={props.targets.length > 1 ? `${props.targets.length} clips : la couleur s'applique à tous, le nom au premier.` : undefined}
         onSave={({ name, color }) => {
@@ -257,7 +257,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   } else if (props?.name === 'track-color' && props.trackId) {
     const track = tracks.find(t => t.id === props.trackId);
     if (track) propsView = (
-      <ClipPropsDialog open title={`Couleur de la piste ${track.name}`} ptHint="Pro Tools : Track Color" color={track.color} focus="color"
+      <ClipPropsDialog open title={`Couleur de la piste ${track.name}`} ptHint="Track Color" color={track.color} focus="color"
         onSave={({ color }) => color && setState(prev => produce(prev, (draft: DAWState) => {
           const t = draft.tracks.find(x => x.id === props.trackId);
           if (t) t.color = color;

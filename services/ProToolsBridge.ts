@@ -222,8 +222,8 @@ export function takesBatchOf(trackId: string, trackName: string, artist: string,
 
 /** Message en bas de l'écran quand une prise part vers Pro Tools. */
 export function writtenMessage(e: PtEntry): string {
-  const where = e.target === 'download' ? 'dans Téléchargements' : e.target === 'folder' ? 'dans le dossier Pro Tools' : 'dans le dossier Pro Tools';
-  return `🎚️ Prise envoyée vers Pro Tools : « ${e.file} » ${where} (Spot à ${positionLabel(e.position, e.sampleRate)}${e.renamed ? ', l’original étant ouvert dans Pro Tools' : ''}).`;
+  const where = e.target === 'download' ? 'dans Téléchargements' : e.target === 'folder' ? 'dans le dossier des prises' : 'dans le dossier des prises';
+  return `🎚️ Prise envoyée vers ton logiciel de studio : « ${e.file} » ${where} (Spot à ${positionLabel(e.position, e.sampleRate)}${e.renamed ? ', l’original étant ouvert dans ton logiciel de studio' : ''}).`;
 }
 
 // --- Écritures réelles (navigateur / Nova Studio) ------------------------------------------

@@ -60,7 +60,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
         {([false, true] as const).map(on => (
           <button key={String(on)} type="button" role="radio" aria-checked={grid === on}
             onClick={() => notify(chooseEditMode(on ? 'GRID' : 'SLIP').message)}
-            title={on ? 'Grille : les clips se calent sur les temps (mode Grid de Pro Tools, F4)' : 'Libre : les clips vont exactement où tu les poses (mode Slip de Pro Tools, F2)'}
+            title={on ? 'Grille : les clips se calent sur les temps (mode Grid, F4)' : 'Libre : les clips vont exactement où tu les poses (mode Slip, F2)'}
             className={`h-9 [@media(pointer:coarse)]:h-10 px-3 rounded-md text-[11px] font-bold transition-colors ${grid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-slate-400 hover:text-white'}`}>
             {on ? 'Grille' : 'Libre'}
           </button>
@@ -71,7 +71,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
 
   return (
     <div ref={boxRef} className="relative flex items-center gap-1 shrink-0" data-nova-target="edit-modes">
-      <div role="radiogroup" aria-label="Mode d'édition (Pro Tools)" className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
+      <div role="radiogroup" aria-label="Mode d'édition" className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
         {EDIT_MODES.map(m => {
           const info = EDIT_MODE_INFO[m];
           const on = em.mode === m;
@@ -93,7 +93,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
       </div>
       <button ref={btnRef} type="button" onClick={() => setMenu(v => !v)} aria-haspopup="menu" aria-expanded={menu} aria-label={`Grille ${gridLabel(em.gridSize)} (valeur de grille)`}
         data-testid="grid-value"
-        title="Valeur de la grille (Pro Tools : Grid value) : 1 mesure à 1/32, triolets, millisecondes et images ; grille absolue ou relative ; Tab to Transient."
+        title="Valeur de la grille (Grid value) : 1 mesure à 1/32, triolets, millisecondes et images ; grille absolue ou relative ; Tab to Transient."
         className={`h-9 [@media(pointer:coarse)]:h-10 px-2.5 rounded-lg border text-[11px] font-bold tabular-nums transition-colors ${em.mode === 'GRID' ? 'bg-blue-500/10 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
         <i className="fas fa-th mr-1.5 text-[10px]" aria-hidden />{gridLabel(em.gridSize)}<i className="fas fa-chevron-down ml-1.5 text-[8px]" aria-hidden />
       </button>
@@ -103,7 +103,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
           <div className="px-1 pb-1 text-[10px] font-bold text-slate-500">Valeur de grille</div>
           {([['musique', null], ['temps', 'En temps (min:s, images)']] as const).map(([kind, title]) => (
             <React.Fragment key={kind}>
-              {title && <div className="px-1 pb-1 pt-2 text-[10px] font-bold text-slate-500" title="Pro Tools : grille en min:sec ou en timecode, indépendante du tempo (vidéo, podcast, son sans tempo)">{title}</div>}
+              {title && <div className="px-1 pb-1 pt-2 text-[10px] font-bold text-slate-500" title="Grille en min:sec ou en timecode, indépendante du tempo (vidéo, podcast, son sans tempo)">{title}</div>}
               <div className="grid grid-cols-3 gap-0.5">
                 {GRID_OPTIONS.filter(o => (o.kind || 'musique') === kind).map(o => (
                   <button key={o.value} type="button" role="menuitemradio" aria-checked={em.gridSize === o.value} title={o.title} data-grid-option={o.value}
@@ -118,7 +118,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
           <div className="grid grid-cols-2 gap-1">
             {(['ABSOLUTE', 'RELATIVE'] as const).map(k => (
               <button key={k} type="button" role="menuitemradio" aria-checked={em.gridKind === k}
-                title={k === 'ABSOLUTE' ? 'Grid absolu : le début du clip (ou son point de synchro) tombe pile sur la grille.' : 'Grid relatif : le clip avance par pas de grille en gardant son décalage (une prise un peu en avance reste en avance). Pro Tools : Relative Grid.'}
+                title={k === 'ABSOLUTE' ? 'Grid absolu : le début du clip (ou son point de synchro) tombe pile sur la grille.' : 'Grid relatif : le clip avance par pas de grille en gardant son décalage (une prise un peu en avance reste en avance). Relative Grid.'}
                 onClick={() => { editModeStore.set({ mode: 'GRID', gridKind: k }); notify(editModeMessage()); setMenu(false); }}
                 className={`px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold capitalize ${em.gridKind === k ? 'bg-blue-500/15 text-blue-300' : 'text-slate-300 hover:bg-white/5'}`}>{GRID_KIND_LABEL[k]}</button>
             ))}
@@ -126,7 +126,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
           <div className="h-px bg-white/5 my-2" />
           <button type="button" role="menuitemcheckbox" aria-checked={em.tabToTransient}
             onClick={() => editModeStore.set({ tabToTransient: !em.tabToTransient })}
-            title="Tab to Transient (Pro Tools) : Tab amène la tête de lecture à l'attaque suivante du clip sélectionné ; éteint, Tab va au bord de clip suivant. Maj+Tab : en arrière."
+            title="Tab to Transient : Tab amène la tête de lecture à l'attaque suivante du clip sélectionné ; éteint, Tab va au bord de clip suivant. Maj+Tab : en arrière."
             className="w-full flex items-center justify-between px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold text-slate-300 hover:bg-white/5">
             <span>Tab va aux attaques (Tab to Transient)</span>
             <span className={`w-8 h-4 rounded-full p-0.5 ${em.tabToTransient ? 'bg-green-500/30' : 'bg-white/10'}`}>
@@ -135,7 +135,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
           </button>
           <button type="button" role="menuitemcheckbox" aria-checked={em.shuffleLock}
             onClick={() => notify(toggleShuffleLock().message)}
-            title="Shuffle Lock (Pro Tools) : empêche d'entrer en Shuffle par erreur (F1, clic)."
+            title="Shuffle Lock : empêche d'entrer en Shuffle par erreur (F1, clic)."
             className="w-full flex items-center justify-between px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold text-slate-300 hover:bg-white/5">
             <span><i className={`fas ${em.shuffleLock ? 'fa-lock text-orange-300' : 'fa-lock-open text-slate-500'} mr-1.5`} aria-hidden />Verrouiller Shuffle (Shuffle Lock)</span>
             <span className="text-slate-500">{em.shuffleLock ? 'oui' : 'non'}</span>

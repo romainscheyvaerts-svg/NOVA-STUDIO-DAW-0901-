@@ -63,7 +63,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
           <section className="space-y-3">
             <span className={sec}>Clic</span>
             <label className="flex items-center justify-between gap-3 text-[13px] font-bold">
-              <span>Clic activé <span className="font-normal text-nv-muted">(pavé 7, comme Pro Tools)</span></span>
+              <span>Clic activé <span className="font-normal text-nv-muted">(pavé 7, comme dans les studios pro)</span></span>
               <input type="checkbox" checked={settings.enabled} onChange={e => onChange({ enabled: e.target.checked })} className="w-5 h-5" data-testid="metro-enabled" />
             </label>
             <div>
@@ -82,7 +82,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
               <input type="range" min={0} max={1} step={0.01} value={settings.volume} onChange={e => onChange({ volume: Number(e.target.value) })} className="w-full h-8" aria-label="Volume du clic" />
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center gap-2 text-[12px] font-bold" title="Le premier temps de chaque mesure plus fort et plus aigu (Pro Tools : Accented ; Logic : Mesure / Temps)">
+              <label className="flex items-center gap-2 text-[12px] font-bold" title="Le premier temps de chaque mesure plus fort et plus aigu (Accented ; Logic : Mesure / Temps)">
                 <input type="checkbox" checked={settings.accentDownbeat} onChange={e => onChange({ accentDownbeat: e.target.checked })} className="w-5 h-5" />
                 Accent sur le 1er temps
               </label>
@@ -98,7 +98,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
                 <button type="button" role="radio" aria-checked={settings.mode !== 'record'} onClick={() => onChange({ mode: 'always' })} className={chip(settings.mode !== 'record')}
                   title="Le clic sonne à la lecture et pendant la prise (Logic : clic en lecture)">Lecture et prise</button>
                 <button type="button" role="radio" aria-checked={settings.mode === 'record'} onClick={() => onChange({ mode: 'record' })} className={chip(settings.mode === 'record')}
-                  data-testid="metro-mode-record" title="Le clic ne sonne que pendant l'enregistrement (Pro Tools : Only During Record)">Prise seulement</button>
+                  data-testid="metro-mode-record" title="Le clic ne sonne que pendant l'enregistrement (Only During Record)">Prise seulement</button>
               </div>
             </div>
             <div>
@@ -107,7 +107,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
                 <button type="button" role="radio" aria-checked={settings.output !== 'system'} onClick={() => onChange({ output: 'main' })} className={chip(settings.output !== 'system')}
                   title="Avec la musique : par la carte son de NOVA (ASIO compris), jamais dans le fichier exporté">Comme la musique</button>
                 <button type="button" role="radio" aria-checked={settings.output === 'system'} onClick={() => onChange({ output: 'system' })} className={chip(settings.output === 'system')}
-                  title="Par la sortie son de l'ordinateur (Pro Tools : sortie du clic séparée)">Sortie de l'ordinateur</button>
+                  title="Par la sortie son de l'ordinateur (sortie du clic séparée)">Sortie de l'ordinateur</button>
               </div>
             </div>
           </section>
@@ -116,7 +116,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
           <section className="space-y-3">
             <span className={sec}>Décompte avant la prise</span>
             <label className="flex items-center justify-between gap-3 text-[13px] font-bold">
-              <span>Décompte <span className="font-normal text-nv-muted">(Pro Tools : Count Off)</span></span>
+              <span>Décompte <span className="font-normal text-nv-muted">(Count Off)</span></span>
               <input type="checkbox" checked={countInEnabled} onChange={e => onCountInEnabled(e.target.checked)} className="w-5 h-5" data-testid="metro-countin-on" />
             </label>
             <div className="grid grid-cols-2 gap-3">
@@ -147,7 +147,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
           {onUpdatePunch && (
             <section className="space-y-2">
               <span className={sec}>Pré-roll</span>
-              <p className="text-[12px] text-nv-muted">La lecture repart un peu avant l'endroit de la prise pour te caler ; seul ce qui suit est gardé (Pro Tools : Pre-Roll).</p>
+              <p className="text-[12px] text-nv-muted">La lecture repart un peu avant l'endroit de la prise pour te caler ; seul ce qui suit est gardé (Pre-Roll).</p>
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" onClick={() => onUpdatePunch({ preRollOn: false })} className={chip(!preOn)}>Aucun</button>
                 {ROLL_CHOICES_BARS.filter(b => b > 0).map(b => (

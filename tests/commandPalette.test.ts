@@ -90,7 +90,7 @@ describe('palette : action principale', () => {
     const { searchActions } = await import('../utils/commandPalette');
     const run = () => {};
     const acts = [
-      { id: 'pal.aafExport', label: 'Exporter la séance pour Pro Tools (AAF + BWF)', group: 'Fichier', run },
+      { id: 'pal.aafExport', label: 'Exporter la séance pour un logiciel de studio (AAF + BWF)', group: 'Fichier', run },
       { id: 'nova.export', label: 'Exporter : mix, stems par piste ou par bus, voix seule', group: 'Fichier', run, primary: true },
     ];
     expect(searchActions('export', acts)[0].id).toBe('nova.export');

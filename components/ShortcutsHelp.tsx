@@ -31,7 +31,7 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
               className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-[12px] font-bold text-slate-200 hover:bg-white/10">🪟 Dispositions</button>
           )}
           {onCustomize && (
-            <button type="button" onClick={onCustomize} data-testid="shortcuts-customize" title="Changer les touches, choisir un jeu Pro Tools, FL Studio ou Ableton Live"
+            <button type="button" onClick={onCustomize} data-testid="shortcuts-customize" title="Changer les touches, choisir un jeu Studio pro, FL Studio ou Ableton Live"
               className="h-9 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 text-[12px] font-bold text-cyan-200 hover:bg-cyan-500/20">Personnaliser</button>
           )}
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
@@ -41,7 +41,7 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
             aria-label="Chercher un raccourci" data-testid="shortcuts-search"
             className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[13px] text-white outline-none focus:border-cyan-500/60" />
           <button type="button" onClick={() => setKeyboardFocus(!focus)} aria-pressed={focus}
-            title="Pro Tools : Commands Keyboard Focus (Ctrl+Alt+1). Une touche = une commande : A, S, D, G, B, R, T…"
+            title="Commands Keyboard Focus (Ctrl+Alt+1). Une touche = une commande : A, S, D, G, B, R, T…"
             className={`shrink-0 rounded-lg border px-3 py-2 text-[12px] font-black ${focus ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-white/5 text-slate-300'}`}>
             a–z Keyboard Focus : {focus ? 'actif' : 'arrêté'}
           </button>
@@ -59,10 +59,10 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
                   </p>
                   <ul className="space-y-1.5">
                     {list.map(s => (
-                      <li key={s.id} className="flex items-start justify-between gap-3 text-[13px]" title={s.pt ? `Pro Tools : ${s.pt}` : undefined}>
+                      <li key={s.id} className="flex items-start justify-between gap-3 text-[13px]" title={s.pt ? `${s.pt}` : undefined}>
                         <span className="min-w-0">
                           <span className="text-slate-200">{s.label}</span>
-                          {s.pt && <span className="block text-[10px] text-slate-500">Pro Tools : {s.pt}</span>}
+                          {s.pt && <span className="block text-[10px] text-slate-500">Équivalent : {s.pt}</span>}
                         </span>
                         <kbd className="shrink-0 rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-right font-mono text-[11px] text-white">{shortcutKeysLabel(s)}</kbd>
                       </li>
@@ -73,7 +73,7 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
             })}
           </div>
         </div>
-        <p className="mt-3 text-[11px] text-slate-500">Les combinaisons Ctrl s’écrivent Cmd sur Mac. Le pavé numérique suit le mode « Transport » de Pro Tools.</p>
+        <p className="mt-3 text-[11px] text-slate-500">Les combinaisons Ctrl s’écrivent Cmd sur Mac. Le pavé numérique suit le mode « Transport » des studios pro.</p>
       </div>
     </div>
   );

@@ -584,7 +584,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
       const excluded = ruleExcluded && !keepExcluded;
       const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list, { ...(keepExcluded ? NO_EXCLUSIONS : {}), channels: t.channels || null });
       if (excluded) report.warnings.push(`${t.name} : ${ins.plugin} est exclu (règle du studio : Slate sauf MetaTune / VerbSuite Classics, SSL).`);
-      else if (ruleExcluded) report.warnings.push(`${t.name} : ${ins.plugin} est hors règles du studio (SSL / Slate) mais GARDÉ : modèle fidèle à la session Pro Tools.`);
+      else if (ruleExcluded) report.warnings.push(`${t.name} : ${ins.plugin} est hors règles du studio (SSL / Slate) mais GARDÉ : modèle fidèle à la session d’origine.`);
       else if (!match) report.warnings.push(`${t.name} : ${ins.plugin}${ins.vendor ? ` (${ins.vendor})` : ''} absent de ce PC.`);
       else if (match.kind !== 'exact') report.warnings.push(`${t.name} : ${ins.plugin} → ${match.plugin.name}${match.note ? ` (${match.note})` : ''}.`);
       // Plugin absent : remplaçant (VST installé le plus proche, ou effet NOVA).
@@ -761,7 +761,7 @@ export const MISSING_REPLACEMENTS: Record<string, MissingReplacement> = {
     builtinParams: src => ({ frequency: 8000, threshold: numOf(src['Threshold'], -18), q: 1, mode: 'BELL', reduction: 0.6 }),
     why: 'de-esser vers 8 kHz (règle de Romain)',
   },
-  neutron4: { vst: ['Ozone 9'], builtin: 'PROEQ12', inactive: true, why: 'tranche iZotope la plus proche installée (Ozone 9) ; Neutron 4 n’a pas de VST3 sur ce PC, réglages d’origine non lus (activation refusée dans Pro Tools)' },
+  neutron4: { vst: ['Ozone 9'], builtin: 'PROEQ12', inactive: true, why: 'tranche iZotope la plus proche installée (Ozone 9) ; Neutron 4 n’a pas de VST3 sur ce PC, réglages d’origine non lus (activation refusée dans la session d’origine)' },
   ozone11exciter: { vst: ['Ozone 9 Exciter'], builtin: 'VOCALSATURATOR', inactive: true, why: 'même module en version 9 (Ozone 9 Exciter) ; réglages d’origine non lus' },
   soothe2: { vst: ['Ozone 9 Spectral Shaper'], builtin: 'DEESSER', inactive: true, why: 'atténuation des résonances : Ozone 9 Spectral Shaper, le plus proche installé ; réglages d’origine non lus' },
   gullfoss: { vst: ['Ozone 9 Dynamic EQ'], builtin: 'PROEQ12', inactive: true, why: 'égalisation automatique : Ozone 9 Dynamic EQ, le plus proche installé ; réglages d’origine non lus' },

@@ -25,7 +25,7 @@ export const ARA_LABEL: Record<AraPluginKey, string> = { melodyne: 'Melodyne', v
 
 /** Infobulle du badge « ARA » (menu +, liste des plugins). */
 export const ARA_BADGE_TOOLTIP =
-  "ARA : en insert sur une piste, comme dans Pro Tools, le plugin lit tous les clips de la piste (sans « transfert ») ; son éditeur s'ancre en bas de la fenêtre Édition et ses retouches s'entendent en lecture. Clic droit sur un clip : « Ouvrir dans Melodyne » rend le clip (Commit).";
+  "ARA : en insert sur une piste, comme dans les studios pro, le plugin lit tous les clips de la piste (sans « transfert ») ; son éditeur s'ancre en bas de la fenêtre Édition et ses retouches s'entendent en lecture. Clic droit sur un clip : « Ouvrir dans Melodyne » rend le clip (Commit).";
 
 /** Plugins ARA connus, reconnus à leur nom ou leur chemin. */
 export function araPluginKey(nameOrPath: string | undefined | null): AraPluginKey | null {

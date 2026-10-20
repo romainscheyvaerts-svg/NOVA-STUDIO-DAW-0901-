@@ -18,8 +18,8 @@
 export type BwfFormat = '24' | '32f';
 
 export const BWF_FORMATS: { id: BwfFormat; label: string; hint: string }[] = [
-  { id: '24', label: '24 bits', hint: 'Standard des séances Pro Tools' },
-  { id: '32f', label: '32 bits flottants', hint: 'Le son de NOVA au bit près (Pro Tools 2022.4 et plus récent)' },
+  { id: '24', label: '24 bits', hint: 'Standard des séances de studio' },
+  { id: '32f', label: '32 bits flottants', hint: 'Le son de NOVA au bit près (logiciels de studio récents)' },
 ];
 
 /** Cadences du timecode de départ de séance (images non droppées). */

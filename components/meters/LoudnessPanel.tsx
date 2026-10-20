@@ -287,7 +287,7 @@ const LoudnessPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <div className="flex rounded-lg overflow-hidden border border-white/10" role="radiogroup" aria-label="Point de mesure des pistes">
           {(['pre', 'post'] as const).map(m => (
             <button key={m} type="button" role="radio" aria-checked={tap === m} onClick={() => { meterBank.setTapMode(m); setTap(m); }}
-              title={m === 'pre' ? 'Mesure après les effets, avant le fader (Pro Tools « Pre-Fader Metering »)' : 'Mesure après le fader et le pan'}
+              title={m === 'pre' ? 'Mesure après les effets, avant le fader (« Pre-Fader Metering »)' : 'Mesure après le fader et le pan'}
               className={`h-7 px-2 text-[11px] font-bold ${tap === m ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400'}`}>{m === 'pre' ? 'Pré-fader' : 'Post-fader'}</button>
           ))}
         </div>

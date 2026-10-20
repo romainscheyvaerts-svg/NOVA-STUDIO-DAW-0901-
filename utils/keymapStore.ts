@@ -36,9 +36,9 @@ export interface KeymapPreset {
 
 const PROTOOLS: KeymapPreset = {
   id: 'protools',
-  name: 'Pro Tools (Windows)',
-  description: 'Les raccourcis relevés sur le Pro Tools 2026 de Romain et dans le guide officiel d’Avid. Touches lues par position, comme « Lock to U.S. Layout » : en AZERTY, Annuler est sur la touche W, comme dans Pro Tools.',
-  source: 'Relevé des menus de Pro Tools 2026 (protools_menus.json) + Avid « Pro Tools Keyboard Shortcuts » (2025)',
+  name: 'Studio pro (Windows)',
+  description: 'Les raccourcis standard des studios pro sous Windows, relevés sur le poste de Romain. Touches lues par position, comme « Lock to U.S. Layout » : en AZERTY, Annuler est sur la touche W.',
+  source: 'Relevé des menus d’un logiciel de studio (2026) et du guide officiel de ses raccourcis (2025)',
   usLayout: true,
   ctrlFFades: true,
   keys: {
@@ -200,7 +200,7 @@ const ABLETON: KeymapPreset = {
 const NOVA: KeymapPreset = {
   id: 'nova',
   name: 'NOVA',
-  description: 'Les raccourcis d’origine de NOVA : une lettre pour les gestes courants (R enregistrer, S couper, L boucle, K repère), plus le pavé numérique et les combinaisons de Pro Tools.',
+  description: 'Les raccourcis d’origine de NOVA : une lettre pour les gestes courants (R enregistrer, S couper, L boucle, K repère), plus le pavé numérique et les combinaisons des studios pro.',
   source: 'NOVA',
   keys: {},
 };

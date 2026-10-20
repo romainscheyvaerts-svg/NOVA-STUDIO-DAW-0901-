@@ -52,7 +52,7 @@ const Row: React.FC<{
           }}
           disabled={t.id === 'master'}
           aria-label={`${t.isHidden ? 'Afficher' : 'Masquer'} ${t.name}`} aria-pressed={!t.isHidden}
-          title={`${t.isHidden ? 'Masquée' : 'Affichée'} · clic : ${t.isHidden ? 'afficher' : 'masquer'} · Ctrl+clic : tout ${t.isHidden ? 'afficher' : 'masquer'} (comme Pro Tools)`}
+          title={`${t.isHidden ? 'Masquée' : 'Affichée'} · clic : ${t.isHidden ? 'afficher' : 'masquer'} · Ctrl+clic : tout ${t.isHidden ? 'afficher' : 'masquer'}`}
           className="nova-hit-tactile w-6 h-6 shrink-0 flex items-center justify-center">
           <span className={`block w-2.5 h-2.5 rounded-full border-2 ${t.isHidden ? 'border-nv-muted bg-transparent' : 'border-nv-accent bg-nv-accent'}`} />
         </button>
@@ -93,7 +93,7 @@ const Row: React.FC<{
             <button type="button" data-testid={`tracklist-active-${t.id}`}
               onClick={(e) => { e.stopPropagation(); applyTracks(ts => setTracksInactive(ts, [t.id], !t.isInactive)); }}
               aria-pressed={!t.isInactive} aria-label={`${t.isInactive ? 'Activer' : 'Rendre inactive'} ${t.name}`}
-              title={t.isInactive ? 'Inactive · clic : activer (Pro Tools « Make Active »)' : 'Active · clic : rendre inactive (Pro Tools « Make Inactive » : ne joue rien, ne coûte rien, routage gardé)'}
+              title={t.isInactive ? 'Inactive · clic : activer (« Make Active »)' : 'Active · clic : rendre inactive (« Make Inactive » : ne joue rien, ne coûte rien, routage gardé)'}
               className={`nova-hit-tactile w-6 h-6 rounded-md flex items-center justify-center ${t.isInactive ? 'text-nv-muted bg-nv-well' : 'text-nv-accent'}`}>
               <i className="fas fa-power-off text-[10px]" />
             </button>

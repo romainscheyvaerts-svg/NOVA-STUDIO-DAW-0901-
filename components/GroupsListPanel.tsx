@@ -48,7 +48,7 @@ const GroupEditor: React.FC<{ g: TrackGroup; tracks: Track[]; onDone: () => void
           <div className="flex flex-1 flex-wrap gap-1">
             {MIX_ATTRS.map(a => (
               <button key={a} type="button" aria-pressed={hasAttr(g, a)} data-testid={`group-attr-${a}`}
-                title={`${MIX_ATTR_LABEL[a].label} · Pro Tools : ${MIX_ATTR_LABEL[a].pt}`}
+                title={`${MIX_ATTR_LABEL[a].label} · ${MIX_ATTR_LABEL[a].pt}`}
                 onClick={() => set(attrPatch(a, !hasAttr(g, a)))}
                 className={`nova-hit-tactile h-7 rounded-full px-2.5 text-[11px] font-bold ${hasAttr(g, a) ? 'text-black' : 'bg-nv-bg text-nv-muted'}`}
                 style={hasAttr(g, a) ? { backgroundColor: g.color } : undefined}>{MIX_ATTR_LABEL[a].label}</button>
@@ -59,7 +59,7 @@ const GroupEditor: React.FC<{ g: TrackGroup; tracks: Track[]; onDone: () => void
       <div className="flex items-center gap-2">
         <span className="w-14 shrink-0 text-[10px] font-bold text-nv-muted">REC</span>
         <button type="button" aria-pressed={!!g.linkedRecord} data-testid="group-attr-record"
-          title="Armement lié (Pro Tools : Record Enable) : armer une piste du groupe arme tout le groupe"
+          title="Armement lié (Record Enable) : armer une piste du groupe arme tout le groupe"
           onClick={() => set({ linkedRecord: !g.linkedRecord })}
           className={`nova-hit-tactile h-7 rounded-full px-2.5 text-[11px] font-bold ${g.linkedRecord ? 'text-black' : 'bg-nv-bg text-nv-muted'}`}
           style={g.linkedRecord ? { backgroundColor: g.color } : undefined}>Armement lié</button>
@@ -83,7 +83,7 @@ const GroupEditor: React.FC<{ g: TrackGroup; tracks: Track[]; onDone: () => void
       <div>
         <div className="mb-1 flex items-center gap-2">
           <span className="text-[10px] font-bold text-nv-muted">Membres ({g.trackIds.length})</span>
-          {g.deduced && <span className="rounded bg-amber-500/15 px-1.5 text-[9px] font-bold text-amber-300" title="La fenêtre des groupes de Pro Tools n'a pas été relevée : membres déduits des noms, à vérifier">déduits : à vérifier</span>}
+          {g.deduced && <span className="rounded bg-amber-500/15 px-1.5 text-[9px] font-bold text-amber-300" title="La fenêtre des groupes n'a pas été relevée : membres déduits des noms, à vérifier">déduits : à vérifier</span>}
         </div>
         <div className="max-h-44 overflow-y-auto rounded-lg border border-nv-line bg-nv-bg p-1 flex flex-col gap-0.5">
           {candidates.map(t => (
@@ -128,17 +128,17 @@ const GroupsListPanel: React.FC<{ readOnly?: boolean; onClose: () => void; class
       className={`flex flex-col rounded-2xl border border-nv-line bg-nv-panel shadow-2xl ${className || ''}`}>
       <div className="flex items-center gap-2 border-b border-nv-line px-3 py-2">
         <i className="fas fa-object-group text-nv-accent text-[12px]" />
-        <h2 className="flex-1 text-[13px] font-bold text-nv-ink" title="Pro Tools : Groups List">Groupes{readOnly ? ' (lecture seule)' : ''}</h2>
+        <h2 className="flex-1 text-[13px] font-bold text-nv-ink" title="Groups List">Groupes{readOnly ? ' (lecture seule)' : ''}</h2>
         <button type="button" onClick={onClose} aria-label="Fermer" className="nova-hit-tactile w-8 h-8 rounded-lg text-nv-muted hover:text-nv-ink"><i className="fas fa-times" /></button>
       </div>
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
           <button type="button" onClick={create} data-testid="group-new"
-            title={`Nouveau groupe avec ${selectedTrackIds?.length ? `les ${selectedTrackIds.length} pistes sélectionnées` : 'les pistes sélectionnées'} (Pro Tools : Ctrl+G)`}
+            title={`Nouveau groupe avec ${selectedTrackIds?.length ? `les ${selectedTrackIds.length} pistes sélectionnées` : 'les pistes sélectionnées'} (Ctrl+G)`}
             className="nova-hit-tactile h-8 rounded-full bg-nv-accent px-3 text-[11px] font-bold text-black"><i className="fas fa-plus mr-1 text-[9px]" />Nouveau groupe</button>
           <button type="button" aria-pressed={suspended} data-testid="groups-suspend"
             onClick={() => applyGroups(s => setSuspended(s, !suspended), suspended ? 'Groupes repris' : 'Tous les groupes sont suspendus')}
-            title="Suspendre tous les groupes (Pro Tools : Suspend All Groups, Ctrl+Maj+G)"
+            title="Suspendre tous les groupes (Suspend All Groups, Ctrl+Maj+G)"
             className={`nova-hit-tactile h-8 rounded-full px-3 text-[11px] font-bold ${suspended ? 'bg-amber-500 text-black' : 'bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
             <i className={`fas ${suspended ? 'fa-play' : 'fa-pause'} mr-1 text-[9px]`} />{suspended ? 'Reprendre les groupes' : 'Suspendre tous'}</button>
         </div>
@@ -146,7 +146,7 @@ const GroupsListPanel: React.FC<{ readOnly?: boolean; onClose: () => void; class
       <p className="px-3 pt-1.5 text-[10px] leading-snug text-nv-muted">
         {readOnly
           ? 'Les groupes se règlent sur l’ordinateur ou la tablette.'
-          : <>Clic sur un nom : groupe actif / inactif. <b className="text-nv-ink">Maj+Ctrl</b> pendant un geste inverse le groupe (Pro Tools). {suspended && <b className="text-amber-300">Groupes suspendus.</b>}</>}
+          : <>Clic sur un nom : groupe actif / inactif. <b className="text-nv-ink">Maj+Ctrl</b> pendant un geste inverse le groupe. {suspended && <b className="text-amber-300">Groupes suspendus.</b>}</>}
       </p>
       <div role="list" className="min-h-0 flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-0.5">
         {groups.length === 1 && (
@@ -164,7 +164,7 @@ const GroupsListPanel: React.FC<{ readOnly?: boolean; onClose: () => void; class
                 className={`flex items-center gap-1.5 rounded-lg pr-1 min-h-[34px] [@media(pointer:coarse)]:min-h-[44px] ${open === g.id ? 'bg-nv-accent/10' : 'hover:bg-nv-well'}`}>
                 <button type="button" disabled={readOnly} data-testid={`group-toggle-${g.id}`} aria-pressed={isGroupOn(g)}
                   onClick={() => applyGroups(s => toggleGroup(s, g.id))}
-                  title={`${isGroupOn(g) ? 'Actif' : 'Inactif'} · clic : ${isGroupOn(g) ? 'désactiver' : 'activer'} (Pro Tools : clic dans la Groups List)${isAll ? '. <TOUT> lie toutes les pistes, inactif par défaut' : ''}`}
+                  title={`${isGroupOn(g) ? 'Actif' : 'Inactif'} · clic : ${isGroupOn(g) ? 'désactiver' : 'activer'} (clic dans la Groups List)${isAll ? '. <TOUT> lie toutes les pistes, inactif par défaut' : ''}`}
                   className="nova-hit-tactile flex min-w-0 flex-1 items-center gap-2 pl-1.5 text-left disabled:cursor-default">
                   <span className={`w-3 h-3 shrink-0 rounded-full border-2 ${on ? '' : 'opacity-40'}`} style={{ borderColor: g.color, backgroundColor: isGroupOn(g) ? g.color : 'transparent' }} />
                   <span className={`min-w-0 truncate text-[12px] font-bold ${on ? 'text-nv-ink' : 'text-nv-muted'}`}>{g.name}</span>

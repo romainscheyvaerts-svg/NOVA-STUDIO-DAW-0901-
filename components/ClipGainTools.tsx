@@ -285,7 +285,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     const v = clipGainViewStore.get();
     if (tool === 'DRAW') return { cursor: 'crosshair', hint: `Crayon (${PENCIL_SHAPES.find(s => s.id === v.shape)?.label}) : dessine la ligne de gain` };
     const cx1 = (c.start + c.duration) * ref.current.zoomH;
-    if (v.loopTrim && cx1 - x < edgePx && relY >= laneH * 0.35) return { cursor: 'e-resize', hint: 'Glisser : boucler le clip (Loop Trim de Pro Tools)' };
+    if (v.loopTrim && cx1 - x < edgePx && relY >= laneH * 0.35) return { cursor: 'e-resize', hint: 'Glisser : boucler le clip (Loop Trim)' };
     if (!v.line) return null;
     const h = laneH - 4, y = relY - 2;
     if (screenPoints(c, h).some(p => Math.hypot(p.x - x, p.y - y) <= grab())) return { cursor: 'move', hint: 'Glisser : déplacer le point · Alt+clic : l’enlever' };
@@ -395,7 +395,7 @@ export const ClipGainToolbar: React.FC<{ activeTool: EditorTool; setActiveTool: 
     <div className="flex items-center gap-1 shrink-0" data-testid="clip-gain-toolbar">
       <div className="relative flex bg-black/40 rounded-lg p-0.5 border border-white/5">
         <button type="button" data-testid="tool-pencil" aria-pressed={activeTool === 'DRAW'} onClick={() => setActiveTool(activeTool === 'DRAW' ? 'SMART' : 'DRAW')}
-          title={`Crayon (6, comme le Pencil Tool de Pro Tools : F10) : dessine la ligne de gain d'un clip ou une ligne d'automation ouverte. Forme : ${shape.label}.`}
+          title={`Crayon (6, comme le Pencil Tool : F10) : dessine la ligne de gain d'un clip ou une ligne d'automation ouverte. Forme : ${shape.label}.`}
           aria-label="Crayon"
           className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'DRAW' ? 'bg-amber-400 text-black' : 'text-slate-500 hover:text-white'}`}>
           <i className="fas fa-pencil-alt text-[12px]" />
@@ -420,19 +420,19 @@ export const ClipGainToolbar: React.FC<{ activeTool: EditorTool; setActiveTool: 
           </div>, document.body)}
       </div>
       <button type="button" data-testid="toggle-gain-line" aria-pressed={v.line} onClick={() => clipGainViewStore.set({ line: !v.line })}
-        title="Ligne de gain des clips (Pro Tools : Ctrl+Maj+−, ici aussi Alt+G) : clique sur la ligne pour poser un point, tire-le, Alt+clic pour l'enlever, Ctrl+glisser pour courber un segment, Maj+glisser pour tout le clip. Ctrl+Maj+↑ / ↓ : ±0,5 dB."
+        title="Ligne de gain des clips (Ctrl+Maj+−, ici aussi Alt+G) : clique sur la ligne pour poser un point, tire-le, Alt+clic pour l'enlever, Ctrl+glisser pour courber un segment, Maj+glisser pour tout le clip. Ctrl+Maj+↑ / ↓ : ±0,5 dB."
         aria-label="Ligne de gain" className={btn(v.line)}>
         <i className="fas fa-chart-line text-[11px]" />{!compact && <span className="hidden 2xl:inline">Gain</span>}
       </button>
       {!compact && (
         <>
           <button type="button" data-testid="toggle-gain-info" aria-pressed={v.info} onClick={() => clipGainViewStore.set({ info: !v.info })}
-            title="Valeurs de gain sur les clips (Pro Tools : Clip Gain Info) : le gain de chaque clip et de chaque point de sa ligne."
+            title="Valeurs de gain sur les clips (Clip Gain Info) : le gain de chaque clip et de chaque point de sa ligne."
             aria-label="Valeurs de gain sur les clips" className={`${btn(v.info)} hidden lg:flex`}>
             <i className="fas fa-sliders text-[11px]" />{<span className="hidden 2xl:inline">dB</span>}
           </button>
           <button type="button" data-testid="toggle-loop-trim" aria-pressed={v.loopTrim} onClick={() => clipGainViewStore.set({ loopTrim: !v.loopTrim })}
-            title="Mode boucle (Pro Tools : Loop Trim) : tire le bord droit d'un clip pour le répéter ; la dernière boucle peut être partielle. Ctrl+Alt+L : boucler n fois, Alt+R : répéter."
+            title="Mode boucle (Loop Trim) : tire le bord droit d'un clip pour le répéter ; la dernière boucle peut être partielle. Ctrl+Alt+L : boucler n fois, Alt+R : répéter."
             aria-label="Mode boucle" className={btn(v.loopTrim)}>
             <i className="fas fa-repeat text-[11px]" />{<span className="hidden 2xl:inline">Boucle</span>}
           </button>
@@ -452,19 +452,19 @@ export function clipGainMenuItems(trackId: string, clip: Clip, close: () => void
   const v = clipGainViewStore.get();
   const items: ContextMenuItem[] = [
     { label: 'Heal : recoller avec le voisin', icon: 'fa-bandage', shortcut: 'Ctrl+H',
-      title: 'Recolle deux morceaux consécutifs d’un même fichier (Heal Separation de Pro Tools) : le son redevient celui d’avant la découpe.',
+      title: 'Recolle deux morceaux consécutifs d’un même fichier (Heal Separation) : le son redevient celui d’avant la découpe.',
       onClick: () => { selectOnly(clip.id); healCommand(); close(); } },
-    { label: 'Boucler le clip…', icon: 'fa-repeat', shortcut: 'Ctrl+Alt+L', title: 'Répète le clip en boucle (Loop de Pro Tools), avec des fondus aux jonctions si tu veux.',
+    { label: 'Boucler le clip…', icon: 'fa-repeat', shortcut: 'Ctrl+Alt+L', title: 'Répète le clip en boucle (Loop), avec des fondus aux jonctions si tu veux.',
       onClick: () => { selectOnly(clip.id); clipToolsDialogStore.set({ kind: 'loop' }); close(); } },
-    ...(clip.loop ? [{ label: 'Défaire la boucle', icon: 'fa-link-slash', title: 'Ne garde que le clip d’origine (Unloop de Pro Tools).', onClick: () => { unloopCommand(trackId, clip.id); close(); } }] : []),
-    { label: 'Répéter…', icon: 'fa-clone', shortcut: 'Alt+R', title: 'Copie le clip n fois à la suite (Repeat de Pro Tools).',
+    ...(clip.loop ? [{ label: 'Défaire la boucle', icon: 'fa-link-slash', title: 'Ne garde que le clip d’origine (Unloop).', onClick: () => { unloopCommand(trackId, clip.id); close(); } }] : []),
+    { label: 'Répéter…', icon: 'fa-clone', shortcut: 'Alt+R', title: 'Copie le clip n fois à la suite (Repeat).',
       onClick: () => { selectOnly(clip.id); clipToolsDialogStore.set({ kind: 'repeat' }); close(); } },
     { label: v.line ? 'Masquer la ligne de gain' : 'Afficher la ligne de gain', icon: 'fa-chart-line', shortcut: 'Alt+G',
-      title: 'Ligne de gain des clips (Clip Gain Line de Pro Tools, Ctrl+Maj+−).', onClick: () => { clipGainViewStore.set({ line: !v.line }); close(); } },
+      title: 'Ligne de gain des clips (Clip Gain Line, Ctrl+Maj+−).', onClick: () => { clipGainViewStore.set({ line: !v.line }); close(); } },
   ];
   if (clip.gainPoints?.length) items.push({ label: 'Remettre la ligne de gain à plat', icon: 'fa-minus', title: 'Enlève tous les points (le gain global du clip reste).', onClick: () => { getEditCommands()?.patchClips(trackId, { [clip.id]: { gainPoints: undefined } }); close(); } });
   if (!clip.gainRender && (clip.gainPoints?.length || Math.abs((clip.gain ?? 1) - 1) > 1e-6)) {
-    items.push({ label: 'Rendre le gain dans le fichier', icon: 'fa-file-waveform', title: 'Applique la ligne et le gain au son (Render Clip Gain de Pro Tools). Non destructif : « Revenir » remet tout comme avant.',
+    items.push({ label: 'Rendre le gain dans le fichier', icon: 'fa-file-waveform', title: 'Applique la ligne et le gain au son (Render Clip Gain). Non destructif : « Revenir » remet tout comme avant.',
       onClick: () => { renderGainCommand([{ trackId, clip }]); close(); } });
   }
   if (clip.gainRender) {
@@ -519,12 +519,12 @@ export const ClipToolsHost: React.FC = () => {
   const close = () => clipToolsDialogStore.set(null);
   if (dlg.kind === 'repeat') {
     return <NumberDialog title="Répéter" testId="repeat-dialog" label="Nombre de copies" value={n} min={1} max={99} onChange={setN}
-      hint="Copie les clips sélectionnés à la suite, autant de fois que tu veux (Repeat de Pro Tools, Alt+R)."
+      hint="Copie les clips sélectionnés à la suite, autant de fois que tu veux (Repeat, Alt+R)."
       onClose={close} onOk={() => { repeatCommand(n); close(); }} />;
   }
   return (
     <NumberDialog title="Boucler le clip" testId="loop-dialog" label="Nombre de tours" value={Math.max(2, n)} min={2} max={256} onChange={setN}
-      hint="Répète le clip en boucle (Loop de Pro Tools). Ensuite, en mode Boucle, tire son bord droit pour ajouter ou enlever des tours."
+      hint="Répète le clip en boucle (Loop). Ensuite, en mode Boucle, tire son bord droit pour ajouter ou enlever des tours."
       onClose={close} onOk={() => { clipGainViewStore.set({ loopXfadeMs: xf }); loopCommand(Math.max(2, n), xf); close(); }}>
       <label className="flex items-center justify-between gap-3 text-[12px] font-bold">
         Fondus aux jonctions
@@ -550,7 +550,7 @@ export const MobileClipGain: React.FC<{ clip: Clip; onChange: (patch: Partial<Cl
   };
   return (
     <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5" data-testid="mobile-clip-gain"
-      title="Gain du clip (Clip Gain de Pro Tools) : ±1 dB par appui. La ligne de gain dessinée sur ordinateur est gardée.">
+      title="Gain du clip (Clip Gain) : ±1 dB par appui. La ligne de gain dessinée sur ordinateur est gardée.">
       <span className="text-[8px] font-bold text-white/40 mb-0.5">GAIN{clip.gainPoints?.length ? ' · LIGNE' : ''}</span>
       <div className="flex items-center gap-1">
         <button type="button" onClick={() => step(-1)} aria-label="Baisser le gain du clip d’1 dB" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">−</button>

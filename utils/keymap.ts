@@ -78,13 +78,13 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.barPrev', keys: [',', ';'], label: 'Mesure précédente (avec Maj : temps précédent)', pt: 'Pavé 1 (Rewind)', category: 'Navigation' }),
   nova({ id: 'nova.barNext', keys: ['.', ':'], label: 'Mesure suivante (avec Maj : temps suivant)', pt: 'Pavé 2 (Fast Forward)', category: 'Navigation' }),
   nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off (avec une plage sélectionnée : boucler cette plage)', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
-  nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Pas dans Pro Tools : Capture as Recording de Logic', category: 'Transport' }),
-  nova({ id: 'nova.keepTake', keys: ['ctrl+alt+p'], label: '📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste, pour choisir à la fin)', pt: 'Pro Tools : noter la prise (Ctrl+Alt+Démarrer+1…5, Démarrer réservée à Windows) · Copy Selection to Main Playlist', category: 'Transport' }),
+  nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Aucun (Logic : Capture as Recording)', category: 'Transport' }),
+  nova({ id: 'nova.keepTake', keys: ['ctrl+alt+p'], label: '📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste, pour choisir à la fin)', pt: 'Noter la prise (Ctrl+Alt+Démarrer+1…5, Démarrer réservée à Windows) · Copy Selection to Main Playlist', category: 'Transport' }),
   nova({ id: 'nova.guide', keys: ['g'], label: 'Couper / rallumer la piste guide', category: 'Transport' }),
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
   nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),
   nova({ id: 'nova.help', keys: ['?', 'shift+/'], label: 'Afficher / masquer l’aide des raccourcis', category: 'Fenêtres' }),
-  nova({ id: 'nova.palette', keys: ['ctrl+k'], label: 'Palette de commandes : chercher n’importe quelle action par son nom (exporter, tempo, bus, Strip Silence…)', pt: 'Pas dans Pro Tools : Commandes rapides de Logic, Ctrl+K de Live 12', category: 'Fenêtres' }),
+  nova({ id: 'nova.palette', keys: ['ctrl+k'], label: 'Palette de commandes : chercher n’importe quelle action par son nom (exporter, tempo, bus, Strip Silence…)', pt: 'Aucun (Logic : Commandes rapides ; Live 12 : Ctrl+K)', category: 'Fenêtres' }),
   // Géré par components/FeedbackModal (FeedbackHost), même sur la page d'accueil.
   nova({ id: 'nova.feedback', keys: ['ctrl+shift+b'], label: 'Signaler un bug / proposer une idée', category: 'Fenêtres' }),
   nova({ id: 'nova.undo', keys: ['ctrl+z'], label: 'Annuler', pt: 'Ctrl+Z', category: 'Édition' }),
@@ -111,8 +111,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'tool.erase', keys: ['3'], label: 'Gomme : supprimer le clip cliqué', category: 'Outils' }),
   nova({ id: 'tool.cycle', keys: [], label: 'Passer à l’outil suivant', pt: 'Échap (Cycle through Edit tools)', category: 'Outils' }),
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
-  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Pro Tools : clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
-  nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Pas dans Pro Tools : Capture MIDI de Live (Ctrl+Maj+C)', category: 'Transport' }),
+  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
+  nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Aucun (Live : Capture MIDI, Ctrl+Maj+C)', category: 'Transport' }),
 
   // --- Ajoutés façon Pro Tools (toujours actifs) ----------------------------------
   g({ id: 'pt.split', keys: ['ctrl+e'], label: 'Séparer le clip à la tête de lecture', pt: 'Ctrl+E (Separate Clip at Selection)', category: 'Édition', command: 'split' }),
@@ -131,7 +131,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.clearClipIndicators', keys: ['alt+c'], label: 'Effacer les diodes de saturation (indicateurs d’écrêtage) de toutes les pistes et du master', pt: 'Alt+C (Clear All Clip Indicators)', category: 'Mix', command: 'clearClipIndicators' }),
   g({ id: 'pt.rename', keys: ['ctrl+shift+r'], label: 'Renommer le clip', pt: 'Ctrl+Maj+R (Rename Clip)', category: 'Édition', command: 'renameClip' }),
   g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Supprimer les silences (Strip Silence) : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
-  g({ id: 'nova.breaths', keys: ['ctrl+alt+r'], label: 'Respirations : baisser la lead, supprimer sur les backs (fenêtre)', pt: 'Pas dans Pro Tools : comme Breath Control de Waves / De-breath de RX', category: 'Édition', command: 'breaths' }),
+  g({ id: 'nova.breaths', keys: ['ctrl+alt+r'], label: 'Respirations : baisser la lead, supprimer sur les backs (fenêtre)', pt: 'Aucun (comme Breath Control de Waves / De-breath de RX)', category: 'Édition', command: 'breaths' }),
   g({ id: 'pt.nudgeL', keys: ['arrowleft', 'numsub'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la gauche ; sans sélection, la tête de lecture', pt: 'Pavé − (Nudge)', category: 'Édition', command: 'nudgeLeft' }),
   g({ id: 'pt.nudgeR', keys: ['arrowright', 'numadd'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la droite ; sans sélection, la tête de lecture', pt: 'Pavé + (Nudge)', category: 'Édition', command: 'nudgeRight' }),
   g({ id: 'pt.nudgeFineL', keys: ['alt+arrowleft'], label: 'Nudge fin (10 ms) vers la gauche', pt: 'Nudge 10 ms', category: 'Édition', command: 'nudgeLeft', arg: { fine: true } }),
@@ -218,8 +218,8 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'shuttle.stop', keys: ['alt+k'], label: 'Arrêter le shuttle (la tête de lecture reste où tu l’as amenée)', pt: 'Pavé 0 (Shuttle Lock stop)', category: 'Scrub et shuttle' }),
   g({ id: 'shuttle.fwd', keys: ['alt+l'], label: 'Shuttle avant : chaque appui accélère (×1, ×2, ×4, ×8)', pt: 'Pavé 6 / 9 en mode Shuttle', category: 'Scrub et shuttle' }),
   g({ id: 'shuttle.lock', keys: ['ctrl+alt+num1', 'ctrl+alt+num2', 'ctrl+alt+num3', 'ctrl+alt+num4', 'ctrl+alt+num5', 'ctrl+alt+num6', 'ctrl+alt+num7', 'ctrl+alt+num8', 'ctrl+alt+num9'], label: 'Shuttle Lock : vitesse 1 (lente) à 9 (×8), 5 = temps réel ; pavé − / + change de sens, pavé 0 arrête, Espace ou Échap sort', pt: 'Démarrer+1–9 (Shuttle Lock) : la touche Démarrer est réservée à Windows', category: 'Scrub et shuttle', fixed: true }),
-  g({ id: 'scrub.nudgeL', keys: [], label: 'Scrub d’un pas vers la gauche (entendre le petit bout de son)', pt: 'Pas dans Pro Tools', category: 'Scrub et shuttle' }),
-  g({ id: 'scrub.nudgeR', keys: [], label: 'Scrub d’un pas vers la droite', pt: 'Pas dans Pro Tools', category: 'Scrub et shuttle' }),
+  g({ id: 'scrub.nudgeL', keys: [], label: 'Scrub d’un pas vers la gauche (entendre le petit bout de son)', pt: 'Aucun', category: 'Scrub et shuttle' }),
+  g({ id: 'scrub.nudgeR', keys: [], label: 'Scrub d’un pas vers la droite', pt: 'Aucun', category: 'Scrub et shuttle' }),
   // --- Fondus, consolidation, modes ----------------------------------------------------
   g({ id: 'pt.fadesRange', keys: ['ctrl+f'], label: 'Fondus sur la plage sélectionnée. Sans plage : la recherche du navigateur, sauf si « Ctrl+F = fondus » est coché (fondus rapides sur les clips)', pt: 'Ctrl+F (Fades)', category: 'Édition', command: 'quickFades' }),
   nova({ id: 'pt.consolidate', keys: ['alt+shift+3'], label: 'Consolider la plage sélectionnée en un seul clip', pt: 'Alt+Maj+3 (Consolidate Clip)', category: 'Édition' }),
@@ -232,7 +232,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'layout.5', keys: ['ctrl+shift+5'], label: 'Disposition 5 (la tienne)', pt: 'Pavé . 5 *', category: 'Dispositions', arg: 5 }),
   g({ id: 'layout.list', keys: ['ctrl+alt+j'], label: 'Dispositions de fenêtres : enregistrer, rappeler, renommer', pt: 'Ctrl+Alt+J (Window Configuration List)', category: 'Dispositions' }),
   g({ id: 'layout.numpad', keys: [], label: 'Au pavé : « . » N « * » rappelle la disposition N, « . » N « / » y enregistre la vue actuelle', pt: 'Pavé . N * / Pavé . N /', category: 'Dispositions', fixed: true }),
-  g({ id: 'keymap.editor', keys: ['ctrl+alt+k'], label: 'Personnaliser les raccourcis (éditeur, préréglages Pro Tools, FL Studio, Ableton Live)', pt: 'Démarrer+Maj+K (Keyboard Shortcuts)', category: 'Fenêtres' }),
+  g({ id: 'keymap.editor', keys: ['ctrl+alt+k'], label: 'Personnaliser les raccourcis (éditeur, préréglages Studio pro, FL Studio, Ableton Live)', pt: 'Démarrer+Maj+K (Keyboard Shortcuts)', category: 'Fenêtres' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------
   f({ id: 'kf.trimStart', keys: ['a'], label: 'Couper le début du clip jusqu’à la tête de lecture', pt: 'A (Trim Start to Insertion)', category: 'Keyboard Focus', command: 'trimStartToCursor' }),
@@ -260,12 +260,12 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'view.mixEdit', keys: ['ctrl+='], label: 'Basculer entre l’arrangement et la console de mixage', pt: 'Ctrl+= (Mix / Edit)', category: 'Fenêtres' }),
   nova({ id: 'view.arrangement', keys: [], label: 'Afficher l’arrangement', pt: 'Fenêtre › Édition', category: 'Fenêtres' }),
   nova({ id: 'view.mixer', keys: [], label: 'Afficher la console de mixage', pt: 'Fenêtre › Mixage', category: 'Fenêtres' }),
-  nova({ id: 'view.browser', keys: ['ctrl+alt+b'], label: 'Afficher / masquer le navigateur (sons, effets)', pt: 'Pas de raccourci dans Pro Tools', category: 'Fenêtres' }),
+  nova({ id: 'view.browser', keys: ['ctrl+alt+b'], label: 'Afficher / masquer le navigateur (sons, effets)', pt: 'Aucun raccourci', category: 'Fenêtres' }),
   nova({ id: 'nova.metronome', keys: [], label: 'Métronome on / off', pt: 'Pavé 7 (Click)', category: 'Transport' }),
 
   // --- Piano roll ouvert (components/PianoRoll) : passe avant les raccourcis globaux ---
   pr({ id: 'pr.close', keys: ['escape'], label: 'Fermer le piano roll' }),
-  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Pro Tools : Mute Notes (Ctrl+M) · FL : Alt+M' }),
+  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Mute Notes (Ctrl+M) · FL : Alt+M' }),
   pr({ id: 'pr.delete', keys: ['delete', 'backspace'], label: 'Effacer les notes sélectionnées' }),
   pr({ id: 'pr.selectAll', keys: ['ctrl+a'], label: 'Sélectionner toutes les notes' }),
   pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite', pt: 'FL : Ctrl+B · Live : Ctrl+D' }),

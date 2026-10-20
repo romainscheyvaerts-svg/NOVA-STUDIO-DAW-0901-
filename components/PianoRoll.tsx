@@ -1392,12 +1392,12 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
               <i className="fas fa-random text-[10px]"></i><span>H</span>
             </button>
             <button type="button" data-nova-roll="muet" onClick={() => toggleMuteNotes()} disabled={!hasSel} className="pr-cap"
-              title="Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Ctrl+M, ou Alt+clic sur une note ; Pro Tools : Mute Notes, FL : outil Muet)" aria-label="Rendre muettes les notes sélectionnées">
+              title="Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Ctrl+M, ou Alt+clic sur une note ; Mute Notes, FL : outil Muet)" aria-label="Rendre muettes les notes sélectionnées">
               <i className="fas fa-volume-mute text-[10px]"></i><span className="hidden min-[1800px]:inline">Muet</span>
             </button>
             <div className="pr-sep"></div>
             <button type="button" data-nova-roll="pas-a-pas" onClick={() => setStepOn(v => !v)} aria-pressed={stepOn} className={`pr-cap ${stepOn ? '!bg-emerald-400 !text-black' : '!text-emerald-300'}`}
-              title="Saisie pas à pas : chaque note jouée (clavier MIDI, clavier de l'ordinateur ou touches à l'écran) avance d'une valeur choisie, sans lecture (Pro Tools : MIDI Step Input, FL : Step recording)" aria-label="Saisie pas à pas">
+              title="Saisie pas à pas : chaque note jouée (clavier MIDI, clavier de l'ordinateur ou touches à l'écran) avance d'une valeur choisie, sans lecture (MIDI Step Input, FL : Step recording)" aria-label="Saisie pas à pas">
               <i className="fas fa-shoe-prints text-[10px]"></i><span>Pas à pas</span>
             </button>
             <button type="button" data-nova-roll="outils" aria-label="Outils MIDI" aria-haspopup="dialog" aria-expanded={toolsAnchor !== false}

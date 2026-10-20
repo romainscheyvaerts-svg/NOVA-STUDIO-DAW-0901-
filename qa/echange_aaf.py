@@ -305,7 +305,7 @@ def scenario_reference(page):
     ok("référence intégrée : volume et pan de piste", all(abs(a - (c if c is not None else 1)) < 1e-6 and abs(b - ((2 * d - 1) if d is not None else 0)) < 1e-6 for a, b, c, d in vp), vp)
     n_approx = sum(1 for w in want["integre"]["tracks"] for e in w["clips"] for s in ("fadeIn", "fadeOut") if e[s] and e[s]["approx"])
     ok(f"référence intégrée : rapport « 47 clips importés, 6 pistes, {n_approx} fondus approchés »", f"47 clips importés, 6 pistes, {n_approx} fondus approchés" in report, report[:400])
-    ok("référence intégrée : rapport détaillé (fondus rendus remplacés, stéréo double mono regroupée)", "2 fondus rendus par Pro Tools remplacés" in report and "1 piste stéréo en double mono" in report, report[:600])
+    ok("référence intégrée : rapport détaillé (fondus rendus remplacés, stéréo double mono regroupée)", "2 fondus rendus par le logiciel d’origine remplacés" in report and "1 piste stéréo en double mono" in report, report[:600])
     ok("référence intégrée : tous les sons présents (aucun clip muet)", all(not c["offline"] and c["bufferId"] for t in new for c in t["clips"]))
 
     # 2. Médias liés : d'abord l'AAF seul (7 sons manquants), puis le choix des sons (1 reste absent)

@@ -53,20 +53,20 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
   const applyVol = (v: number | null = volDb) => { if (v === null || Math.abs(v) < 1e-9) return; commands.volumeRange(v); setVolOpen(false); };
   const bump = (step: number) => setVolText(t => { const v = Math.round(((parseDb(t) ?? 0) + step) * 10) / 10; return v > 0 ? `+${v}` : `${v}`; });
   const actions: { label: string; icon: string; title: string; run: () => unknown; danger?: boolean }[] = [
-    { label: 'Couper', icon: 'fa-cut', title: 'Couper la plage (Ctrl+X, comme dans Pro Tools)', run: commands.cutSelection },
+    { label: 'Couper', icon: 'fa-cut', title: 'Couper la plage (Ctrl+X, comme dans les studios pro)', run: commands.cutSelection },
     { label: 'Copier', icon: 'fa-copy', title: 'Copier la plage (Ctrl+C)', run: commands.copySelection },
-    { label: 'Dupliquer', icon: 'fa-clone', title: 'Dupliquer la plage juste après (Ctrl+D, « Duplicate » de Pro Tools)', run: commands.duplicateSelection },
-    { label: 'Séparer', icon: 'fa-grip-lines-vertical', title: 'Séparer les clips aux bords de la plage (Ctrl+E, « Separate Clip » de Pro Tools)', run: commands.separate },
-    { label: 'Consolider', icon: 'fa-layer-group', title: 'Consolider la plage : sans effets (Alt+Maj+3, « Consolidate Clip » de Pro Tools) ou avec effets sur une nouvelle piste (« Bounce in Place » de Logic, « Bounce to New Track » d’Ableton)', run: () => openNovaWindow('bounce', { bounce: { mode: 'range' }, range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
-    { label: 'AudioSuite', icon: 'fa-wand-magic-sparkles', title: 'Traiter les clips de la plage avec un effet NOVA ou un VST, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic)', run: () => openNovaWindow('audiosuite', { range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
-    { label: 'Fondus', icon: 'fa-bezier-curve', title: 'Créer des fondus sur la plage : entrée, sortie ou crossfade sur une jonction (Ctrl+F, « Fades » de Pro Tools)', run: commands.fadesFromSelection },
+    { label: 'Dupliquer', icon: 'fa-clone', title: 'Dupliquer la plage juste après (Ctrl+D, « Duplicate »)', run: commands.duplicateSelection },
+    { label: 'Séparer', icon: 'fa-grip-lines-vertical', title: 'Séparer les clips aux bords de la plage (Ctrl+E, « Separate Clip »)', run: commands.separate },
+    { label: 'Consolider', icon: 'fa-layer-group', title: 'Consolider la plage : sans effets (Alt+Maj+3, « Consolidate Clip ») ou avec effets sur une nouvelle piste (« Bounce in Place » de Logic, « Bounce to New Track » d’Ableton)', run: () => openNovaWindow('bounce', { bounce: { mode: 'range' }, range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
+    { label: 'AudioSuite', icon: 'fa-wand-magic-sparkles', title: 'Traiter les clips de la plage avec un effet NOVA ou un VST, avec poignées ; l’original est gardé (« AudioSuite », « Traitement de fichier » de Logic)', run: () => openNovaWindow('audiosuite', { range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
+    { label: 'Fondus', icon: 'fa-bezier-curve', title: 'Créer des fondus sur la plage : entrée, sortie ou crossfade sur une jonction (Ctrl+F, « Fades »)', run: commands.fadesFromSelection },
     { label: 'Boucler', icon: 'fa-sync-alt', title: 'Boucler la lecture sur la plage (« Loop Playback » sur la sélection)', run: commands.loopSelection },
-    { label: 'Punch', icon: 'fa-bullseye', title: 'La plage devient la zone de punch : REC ne remplacera qu\'elle (Punch-in / punch-out de Pro Tools)', run: commands.punchSelection },
-    { label: 'Volume', icon: 'fa-volume-high', title: 'Volume de la plage : monter ou baisser la courbe de volume des pistes sélectionnées de N dB (refrain +2 dB…), rampes de 10 ms aux bords (Pro Tools : Trim sur la sélection en vue volume, « Write to Selection »)', run: () => setVolOpen(v => !v) },
-    { label: 'Écrire', icon: 'fa-pen-nib', title: 'Écrire la valeur ACTUELLE du fader (ou du pan, ou de tous les réglages) sur toute la plage : règle à l’oreille, puis écris (Pro Tools : Write Automation to Current, Ctrl+/ ; to All Enabled, Ctrl+Alt+/)', run: () => { setVolOpen(false); setWriteOpen(v => !v); } },
-    { label: 'Copier l’automation', icon: 'fa-wave-square', title: 'Copier l’automation de la plage : volume, pan, muet, envois et réglages d’effets de chaque piste (« Copy Special > Automation » de Pro Tools)', run: commands.copyAutomation },
-    ...(commands.hasAutomationClipboard() ? [{ label: 'Coller l’automation', icon: 'fa-paste', title: 'Coller l’automation copiée au début de la plage, sur les mêmes réglages (« Paste Special > Merge » de Pro Tools) ; un réglage d’effet absent de la piste est ignoré', run: commands.pasteAutomation }] : []),
-    { label: 'Exporter', icon: 'fa-compact-disc', title: 'Exporter seulement la plage (« Bounce » de la sélection dans Pro Tools)', run: commands.exportSelection },
+    { label: 'Punch', icon: 'fa-bullseye', title: 'La plage devient la zone de punch : REC ne remplacera qu\'elle (Punch-in / punch-out)', run: commands.punchSelection },
+    { label: 'Volume', icon: 'fa-volume-high', title: 'Volume de la plage : monter ou baisser la courbe de volume des pistes sélectionnées de N dB (refrain +2 dB…), rampes de 10 ms aux bords (Trim sur la sélection en vue volume, « Write to Selection »)', run: () => setVolOpen(v => !v) },
+    { label: 'Écrire', icon: 'fa-pen-nib', title: 'Écrire la valeur ACTUELLE du fader (ou du pan, ou de tous les réglages) sur toute la plage : règle à l’oreille, puis écris (Write Automation to Current, Ctrl+/ ; to All Enabled, Ctrl+Alt+/)', run: () => { setVolOpen(false); setWriteOpen(v => !v); } },
+    { label: 'Copier l’automation', icon: 'fa-wave-square', title: 'Copier l’automation de la plage : volume, pan, muet, envois et réglages d’effets de chaque piste (« Copy Special > Automation »)', run: commands.copyAutomation },
+    ...(commands.hasAutomationClipboard() ? [{ label: 'Coller l’automation', icon: 'fa-paste', title: 'Coller l’automation copiée au début de la plage, sur les mêmes réglages (« Paste Special > Merge ») ; un réglage d’effet absent de la piste est ignoré', run: commands.pasteAutomation }] : []),
+    { label: 'Exporter', icon: 'fa-compact-disc', title: 'Exporter seulement la plage (« Bounce » de la sélection)', run: commands.exportSelection },
     { label: 'Effacer', icon: 'fa-trash', title: 'Effacer le contenu de la plage, en laissant un blanc (Suppr)', run: commands.deleteSelection, danger: true },
   ];
   return (
@@ -75,7 +75,7 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
       data-passive={passive ? '1' : '0'}
       style={{ left: insetLeft + 12, maxWidth: `calc(100% - ${insetLeft + 24}px)`, ...(passive ? { pointerEvents: 'none', opacity: 0.25 } : {}) }}
       className="absolute bottom-3 z-40 transition-opacity duration-150 overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
-      <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur de Pro Tools)">
+      <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur)">
         Plage {fmt(selLength(time))} · {time.trackIds.length} piste{time.trackIds.length > 1 ? 's' : ''}
       </span>
       {actions.map(a => (

@@ -8,7 +8,7 @@ qa/harness/pont_projets.py sur le port 8791 (jamais le pont de l'appli installé
   A = Lina, artiste, hôte                E = Max, ingé son (Nova Studio simulé : le pont écrit)
 
 Pour chaque fréquence de projet (48 kHz puis 44,1 kHz) :
-  1. Max active « Dossier Pro Tools » (dossier de test, départ de séance 01:00:00:00, 24 bits) ;
+  1. Max active « Dossier des prises » (dossier de test, départ de séance 01:00:00:00, 24 bits) ;
   2. Lina enregistre une prise (début hors grille) ; elle arrive chez Max par la collaboration ;
      → fichier BWF dans le dossier en ≤ 3 s après être posée chez Max ;
      → TimeReference relu en Python (protools_files.read_bwf) = 01:00:00:00 + position NOVA
@@ -317,7 +317,7 @@ def one_rate(p, sr, res, step, check, pages):
         E.wait_for_timeout(300)
         shot(E, f"E1_{tag}_reglage_dossier_pro_tools")
         return {"etat_dossier": E.get_by_test_id("pt-folder-state").inner_text(), "cible": E.get_by_test_id("pt-target").inner_text(), "reglages": E.evaluate(SINK_JS)["reglages"]}
-    o = step(f"[{tag}] Max active « Dossier Pro Tools » : dossier, départ 01:00:00:00, 24 bits", e_setup)
+    o = step(f"[{tag}] Max active « Dossier des prises » : dossier, départ 01:00:00:00, 24 bits", e_setup)
     if o:
         check(f"[{tag}] réglages enregistrés (dossier, départ de séance, format)", o["reglages"]["enabled"] and o["reglages"]["folder"] == str(folder)
               and o["reglages"]["sessionStart"] == TC_START and o["reglages"]["format"] == "24")
@@ -381,7 +381,7 @@ def one_rate(p, sr, res, step, check, pages):
             "frequences": {"projet": region["projet_sr"], "contexte": region["contexte_sr"], "son": region["sr"]},
             "longueur_nova": region["len"], "longueur_fichier": info["frames"],
             "ecart_max_avec_la_prise_de_lina": diff, "ui": ui_txt[:300],
-            "message_visible": "Prise envoyée vers Pro Tools" in notif,
+            "message_visible": "Prise envoyée vers ton logiciel de studio" in notif and "Pro Tools" not in notif,
         }
 
     for i, (at, secs, fmt) in enumerate(((3.217, 3.0, "24"), (9.1234, 2.5, "32f"))):
@@ -397,7 +397,7 @@ def one_rate(p, sr, res, step, check, pages):
               o["bext"]["bits"] == (32 if fmt == "32f" else 24) and o["bext"]["float"] == (fmt == "32f") and "<SCENE>Voix lead</SCENE>" in o["ixml"]
               and f"<TAKE>{o['prise']['takeNumber']}</TAKE>" in o["ixml"]
               and f"<TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO>{o['bext']['time_reference'] % 2 ** 32}<" in o["ixml"])
-        check(f"[{tag}] {fmt} : retour visuel chez Max (« Envoyée vers Pro Tools · Spot à … » + message)", "Envoyée vers Pro Tools" in o["ui"] and o["message_visible"])
+        check(f"[{tag}] {fmt} : retour visuel chez Max (« Envoyée vers ton logiciel de studio · Spot à … » + message)", "Envoyée vers ton logiciel de studio" in o["ui"] and o["message_visible"])
 
     if sr == 48000:
         browser_paths(E, res, step, check, tag, mes)

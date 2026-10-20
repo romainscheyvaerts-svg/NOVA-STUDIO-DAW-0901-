@@ -446,7 +446,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     <label className="space-y-1 block" data-testid="export-arrangement">
       <span className={lab}>Arrangement</span>
       <select value={arrangementId} disabled={isRendering} className={sel} aria-label="Arrangement exporté"
-        title="Exporter un arrangement précis (clean, explicite, radio edit…) : sections dans son ordre, passages coupés. Logic : Arrangement Alternatives ; Pro Tools : une session par version."
+        title="Exporter un arrangement précis (clean, explicite, radio edit…) : sections dans son ordre, passages coupés. Logic : Arrangement Alternatives ; ailleurs : une session par version."
         onChange={e => {
           const id = e.target.value;
           setArrangementId(id);
@@ -632,7 +632,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                 <button type="button" onClick={() => setAdvanced(true)} disabled={isRendering} aria-expanded={false} data-testid="export-avance"
                   className="w-full pt-1 text-center text-[12px] font-bold text-slate-400 hover:text-white">
-                  ⚙️ Réglages avancés <span className="font-normal">(format, qualité, voix seules, pistes séparées, Spotify / distribution, Pro Tools…)</span>
+                  ⚙️ Réglages avancés <span className="font-normal">(format, qualité, voix seules, pistes séparées, Spotify / distribution, séance AAF…)</span>
                 </button>
               </div>
             )}
@@ -656,7 +656,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <span className={lab}>Quoi</span>
                             {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
                             <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-nv-line/15 bg-nv-well/40 p-1">
-                              {([['MASTER', 'Mix', 'Le morceau mixé (Pro Tools : Bounce Mix ; Logic : Bounce ; Ableton : Export Audio ; FL : Export)'], ['STEMS', 'Stems', 'Les pistes séparées, alignées au début, même longueur (Pro Tools : Track Bounce ; Ableton : Export individual tracks ; FL : Split mixer tracks)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
+                              {([['MASTER', 'Mix', 'Le morceau mixé (Bounce Mix ; Logic : Bounce ; Ableton : Export Audio ; FL : Export)'], ['STEMS', 'Stems', 'Les pistes séparées, alignées au début, même longueur (Track Bounce ; Ableton : Export individual tracks ; FL : Split mixer tracks)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
                                 <button key={v} type="button" role="radio" aria-checked={source === v} title={h} disabled={isRendering}
                                   data-testid={`export-source-${v}`}
                                   onClick={() => { sourceTouched.current = true; setSource(v); }}
@@ -679,7 +679,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                               <span className={lab}>Découpage</span>
                               <select value={grouping} onChange={e => setGrouping(e.target.value as StemGrouping)} disabled={isRendering} className={sel}
-                                title="Par piste (Pro Tools : Track Bounce), par bus (Logic : Bounce des Track Stacks ; FL : Split mixer tracks), par dossier (Pro Tools : Routing Folders) ou instru / voix (ce que demande l'ingé)">
+                                title="Par piste (Track Bounce), par bus (Logic : Bounce des Track Stacks ; FL : Split mixer tracks), par dossier (Routing Folders) ou instru / voix (ce que demande l'ingé)">
                                 <option value="tracks">Une piste = un fichier</option>
                                 <option value="buses">Par bus (bus voix, bus batterie…)</option>
                                 <option value="folders">Par dossier</option>
@@ -695,7 +695,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 <option value="none">Sans (stems secs)</option>
                               </select>
                             </label>
-                            <label className="sm:col-span-2 flex items-center gap-2 text-[12px] text-nv-ink" title="Avec : chaque stem passe par les effets du master (limiteur, Master Nova). Sans : le master est contourné, la somme des stems redonne exactement le mix — ce qu'attend un ingé de mix (Pro Tools : stems « pre-master »).">
+                            <label className="sm:col-span-2 flex items-center gap-2 text-[12px] text-nv-ink" title="Avec : chaque stem passe par les effets du master (limiteur, Master Nova). Sans : le master est contourné, la somme des stems redonne exactement le mix — ce qu'attend un ingé de mix (stems « pre-master »).">
                               <input type="checkbox" checked={masterFx} onChange={e => setMasterFx(e.target.checked)} disabled={isRendering} />
                               Avec les effets du master (limiteur, Master Nova)
                             </label>
@@ -710,7 +710,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                           <label className="space-y-1 block">
                             <span className={lab}>Durée</span>
                             <select value={rangeMode} onChange={e => setRangeMode(e.target.value as RangeMode)} disabled={isRendering} className={sel}
-                              title="Tout, la boucle, ta sélection ou d'un repère à l'autre (Pro Tools : Bounce de la sélection ; Logic : entre les localisateurs)">
+                              title="Tout, la boucle, ta sélection ou d'un repère à l'autre (Bounce de la sélection ; Logic : entre les localisateurs)">
                               <option value="FULL">Tout le morceau</option>
                               <option value="LOOP">Zone de boucle ({fmtS(projectState.loopStart)} → {fmtS(projectState.loopEnd)})</option>
                               {selRange && <option value="SELECTION">Ta sélection ({fmtS(selRange.start)} → {fmtS(selRange.end)})</option>}
@@ -760,7 +760,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                                 <span className={lab}>Type de fichier</span>
                                 <select value={format} onChange={e => setFormat(e.target.value as ExportFormat)} disabled={isRendering} className={sel}
-                                  title="WAV : le standard des studios (Pro Tools, Ableton, FL). AIFF : le standard Mac (Logic). FLAC : sans perte et 40 % plus léger. MP3 : pour partager.">
+                                  title="WAV : le standard des studios (lu partout : logiciels de studio, Ableton, FL). AIFF : le standard Mac (Logic). FLAC : sans perte et 40 % plus léger. MP3 : pour partager.">
                                     <option value="WAV">WAV (qualité studio)</option>
                                     <option value="AIFF">AIFF (Mac, Logic)</option>
                                     <option value="FLAC">FLAC (sans perte, plus léger)</option>
@@ -771,7 +771,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 <span className={lab}>Fréquence d'échantillonnage</span>
                                 <select value={String(srChoice)} onChange={e => setSrChoice(e.target.value === 'projet' ? 'projet' : Number(e.target.value))} disabled={isRendering} className={sel}
                                   data-testid="export-rate"
-                                  title="Fréquence du projet : aucune conversion. Autre fréquence : conversion de qualité studio (filtre anti-repliement, plat jusqu'à 20 kHz), comme le SRC de Pro Tools ou de Logic à l'export">
+                                  title="Fréquence du projet : aucune conversion. Autre fréquence : conversion de qualité studio (filtre anti-repliement, plat jusqu'à 20 kHz), comme la conversion des logiciels de studio à l'export">
                                     <option value="projet">Celle du projet ({rateLabel(projectRate)}, sans conversion)</option>
                                     <option value="44100">44,1 kHz (CD, streaming){projectRate !== 44100 ? ' · converti' : ''}</option>
                                     <option value="48000">48 kHz (vidéo){projectRate !== 48000 ? ' · converti' : ''}</option>
@@ -801,7 +801,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                                 <span className={lab}>Canaux</span>
                                 <select value={layout} onChange={e => setLayout(e.target.value as ChannelLayout)} disabled={isRendering} className={sel}
-                                  title="Stéréo. Mono : le canal gauche seul (une voix mono enregistrée en stéréo). Mono (somme) : gauche + droite en un canal (Pro Tools : Mono Summed ; radio, contrôle de compatibilité). Double mono : un fichier gauche et un droit (Pro Tools : Multiple Mono).">
+                                  title="Stéréo. Mono : le canal gauche seul (une voix mono enregistrée en stéréo). Mono (somme) : gauche + droite en un canal (Mono Summed ; radio, contrôle de compatibilité). Double mono : un fichier gauche et un droit (Multiple Mono).">
                                     <option value="stereo">Stéréo</option>
                                     <option value="mono">Mono (canal gauche)</option>
                                     <option value="mono-sum">Mono (somme G + D)</option>
@@ -810,7 +810,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             </label>
                         </div>
                         {format !== 'MP3' && effBits < 32 && (
-                          <label className="flex items-center gap-2 text-[12px] text-nv-ink" title="Dither TPDF : un bruit infime qui évite la distorsion de quantification en passant à 16 bits (Pro Tools : POW-r ; Logic : Dither ; Ableton : Triangular)">
+                          <label className="flex items-center gap-2 text-[12px] text-nv-ink" title="Dither TPDF : un bruit infime qui évite la distorsion de quantification en passant à 16 bits (POW-r ; Logic : Dither ; Ableton : Triangular)">
                             <input type="checkbox" checked={dither} onChange={e => setDither(e.target.checked)} disabled={isRendering} />
                             Dither (adoucit le passage en {effBits} bits{effBits === 16 ? ', conseillé' : ''})
                           </label>
@@ -866,7 +866,7 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
                           <p className="sm:col-span-2 text-[11px] text-nv-muted">
                             {format === 'MP3' ? 'Dans le MP3 : titre, artiste, BPM, tonalité, ISRC et pochette (ID3).'
                               : format === 'FLAC' ? 'Dans le FLAC : titre, artiste, BPM, tonalité, ISRC et pochette.'
-                              : `Dans le ${format} : titre, artiste, BPM et mesure, tonalité, ISRC, repères et loudness (BWF), lus par Pro Tools, Logic, Ableton et FL.`}
+                              : `Dans le ${format} : titre, artiste, BPM et mesure, tonalité, ISRC, repères et loudness (BWF), lus par les logiciels de studio, Logic, Ableton et FL.`}
                           </p>
                         </div>
                     </div>
@@ -946,7 +946,7 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
                         </button>
                         {!bloque && !needsVoicesPayment && (
                           <button type="button" onClick={() => void handleExport(true)} disabled={isRendering || payWait} data-testid="export-queue"
-                            title="Lance cet export en arrière-plan et garde la fenêtre libre : ajoute ensuite un MP3, les stems… (Pro Tools : Bounce en arrière-plan ; Logic : file de bounce). Une notification te prévient à la fin."
+                            title="Lance cet export en arrière-plan et garde la fenêtre libre : ajoute ensuite un MP3, les stems… (Bounce en arrière-plan ; Logic : file de bounce). Une notification te prévient à la fin."
                             className="w-full min-h-10 rounded-xl border border-nv-line/15 text-[12px] font-bold text-nv-ink hover:bg-nv-raised disabled:opacity-50">
                             <i className="fas fa-layer-group mr-1.5" aria-hidden="true"></i>Ajouter à la file d'exports
                           </button>
@@ -974,11 +974,11 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
             <MidiExportRow tracks={projectState.tracks} />
             {/* Séance pour Pro Tools : AAF + BWF horodatés (chantier 14) */}
             <button type="button" data-testid="export-aaf" onClick={() => openAafExport()}
-              title="Pro Tools : Fichier › Ouvrir (AAF) ou Importer › Données de session"
+              title="Dans ton logiciel de studio : Fichier › Ouvrir (AAF) ou Importer › Données de session"
               className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center gap-3">
               <span className="text-2xl leading-none" aria-hidden="true">🎚️</span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-black text-white">Séance pour Pro Tools (AAF + BWF)</span>
+                <span className="block text-[14px] font-black text-white">Séance pour logiciel de studio (AAF + BWF)</span>
                 <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Comprise dans l'export de ce projet (licence, export payé ou Nova Pro).</span>
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>

@@ -59,7 +59,7 @@ export const AafImportDialog: React.FC<{ getState: () => DAWState; initialFiles?
     const audio = files.filter(isAudioFile);
     if (!aaf) {
       if (audio.length && session) { setMedia(m => [...m, ...audio]); return; }
-      setError('Choisis un fichier .aaf (Pro Tools : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF).');
+      setError('Choisis un fichier .aaf (dans ton logiciel de studio : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF).');
       return;
     }
     setBusy('Lecture de la séance…'); setError(null);
@@ -85,7 +85,7 @@ export const AafImportDialog: React.FC<{ getState: () => DAWState; initialFiles?
     setBusy('Import…');
     try {
       const out = await importAafIntoProject(session, media, getState(), t => setBusy(t));
-      applyR21(() => out.state, `📥 Séance Pro Tools : ${out.report.summary}. Ctrl+Z pour revenir.`);
+      applyR21(() => out.state, `📥 Séance AAF : ${out.report.summary}. Ctrl+Z pour revenir.`);
       setReport(out.report); setStep('done');
     } catch (e: any) {
       setError(`Import impossible : ${e?.message || e}`);
@@ -95,14 +95,14 @@ export const AafImportDialog: React.FC<{ getState: () => DAWState; initialFiles?
   const linked = session ? session.media.filter(m => m.storage === 'lie').length : 0;
   const embedded = session ? session.media.filter(m => m.storage === 'integre').length : 0;
   return (
-    <Shell title={`Importer une séance Pro Tools (AAF)${aafName ? ` · ${aafName}` : ''}`} icon="fa-file-import" testId="aaf-import-dialog" busy={!!busy} onClose={onClose}
-      hint="Pro Tools : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF">
+    <Shell title={`Importer une séance AAF${aafName ? ` · ${aafName}` : ''}`} icon="fa-file-import" testId="aaf-import-dialog" busy={!!busy} onClose={onClose}
+      hint="Dans ton logiciel de studio : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF">
       {error && <p role="alert" className="rounded-lg border border-red-400/40 bg-red-500/10 p-2 text-[12px] text-red-300">⚠️ {error}</p>}
       {busy && <p className="p-2 text-center text-[13px] text-nv-muted" role="status" data-testid="aaf-busy"><i className="fas fa-circle-notch fa-spin mr-2" />{busy}</p>}
 
       {step === 'pick' && !busy && (
         <div className="flex flex-col gap-3">
-          <p className="text-[12px] text-nv-muted">Dans Pro Tools : sélectionne les pistes, puis <b>Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF</b> (AAF, médias intégrés ou copiés). Les clips arrivent à l'échantillon près, avec leur gain et leurs fondus.</p>
+          <p className="text-[12px] text-nv-muted">Dans ton logiciel de studio : sélectionne les pistes, puis <b>Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF</b> (AAF, médias intégrés ou copiés). Les clips arrivent à l'échantillon près, avec leur gain et leurs fondus.</p>
           <button type="button" className={card} onClick={() => aafRef.current?.click()} data-testid="aaf-pick">
             <span className="block text-[13px] font-black text-nv-ink">🎚️ Choisir le fichier .aaf</span>
             <span className="block text-[11px] text-nv-muted">Tu peux aussi sélectionner en même temps les sons du dossier {MF}, ou glisser le tout sur la timeline.</span>
@@ -212,8 +212,8 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
   };
 
   return (
-    <Shell title="Séance pour Pro Tools (AAF + BWF)" icon="fa-file-export" testId="aaf-export-dialog" busy={!!busy} onClose={onClose}
-      hint="Pro Tools : Fichier › Ouvrir (AAF) ou Fichier › Importer › Données de session">
+    <Shell title="Séance pour logiciel de studio (AAF + BWF)" icon="fa-file-export" testId="aaf-export-dialog" busy={!!busy} onClose={onClose}
+      hint="Dans ton logiciel de studio : Fichier › Ouvrir (AAF) ou Fichier › Importer › Données de session">
       {error && <p role="alert" className="rounded-lg border border-red-400/40 bg-red-500/10 p-2 text-[12px] text-red-300">⚠️ {error}</p>}
       {busy && <p className="p-2 text-center text-[13px] text-nv-muted" role="status"><i className="fas fa-circle-notch fa-spin mr-2" />{busy}</p>}
       {!done && !busy && !gate.admin && !gate.unlocked && (
@@ -224,14 +224,14 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
       {gate.message && <p role="status" className="text-[12px] text-amber-300">{gate.message}</p>}
       {!done && !busy && (
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-          <p className="text-[12px] text-nv-muted">Un dossier .zip à ouvrir dans Pro Tools : la séance (.aaf) et un fichier BWF 24 bits horodaté par son, dans {MF}. Une piste par piste audio, avec les clips, leur gain et leurs fondus.</p>
+          <p className="text-[12px] text-nv-muted">Un dossier .zip à ouvrir dans ton logiciel de studio : la séance (.aaf) et un fichier BWF 24 bits horodaté par son, dans {MF}. Une piste par piste audio, avec les clips, leur gain et leurs fondus.</p>
           <p className="text-[13px] text-nv-ink" data-testid="aaf-export-preview">
             {plural(plan.input.tracks.length, 'piste')} · {plural(clips, 'clip')} · {plural(files, 'fichier BWF', 'fichiers BWF')} · {khz(plan.input.sampleRate)}
           </p>
           <fieldset className="flex flex-col gap-1.5 text-[12px] text-nv-ink">
             <legend className="mb-1 text-[11px] font-black uppercase tracking-wider text-nv-muted">Sons</legend>
             <label className="flex items-start gap-2"><input type="radio" name="aaf-media" checked={!embed} onChange={() => setEmbed(false)} data-testid="aaf-linked" />
-              <span><b>À côté de l'AAF</b> (dossier {MF}) — léger, comme une séance Pro Tools.</span></label>
+              <span><b>À côté de l'AAF</b> (dossier {MF}) — léger, comme une séance de studio classique.</span></label>
             <label className="flex items-start gap-2"><input type="radio" name="aaf-media" checked={embed} onChange={() => setEmbed(true)} data-testid="aaf-embedded" />
               <span><b>Dans l'AAF</b> — un seul fichier à ouvrir, rien à relier (plus lourd).</span></label>
           </fieldset>
@@ -253,7 +253,7 @@ export const AafExportDialog: React.FC<{ getState: () => DAWState; onClose: () =
       {done && (
         <div className="flex flex-col gap-2" data-testid="aaf-export-done">
           <p className="text-[14px] font-bold text-nv-ink">✅ Séance exportée : {plural(done.result.stats.tracks, 'piste')}, {plural(done.result.stats.clips, 'clip')}, {plural(done.result.stats.mediaFiles, 'fichier BWF', 'fichiers BWF')}.</p>
-          <p className="text-[12px] text-nv-muted">« {done.fileName} » : décompresse-le, puis dans Pro Tools <b>Fichier › Ouvrir</b> le fichier .aaf (ou <b>Importer › Données de session</b>). Le mode d'emploi est dans LISEZ-MOI.txt.</p>
+          <p className="text-[12px] text-nv-muted">« {done.fileName} » : décompresse-le, puis dans ton logiciel de studio <b>Fichier › Ouvrir</b> le fichier .aaf (ou <b>Importer › Données de session</b>). Le mode d'emploi est dans LISEZ-MOI.txt.</p>
           {done.result.messages.map((m, i) => <p key={i} className="text-[12px] text-amber-300">{m}</p>)}
           <div className="flex justify-end"><button type="button" className={btnMain} onClick={onClose} data-testid="aaf-export-close">Fermer</button></div>
         </div>

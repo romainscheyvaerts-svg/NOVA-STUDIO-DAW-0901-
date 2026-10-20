@@ -37,7 +37,7 @@ const ClipsList: React.FC<{ state: DAWState; compact?: boolean }> = ({ state, co
             data-testid="clips-search" className="h-9 w-full rounded-lg border border-nv-line bg-nv-bg pl-7 pr-2 text-[12px] text-nv-ink" />
         </div>
         <select value={sort} onChange={e => setSort(e.target.value as ClipSort)} aria-label="Trier par" data-testid="clips-sort"
-          title="Trier la liste (Pro Tools : Clips List › Sort by)" className="h-9 rounded-lg border border-nv-line bg-nv-bg px-2 text-[12px] font-bold text-nv-ink">
+          title="Trier la liste (Clips List › Sort by)" className="h-9 rounded-lg border border-nv-line bg-nv-bg px-2 text-[12px] font-bold text-nv-ink">
           {SORTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
         <button type="button" onClick={() => setDir(v => (v === 1 ? -1 : 1))} aria-label={dir === 1 ? 'Ordre croissant' : 'Ordre décroissant'} title="Inverser l'ordre"
@@ -48,7 +48,7 @@ const ClipsList: React.FC<{ state: DAWState; compact?: boolean }> = ({ state, co
       <div className="flex gap-1.5 overflow-x-auto pb-0.5" role="radiogroup" aria-label="Filtrer">
         {([['all', `Tous (${rows.length})`], ['audio', 'Audio'], ['midi', 'MIDI'], ['unused', `Hors timeline (${unused})`]] as const).map(([id, label]) => (
           <button key={id} type="button" role="radio" aria-checked={only === id} onClick={() => setOnly(id)} className={chip(only === id)}
-            title={id === 'unused' ? 'Clips retirés de la timeline : gardés ici, comme dans la Clips List de Pro Tools' : undefined}>{label}</button>
+            title={id === 'unused' ? 'Clips retirés de la timeline : gardés ici, comme dans la Clips List' : undefined}>{label}</button>
         ))}
       </div>
       <p className="text-[11px] text-nv-muted">{compact ? 'Touche « Poser » pour mettre un clip à la tête de lecture.' : 'Glisse un clip sur une piste pour l\'y poser (ou « Poser » : à la tête de lecture).'}</p>
@@ -93,7 +93,7 @@ const ClipsList: React.FC<{ state: DAWState; compact?: boolean }> = ({ state, co
       <div className="flex items-center gap-2 border-t border-nv-line pt-2">
         {!confirm ? (
           <button type="button" disabled={!unused} onClick={() => setConfirm(true)} data-testid="clips-clear-unused"
-            title="Pro Tools : Clips List › Clear Unused. Retire de la liste les clips qui ne sont plus sur la timeline. Les sons de la timeline ne sont pas touchés ; Ctrl+Z les remet."
+            title="Clips List › Clear Unused. Retire de la liste les clips qui ne sont plus sur la timeline. Les sons de la timeline ne sont pas touchés ; Ctrl+Z les remet."
             className="nova-hit-tactile h-9 flex-1 rounded-lg border border-nv-line text-[12px] font-bold text-nv-ink disabled:opacity-40 hover:bg-white/5">
             <i className="fas fa-broom mr-1.5 text-[11px]" />Supprimer les clips inutilisés{unused ? ` (${unused})` : ''}
           </button>

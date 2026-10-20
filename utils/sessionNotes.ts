@@ -32,7 +32,7 @@ export const PROJECT_NOTE_FIELDS: ProjectNoteField[] = ['lyrics', 'mix', 'refere
 
 export const NOTE_LABELS: Record<ProjectNoteField, { label: string; hint: string; placeholder: string }> = {
   lyrics: { label: 'Paroles', hint: 'Les mêmes que dans le prompteur : les modifier ici les change là-bas.', placeholder: 'Couplet 1…' },
-  mix: { label: 'Consignes de mix', hint: 'Pro Tools : Project Notes. Ce que l\'ingé doit savoir (voix devant, 808 sans saturation…).', placeholder: 'Ex. : voix lead bien devant, pas trop de reverb sur les backs' },
+  mix: { label: 'Consignes de mix', hint: 'Ce que l\'ingé doit savoir (voix devant, 808 sans saturation…).', placeholder: 'Ex. : voix lead bien devant, pas trop de reverb sur les backs' },
   references: { label: 'Références', hint: 'Morceaux de référence, liens, ambiance visée.', placeholder: 'Ex. : « Titre » de tel artiste pour le son de la voix' },
   general: { label: 'Notes libres', hint: 'À faire, idées, ce qui reste à enregistrer.', placeholder: 'Ex. : refaire le 2e couplet, ajouter des adlibs' },
 };

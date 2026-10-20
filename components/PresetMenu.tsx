@@ -197,11 +197,11 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
   return (
     <div className="flex min-w-0 items-center gap-1" data-testid="preset-menu" onPointerDown={e => e.stopPropagation()}>
       {!simple && (
-        <button type="button" onClick={() => step(-1)} disabled={!list.length || busy} aria-label="Preset précédent" title="Preset précédent (Pro Tools : flèche « - » du Librarian · FL : ‹)"
+        <button type="button" onClick={() => step(-1)} disabled={!list.length || busy} aria-label="Preset précédent" title="Preset précédent (flèche « - » du Librarian · FL : ‹)"
           className="h-8 w-7 rounded-full text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 [@media(pointer:coarse)]:h-10"><i className="fas fa-chevron-left text-[10px]" /></button>
       )}
       <button ref={btnRef} type="button" onClick={() => { setOpen(o => !o); setStatus(null); }} aria-haspopup="menu" aria-expanded={open} data-testid="preset-button"
-        title="Presets de l'effet : enregistrer, charger, favoris, importer / exporter (Pro Tools : menu Librarian · Logic : menu Réglages · Ableton : Save Preset · FL : menu Presets)"
+        title="Presets de l'effet : enregistrer, charger, favoris, importer / exporter (menu Librarian · Logic : menu Réglages · Ableton : Save Preset · FL : menu Presets)"
         className={`${chip} min-w-0 max-w-[200px] bg-white/[0.06] border border-white/10 text-slate-200 hover:bg-white/15`}>
         <i className={`fas ${current && isFavorite(current.id) ? 'fa-star text-amber-300' : 'fa-bookmark text-slate-400'} text-[10px]`} />
         <span className="truncate">{label}</span>
@@ -209,12 +209,12 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
         <i className="fas fa-caret-down text-[10px] text-slate-500" />
       </button>
       {!simple && (
-        <button type="button" onClick={() => step(1)} disabled={!list.length || busy} aria-label="Preset suivant" title="Preset suivant (Pro Tools : flèche « + » du Librarian · FL : ›)"
+        <button type="button" onClick={() => step(1)} disabled={!list.length || busy} aria-label="Preset suivant" title="Preset suivant (flèche « + » du Librarian · FL : ›)"
           className="h-8 w-7 rounded-full text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 [@media(pointer:coarse)]:h-10"><i className="fas fa-chevron-right text-[10px]" /></button>
       )}
       {!simple && (
         <button type="button" onClick={() => void toggleCompare()} disabled={busy || (!modified && !listening)} aria-pressed={listening} data-testid="preset-compare"
-          title={`Comparer (Pro Tools « Compare », Logic « Comparer », bascule A/B d'Ableton) : ${listening ? `tu écoutes « ${cs.refLabel} » ; clic pour retrouver tes modifications.` : modified ? `écoute « ${cs.refLabel} » sans perdre tes modifications.` : 'modifie un réglage pour pouvoir comparer.'}`}
+          title={`Comparer (« Compare », Logic « Comparer », bascule A/B d'Ableton) : ${listening ? `tu écoutes « ${cs.refLabel} » ; clic pour retrouver tes modifications.` : modified ? `écoute « ${cs.refLabel} » sans perdre tes modifications.` : 'modifie un réglage pour pouvoir comparer.'}`}
           className={`${chip} shrink-0 border ${listening ? 'bg-amber-400 text-black border-amber-300' : modified ? 'border-amber-400/50 text-amber-300 hover:bg-amber-400/15' : 'border-white/10 text-slate-500'} disabled:opacity-40`}>
           <i className="fas fa-right-left text-[10px]" /><span className="hidden md:inline">Comparer</span>
         </button>
@@ -235,13 +235,13 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
           <div className="mb-2 flex flex-wrap gap-1">
             {!simple && current && !current.bundled && (
               <button type="button" disabled={busy} onClick={() => void save(current.name, current)} data-testid="preset-save"
-                title={`Enregistre le réglage actuel dans « ${current.name} » (Pro Tools : Save Settings, Ctrl+S dans le Librarian)`}
+                title={`Enregistre le réglage actuel dans « ${current.name} » (Save Settings, Ctrl+S dans le Librarian)`}
                 className="min-h-[34px] rounded-lg bg-cyan-500 px-3 text-[11px] font-bold text-black hover:bg-cyan-400 disabled:opacity-40">
                 <i className="fas fa-floppy-disk mr-1" />Enregistrer
               </button>
             )}
             <button type="button" disabled={busy} onClick={() => setSaveAs(s => (s === null ? (presetName && !current?.bundled ? `${presetName} 2` : '') : null))} data-testid="preset-save-as"
-              title="Enregistre le réglage actuel comme nouveau preset (Pro Tools : Save Settings As… · Logic : Enregistrer le réglage sous…)"
+              title="Enregistre le réglage actuel comme nouveau preset (Save Settings As… · Logic : Enregistrer le réglage sous…)"
               className="min-h-[34px] rounded-lg border border-nv-line px-3 text-[11px] font-bold hover:bg-nv-accent/10 disabled:opacity-40">
               <i className="fas fa-plus mr-1" />Enregistrer sous…
             </button>
@@ -306,9 +306,9 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
 
           {!simple && (
             <div className="mt-2 flex flex-wrap gap-1 border-t border-nv-line pt-2">
-              <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} title={`Importer un fichier ${PRESET_EXT} (Pro Tools : Import Settings)`}
+              <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} title={`Importer un fichier ${PRESET_EXT} (Import Settings)`}
                 className="min-h-[32px] rounded-lg px-2 text-[11px] font-semibold text-nv-muted hover:bg-nv-accent/10 hover:text-nv-ink"><i className="fas fa-file-import mr-1" />Importer…</button>
-              <button type="button" disabled={busy} onClick={() => void exportCurrent()} title={`Exporter le réglage actuel en ${PRESET_EXT} (Pro Tools : Export Settings) : à envoyer, ou à ouvrir sur un autre poste`}
+              <button type="button" disabled={busy} onClick={() => void exportCurrent()} title={`Exporter le réglage actuel en ${PRESET_EXT} (Export Settings) : à envoyer, ou à ouvrir sur un autre poste`}
                 className="min-h-[32px] rounded-lg px-2 text-[11px] font-semibold text-nv-muted hover:bg-nv-accent/10 hover:text-nv-ink"><i className="fas fa-file-export mr-1" />Exporter</button>
               <input ref={fileRef} type="file" accept={`${PRESET_EXT},application/json`} className="hidden" onChange={e => void onImport(e.target.files?.[0])} />
             </div>

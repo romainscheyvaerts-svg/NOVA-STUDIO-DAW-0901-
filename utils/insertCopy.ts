@@ -97,7 +97,7 @@ export function transferSend(tracks: Track[], srcId: string, sendId: string, des
 export function insertCopyMenuItems(track: Track, p: PluginInstance, all: Track[], apply: (fn: (ts: Track[]) => Track[], label: string) => void): ContextMenuItem[] {
   return all.filter(t => t.id !== track.id && acceptsInserts(t) && !t.isHidden).slice(0, 10).map(t => ({
     label: `Copier vers « ${t.name} »`, icon: 'fa-copy',
-    title: 'Pro Tools : Alt+glisser l’insert sur une autre tranche (réglages compris)',
+    title: 'Alt+glisser l’insert sur une autre tranche (réglages compris)',
     onClick: () => apply(ts => transferInsert(ts, track.id, p.id, t.id).tracks, `${p.name || p.type} copié sur « ${t.name} » (réglages compris)`),
   }));
 }

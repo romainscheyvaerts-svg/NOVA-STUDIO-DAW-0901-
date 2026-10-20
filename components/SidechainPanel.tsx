@@ -99,7 +99,7 @@ export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdat
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <span className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-sky-300" title={isDeesser
           ? "Écoute externe : la détection des « s » suit une autre piste ou un bus (ex. une copie de la voix sans effets)."
-          : "Side-chain (Pro Tools : « Key Input ») : la détection écoute une autre piste ou un bus au lieu du son de la piste. Ex. la 808 s'efface sous le kick."}>
+          : "Side-chain (« Key Input ») : la détection écoute une autre piste ou un bus au lieu du son de la piste. Ex. la 808 s'efface sous le kick."}>
           <i className="fas fa-key" aria-hidden /> {title}
         </span>
         <select value={missing ? '' : ref} onChange={e => { setNote(null); apply(e.target.value || null); }} aria-label="Source de la clé" title={summary}
@@ -129,7 +129,7 @@ export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdat
         )}
         {ref && !isVst && (
           <button type="button" aria-pressed={f.listen} onClick={() => onUpdateParams({ keyListen: f.listen ? 0 : 1 })} data-nova-key-listen
-            title="Écouter la clé (Pro Tools : « Key Listen ») : on entend la clé filtrée à la place du son, pour régler le filtre. Pense à le couper ensuite."
+            title="Écouter la clé (« Key Listen ») : on entend la clé filtrée à la place du son, pour régler le filtre. Pense à le couper ensuite."
             className={`h-8 px-2 rounded-lg border text-[11px] font-bold ${f.listen ? 'bg-amber-400 text-black border-amber-300 animate-pulse' : 'bg-white/5 border-white/15 text-slate-200 hover:bg-white/10'}`}>
             <i className="fas fa-headphones mr-1" aria-hidden />{f.listen ? 'Écoute de la clé' : 'Écouter'}
           </button>

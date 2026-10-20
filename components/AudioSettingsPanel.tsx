@@ -61,7 +61,7 @@ const MultitrackSettings: React.FC = () => {
           <span className="block text-[12px] font-bold text-white">Armement exclusif</span>
           <span className="block text-[11px] text-slate-400">{exclusive
             ? 'Armer une piste désarme les autres (Maj+clic : l’armer en plus).'
-            : 'Comme Pro Tools : plusieurs pistes armées enregistrent ensemble, chacune son entrée (sélecteur « In » de la piste). Maj+clic : armer une piste seule.'}</span>
+            : 'Comme dans les studios pro : plusieurs pistes armées enregistrent ensemble, chacune son entrée (sélecteur « In » de la piste). Maj+clic : armer une piste seule.'}</span>
         </span>
       </label>
       {!asio && info.available <= 2 && (

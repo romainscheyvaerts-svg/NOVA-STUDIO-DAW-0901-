@@ -316,7 +316,7 @@ export function readAaf(bytes: Uint8Array): AafSession {
   const sampleRate = voted || (erValue >= 8000 ? Math.round(erValue) : 48000);
   if (rateVotes.size > 1) warnings.push(`Sons à plusieurs fréquences (${[...rateVotes.keys()].map(r => `${r / 1000} kHz`).join(', ')}) : la séance est lue à ${sampleRate / 1000} kHz.`);
   const videoRate = erValue < 1000;
-  if (videoRate) warnings.push(`Séance au débit d'édition vidéo (${fmtRate(erValue)} images/s) : les positions sont sur les images, les bouts « Sample accurate edit » de Pro Tools sont recollés.`);
+  if (videoRate) warnings.push(`Séance au débit d'édition vidéo (${fmtRate(erValue)} images/s) : les positions sont sur les images, les bouts « Sample accurate edit » sont recollés.`);
 
   // ── Conversion en échantillons, fondus rendus, bouts « Sample accurate edit » ─────────
   const tracks: AafTrack[] = rawTracks.map(t => {

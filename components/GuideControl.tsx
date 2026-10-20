@@ -36,7 +36,7 @@ const GuideControl: React.FC<Props> = ({ count, muted, level, onToggle, onLevel,
   return (
     <div className="flex items-center" data-testid="guide-control">
       <button type="button" onClick={onToggle} aria-pressed={!muted} data-testid="guide-toggle"
-        title={`Piste guide (${count}) : ${muted ? 'coupée' : `entendue à ${pct(level)}`}. Clic ou touche G : couper / rallumer. Jamais exportée ni mixée (Pro Tools : piste guide inactive au bounce).`}
+        title={`Piste guide (${count}) : ${muted ? 'coupée' : `entendue à ${pct(level)}`}. Clic ou touche G : couper / rallumer. Jamais exportée ni mixée (piste guide inactive au bounce).`}
         className={`nova-hit-tactile h-8 px-2 rounded-lg whitespace-nowrap text-[9px] font-black tracking-wider border transition-all ${muted ? 'text-slate-500 border-white/10 line-through' : 'bg-amber-500/15 text-amber-300 border-amber-500/40'}`}>
         <i className="fas fa-headphones" aria-hidden="true"></i>{compact ? null : <span {...barItem('libelle-guide', 8)} className="ml-1">GUIDE</span>}
       </button>

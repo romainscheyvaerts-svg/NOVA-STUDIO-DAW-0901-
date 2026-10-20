@@ -120,8 +120,8 @@ export function reportLines(s: AafSession, r: AafImportReport): string[] {
   if (r.roundedPositions) out.push(`⚠️ ${plural(r.roundedPositions, 'position arrondie', 'positions arrondies')} à l'échantillon (débit d'édition non entier).`);
   out.push(`Fréquence de la séance : ${khz(r.sampleRate)}${r.sampleRate !== r.projectRate ? ` — le projet est à ${khz(r.projectRate)} : les sons sont convertis, les positions gardent leur temps.` : '.'}`);
   const fades = r.fadesExact + r.fadesApprox;
-  if (fades) out.push(`${plural(fades, 'fondu')} : ${r.fadesExact} à la forme exacte${r.fadesApprox ? `, ${plural(r.fadesApprox, 'approché', 'approchés')} (forme inconnue ou fondu rendu par Pro Tools)` : ''}.`);
-  if (r.renderedFades) out.push(`${plural(r.renderedFades, 'fondu rendu', 'fondus rendus')} par Pro Tools remplacé${r.renderedFades > 1 ? 's' : ''} par un vrai fondu sur le clip.`);
+  if (fades) out.push(`${plural(fades, 'fondu')} : ${r.fadesExact} à la forme exacte${r.fadesApprox ? `, ${plural(r.fadesApprox, 'approché', 'approchés')} (forme inconnue ou fondu rendu par le logiciel d’origine)` : ''}.`);
+  if (r.renderedFades) out.push(`${plural(r.renderedFades, 'fondu rendu', 'fondus rendus')} par le logiciel d’origine remplacé${r.renderedFades > 1 ? 's' : ''} par un vrai fondu sur le clip.`);
   if (r.crossfades) out.push(`${plural(r.crossfades, 'fondu enchaîné', 'fondus enchaînés')} entre deux clips.`);
   if (r.stereoPairs) out.push(`${plural(r.stereoPairs, 'piste stéréo', 'pistes stéréo')} en double mono (.L / .R) regroupée${r.stereoPairs > 1 ? 's' : ''}.`);
   if (r.sampleAccurateMerged) out.push(`${plural(r.sampleAccurateMerged, 'bout « Sample accurate edit » recollé', 'bouts « Sample accurate edit » recollés')} à son clip.`);

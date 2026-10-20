@@ -229,7 +229,7 @@ export const GATEFX_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const GATE_SPECS: V21ParamSpec[] = [
-  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la détection (le son lui-même, ou la clé externe) dépasse ce seuil. Pro Tools : Threshold du Dyn3 Expander/Gate.' },
+  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la détection (le son lui-même, ou la clé externe) dépasse ce seuil (Threshold d’un expandeur/gate de studio).' },
   { id: 'range', label: 'Plage', min: 0, max: 80, step: 1, unit: 'dB', hint: 'Combien la porte baisse le son quand elle est fermée : 80 dB = silence, 6 à 12 dB = expandeur doux (garde un peu de respiration).' },
   { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
   { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après le dernier passage au-dessus du seuil : évite qu’elle claque sur une fin de note.' },

@@ -28,11 +28,11 @@ const setNote = (s: DAWState, f: ProjectNoteField, text: string): DAWState => {
  * Téléphone : version simple (notes et versions).
  */
 const TABS: { id: R21Tab; label: string; icon: string; title: string }[] = [
-  { id: 'notes', label: 'Notes', icon: 'fa-sticky-note', title: 'Notes de projet et commentaires de piste (Pro Tools : Comments, Project Notes)' },
-  { id: 'clips', label: 'Clips', icon: 'fa-th-list', title: 'Liste des clips de la session (Pro Tools : Clips List ; Logic : Project Audio Browser)' },
+  { id: 'notes', label: 'Notes', icon: 'fa-sticky-note', title: 'Notes de projet et commentaires de piste (Comments, Project Notes)' },
+  { id: 'clips', label: 'Clips', icon: 'fa-th-list', title: 'Liste des clips de la session (Clips List ; Logic : Project Audio Browser)' },
   { id: 'arrangements', label: 'Arrangements', icon: 'fa-random', title: 'Arrangements multiples : clean, explicite, radio edit (Logic : Arrangement Alternatives)' },
-  { id: 'versions', label: 'Versions', icon: 'fa-code-branch', title: 'Versions nommées v2, v3… (Pro Tools : Save As New Version ; Logic : Project Alternatives)' },
-  { id: 'reglages', label: 'Réglages', icon: 'fa-sliders-h', title: "Réglages de la session : fréquence d'échantillonnage (Pro Tools : Session Setup)" },
+  { id: 'versions', label: 'Versions', icon: 'fa-code-branch', title: 'Versions nommées v2, v3… (Save As New Version ; Logic : Project Alternatives)' },
+  { id: 'reglages', label: 'Réglages', icon: 'fa-sliders-h', title: "Réglages de la session : fréquence d'échantillonnage (Session Setup)" },
 ];
 
 const btn = 'nova-hit-tactile h-9 rounded-lg border border-nv-line px-3 text-[12px] font-bold text-nv-ink hover:bg-nv-accent/15 disabled:opacity-40';
@@ -97,7 +97,7 @@ const NotesTab: React.FC<{ state: DAWState; compact?: boolean }> = ({ state, com
         {pn?.updatedAt && f !== 'lyrics' ? <p className="text-[10px] text-nv-muted">Modifié {fmtWhen(pn.updatedAt)}{pn.updatedBy ? ` par ${pn.updatedBy}` : ''} · voyage avec le projet et en collaboration</p> : null}
       </section>
       <section className="flex flex-col gap-1.5">
-        <h3 className="text-[11px] font-black uppercase tracking-wider text-nv-muted" title="Pro Tools : vue Commentaires (console et fenêtre d'édition)">Commentaires des pistes</h3>
+        <h3 className="text-[11px] font-black uppercase tracking-wider text-nv-muted" title="Vue Commentaires (console et fenêtre d'édition)">Commentaires des pistes</h3>
         {!tracks.length && <p className="text-[12px] text-nv-muted">Aucune piste.</p>}
         {tracks.slice(0, compact ? 30 : 200).map(t => <CommentRow key={t.id} id={t.id} name={t.name} color={t.color} comment={t.comment || ''} />)}
       </section>
@@ -267,7 +267,7 @@ const VersionsTab: React.FC<{ state: DAWState; compact?: boolean }> = ({ state }
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1" data-testid="versions-tab">
       <section className="flex flex-col gap-2 rounded-xl border border-nv-line bg-nv-well/40 p-3">
         <p className="text-[12px] font-bold text-nv-ink">Enregistrer comme nouvelle version</p>
-        <p className="text-[11px] text-nv-muted">Pro Tools : Save As New Version. Le projet devient « {versionName(state.name, n)} » ; la version reste dans l'historique de l'appareil, jamais effacée.</p>
+        <p className="text-[11px] text-nv-muted">Save As New Version. Le projet devient « {versionName(state.name, n)} » ; la version reste dans l'historique de l'appareil, jamais effacée.</p>
         <input value={comment} onChange={e => setComment(e.target.value)} placeholder="Commentaire (ex. : mix validé par l'artiste)" aria-label="Commentaire de la version"
           data-testid="version-comment" maxLength={400} className={`${field} h-9`} />
         <button type="button" className={btnMain} data-testid="version-save"
@@ -375,7 +375,7 @@ const SessionProPanel: React.FC<{ state: DAWState; tab: R21Tab; phone?: boolean;
         <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-nv-ink">Session · {state.name}</h2>
         {!phone && (
           <button type="button" onClick={() => openImportSession()} className={btn} data-testid="session-import"
-            title="Importer des pistes d'un autre projet, d'un modèle ou d'un projet récent (Pro Tools : Import Session Data, Alt+Maj+I)">
+            title="Importer des pistes d'un autre projet, d'un modèle ou d'un projet récent (Import Session Data, Alt+Maj+I)">
             <i className="fas fa-file-import mr-1.5 text-[11px]" />Importer
           </button>
         )}

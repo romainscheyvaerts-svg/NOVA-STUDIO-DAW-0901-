@@ -92,8 +92,8 @@ export const pluginStateHelp = (p: PluginInstance): string => {
     ? 'Inactif : retiré du son, ne consomme rien, aucune latence (ses réglages sont gardés).'
     : s === 'bypass' ? 'Bypass : le son passe sans traitement ; l’effet reste chargé et sa latence reste compensée.'
       : 'Actif.';
-  const ara = isAraInsert(p) ? ' Insert ARA (comme Pro Tools) : le plugin lit les clips de la piste et son éditeur s’ouvre en bas de la fenêtre Édition. Sur un poste sans le plugin (collaboration), la piste joue son rendu, fait à la sauvegarde.' : '';
-  return `${base}${ara} Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Pro Tools : Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
+  const ara = isAraInsert(p) ? ' Insert ARA : le plugin lit les clips de la piste et son éditeur s’ouvre en bas de la fenêtre Édition. Sur un poste sans le plugin (collaboration), la piste joue son rendu, fait à la sauvegarde.' : '';
+  return `${base}${ara} Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
 };
 
 /** Ctrl+clic / Ctrl+Alt+clic sur un effet. Renvoie vrai si le clic est traité. */
@@ -116,8 +116,8 @@ export const pluginStateMenuItems = (trackId: string, p: PluginInstance, onOpen?
   if (onOpen) items.push({ label: 'Ouvrir l’effet', icon: 'fa-sliders-h', onClick: onOpen, disabled: cur === 'inactive', title: cur === 'inactive' ? 'Rends-le actif pour l’ouvrir' : undefined });
   items.push(
     { label: `${cur === 'active' ? '✓ ' : ''}Actif`, icon: 'fa-power-off', onClick: set('active'), title: 'L’effet traite le son.' },
-    { label: `${cur === 'bypass' ? '✓ ' : ''}Bypass`, icon: 'fa-forward', shortcut: 'Ctrl+clic', onClick: set('bypass'), title: 'Pro Tools « Bypass » : le son passe sans traitement, l’effet reste chargé et sa latence reste compensée.' },
-    { label: `${cur === 'inactive' ? '✓ ' : ''}Inactif`, icon: 'fa-ban', shortcut: 'Ctrl+Alt+clic', onClick: set('inactive'), title: 'Pro Tools « Make Inactive » (Ctrl+Démarrer+clic) : retiré du son, aucune latence, réglages gardés.' },
+    { label: `${cur === 'bypass' ? '✓ ' : ''}Bypass`, icon: 'fa-forward', shortcut: 'Ctrl+clic', onClick: set('bypass'), title: '« Bypass » : le son passe sans traitement, l’effet reste chargé et sa latence reste compensée.' },
+    { label: `${cur === 'inactive' ? '✓ ' : ''}Inactif`, icon: 'fa-ban', shortcut: 'Ctrl+Alt+clic', onClick: set('inactive'), title: '« Make Inactive » (Ctrl+Démarrer+clic) : retiré du son, aucune latence, réglages gardés.' },
   );
   return items;
 };
@@ -168,26 +168,26 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   // R4 : Track Presets (Pro Tools 2020+).
   if (!target.isVca && !target.folder) items.push({
     label: 'Track Preset…', icon: 'fa-bookmark',
-    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Pro Tools : Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
+    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
     onClick: () => openNovaWindow('track-preset', { trackId: id }),
   });
   // VCA : reporter son gain dans ses pistes (Pro Tools « Coalesce VCA Automation », utils/vcaCoalesce).
   if (target.isVca) items.push({ label: 'Fusionner le VCA dans ses pistes', icon: 'fa-compress-alt',
-    title: 'Pro Tools « Coalesce VCA » : le gain du VCA passe dans le fader et la courbe de volume de chaque piste ; le son ne change pas, le VCA revient à 0 dB',
+    title: '« Coalesce VCA » : le gain du VCA passe dans le fader et la courbe de volume de chaque piste ; le son ne change pas, le VCA revient à 0 dB',
     onClick: () => runEditCommand('vcaCoalesce', { trackIds: [id] }) });
   // Playlists de piste (Pro Tools : New / Duplicate Playlist, sélecteur de playlist).
   if (canHavePlaylists(target)) {
     const { list, activeId } = playlistsOf(target);
-    items.push({ label: 'Nouvelle playlist (vide)', icon: 'fa-plus', title: 'Pro Tools « New Playlist » : une version vide de la piste ; l’actuelle est gardée',
+    items.push({ label: 'Nouvelle playlist (vide)', icon: 'fa-plus', title: '« New Playlist » : une version vide de la piste ; l’actuelle est gardée',
       onClick: () => runEditCommand('playlistNew', { trackIds: [id] }) });
-    items.push({ label: 'Dupliquer la playlist', icon: 'fa-clone', title: 'Pro Tools « Duplicate Playlist » : copie de travail (avant un nettoyage, une version clean…)',
+    items.push({ label: 'Dupliquer la playlist', icon: 'fa-clone', title: '« Duplicate Playlist » : copie de travail (avant un nettoyage, une version clean…)',
       onClick: () => runEditCommand('playlistNew', { trackIds: [id], duplicate: true }) });
     // Plage sélectionnée sur cette piste : la copier / déplacer vers une nouvelle playlist (utils/playlistSelection).
     const sel = editSelectionStore.get().time;
     if (sel && sel.end - sel.start > 1e-3 && sel.trackIds.includes(id)) {
-      items.push({ label: 'Copier la sélection vers une nouvelle playlist', icon: 'fa-share-square', title: 'Pro Tools « Copy Selection to New Playlist » : la plage part dans une version à part ; on entend toujours la même',
+      items.push({ label: 'Copier la sélection vers une nouvelle playlist', icon: 'fa-share-square', title: '« Copy Selection to New Playlist » : la plage part dans une version à part ; on entend toujours la même',
         onClick: () => runEditCommand('playlistFromSelection', {}) });
-      items.push({ label: 'Déplacer la sélection vers une nouvelle playlist', icon: 'fa-cut', title: 'Pro Tools « Move Selection to New Playlist » : la plage quitte la version qu’on entend',
+      items.push({ label: 'Déplacer la sélection vers une nouvelle playlist', icon: 'fa-cut', title: '« Move Selection to New Playlist » : la plage quitte la version qu’on entend',
         onClick: () => runEditCommand('playlistFromSelection', { move: true }) });
     }
     if (list.length > 1) list.filter(p => p.id !== activeId).slice(0, 6).forEach(p => items.push({
@@ -197,12 +197,12 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   // R6 : Commit, impression de bus, restauration.
   if (canCommit(target) && (target.clips || []).length) items.push({
     label: 'Commit (rendre avec les effets)…', icon: 'fa-check-double',
-    title: 'La piste rendue avec ses effets remplace l’originale, gardée inactive et masquée (Pro Tools 2020+ : Commit · Logic : Bounce in Place · Ableton : Freeze and Flatten · FL : Consolidate)',
+    title: 'La piste rendue avec ses effets remplace l’originale, gardée inactive et masquée (Commit · Logic : Bounce in Place · Ableton : Freeze and Flatten · FL : Consolidate)',
     onClick: () => openNovaWindow('bounce', { trackId: id, bounce: { mode: 'commit' } }),
   });
   if (canPrintBus(target)) items.push({
     label: 'Imprimer le bus sur une nouvelle piste…', icon: 'fa-print',
-    title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (Pro Tools : enregistrer un bus · Logic : Bounce in Place d’un aux · Ableton : Resample)',
+    title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (enregistrer un bus · Logic : Bounce in Place d’un aux · Ableton : Resample)',
     onClick: () => openNovaWindow('print-bus', { trackId: id }),
   });
   items.push({ label: 'Commit / geler plusieurs pistes…', icon: 'fa-layer-group', shortcut: 'Alt+Maj+C',
@@ -215,13 +215,13 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   items.push({
     label: target.isInactive ? 'Rendre la piste active' : 'Rendre la piste inactive',
     icon: target.isInactive ? 'fa-play-circle' : 'fa-ban',
-    title: 'Pro Tools « Make Inactive / Active » : une piste inactive ne joue rien et ne coûte rien ; son routage est gardé.',
+    title: '« Make Inactive / Active » : une piste inactive ne joue rien et ne coûte rien ; son routage est gardé.',
     onClick: () => applyTracks(ts => setTracksInactive(ts, [id], !target.isInactive), target.isInactive ? `« ${target.name} » est active` : `« ${target.name} » est inactive`),
   });
   items.push({
     label: target.isHidden ? 'Afficher la piste' : 'Masquer la piste',
     icon: target.isHidden ? 'fa-eye' : 'fa-eye-slash',
-    title: 'Comme la liste des pistes de Pro Tools : une piste masquée continue de jouer si elle est active.',
+    title: 'Comme la liste des pistes : une piste masquée continue de jouer si elle est active.',
     onClick: () => applyTracks(ts => setTracksHidden(ts, [id], !target.isHidden), target.isHidden ? undefined : `« ${target.name} » est masquée (Liste des pistes pour la retrouver)`),
   });
   if (target.isHidden || target.isInactive) items.push({ label: 'Afficher et activer', icon: 'fa-bolt', onClick: () => applyTracks(ts => showAndActivate(ts, id), `« ${target.name} » est prête`) });
@@ -230,9 +230,9 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
     items.push({ label: open ? 'Replier le dossier' : 'Déplier le dossier', icon: open ? 'fa-folder' : 'fa-folder-open', onClick: () => applyTracks(ts => setFolderOpen(ts, id, !open)) });
     items.push({ label: 'Défaire le dossier (garder les pistes)', icon: 'fa-folder-minus', onClick: () => applyTracks(ts => dissolveFolder(ts, id), 'Dossier défait : ses pistes sont gardées') });
   } else {
-    items.push({ label: 'Nouveau dossier de routage avec cette piste', icon: 'fa-folder-plus', title: 'Pro Tools « Routing Folder » : un dossier qui est aussi un bus (fader, inserts) ; la piste y est routée.',
+    items.push({ label: 'Nouveau dossier de routage avec cette piste', icon: 'fa-folder-plus', title: '« Routing Folder » : un dossier qui est aussi un bus (fader, inserts) ; la piste y est routée.',
       onClick: () => applyTracks(ts => createFolder(ts, { id: uid('folder'), name: `${target.name} DOSSIER`, kind: 'routing', childIds: [id] })) });
-    items.push({ label: 'Nouveau dossier simple avec cette piste', icon: 'fa-folder', title: 'Pro Tools « Basic Folder » : range les pistes, sans toucher au son.',
+    items.push({ label: 'Nouveau dossier simple avec cette piste', icon: 'fa-folder', title: '« Basic Folder » : range les pistes, sans toucher au son.',
       onClick: () => applyTracks(ts => createFolder(ts, { id: uid('folder'), name: `${target.name} DOSSIER`, kind: 'basic', childIds: [id] })) });
   }
   const parent = target.parentFolderId ? tracks.find(t => t.id === target.parentFolderId) : undefined;
@@ -278,7 +278,7 @@ export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
           onClick={e => e.stopPropagation()}>
           <button type="button" data-testid={`activate-${track.id}`}
             onClick={(e) => { e.stopPropagation(); applyTracks(ts => (inheritedFrom ? setTracksInactive(ts, [inheritedFrom.id], false) : showAndActivate(ts, track.id)), `« ${inheritedFrom?.name || track.name} » est active`); }}
-            title="Pro Tools « Make Active » : la piste rejoue (elle ne coûtait rien tant qu'elle était inactive)"
+            title="« Make Active » : la piste rejoue (elle ne coûtait rien tant qu'elle était inactive)"
             className="nova-hit-tactile rounded-full border border-nv-line bg-nv-raised px-3 py-1 text-[10px] font-bold text-nv-ink shadow hover:border-nv-accent">
             <i className="fas fa-power-off mr-1 text-[9px] text-nv-muted" />
             {inheritedFrom ? `Dossier « ${inheritedFrom.name} » inactif · Activer` : 'Piste inactive · Activer'}
@@ -301,7 +301,7 @@ export const TrackStructureInline: React.FC<{ track: Track }> = ({ track }) => {
           {track.folder && (
             <button type="button" data-testid={`folder-toggle-${track.id}`}
               onClick={(e) => { e.stopPropagation(); applyTracks(ts => setFolderOpen(ts, track.id, track.folder!.isOpen === false)); }}
-              title={`${track.folder.kind === 'routing' ? 'Dossier de routage (Pro Tools « Routing Folder ») : un bus, ses pistes y sont routées' : 'Dossier simple (Pro Tools « Basic Folder ») : range les pistes'} · ${track.folder.isOpen === false ? 'déplier' : 'replier'}`}
+              title={`${track.folder.kind === 'routing' ? 'Dossier de routage (« Routing Folder ») : un bus, ses pistes y sont routées' : 'Dossier simple (« Basic Folder ») : range les pistes'} · ${track.folder.isOpen === false ? 'déplier' : 'replier'}`}
               aria-expanded={track.folder.isOpen !== false}
               className={`nova-hit-tactile h-5 rounded-md border px-1.5 text-[9px] font-black flex items-center gap-1 ${track.folder.kind === 'routing' ? 'border-amber-400/50 bg-amber-500/15 text-amber-300' : 'border-nv-line bg-nv-well text-nv-muted'}`}>
               <i className={`fas ${track.folder.isOpen === false ? 'fa-folder' : 'fa-folder-open'} text-[9px]`} />
@@ -310,7 +310,7 @@ export const TrackStructureInline: React.FC<{ track: Track }> = ({ track }) => {
             </button>
           )}
           {track.isVca && (
-            <span title="VCA Master (Pro Tools) : son fader pilote le volume des pistes membres, sans passer le son"
+            <span title="VCA Master : son fader pilote le volume des pistes membres, sans passer le son"
               className="h-5 rounded-md border border-violet-400/50 bg-violet-500/15 px-1.5 text-[9px] font-black text-violet-300 flex items-center">VCA · {members}</span>
           )}
     </span>
@@ -349,7 +349,7 @@ export const TrackIOSelectors: React.FC<{ track: Track; allTracks: Track[] }> = 
       {canListen && !track.isVca && track.id !== 'master' && (
         <div className="relative" data-testid={`input-select-${track.id}`}>
           <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-            <span className="text-[8px] font-black text-slate-500 mr-2" title="Entrée (Pro Tools) : le bus nommé que cette piste écoute">Entrée</span>
+            <span className="text-[8px] font-black text-slate-500 mr-2" title="Entrée : le bus nommé que cette piste écoute">Entrée</span>
             <span className="text-[8px] font-mono text-cyan-400 truncate flex-1">{inBus ? inBus.name : 'Aucune'}</span>
             <i className="fas fa-caret-down text-[8px] text-slate-600" />
           </div>
@@ -367,7 +367,7 @@ export const TrackIOSelectors: React.FC<{ track: Track; allTracks: Track[] }> = 
       )}
       <div className="relative" data-testid={`output-select-${track.id}`}>
         <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-          <span className="text-[8px] font-black text-slate-500 mr-2" title="Sortie (Pro Tools) : le master, un bus nommé ou une piste aux / bus">Sortie</span>
+          <span className="text-[8px] font-black text-slate-500 mr-2" title="Sortie : le master, un bus nommé ou une piste aux / bus">Sortie</span>
           <span className={`text-[8px] font-mono truncate flex-1 ${out.kind === 'bus' ? 'text-cyan-300' : 'text-amber-400'}`}>{outLabel}</span>
           <i className="fas fa-caret-down text-[8px] text-slate-600" />
         </div>
@@ -434,16 +434,16 @@ const SendRow: React.FC<{ track: Track; all: Track[]; slot: number; send: TrackS
           <span className="w-12 text-right text-[9px] tabular-nums text-slate-400">{gainToDbText(send.level)}</span>
           <input type="range" min={-1} max={1} step={0.01} value={send.pan ?? 0}
             aria-label={`Pan de l'envoi ${letter}`}
-            title={send.pan === undefined ? 'Pan de l’envoi : suit le pan de la piste (Pro Tools « FMP »). Bouge-le pour lui donner son propre pan ; double-clic = suivre la piste.' : `Pan de l’envoi : ${panToText(send.pan)} (double-clic : suivre le pan de la piste)`}
+            title={send.pan === undefined ? 'Pan de l’envoi : suit le pan de la piste (« FMP »). Bouge-le pour lui donner son propre pan ; double-clic = suivre la piste.' : `Pan de l’envoi : ${panToText(send.pan)} (double-clic : suivre le pan de la piste)`}
             onChange={(e) => set({ pan: Number(e.target.value) })}
             onDoubleClick={() => send && updateSends(track.id, ss => ss.map(s => { if (s.id !== send.id) return s; const o = { ...s }; delete o.pan; return o; }))}
             className={`w-12 ${send.pan === undefined ? 'opacity-50' : ''} accent-amber-400`} />
           <span className="w-8 text-[9px] text-slate-400">{send.pan === undefined ? 'piste' : panToText(send.pan)}</span>
           <button type="button" onClick={() => set({ isMuted: !send.isMuted })} aria-pressed={!!send.isMuted} aria-label={`Couper l'envoi ${letter}`}
-            title="Mute de l’envoi (Pro Tools) : coupé, mais toujours routé"
+            title="Mute de l’envoi : coupé, mais toujours routé"
             className={`nova-hit-tactile h-6 w-6 rounded text-[9px] font-black ${send.isMuted ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'}`}>M</button>
           <button type="button" onClick={() => set({ preFader: !send.preFader })} aria-pressed={!!send.preFader} aria-label={`Envoi ${letter} pré-fader`}
-            title="PRE (Pro Tools) : l’envoi part avant le fader de la piste"
+            title="PRE : l’envoi part avant le fader de la piste"
             className={`nova-hit-tactile h-6 px-1 rounded text-[8px] font-black ${send.preFader ? 'bg-amber-400 text-black' : 'bg-white/10 text-slate-400'}`}>PRE</button>
         </>
       )}
@@ -473,7 +473,7 @@ export const SendSlotsPopover: React.FC<{ track: Track; all: Track[]; anchor: DO
         <p className="text-[11px] font-bold text-nv-ink">Envois a à j · {track.name}</p>
         <button type="button" onClick={onClose} aria-label="Fermer" className="nova-hit-tactile h-6 w-6 rounded text-nv-muted hover:text-nv-ink"><i className="fas fa-times text-[10px]" /></button>
       </div>
-      <p className="mb-1.5 text-[10px] text-nv-muted">Comme Pro Tools : 10 envois par piste, chacun avec son niveau, son pan, son mute et pré / post-fader.</p>
+      <p className="mb-1.5 text-[10px] text-nv-muted">Comme dans les studios pro : 10 envois par piste, chacun avec son niveau, son pan, son mute et pré / post-fader.</p>
       <div className="flex flex-col gap-1">
         {slots.map((s, i) => <SendRow key={i} track={live} all={all} slot={i} send={s} />)}
       </div>
@@ -512,7 +512,7 @@ export const SendViewStrip: React.FC<{ track: Track; all: Track[]; slot: number 
               onDoubleClick={() => updateSends(track.id, ss => ss.map(s => { if (s.id !== send.id) return s; const o = { ...s }; delete o.pan; return o; }))}
               title="Pan de l'envoi (double-clic : suivre le pan de la piste)" className={`min-w-0 flex-1 accent-amber-400 ${send.pan === undefined ? 'opacity-50' : ''}`} />
             <span className="w-8 shrink-0 text-[9px] text-slate-400">{send.pan === undefined ? 'piste' : panToText(send.pan)}</span>
-            <button type="button" onClick={() => set({ isMuted: !send.isMuted })} aria-pressed={!!send.isMuted} aria-label={`Couper l'envoi ${letter}`} title="Mute de l'envoi (Pro Tools)"
+            <button type="button" onClick={() => set({ isMuted: !send.isMuted })} aria-pressed={!!send.isMuted} aria-label={`Couper l'envoi ${letter}`} title="Mute de l'envoi"
               className={`nova-hit-tactile h-6 w-6 shrink-0 rounded text-[9px] font-black ${send.isMuted ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'}`}>M</button>
             <button type="button" onClick={() => set({ preFader: !send.preFader })} aria-pressed={!!send.preFader} aria-label={`Envoi ${letter} pré-fader`} title="PRE : avant le fader"
               className={`nova-hit-tactile h-6 px-1 shrink-0 rounded text-[8px] font-black ${send.preFader ? 'bg-amber-400 text-black' : 'bg-white/10 text-slate-400'}`}>PRE</button>
@@ -525,7 +525,7 @@ export const SendViewStrip: React.FC<{ track: Track; all: Track[]; slot: number 
 
 /** Choix de la Send View dans la console : vue normale ou un envoi a-j en grand. */
 export const SendViewPicker: React.FC<{ slot: number | null }> = ({ slot }) => (
-  <label className="flex flex-col items-center gap-1" title="Send View (Pro Tools) : affiche un envoi (a à j) en grand dans chaque tranche">
+  <label className="flex flex-col items-center gap-1" title="Send View : affiche un envoi (a à j) en grand dans chaque tranche">
     <span className="text-[10px] font-bold text-cyan-300 whitespace-nowrap">Envois</span>
     <select aria-label="Envoi affiché en grand (Send View)" data-testid="send-view-picker" value={slot === null ? '' : String(slot)}
       onChange={(e) => structureBus.emit({ kind: 'sendView', slot: e.target.value === '' ? null : Number(e.target.value) })}
@@ -556,7 +556,7 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
   return (
     <div data-strip-id={vca.id} data-testid={`vca-strip-${vca.id}`}
       className={`relative w-36 shrink-0 h-full border-r border-white/5 bg-violet-500/[0.06] p-3 flex flex-col gap-2 ${vca.isInactive ? 'opacity-50 grayscale' : ''}`}>
-      <div className="text-[9px] font-black uppercase tracking-wide text-violet-300" title="VCA Master (Pro Tools) : pilote le volume des membres, sans passer le son">VCA</div>
+      <div className="text-[9px] font-black uppercase tracking-wide text-violet-300" title="VCA Master : pilote le volume des membres, sans passer le son">VCA</div>
       <button type="button" onClick={(e) => setPick((e.currentTarget as HTMLElement).getBoundingClientRect())}
         className="rounded border border-violet-400/40 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-200 text-left" data-testid={`vca-members-${vca.id}`}>
         {members.length} membre{members.length > 1 ? 's' : ''}{vcaGroup ? ` · groupe ${vcaGroup.name}` : ''} ▾
@@ -585,7 +585,7 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
           items={[
             ...groups.map(g => {
               const on = vca.vcaGroupId === g.id;
-              return { label: `${on ? '✓ ' : ''}Groupe « ${g.name} » (${g.trackIds.length})`, title: 'Les pistes du groupe suivent ce VCA (Pro Tools : VCA du groupe)',
+              return { label: `${on ? '✓ ' : ''}Groupe « ${g.name} » (${g.trackIds.length})`, title: 'Les pistes du groupe suivent ce VCA (VCA du groupe)',
                 onClick: () => applyTracks(mapTrack(vca.id, x => { const o = { ...x }; if (on) delete o.vcaGroupId; else o.vcaGroupId = g.id; return o; }), on ? 'VCA détaché du groupe' : `VCA lié au groupe « ${g.name} »`) };
             }),
             ...(groups.length ? ['separator' as const] : []),
@@ -608,7 +608,7 @@ export const InactiveStripVeil: React.FC<{ track: Track; all: Track[] }> = ({ tr
     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-nv-bg/75 backdrop-grayscale" data-testid={`strip-inactive-${track.id}`}>
       <span className="text-[10px] font-bold text-nv-muted text-center px-2">{from ? `Dans le dossier inactif « ${from.name} »` : 'Piste inactive'}</span>
       <button type="button" onClick={() => applyTracks(ts => (from ? setTracksInactive(ts, [from.id], false) : setTracksInactive(ts, [track.id], false)))}
-        title="Pro Tools « Make Active »" className="nova-hit-tactile rounded-full border border-nv-line bg-nv-raised px-3 py-1.5 text-[11px] font-bold text-nv-ink hover:border-nv-accent">Activer</button>
+        title="« Make Active »" className="nova-hit-tactile rounded-full border border-nv-line bg-nv-raised px-3 py-1.5 text-[11px] font-bold text-nv-ink hover:border-nv-accent">Activer</button>
     </div>
   );
 };
@@ -624,17 +624,17 @@ export const MixerStructureButtons: React.FC<{ tracks: Track[] }> = ({ tracks })
   return (
     <>
       <button type="button" data-testid="mixer-structure-add" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())}
-        className="w-10 h-10 rounded-xl border border-dashed border-violet-500/30 text-violet-300 hover:bg-violet-500/10 flex items-center justify-center" title="Ajouter un VCA ou un dossier (Pro Tools)" aria-label="Ajouter un VCA ou un dossier">
+        className="w-10 h-10 rounded-xl border border-dashed border-violet-500/30 text-violet-300 hover:bg-violet-500/10 flex items-center justify-center" title="Ajouter un VCA ou un dossier" aria-label="Ajouter un VCA ou un dossier">
         <i className="fas fa-folder-plus text-[11px]" />
       </button>
       <span className="text-[10px] font-bold text-violet-300 whitespace-nowrap">VCA · Dossier</span>
       <button type="button" data-testid="mixer-open-tracks" onClick={() => structureBus.emit({ kind: 'panel', panel: 'tracks' })}
-        className="w-10 h-10 rounded-xl border border-dashed border-white/20 text-slate-300 hover:bg-white/10 flex items-center justify-center" title="Liste des pistes (Pro Tools) : afficher / masquer, activer, dossiers" aria-label="Liste des pistes">
+        className="w-10 h-10 rounded-xl border border-dashed border-white/20 text-slate-300 hover:bg-white/10 flex items-center justify-center" title="Liste des pistes : afficher / masquer, activer, dossiers" aria-label="Liste des pistes">
         <i className="fas fa-list text-[11px]" />
       </button>
       <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">Pistes</span>
       <button type="button" data-testid="mixer-open-buses" onClick={() => structureBus.emit({ kind: 'panel', panel: 'buses' })}
-        className="w-10 h-10 rounded-xl border border-dashed border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 flex items-center justify-center" title="Bus : une piste de regroupement où plusieurs pistes se mélangent (toutes les voix, par exemple) pour les régler ensemble. Ici : créer, renommer, voir qui envoie où (I/O Setup de Pro Tools)." aria-label="Bus nommés">
+        className="w-10 h-10 rounded-xl border border-dashed border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 flex items-center justify-center" title="Bus : une piste de regroupement où plusieurs pistes se mélangent (toutes les voix, par exemple) pour les régler ensemble. Ici : créer, renommer, voir qui envoie où (I/O Setup)." aria-label="Bus nommés">
         <i className="fas fa-project-diagram text-[11px]" />
       </button>
       <span className="text-[10px] font-bold text-cyan-300 whitespace-nowrap">Bus</span>

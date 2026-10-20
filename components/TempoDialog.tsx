@@ -102,7 +102,7 @@ const TempoDialog: React.FC<Props> = ({ open, onClose, bpm, timeSignature, event
               <button ref={tapRef} type="button" data-testid="tempo-tap"
                 onPointerDown={e => { e.preventDefault(); doTap(); }}
                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doTap(); } }}
-                title="Tape au rythme de la prod (4 fois ou plus). Comme le tap tempo de Pro Tools (T), de Logic, d'Ableton et de FL."
+                title="Tape au rythme de la prod (4 fois ou plus). Comme le tap tempo des studios pro (T), de Logic, d'Ableton et de FL."
                 className="flex-1 min-h-16 rounded-2xl border-2 border-dashed border-nv-accent/60 bg-cyan-500/10 text-nv-accent font-black text-[15px] select-none touch-manipulation active:scale-[0.98]">
                 TAP {tapped ? <span className="ml-2 font-mono">{tapped}</span> : null}
                 <span className="block text-[11px] font-bold text-nv-muted">{tapCount === 0 ? 'Tape ici (ou T) au rythme' : tapCount < 4 ? 'Continue…' : 'Encore pour affiner'}</span>
@@ -166,7 +166,7 @@ const TempoDialog: React.FC<Props> = ({ open, onClose, bpm, timeSignature, event
                 onChange({ tempoEvents: upsertTempoEvent(events, { bar: newBar - 1, bpm: Number.isFinite(v) && v >= 20 ? v : undefined, numerator: mt.numerator, denominator: mt.denominator }) });
                 onTempoLane(true);
               }}
-              title="Pose le changement au début de la mesure (Pro Tools : Tempo / Meter Change)"
+              title="Pose le changement au début de la mesure (Tempo / Meter Change)"
               className="w-full min-h-11 rounded-xl bg-cyan-500 text-black text-[13px] font-black">
               Poser le changement à la mesure {newBar}
             </button>

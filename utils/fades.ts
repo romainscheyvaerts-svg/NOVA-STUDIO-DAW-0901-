@@ -20,10 +20,10 @@ export const FADE_CURVES: CrossfadeCurve[] = ['LINEAR', 'EQUAL_POWER', 'EXPONENT
 
 /** Libellés (tutoiement) et équivalent Pro Tools de chaque courbe. */
 export const FADE_CURVE_INFO: Record<CrossfadeCurve, { label: string; short: string; hint: string }> = {
-  LINEAR: { label: 'Linéaire', short: 'Lin', hint: 'Gain égal (« Equal Gain » dans Pro Tools) : idéal entre deux morceaux du même son.' },
-  EQUAL_POWER: { label: 'Puissance égale', short: 'PE', hint: 'Puissance égale (« Equal Power » dans Pro Tools) : pas de creux de niveau entre deux prises différentes.' },
+  LINEAR: { label: 'Linéaire', short: 'Lin', hint: 'Gain égal (« Equal Gain ») : idéal entre deux morceaux du même son.' },
+  EQUAL_POWER: { label: 'Puissance égale', short: 'PE', hint: 'Puissance égale (« Equal Power ») : pas de creux de niveau entre deux prises différentes.' },
   EXPONENTIAL: { label: 'Exponentielle', short: 'Exp', hint: 'Démarre doucement puis monte vite : naturel pour une fin de phrase ou une queue de reverb.' },
-  S_CURVE: { label: 'En S', short: 'S', hint: 'Courbe en S (« S-Curve » dans Pro Tools) : entrée et sortie très douces.' },
+  S_CURVE: { label: 'En S', short: 'S', hint: 'Courbe en S (« S-Curve ») : entrée et sortie très douces.' },
 };
 
 /** Durée d'un crossfade posé par défaut (Smart Tool, Ctrl+F sur une jonction). */

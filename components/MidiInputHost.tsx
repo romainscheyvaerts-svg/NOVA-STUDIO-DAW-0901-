@@ -196,7 +196,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
             <input type="checkbox" className="w-5 h-5 accent-cyan-400" checked={kbOn} onChange={e => computerKeyboardStore.setOn(e.target.checked)} />
             <span><b>Clavier de l’ordinateur</b> <span className="text-nv-muted">(Ctrl+Maj+K) : les lettres jouent sur la piste {target ? `« ${target.name} »` : 'MIDI sélectionnée'}, sans ouvrir le piano roll (Computer MIDI Keyboard de Live, Typing keyboard de FL)</span></span>
           </label>
-          <label className="flex items-center gap-2 text-[12px] min-h-10" title="Pro Tools : MIDI Thru. La piste armée (sinon la piste MIDI sélectionnée) joue ce que tu joues, tout de suite.">
+          <label className="flex items-center gap-2 text-[12px] min-h-10" title="MIDI Thru. La piste armée (sinon la piste MIDI sélectionnée) joue ce que tu joues, tout de suite.">
             <input type="checkbox" className="w-5 h-5 accent-cyan-400" checked={prefs.thru} onChange={e => midiInput.setPrefs({ thru: e.target.checked })} />
             <span><b>Entendre ce que je joue</b> <span className="text-nv-muted">(Thru : la piste armée joue tes notes en direct)</span></span>
           </label>
@@ -214,12 +214,12 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
           {prefs.mode === 'loop' && (
             <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="En boucle">
               <button type="button" role="radio" aria-checked={prefs.loopStyle === 'takes'} data-nova-loop-style="takes" onClick={() => midiInput.setPrefs({ loopStyle: 'takes' })} className={chip(prefs.loopStyle === 'takes')}
-                title="Chaque tour devient une prise ; la dernière complète joue, les autres restent muettes en dessous pour comparer (Pro Tools : Loop Record)">Une prise par tour</button>
+                title="Chaque tour devient une prise ; la dernière complète joue, les autres restent muettes en dessous pour comparer (Loop Record)">Une prise par tour</button>
               <button type="button" role="radio" aria-checked={prefs.loopStyle === 'merge'} data-nova-loop-style="merge" onClick={() => midiInput.setPrefs({ loopStyle: 'merge' })} className={chip(prefs.loopStyle === 'merge')}
                 title="Chaque tour s’ajoute au précédent : kick au 1er tour, snare au 2e, charley au 3e (FL : Overdub en boucle, Live : MIDI Overdub)">Tout fusionner</button>
             </div>
           )}
-          <label className="flex items-center gap-2 text-[12px] min-h-10" title="Pro Tools : Input Quantize. Les débuts de notes vont sur la grille pendant l’enregistrement.">
+          <label className="flex items-center gap-2 text-[12px] min-h-10" title="Input Quantize. Les débuts de notes vont sur la grille pendant l’enregistrement.">
             <input type="checkbox" className="w-5 h-5 accent-cyan-400" checked={prefs.quantizeOnInput} onChange={e => midiInput.setPrefs({ quantizeOnInput: e.target.checked })} />
             <span><b>Quantifier à l’entrée</b></span>
           </label>
@@ -235,7 +235,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
               </label>
             </div>
           )}
-          <label className="flex items-center gap-2 text-[12px] min-h-10" title="Pro Tools : MIDI Input Offset. Si tes notes tombent toujours un peu en retard, avance-les de quelques millisecondes.">
+          <label className="flex items-center gap-2 text-[12px] min-h-10" title="MIDI Input Offset. Si tes notes tombent toujours un peu en retard, avance-les de quelques millisecondes.">
             <span className="shrink-0"><b>Décalage</b></span>
             <input type="range" min={-50} max={50} step={1} value={prefs.offsetMs} aria-label="Décalage MIDI en millisecondes" onChange={e => midiInput.setPrefs({ offsetMs: Number(e.target.value) })} className="flex-1" />
             <span className="w-24 text-right">{prefs.offsetMs === 0 ? '0 ms' : `${prefs.offsetMs > 0 ? 'avance ' : 'recule '}${Math.abs(prefs.offsetMs)} ms`}</span>
@@ -285,7 +285,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
         </section>
 
         <button type="button" onClick={() => midiInput.panic()} className="w-full min-h-10 rounded-xl bg-white/5 border border-white/10 text-[12px] font-bold"
-          title="Pro Tools : MIDI Panic (Ctrl+Maj+.) : arrête toutes les notes qui restent coincées">Couper toutes les notes (panique)</button>
+          title="MIDI Panic (Ctrl+Maj+.) : arrête toutes les notes qui restent coincées">Couper toutes les notes (panique)</button>
       </div>
     </div>,
     document.body,

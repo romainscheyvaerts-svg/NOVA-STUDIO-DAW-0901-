@@ -250,7 +250,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                             </fieldset>}
                             {info.inactive > 0 && <label className="flex items-start gap-3 min-h-[36px] text-[13px]">
                               <input type="checkbox" checked={enableAll} onChange={e => setEnableAll(e.target.checked)} className="mt-0.5 w-5 h-5 accent-cyan-400" data-testid="tpl-enable-all" />
-                              <span>Activer tous les effets inactifs{info.inactive ? ` (${plural(info.inactive, 'effet inactif ou en bypass', 'effets inactifs ou en bypass')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine (Pro Tools) mais qui servent au mix : on garde la trace de ce qui était inactif.</span></span>
+                              <span>Activer tous les effets inactifs{info.inactive ? ` (${plural(info.inactive, 'effet inactif ou en bypass', 'effets inactifs ou en bypass')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine mais qui servent au mix : on garde la trace de ce qui était inactif.</span></span>
                             </label>}
                             <ProjectRatePicker value={rateFor[t.id] ?? templateRate(t)} onChange={r => setRateFor(m => ({ ...m, [t.id]: r }))}
                               tone="dark" label="Fréquence du projet" testId="tpl-rate" />

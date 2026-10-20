@@ -62,8 +62,8 @@ const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo,
     >
       <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
         <i className="fas fa-map-marker-alt text-cyan-400 text-[12px]" />
-        <h2 className="mr-auto text-[13px] font-black text-white" title="Pro Tools : Memory Locations (Ctrl+5)">Repères</h2>
-        <button type="button" onClick={onAdd} title="Nouveau repère à la tête de lecture (Pro Tools : Entrée du pavé ; ici aussi K)"
+        <h2 className="mr-auto text-[13px] font-black text-white" title="Memory Locations (Ctrl+5)">Repères</h2>
+        <button type="button" onClick={onAdd} title="Nouveau repère à la tête de lecture (Entrée du pavé ; ici aussi K)"
           className="nova-hit-tactile rounded-lg bg-cyan-500/15 px-2.5 py-1.5 text-[11px] font-bold text-cyan-300 hover:bg-cyan-500/25">
           <i className="fas fa-plus mr-1 text-[9px]" />Nouveau
         </button>

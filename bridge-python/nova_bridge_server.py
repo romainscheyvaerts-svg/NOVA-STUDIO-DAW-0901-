@@ -1426,7 +1426,7 @@ def _protools_server_methods():
             t = time.time()
             path, renamed = await self.loop.run_in_executor(
                 pool(self), protools_files.write_take, str(meta.get("folder") or ""), str(meta.get("name") or ""), data)
-            logger.info(f"🎚️ Pro Tools : {path.name} écrit en {1000 * (time.time() - t):.0f} ms{' (renommé : original ouvert)' if renamed else ''}")
+            logger.info(f"🎚️ Pont studio : {path.name} écrit en {1000 * (time.time() - t):.0f} ms{' (renommé : original ouvert)' if renamed else ''}")
             await self._send(ws, {**reply, "success": True, "path": str(path), "renamed": renamed})
         except Exception as e:
             logger.error(f"PT_WRITE_FILE : {e}")

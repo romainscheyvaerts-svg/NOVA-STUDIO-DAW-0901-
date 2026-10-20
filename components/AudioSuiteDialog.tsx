@@ -198,8 +198,8 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">AudioSuite</h2>
-            <p className="text-[11px] text-nv-muted" title="Pro Tools : AudioSuite · Logic : Traitement de fichier · Ableton : effet puis Consolidate · FL : Edison">
-              Traite {resolved.length} clip{resolved.length > 1 ? 's' : ''}{range ? ' de la plage' : ''} avec un effet, comme l'AudioSuite de Pro Tools. L'original est gardé.
+            <p className="text-[11px] text-nv-muted" title="AudioSuite · Logic : Traitement de fichier · Ableton : effet puis Consolidate · FL : Edison">
+              Traite {resolved.length} clip{resolved.length > 1 ? 's' : ''}{range ? ' de la plage' : ''} avec un effet, comme le traitement hors ligne des studios. L'original est gardé.
             </p>
           </div>
           <button type="button" disabled={!!busy} onClick={onClose} aria-label="Fermer" className="h-10 w-10 shrink-0 rounded-full text-nv-muted hover:bg-nv-accent/10"><i className="fas fa-times" /></button>
@@ -235,7 +235,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
           </select>
         )}
 
-        <label className="flex items-center justify-between gap-2 text-[12px]" title="Pro Tools : « Handle Length » — du son avant / après le clip passe dans l'effet, pour pouvoir rallonger le clip ensuite">
+        <label className="flex items-center justify-between gap-2 text-[12px]" title="« Handle Length » — du son avant / après le clip passe dans l'effet, pour pouvoir rallonger le clip ensuite">
           <span>Poignées (avant / après le clip)</span>
           <select value={handle} onChange={e => setHandle(Number(e.target.value))} aria-label="Poignées" className="rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[12px] text-nv-ink">
             {[0, 0.5, 1, 2, 5].map(h => <option key={h} value={h}>{h} s</option>)}
@@ -252,7 +252,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
             <i className="fas fa-wand-magic-sparkles mr-2" />Traiter
           </button>
           {revertable.length > 0 && (
-            <button type="button" disabled={!!busy} onClick={revert} data-testid="audiosuite-revert" title="Remet la prise d'origine, à la même place (Pro Tools : revenir au clip d'origine dans la liste des clips)"
+            <button type="button" disabled={!!busy} onClick={revert} data-testid="audiosuite-revert" title="Remet la prise d'origine, à la même place (revenir au clip d'origine dans la liste des clips)"
               className="min-h-[40px] [@media(pointer:coarse)]:min-h-[48px] rounded-xl border border-nv-line px-4 text-[13px] font-bold hover:bg-nv-accent/10">
               <i className="fas fa-rotate-left mr-2" />Revenir à l'original
             </button>

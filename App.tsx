@@ -3019,7 +3019,7 @@ function Studio() {
       const res = applyLoopTake(tr.clips, r.take, { ...base, style, mergeMode: prefs.mode === 'replace' ? 'replace' : 'merge' });
       clips = res.clips;
       msg = res.takes > 1
-        ? `🔁 ${res.takes} tours enregistrés sur « ${tr.name} » : une prise par tour (la dernière complète joue, les autres sont muettes en dessous, comme Loop Record de Pro Tools).`
+        ? `🔁 ${res.takes} tours enregistrés sur « ${tr.name} » : une prise par tour (la dernière complète joue, les autres sont muettes en dessous, comme le Loop Record des studios).`
         : `🔁 ${notes} note${notes > 1 ? 's' : ''} enregistrée${notes > 1 ? 's' : ''} en boucle sur « ${tr.name} »${r.take.passes.length > 1 ? ` (${r.take.passes.length} tours fusionnés)` : ''}.`;
     } else {
       const pass = r.take.passes[0];
@@ -3322,7 +3322,7 @@ function Studio() {
         const track = draft.tracks.find(t => t.id === tid);
         if (track) track.plugins = withAraInsertFirst(track.plugins, newPlugin);
       }));
-      setAiNotification(`🎛️ ${metadata?.name || 'Plugin ARA'} en insert : tous les clips de la piste lui sont confiés (ARA), comme dans Pro Tools. Ses retouches s'entendent en lecture.`);
+      setAiNotification(`🎛️ ${metadata?.name || 'Plugin ARA'} en insert : tous les clips de la piste lui sont confiés (ARA), comme dans les studios pro. Ses retouches s'entendent en lecture.`);
       setTimeout(() => setAiNotification(null), 5000);
       await ensureAudioEngine();
       setTimeout(() => openAraDock(tid, newPlugin.id), 50);
@@ -7744,7 +7744,7 @@ function Studio() {
       const fromInput = mixSource().kind === 'input';
       const stream = await mixSource().stream(() => audioEngine.getCollabMixStream());
       if (!stream) {
-        setAiNotification(fromInput ? `🎧 ${mixSource().view?.error || "L'entrée choisie ne s'ouvre pas : choisis-en une autre dans Collaboration › Pont Pro Tools."}` : "🎧 Le moteur audio n'est pas prêt : lance la lecture une fois, puis réessaie.");
+        setAiNotification(fromInput ? `🎧 ${mixSource().view?.error || "L'entrée choisie ne s'ouvre pas : choisis-en une autre dans Collaboration › Pont studio."}` : "🎧 Le moteur audio n'est pas prêt : lance la lecture une fois, puis réessaie.");
         return;
       }
       rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
@@ -10334,8 +10334,8 @@ function Studio() {
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
-      a('Fichier', 'pal.aafImport', 'Importer une séance Pro Tools (AAF)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf pro tools protools séance session importer ingé' }),
-      a('Fichier', 'pal.aafExport', 'Exporter la séance pour Pro Tools (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf pro tools protools séance session exporter ingé bwf' }),
+      a('Fichier', 'pal.aafImport', 'Importer une séance AAF (logiciel de studio)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf pro tools protools séance session importer ingé' }),
+      a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf pro tools protools séance session exporter ingé bwf' }),
       a('Fichier', 'pal.distribution', '🚀 Prêt pour Spotify / Apple / TikTok ? (contrôle avant distribution)', () => openDistribution(), { keywords: 'distribution spotify apple deezer tiktok distrokid tunecore livraison sortir sortie release paquet' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
       a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
@@ -10408,7 +10408,7 @@ function Studio() {
       a('Aide', 'pal.howto', '❓ Comment faire ? Les démarches pas à pas', () => howTo.open(), { keywords: 'aide comment faire tuto tutoriel guide parcours démarche étapes help how to montre-moi' }),
       ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
-      a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Pro Tools, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
+      a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Studio pro, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
     ];
   };
@@ -10611,22 +10611,22 @@ function Studio() {
                     Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
                 {!simpleMode && <>
                 <button type="button" data-testid="dock-track-list" {...dockItem(3)} aria-label="Liste des pistes" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
-                  title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
+                  title="Liste des pistes (« Track List ») : afficher / masquer, activer, dossiers, VCA"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-list mr-1.5 text-[10px]" /><span data-dock-label>Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}</span>
                 </button>
                 <button type="button" data-testid="dock-groups" {...dockItem(2)} aria-label="Groupes" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
-                  title="Groupes (Pro Tools « Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
+                  title="Groupes (« Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-object-group mr-1.5 text-[10px]" /><span data-dock-label>Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}</span>
                 </button>
                 <button type="button" data-testid="dock-time" {...dockItem(1)} aria-label="Insérer ou supprimer du temps" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
-                  title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
+                  title="Insérer / supprimer du temps (Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
                   className="h-10 rounded-full border border-nv-line/15 bg-nv-raised px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
                   <i data-dock-icon className="fas fa-arrows-alt-h mr-1.5 text-[10px]" /><span data-dock-label>Temps</span>
                 </button>
                 <button type="button" data-testid="dock-session" {...dockItem(1)} aria-label="Session : notes, clips, arrangements, versions" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
-                  title="Session : notes et commentaires (Pro Tools : Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
+                  title="Session : notes et commentaires (Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-folder-open text-[10px] mr-1.5" aria-hidden="true" /><span data-dock-label>Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span>
                 </button>
@@ -11267,7 +11267,7 @@ function Studio() {
           </PanelBoundary>
         ) : null}
         proTools={collab?.role === 'engineer' ? (
-          <PanelBoundary name="le pont Pro Tools" compact>
+          <PanelBoundary name="le pont studio" compact>
             <ProToolsPanel existing={() => stateRef.current.tracks
               .filter(t => t.collabOwner === 'artist' || (t.clips || []).some(k => k.takeNumber))
               .map(t => takesBatchOf(t.id, t.name, t.collabOwnerName || 'Artiste', t.clips || [], stateRef.current.name))} />

@@ -35,17 +35,17 @@ export interface AutomationModeInfo {
 
 export const AUTOMATION_MODES: AutomationModeInfo[] = [
   { id: 'off', label: 'Off', short: 'OFF', fr: 'Coupée', color: '#64748b',
-    title: "Off : l'automation de la piste n'est ni lue ni écrite (Pro Tools : Off)." },
+    title: "Off : l'automation de la piste n'est ni lue ni écrite." },
   { id: 'read', label: 'Read', short: 'READ', fr: 'Lecture', color: '#22c55e',
-    title: "Read : la piste rejoue son automation ; bouger un fader ne l'écrit pas (Pro Tools : Read)." },
+    title: "Read : la piste rejoue son automation ; bouger un fader ne l'écrit pas." },
   { id: 'touch', label: 'Touch', short: 'TCH', fr: 'Au toucher', color: '#eab308',
-    title: "Touch : pendant la lecture, écrit tant que tu tiens le fader ; au relâchement, il revient à la courbe (Pro Tools : Touch)." },
+    title: "Touch : pendant la lecture, écrit tant que tu tiens le fader ; au relâchement, il revient à la courbe." },
   { id: 'latch', label: 'Latch', short: 'LTCH', fr: 'Maintien', color: '#eab308',
-    title: "Latch : écrit dès que tu touches le fader et garde la dernière valeur jusqu'à l'arrêt (Pro Tools : Latch)." },
+    title: "Latch : écrit dès que tu touches le fader et garde la dernière valeur jusqu'à l'arrêt." },
   { id: 'write', label: 'Write', short: 'WRT', fr: 'Écriture', color: '#ef4444',
-    title: "Write : écrase l'automation de tout le passage lu, du départ à l'arrêt ; la piste repasse ensuite en Touch (Pro Tools : Write)." },
+    title: "Write : écrase l'automation de tout le passage lu, du départ à l'arrêt ; la piste repasse ensuite en Touch." },
   { id: 'trim', label: 'Trim', short: 'TRIM', fr: 'Ajustement', color: '#f97316',
-    title: "Trim : décale la courbe existante (en dB pour le volume) tant que tu tiens le fader (Pro Tools : Trim)." },
+    title: "Trim : décale la courbe existante (en dB pour le volume) tant que tu tiens le fader." },
 ];
 
 export const DEFAULT_AUTOMATION_MODE: AutomationMode = 'read';

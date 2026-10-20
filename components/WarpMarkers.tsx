@@ -246,7 +246,7 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">Marqueurs de warp · « {clip.elastic?.sourceName || clip.name} »</h2>
-            <p className="text-[11px] text-nv-muted" title="Pro Tools : Elastic Audio (vue Warp, Quantize) · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch">
+            <p className="text-[11px] text-nv-muted" title="Elastic Audio (vue Warp, Quantize) · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch">
               Tire une attaque (trait orange) ou un marqueur (triangle) pour la caler : seul le son entre les marqueurs voisins s'étire, la hauteur ne bouge pas.
               <span className="[@media(pointer:coarse)]:hidden"> Double-clic : poser un marqueur · clic droit ou Suppr : le retirer · Maj : sans grille.</span>
               <span className="hidden [@media(pointer:coarse)]:inline"> Appui long sur un marqueur : le retirer.</span>
@@ -267,10 +267,10 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
 
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={quantize} disabled={!onsets.length} className={btn} data-testid="warp-quantize"
-            title="Cale toutes les attaques sur la grille du projet, sans changer la hauteur (Pro Tools : Elastic Audio Quantize · Logic : Flex Time + Quantize · Live : Quantize des warp markers)">
+            title="Cale toutes les attaques sur la grille du projet, sans changer la hauteur (Elastic Audio Quantize · Logic : Flex Time + Quantize · Live : Quantize des warp markers)">
             <i className="fas fa-magnet mr-1.5" />Quantifier l'audio
           </button>
-          <label className="flex items-center gap-1 text-[12px]" title="Grille du calage (Pro Tools : valeur du Quantize · Logic : Q) : 1/16 pour les charleys, 1/8 pour un flow, triolets pour les flows en triolets">
+          <label className="flex items-center gap-1 text-[12px]" title="Grille du calage (valeur du Quantize · Logic : Q) : 1/16 pour les charleys, 1/8 pour un flow, triolets pour les flows en triolets">
             Grille
             <select value={qGrid} onChange={e => setQGrid(e.target.value)} aria-label="Grille du calage" data-testid="warp-grid" className="rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[12px] text-nv-ink">
               {GRID_OPTIONS.filter(o => o.kind !== 'temps').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

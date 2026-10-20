@@ -2,7 +2,7 @@
   "format": "nova-template-spec",
   "version": 1,
   "name": "Voix lead · base Romain",
-  "description": "Template de base pour tests : voix lead (Auto-Tune Pro, Pro-Q 4, Pro-C 3 2:1, Pro-DS) → bus voix (Tube-Tech CL 1B 2:1, opto) ; envois Reverb courte (VerbSuite Classics), Reverb longue (ValhallaVintageVerb), Écho 1/4 (EchoBoy) ; master (Pro-Q 4, Pro-L 2 désactivé). Exemple réaliste en attendant le relevé de la vraie session Pro Tools.",
+  "description": "Template de base pour tests : voix lead (Auto-Tune Pro, Pro-Q 4, Pro-C 3 2:1, Pro-DS) → bus voix (Tube-Tech CL 1B 2:1, opto) ; envois Reverb courte (VerbSuite Classics), Reverb longue (ValhallaVintageVerb), Écho 1/4 (EchoBoy) ; master (Pro-Q 4, Pro-L 2 désactivé). Exemple réaliste en attendant le relevé de la vraie session.",
   "privateTo": "romain",
   "source": "Exemple écrit à la main (08/10/2026), règles de mix du studio",
   "bpm": 140,

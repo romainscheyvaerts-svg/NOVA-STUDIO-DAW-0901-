@@ -131,7 +131,7 @@ export const MeterMenu: React.FC<{ x: number; y: number; onClose: () => void }> 
       <div className="px-3 pt-2 pb-0.5 text-[9px] font-black uppercase text-slate-500">Point de mesure</div>
       {(['pre', 'post'] as const).map(m => (
         <button key={m} type="button" role="menuitemradio" aria-checked={mode === m} className={item}
-          title={m === 'pre' ? 'Mesure après les effets, avant le fader : le niveau qui entre dans la tranche (Pro Tools « Pre-Fader Metering »)' : 'Mesure après le fader et le pan : ce que la piste envoie au mix'}
+          title={m === 'pre' ? 'Mesure après les effets, avant le fader : le niveau qui entre dans la tranche (« Pre-Fader Metering »)' : 'Mesure après le fader et le pan : ce que la piste envoie au mix'}
           onClick={() => { meterBank.setTapMode(m); onClose(); }}>
           <i className={`fas fa-check text-[9px] ${mode === m ? 'text-cyan-400' : 'opacity-0'}`} />{m === 'pre' ? 'Pré-fader' : 'Post-fader'}
         </button>

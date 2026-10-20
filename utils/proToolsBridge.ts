@@ -118,10 +118,10 @@ export function inputVerdict(w: InputWindow): InputVerdict {
 export function inputVerdictMessage(v: InputVerdict, label: string): { text: string; warn: boolean } {
   switch (v) {
     case 'stereo': return { text: `Stéréo : l'artiste reçoit « ${label} » en gauche / droite.`, warn: false };
-    case 'mono': return { text: `Entrée mono : l'artiste entendra le même son des deux côtés. Choisis une entrée stéréo (le retour de la sortie de Pro Tools, ex. « CABLE Output » ou « Loopback 1-2 »).`, warn: true };
-    case 'gauche': return { text: 'Son seulement à GAUCHE : vérifie que la sortie de Pro Tools envoie bien ses deux canaux vers cette entrée.', warn: true };
-    case 'droite': return { text: 'Son seulement à DROITE : vérifie que la sortie de Pro Tools envoie bien ses deux canaux vers cette entrée.', warn: true };
-    case 'muette': return { text: `Aucun son sur « ${label} » depuis 2 s : lance la lecture dans Pro Tools et vérifie que sa sortie arrive bien sur cette entrée.`, warn: true };
+    case 'mono': return { text: `Entrée mono : l'artiste entendra le même son des deux côtés. Choisis une entrée stéréo (le retour de la sortie de ton logiciel de studio, ex. « CABLE Output » ou « Loopback 1-2 »).`, warn: true };
+    case 'gauche': return { text: 'Son seulement à GAUCHE : vérifie que la sortie de ton logiciel de studio envoie bien ses deux canaux vers cette entrée.', warn: true };
+    case 'droite': return { text: 'Son seulement à DROITE : vérifie que la sortie de ton logiciel de studio envoie bien ses deux canaux vers cette entrée.', warn: true };
+    case 'muette': return { text: `Aucun son sur « ${label} » depuis 2 s : lance la lecture dans ton logiciel de studio et vérifie que sa sortie arrive bien sur cette entrée.`, warn: true };
     default: return { text: 'Écoute de l’entrée…', warn: false };
   }
 }

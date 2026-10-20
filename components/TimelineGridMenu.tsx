@@ -98,7 +98,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 
-        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500" title="Modes d'édition de Pro Tools (F1 à F4, ou Alt+1 à 4)">Mode d’édition</div>
+        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500" title="Modes d'édition (F1 à F4, ou Alt+1 à 4)">Mode d’édition</div>
         <div className="grid grid-cols-4 gap-0.5 px-1" role="radiogroup" aria-label="Mode d'édition">
           {EDIT_MODES.map(m => {
             const info = EDIT_MODE_INFO[m];
@@ -132,7 +132,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
             <i className="fas fa-search-minus w-4 text-center text-slate-500"></i>
             <span>Réinitialiser le zoom</span>
           </button>
-          <button onClick={() => { openNovaWindow('memory-locations'); onClose(); }} title="Liste des repères (Pro Tools : Memory Locations, Ctrl+5)" className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
+          <button onClick={() => { openNovaWindow('memory-locations'); onClose(); }} title="Liste des repères (Memory Locations, Ctrl+5)" className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
             <i className="fas fa-map-marker-alt w-4 text-center text-slate-500"></i>
             <span>Repères (Memory Locations)</span>
           </button>
@@ -143,10 +143,10 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
         </div>
 
         <div className="h-px bg-white/5 my-2 mx-2" />
-        <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest" title="Pro Tools : Track Height (Ctrl+↑ / Ctrl+↓)">Hauteur des pistes</div>
+        <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest" title="Track Height (Ctrl+↑ / Ctrl+↓)">Hauteur des pistes</div>
         <div className="grid grid-cols-5 gap-0.5 px-1 pb-1">
           {TRACK_HEIGHTS.map(h => (
-            <button key={h.id} title={`${h.label} (${h.px} px) · Pro Tools : ${h.pt}`} onClick={() => { runEditCommand('trackHeight', h.px); onClose(); }}
+            <button key={h.id} title={`${h.label} (${h.px} px) · ${h.pt}`} onClick={() => { runEditCommand('trackHeight', h.px); onClose(); }}
               className="rounded-lg px-1 py-1.5 [@media(pointer:coarse)]:py-2.5 text-[9px] font-bold text-slate-300 hover:bg-white/5">
               {h.short}
             </button>

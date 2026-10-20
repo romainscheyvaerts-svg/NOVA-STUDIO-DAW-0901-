@@ -15,7 +15,7 @@ import type { CountInPlan } from '../utils/countIn';
 export type MetronomeSound = MetronomeSettings['sound'];
 
 export const METRONOME_SOUNDS: { id: MetronomeSound; label: string; hint: string }[] = [
-  { id: 'CLICK', label: 'Clic', hint: 'Clic sinusoïdal court (Pro Tools Click II)' },
+  { id: 'CLICK', label: 'Clic', hint: 'Clic sinusoïdal court (façon studio)' },
   { id: 'WOODBLOCK', label: 'Woodblock', hint: 'Bloc de bois (Logic, Ableton « Wood »)' },
   { id: 'STICK', label: 'Baguette', hint: 'Baguettes / charley fermé, discret sous la voix' },
   { id: 'COWBELL', label: 'Cloche', hint: 'Cloche (cowbell), perce un mix chargé' },

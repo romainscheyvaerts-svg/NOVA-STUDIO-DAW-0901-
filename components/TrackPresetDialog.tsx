@@ -140,8 +140,8 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
         <div className="flex items-start justify-between gap-3 border-b border-nv-line p-4">
           <div className="min-w-0">
             <h2 className="text-[15px] font-black">Track Presets{track ? <span className="font-semibold text-nv-muted"> · {track.name}</span> : null}</h2>
-            <p className="text-[11px] text-nv-muted" title="Pro Tools 2020+ : Track Presets · Logic : Patches · Ableton : Rack enregistré · FL : état de piste du mixeur (.fst)">
-              Toute la chaîne d’une piste : effets dans l’ordre, envois, volume, pan, sortie. Comme les Track Presets de Pro Tools.
+            <p className="text-[11px] text-nv-muted" title="Track Presets · Logic : Patches · Ableton : Rack enregistré · FL : état de piste du mixeur (.fst)">
+              Toute la chaîne d’une piste : effets dans l’ordre, envois, volume, pan, sortie. Comme les Track Presets.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-10 w-10 shrink-0 rounded-full text-nv-muted hover:bg-nv-accent/10 hover:text-nv-ink"><i className="fas fa-times" /></button>
@@ -201,7 +201,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
                           className={`${btn} bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-wand-magic-sparkles mr-1" />Appliquer à {track.name}</button>
                       )}
                       <button type="button" disabled={busy} onClick={() => void createWith(p)} data-testid="track-preset-new"
-                        title="Crée une nouvelle piste avec cette chaîne (Pro Tools : New Track > Track Preset)"
+                        title="Crée une nouvelle piste avec cette chaîne (New Track > Track Preset)"
                         className={`${btn} border border-nv-line hover:bg-nv-accent/10`}><i className="fas fa-plus mr-1" />Nouvelle piste</button>
                       {!simple && (
                         <button type="button" disabled={busy} onClick={() => void act(async () => { const f = exportPresetFile(p); await saveBlob(f.blob, f.filename); setStatus({ kind: 'ok', text: `💾 ${f.filename} prêt.` }); })}
@@ -230,7 +230,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
         <div className="space-y-2 border-t border-nv-line p-4">
           {track && (saveName === null ? (
             <button type="button" disabled={busy} onClick={() => setSaveName(`${track.name} · chaîne`)} data-testid="track-preset-save"
-              title="Enregistre effets, envois, volume, pan et sortie de cette piste (Pro Tools : Save Track Preset)"
+              title="Enregistre effets, envois, volume, pan et sortie de cette piste (Save Track Preset)"
               className={`${btn} w-full border border-nv-line hover:bg-nv-accent/10`}><i className="fas fa-floppy-disk mr-1" />Enregistrer la chaîne de « {track.name} »</button>
           ) : (
             <form className="flex gap-1" onSubmit={e => { e.preventDefault(); void saveCurrent(); }}>

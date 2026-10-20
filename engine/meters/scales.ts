@@ -42,7 +42,7 @@ const k = (id: 'k20' | 'k14' | 'k12', ref: number): MeterScale => ({
 export const METER_SCALES: MeterScale[] = [
   {
     id: 'pt', label: 'Sample Peak', ballistics: 'peak',
-    hint: 'Échelle de Pro Tools (Sample Peak) : crête échantillon par canal, plus de place en haut de la course.',
+    hint: 'Échelle Sample Peak : crête échantillon par canal, plus de place en haut de la course.',
     floorDb: -60, topDb: 0, refDb: 0,
     curve: [[-60, 0], [-50, 0.06], [-40, 0.13], [-30, 0.25], [-24, 0.35], [-18, 0.48], [-12, 0.64], [-6, 0.82], [-3, 0.91], [0, 1]],
     marks: [0, -3, -6, -12, -18, -24, -30, -40, -60].map(d => ({ db: d, label: d === 0 ? '0' : String(-d) })),

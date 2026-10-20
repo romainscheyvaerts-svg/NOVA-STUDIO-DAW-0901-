@@ -61,14 +61,14 @@ export function sendTransferMenuItems(
   for (const t of dests) {
     items.push({
       label: `Copier vers « ${t.name} »`, icon: 'fa-copy',
-      title: 'Pro Tools : Alt+glisser l’envoi sur une autre tranche (niveau, pré / post, pan, mute)',
+      title: 'Alt+glisser l’envoi sur une autre tranche (niveau, pré / post, pan, mute)',
       onClick: () => apply(ts => transferSend(ts, track.id, send.id, t.id, { slot: send.slot }).tracks, `Envoi vers « ${busName} » copié sur « ${t.name} »`),
     });
   }
   for (const t of dests) {
     items.push({
       label: `Déplacer vers « ${t.name} »`, icon: 'fa-right-left',
-      title: 'Pro Tools : glisser l’envoi sur une autre tranche ; l’original retombe à zéro',
+      title: 'Glisser l’envoi sur une autre tranche (préréglage Studio pro) ; l’original retombe à zéro',
       onClick: () => apply(ts => transferSend(ts, track.id, send.id, t.id, { slot: send.slot, move: true }).tracks, `Envoi vers « ${busName} » déplacé sur « ${t.name} »`),
     });
   }

@@ -73,7 +73,7 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onMouseDown={onClose} role="dialog" aria-modal="true" aria-labelledby="spot-title" data-testid="spot-dialog">
       <div className="w-full max-w-md rounded-2xl border border-yellow-500/30 bg-nv-surface p-5 shadow-2xl" onMouseDown={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center">
-          <h2 id="spot-title" className="mr-auto text-[15px] font-black text-white" title="Position exacte : place le clip au tick, à la milliseconde ou à l’échantillon près (Pro Tools : Spot Dialog, mode Spot, F3)">
+          <h2 id="spot-title" className="mr-auto text-[15px] font-black text-white" title="Position exacte : place le clip au tick, à la milliseconde ou à l’échantillon près (Spot Dialog, mode Spot, F3)">
             {!simple && <span className="mr-2 rounded px-1.5 py-0.5 text-[10px] font-black text-black" style={{ background: '#eab308' }}>SPOT</span>}Position exacte
           </h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
@@ -124,7 +124,7 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button type="button" disabled={origin === null} data-testid="spot-origin"
             onClick={() => { if (origin === null) return; setAnchor('START'); setField(spotField(origin, format, ctx)); }}
-            title={origin === null ? 'Position d’origine inconnue : ce clip n’a pas été enregistré dans NOVA (import, ancien projet).' : 'Remet le clip là où il a été enregistré (Pro Tools : Original Time Stamp).'}
+            title={origin === null ? 'Position d’origine inconnue : ce clip n’a pas été enregistré dans NOVA (import, ancien projet).' : 'Remet le clip là où il a été enregistré (Original Time Stamp).'}
             className="mr-auto rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-35">
             <i className="fas fa-clock-rotate-left mr-1.5" aria-hidden />Reprendre la position d’origine
           </button>

@@ -1213,7 +1213,7 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
                 path = None
                 try:
                     dlg = WinForms.FolderBrowserDialog()
-                    dlg.Description = "Dossier où NOVA dépose les prises pour Pro Tools"
+                    dlg.Description = "Dossier où NOVA dépose les prises pour ton logiciel de studio"
                     dlg.ShowNewFolderButton = True
                     if initial and os.path.isdir(initial):
                         dlg.SelectedPath = initial
@@ -1221,8 +1221,8 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
                         path = str(dlg.SelectedPath) or None
                     dlg.Dispose()
                 except Exception as e:
-                    log.warning(f"pont Pro Tools : sélecteur de dossier impossible ({type(e).__name__})")
-                log.info(f"pont Pro Tools : dossier {'choisi' if path else 'non choisi'}")
+                    log.warning(f"pont studio : sélecteur de dossier impossible ({type(e).__name__})")
+                log.info(f"pont studio : dossier {'choisi' if path else 'non choisi'}")
                 self.post_to_page({"type": "nova-desktop-folder", "path": path})
 
             try:

@@ -40,9 +40,9 @@ class ProToolsFileError(Exception):
 
 
 def default_folder() -> Path:
-    """Documents\\Nova Studio\\Pro Tools (à côté des projets). NOVA_PT_DIR : autre dossier (tests)."""
+    """Documents\\Nova Studio\\Prises studio (à côté des projets). NOVA_PT_DIR : autre dossier (tests)."""
     env = os.environ.get('NOVA_PT_DIR')
-    return Path(env) if env else project_store.default_root().parent / 'Pro Tools'
+    return Path(env) if env else project_store.default_root().parent / 'Prises studio'
 
 
 def _forbidden_roots():
@@ -64,7 +64,7 @@ def check_folder(folder: str) -> Path:
         return default_folder()
     p = Path(s)
     if not p.is_absolute():
-        raise ProToolsFileError('Le dossier doit être un chemin complet (ex. D:\\Séances\\Pro Tools\\Prises).')
+        raise ProToolsFileError('Le dossier doit être un chemin complet (ex. D:\\Séances\\Prises).')
     try:
         r = p.resolve()
     except OSError as e:
@@ -152,7 +152,7 @@ def write_take(folder: str, name: str, data: bytes) -> Tuple[Path, bool]:
             alt = d / f'{stem} ({k}).wav'
             if _try_replace(tmp, alt, 1):
                 return alt, True
-        raise ProToolsFileError('Fichier verrouillé (ouvert dans Pro Tools ?) : écriture impossible.')
+        raise ProToolsFileError('Fichier verrouillé (ouvert dans ton logiciel de studio ?) : écriture impossible.')
     except OSError as e:
         raise ProToolsFileError(f'Écriture impossible : {e}')
     finally:

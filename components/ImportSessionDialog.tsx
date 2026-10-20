@@ -153,7 +153,7 @@ const ImportSessionDialog: React.FC<{
         className="flex max-h-[92vh] w-full max-w-[720px] flex-col gap-3 rounded-2xl border border-nv-line bg-nv-panel p-4 shadow-2xl">
         <div className="flex items-center gap-2">
           <i className="fas fa-file-import text-nv-accent" />
-          <h2 id="import-session-title" className="min-w-0 flex-1 truncate text-[15px] font-bold text-nv-ink" title="Pro Tools : File › Import › Session Data (Alt+Maj+I) ; Logic : Import › Logic Projects">
+          <h2 id="import-session-title" className="min-w-0 flex-1 truncate text-[15px] font-bold text-nv-ink" title="File › Import › Session Data (Alt+Maj+I) ; Logic : Import › Logic Projects">
             Importer depuis une session{loaded ? ` · ${loaded.name}` : ''}
           </h2>
           <button type="button" onClick={onClose} disabled={!!busy} aria-label="Fermer" className="nova-hit-tactile h-9 w-9 rounded-lg text-nv-muted hover:text-nv-ink"><i className="fas fa-times" /></button>
@@ -170,8 +170,8 @@ const ImportSessionDialog: React.FC<{
             <input ref={fileRef} type="file" accept=".zip,application/zip" className="hidden" data-testid="import-zip-input"
               onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void fromZip(f); }} />
             <button type="button" className={card} onClick={() => { onClose(); openAafImport(); }} data-testid="import-from-aaf">
-              <span className="block text-[13px] font-black text-nv-ink">🎚️ Une séance Pro Tools (.aaf)</span>
-              <span className="block text-[11px] text-nv-muted">Pro Tools : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF.</span>
+              <span className="block text-[13px] font-black text-nv-ink">🎚️ Une séance de logiciel de studio (.aaf)</span>
+              <span className="block text-[11px] text-nv-muted">Dans ton logiciel de studio : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF.</span>
             </button>
             <div>
               <p className="mb-1 text-[11px] font-black uppercase tracking-wider text-nv-muted">Projets récents (cet appareil)</p>
@@ -242,13 +242,13 @@ const ImportSessionDialog: React.FC<{
               })}
             </ul>
             <div className="grid grid-cols-1 gap-2 rounded-xl border border-nv-line bg-nv-well/40 p-2.5 text-[12px] sm:grid-cols-2">
-              <div role="radiogroup" aria-label="Pistes du même nom" title="Pro Tools : Match Tracks / Import as New Track">
+              <div role="radiogroup" aria-label="Pistes du même nom" title="Match Tracks / Import as New Track">
                 <p className="mb-1 font-bold text-nv-muted">Pistes du même nom</p>
                 {([['add', 'Ajouter (« LEAD 2 »)'], ['replace', 'Remplacer ce qui est coché']] as const).map(([m, label]) => (
                   <label key={m} className="mr-3 inline-flex items-center gap-1.5 text-nv-ink"><input type="radio" name="same-name" checked={sameName === m} onChange={() => setSameName(m)} />{label}</label>
                 ))}
               </div>
-              <label className={`flex items-start gap-2 ${tempoDiffers ? 'text-nv-ink' : 'text-nv-muted'}`} title="Pro Tools : Import Tempo/Meter Map. Positions recalées sur les mêmes mesures ; les clips audio sont étirés (R13), le MIDI et l'automation suivent.">
+              <label className={`flex items-start gap-2 ${tempoDiffers ? 'text-nv-ink' : 'text-nv-muted'}`} title="Import Tempo/Meter Map. Positions recalées sur les mêmes mesures ; les clips audio sont étirés (R13), le MIDI et l'automation suivent.">
                 <input type="checkbox" checked={matchTempo && tempoDiffers} disabled={!tempoDiffers} onChange={e => setMatchTempo(e.target.checked)} className="mt-0.5" />
                 <span>Faire correspondre au tempo<span className="block text-[11px] text-nv-muted">Source {r2(srcBpm)} BPM · projet {r2(cur.bpm)} BPM{tempoDiffers ? '' : ' (identiques)'}</span></span>
               </label>

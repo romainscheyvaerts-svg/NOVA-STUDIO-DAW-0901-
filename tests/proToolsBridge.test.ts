@@ -80,7 +80,8 @@ describe('écriture des prises reçues', () => {
     expect(Array.from(p.samples[0] as Float32Array)).toEqual(Array.from(buffers.b1.getChannelData(0).slice(12000, 12000 + 96000)));
     expect(sink.entries[0]).toMatchObject({ status: 'ok', target: 'bridge', position: 96000, file: 'Voix lead_Prise 3_Lina.wav' });
     expect(onW).toHaveBeenCalledTimes(1);
-    expect(writtenMessage(sink.entries[0])).toMatch(/Prise envoyée vers Pro Tools : « Voix lead_Prise 3_Lina\.wav » dans le dossier Pro Tools \(Spot à 0:02,000\)/);
+    expect(writtenMessage(sink.entries[0])).toMatch(/Prise envoyée vers ton logiciel de studio : « Voix lead_Prise 3_Lina\.wav » dans le dossier des prises \(Spot à 0:02,000\)/);
+    expect(writtenMessage(sink.entries[0])).not.toMatch(/pro ?tools/i);
   });
   it('prise déplacée par l’artiste : réécrite (mise à jour), même nom', async () => {
     const { d, written } = deps();

@@ -7,7 +7,7 @@ toute discontinuité (clic) se voit comme un saut d'échantillon à échantillon
 PC :
   1. Éditeur de raccourcis : « Poser un repère » remappé sur J par capture de touche,
      puis utilisé (J pose un repère, K plus rien) ; conflit proposé (Ctrl+E) et résolu ;
-  2. préréglage « Pro Tools (Windows) » appliqué : 10+ raccourcis vérifiés en vrai ;
+  2. préréglage « Studio pro (Windows) » (id protools) appliqué : 10+ raccourcis vérifiés en vrai ;
   3. scrub à la souris (outil Scrubber F9), lent (×0,5) puis rapide (×2) : son
      enregistré au master, hauteur mesurée (220 / 880 Hz), aucun clic, position suivie ;
      comparaison avec des grains SANS fenêtre (ce que donnerait un scrub naïf) ;

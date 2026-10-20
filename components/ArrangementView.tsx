@@ -956,14 +956,14 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({
       label: target.isGuide ? 'Ce n’est plus une piste guide' : 'Piste guide (s’entend, jamais exportée)',
       icon: 'fa-headphones',
-      title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (Pro Tools : piste guide inactive au bounce).',
+      title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (piste guide inactive au bounce).',
       onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
     });
     // Pro Tools : tous les clips de la piste (triple-clic au Sélecteur) et solo safe (Ctrl+clic sur S).
     if (target && target.clips.length) menuItems.push({ label: 'Sélectionner tous les clips de la piste', icon: 'fa-object-group', shortcut: 'Ctrl+Alt+A', onClick: () => { setContextMenu(null); runEditCommand('selectTrackClips', { trackId }); } });
     if (target && target.id !== 'master') menuItems.push({
       label: target.soloSafe ? 'Retirer le solo safe' : 'Solo safe (reste audible pendant les solos)', icon: 'fa-shield-alt', shortcut: 'Ctrl+clic sur S',
-      title: 'La piste ne se coupe jamais quand une autre est en solo : retour de réverbe, clic, piste guide, beat de référence (Pro Tools : Solo Safe).',
+      title: 'La piste ne se coupe jamais quand une autre est en solo : retour de réverbe, clic, piste guide, beat de référence (Solo Safe).',
       onClick: () => { setContextMenu(null); runEditCommand('soloSafe', { trackIds: [trackId] }); },
     });
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
@@ -2528,14 +2528,14 @@ useEffect(() => {
       { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], focus: 'color' }); close(); }},
       // Verrou (Pro Tools : Clip › Verrouiller) : sur la sélection si ce clip en fait partie.
       { label: cm.clip.lock === 'edit' ? 'Déverrouiller le clip' : 'Verrouiller le clip', icon: cm.clip.lock === 'edit' ? 'fa-lock-open' : 'fa-lock', shortcut: 'Ctrl+L',
-        title: 'Verrouillé, le clip ne se déplace plus, ne se rogne plus, ne se coupe plus et ne se supprime plus (Pro Tools : Edit Lock).',
+        title: 'Verrouillé, le clip ne se déplace plus, ne se rogne plus, ne se coupe plus et ne se supprime plus (Edit Lock).',
         onClick: () => { close(); runEditCommand('clipLock', { kind: 'edit', clipIds: selTargets().map(x => x.clipId) }); }},
       { label: cm.clip.lock === 'time' ? 'Libérer la position' : 'Verrouiller la position', icon: 'fa-thumbtack', shortcut: 'Alt+Maj+L',
-        title: 'Le clip reste calé à cet endroit du morceau : il se rogne, se retouche et se règle, mais ne se déplace plus (Pro Tools : Time Lock).',
+        title: 'Le clip reste calé à cet endroit du morceau : il se rogne, se retouche et se règle, mais ne se déplace plus (Time Lock).',
         onClick: () => { close(); runEditCommand('clipLock', { kind: 'time', clipIds: selTargets().map(x => x.clipId) }); }},
       'separator',
       // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
-      { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Pro Tools : Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: cm.trackId, clipId: cm.clip.id }); close(); }},
+      { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: cm.trackId, clipId: cm.clip.id }); close(); }},
       { label: 'Point de synchro à la tête de lecture', icon: 'fa-location-dot', shortcut: 'Ctrl+,', onClick: () => {
           const sp = syncPointAt(cm.clip, playheadStore.get());
           if (sp === null) window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Point de synchro : place d’abord la tête de lecture DANS ce clip, sur l’attaque à caler.' }));
@@ -2545,7 +2545,7 @@ useEffect(() => {
       'separator',
       // Heal, boucle, Répéter (R5).
       ...editTools,
-      ...(audioOnly ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); }}] : []),
+      ...(audioOnly ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); }}] : []),
       { label: cm.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { isReversed: !cm.clip.isReversed }); close(); }},
     ], '');
 
@@ -2574,7 +2574,7 @@ useEffect(() => {
     }
     if (cm.clip.fadeIn || cm.clip.fadeOut) fades.push({ label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); close(); } });
     if (editCommands && audioOnly) {
-      fades.push({ label: 'Courbes des fondus (Pro Tools)', icon: 'fa-bezier-curve', onClick: () => {}, disabled: true,
+      fades.push({ label: 'Courbes des fondus', icon: 'fa-bezier-curve', onClick: () => {}, disabled: true,
         component: (
           <div className="px-3 pb-2 pt-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
             {(['in', 'out'] as const).map(which => {
@@ -2618,13 +2618,13 @@ useEffect(() => {
     const pitchTime = group('Hauteur et temps', 'fa-arrows-up-down', [
       ...(audioOnly && !cm.clip.notes ? [
         { label: simple ? 'Changer la tonalité…' : 'Transposer / étirer…', icon: 'fa-arrows-up-down',
-          title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Pro Tools : Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
+          title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
           onClick: () => {
             const targets = selTargets().filter(tg => { const c = tracks.find(t => t.id === tg.trackId)?.clips.find(x => x.id === tg.clipId); return !!c && !c.notes && c.type !== TrackType.MIDI; });
             openNovaWindow('transpose', { targets, simple }); close();
           } },
         ...(!simple ? [{ label: 'Marqueurs de warp…', icon: 'fa-arrows-left-right-to-line',
-          title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Pro Tools : Elastic Audio, vue Warp · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
+          title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Elastic Audio, vue Warp · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
           onClick: () => { openNovaWindow('warp', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } }] : []),
       ] : []),
       ...(cm.clip.warp?.originalBpm && Math.abs(cm.clip.warp.originalBpm - bpm) > 0.5 ? [
@@ -2683,7 +2683,7 @@ useEffect(() => {
     // 6. Traitement : AudioSuite, stems, sampler et découpe (R18).
     const processing = group('Traitement', 'fa-wand-magic-sparkles', [
       ...(audioOnly ? [{ label: 'AudioSuite (traiter avec un effet)…', icon: 'fa-wand-magic-sparkles',
-        title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic, Edison dans FL)',
+        title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« AudioSuite », « Traitement de fichier » de Logic, Edison dans FL)',
         onClick: () => { openNovaWindow('audiosuite', { targets: selTargets() }); close(); }}] : []),
       ...(cm.clip.audioSuite ? [{ label: 'Revenir à l’original (AudioSuite)', icon: 'fa-rotate-left',
         title: `Remet la prise d’origine à la même place (traitements : ${cm.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,
@@ -2734,9 +2734,9 @@ useEffect(() => {
             <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SMART')} aria-pressed={activeTool === 'SMART'} className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'SMART' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title="Smart Tool (comme dans Pro Tools) (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
+              title="Smart Tool (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
             {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
+              title="Sélecteur (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
             {!simple && <button onClick={() => setActiveTool('SCRUB')} aria-pressed={activeTool === 'SCRUB'} data-testid="tool-scrub" className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SCRUB' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title={`Scrubber (${shortcutHint('tool.scrub') || 'F9'}) : glisse sur la forme d'onde pour l'entendre, au rythme de ta main (ou de ton doigt). Alt+glisser = shuttle. Avec le Sélecteur, Ctrl+glisser fait la même chose.`} aria-label="Outil scrub"><i className="fas fa-headphones text-[12px]"></i></button>}
@@ -2746,7 +2746,7 @@ useEffect(() => {
           {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
           {!simple && (
             <button type="button" onClick={() => editPrefsStore.set({ trimTce: !editPrefs.trimTce })} aria-pressed={!!editPrefs.trimTce} data-testid="trim-tce" aria-label="Étirer en tirant le bord (Trim TCE)"
-              title="Étirer en tirant le bord (Pro Tools : outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
+              title="Étirer en tirant le bord (outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
               className={`hidden [@media(pointer:fine)]:flex lg:flex w-9 h-9 shrink-0 rounded-lg items-center justify-center border transition-all ${editPrefs.trimTce ? 'bg-amber-500/15 border-amber-500/50 text-amber-400' : 'border-white/5 bg-black/40 text-slate-500 hover:text-white'}`}>
               <i className="fas fa-left-right text-[11px]" aria-hidden="true"></i><i className="fas fa-clock text-[8px] -ml-0.5 mt-2" aria-hidden="true"></i>
             </button>
@@ -2758,9 +2758,9 @@ useEffect(() => {
           {!simple && <EditModeSelector compact={simple} />}
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
-              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge » de Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
+              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge ») : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
               <select id="nova-nudge" value={editPrefs.nudge} onChange={e => editCommands ? editCommands.setNudgeUnit(e.target.value as NudgeUnit) : editPrefsStore.set({ nudge: e.target.value as NudgeUnit })}
-                title="Pas du décalage (« Nudge value » de Pro Tools) : ← / → sur la sélection, Maj = 10 pas" aria-label="Pas du décalage"
+                title="Pas du décalage (« Nudge value ») : ← / → sur la sélection, Maj = 10 pas" aria-label="Pas du décalage"
                 className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
                 {NUDGE_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
               </select>
@@ -2771,13 +2771,13 @@ useEffect(() => {
               </button>
               <button onClick={() => editPrefsStore.set({ automationFollowsEdit: !editPrefs.automationFollowsEdit })} aria-pressed={editPrefs.automationFollowsEdit !== false}
                 data-nova-target="automation-follows"
-                title="L'automation suit l'édition (« Automation Follows Edit » de Pro Tools) : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
+                title="L'automation suit l'édition (« Automation Follows Edit ») : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
                 className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.automationFollowsEdit !== false ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
                 <i className="fas fa-wave-square mr-1"></i>Automation suit l'édition
               </button>
               <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
                 aria-label="Courbe des fondus enchaînés"
-                title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power » de Pro Tools, sans creux de niveau."
+                title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power », sans creux de niveau."
                 className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
                 {FADE_CURVES.map(cv => <option key={cv} value={cv}>{FADE_CURVE_INFO[cv].label}</option>)}
               </select>

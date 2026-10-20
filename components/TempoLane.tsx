@@ -52,7 +52,7 @@ const TempoLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, eve
   return (
     <div className="shrink-0 flex border-b relative z-30" data-testid="tempo-lane" style={{ height: TEMPO_LANE_H, borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
       <div className="shrink-0 flex items-center gap-1.5 px-2 border-r" style={{ width: headerWidth, borderColor: 'var(--border-dim)' }}
-        title="Piste tempo : changements de tempo et de mesure (Pro Tools : règles Tempo et Meter ; Logic : piste Tempo globale)">
+        title="Piste tempo : changements de tempo et de mesure (règles Tempo et Meter ; Logic : piste Tempo globale)">
         <i className="fas fa-tachometer-alt text-[10px] text-amber-300" aria-hidden />
         <span className="text-[11px] font-black truncate" style={{ color: 'var(--text-primary)' }}>Tempo</span>
         <span className="text-[10px] font-mono text-slate-400 truncate">{start.bpm} · {start.num}/{start.den}</span>

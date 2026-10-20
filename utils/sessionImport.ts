@@ -30,10 +30,10 @@ import { AutomationLane, Clip, DAWState, NamedBus, PluginInstance, Track, TrackT
 export type ImportPart = 'clips' | 'plugins' | 'sends' | 'automation' | 'color';
 export const ALL_PARTS: ImportPart[] = ['clips', 'plugins', 'sends', 'automation', 'color'];
 export const PART_LABELS: Record<ImportPart, { label: string; hint: string }> = {
-  clips: { label: 'Clips', hint: 'Clips audio et MIDI (Pro Tools : Clips and Media)' },
-  plugins: { label: 'Effets et réglages', hint: 'Effets, instrument, volume, pan, largeur (Pro Tools : Plug-Ins + Main Playlist Options)' },
-  sends: { label: 'Envois et routage', hint: 'Sortie, envois vers les bus, side-chain (Pro Tools : I/O + Sends)' },
-  automation: { label: 'Automation', hint: 'Courbes de volume, pan et paramètres d\'effets (Pro Tools : Automation)' },
+  clips: { label: 'Clips', hint: 'Clips audio et MIDI (Clips and Media)' },
+  plugins: { label: 'Effets et réglages', hint: 'Effets, instrument, volume, pan, largeur (Plug-Ins + Main Playlist Options)' },
+  sends: { label: 'Envois et routage', hint: 'Sortie, envois vers les bus, side-chain (I/O + Sends)' },
+  automation: { label: 'Automation', hint: 'Courbes de volume, pan et paramètres d\'effets (Automation)' },
   color: { label: 'Couleur', hint: 'Couleur de la piste' },
 };
 

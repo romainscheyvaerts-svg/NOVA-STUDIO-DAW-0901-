@@ -32,7 +32,7 @@ const IoNamesDialog: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">Entrées nommées</h2>
-            <p className="text-[12px] text-nv-muted">Le câblage du studio (Pro Tools : I/O Setup). Laisse vide pour garder « Entrée N ». {available} entrée{available > 1 ? 's' : ''} détectée{available > 1 ? 's' : ''}.</p>
+            <p className="text-[12px] text-nv-muted">Le câblage du studio (I/O Setup). Laisse vide pour garder « Entrée N ». {available} entrée{available > 1 ? 's' : ''} détectée{available > 1 ? 's' : ''}.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-10 w-10 shrink-0 rounded-full text-nv-muted hover:bg-nv-accent/10"><i className="fas fa-times" /></button>
         </div>

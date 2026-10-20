@@ -235,7 +235,7 @@ const AraEditorDock: React.FC<Props> = ({ tracks, selectedTrackId, onCommit, onS
         <div className={`${floating ? '' : 'ml-auto '}flex items-center gap-2`}>
           {busy && <span className="text-cyan-300"><i className="fas fa-circle-notch fa-spin mr-1" />{busy}</span>}
           <button type="button" data-testid="ara-dock-commit" onClick={commit} disabled={!!busy || !node}
-            title="Pro Tools « Commit » : rend les clips à travers le plugin (son figé, processeur libéré). L’original et les retouches restent récupérables."
+            title="« Commit » : rend les clips à travers le plugin (son figé, processeur libéré). L’original et les retouches restent récupérables."
             className="h-7 rounded-full border border-white/15 px-3 font-bold hover:border-fuchsia-400 disabled:opacity-40">Valider (Commit)</button>
           {hwnd && (floating
             ? <button type="button" data-testid="ara-dock-attach" onClick={attach} className="h-7 rounded-full border border-white/15 px-3 font-bold hover:border-cyan-400">Ancrer</button>

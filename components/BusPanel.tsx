@@ -42,7 +42,7 @@ const BusPanel: React.FC<{ tracks: Track[]; onClose: () => void; className?: str
         <h2 className="flex-1 text-[13px] font-bold text-nv-ink">Bus nommés</h2>
         <button type="button" onClick={onClose} aria-label="Fermer" className="nova-hit-tactile w-8 h-8 rounded-lg text-nv-muted hover:text-nv-ink"><i className="fas fa-times" /></button>
       </div>
-      <p className="px-3 pt-2 text-[10px] text-nv-muted">Comme l’I/O Setup de Pro Tools : un bus est un chemin nommé. Une piste y <b>sort</b> (sortie) ou y <b>envoie</b> (envois a-j) ; un aux l’<b>écoute</b> (entrée).</p>
+      <p className="px-3 pt-2 text-[10px] text-nv-muted">Comme dans l’I/O Setup d’un studio : un bus est un chemin nommé. Une piste y <b>sort</b> (sortie) ou y <b>envoie</b> (envois a-j) ; un aux l’<b>écoute</b> (entrée).</p>
       <form className="flex gap-1.5 px-3 pt-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Nom du bus (LEAD A, VOX ALL, RV…)" aria-label="Nom du nouveau bus" data-testid="bus-new-name"
           className="min-w-0 flex-1 h-9 rounded-lg border border-nv-line bg-nv-well px-2 text-[12px] text-nv-ink outline-none focus:border-nv-accent" />

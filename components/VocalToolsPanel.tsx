@@ -148,7 +148,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                     <div className="flex items-center gap-2 mb-1.5">
                       <p className="text-[11px] text-slate-400 min-w-0 truncate flex-1">{g.trackName}</p>
                       {p.onShowLanes && <button type="button" onClick={() => p.onShowLanes!(g.trackId)}
-                        title="Ouvre les couloirs sous la piste : balaie un passage d'une prise pour le garder (comme les Playlists de Pro Tools)."
+                        title="Ouvre les couloirs sous la piste : balaie un passage d'une prise pour le garder (comme les Playlists)."
                         className="h-8 px-2.5 rounded-lg text-[11px] font-bold text-cyan-200 border border-cyan-400/40 hover:bg-cyan-500/10 shrink-0">
                         <i className="fas fa-layer-group mr-1" />Voir les couloirs
                       </button>}
@@ -295,7 +295,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                 checked={p.countIn}
                 onChange={p.onCountInChange}
                 label={`Décompte${p.countInLength ? ` (${p.countInLength})` : ''} avant d'enregistrer`}
-                hint="Le temps de te placer devant le micro. Longueur, son et volume : ▾ à côté du métronome (comme Click/Countoff de Pro Tools)."
+                hint="Le temps de te placer devant le micro. Longueur, son et volume : ▾ à côté du métronome (comme Click/Countoff)."
               />
               {p.onCaptureMinutes && (
                 <div className="py-2 flex items-center justify-between gap-3" title="Pendant la lecture avec une piste armée, NOVA garde les dernières minutes du micro : « Capturer la dernière prise » (Maj+R) récupère un freestyle chanté sans avoir appuyé sur REC (Logic : Capture as Recording).">

@@ -17,9 +17,9 @@ interface Props {
 }
 
 const KINDS: { kind: BatchKind; label: string; icon: string; title: string }[] = [
-  { kind: 'freeze', label: 'Geler', icon: 'fa-snowflake', title: 'Pro Tools « Freeze » : les effets sont rendus, la piste ne coûte plus de processeur ; Dégeler pour retoucher' },
+  { kind: 'freeze', label: 'Geler', icon: 'fa-snowflake', title: '« Freeze » : les effets sont rendus, la piste ne coûte plus de processeur ; Dégeler pour retoucher' },
   { kind: 'unfreeze', label: 'Dégeler', icon: 'fa-fire', title: 'Les effets rejouent en direct (réglages modifiables)' },
-  { kind: 'commit', label: 'Commit', icon: 'fa-check-double', title: 'Pro Tools « Commit » : chaque piste est remplacée par son rendu avec effets ; l’originale est gardée inactive et masquée' },
+  { kind: 'commit', label: 'Commit', icon: 'fa-check-double', title: '« Commit » : chaque piste est remplacée par son rendu avec effets ; l’originale est gardée inactive et masquée' },
 ];
 
 const BatchRenderDialog: React.FC<Props> = ({ open, tracks, preselected, onClose }) => {

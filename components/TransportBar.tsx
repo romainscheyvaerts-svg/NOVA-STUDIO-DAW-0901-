@@ -214,7 +214,7 @@ const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator
   const nom = nomTonaliteCourt(projectKey, projectScale);
   const court = nomTonaliteCourt(projectKey, projectScale, true);
   return (
-    <button type="button" onClick={onClick} data-testid="open-tempo" className="hidden lg:flex shrink-0 flex-col items-end leading-tight rounded-md px-1 hover:bg-white/5" title={`${nom ? `Tonalité du projet : ${nom} · ` : ''}mesure ${numerator}/${denominator}. Clic : Tempo et mesure (3/4, 6/8, 7/8, changements dans le morceau, tap tempo T) — Pro Tools : Tempo / Meter.`}>
+    <button type="button" onClick={onClick} data-testid="open-tempo" className="hidden lg:flex shrink-0 flex-col items-end leading-tight rounded-md px-1 hover:bg-white/5" title={`${nom ? `Tonalité du projet : ${nom} · ` : ''}mesure ${numerator}/${denominator}. Clic : Tempo et mesure (3/4, 6/8, 7/8, changements dans le morceau, tap tempo T) — Tempo / Meter.`}>
       {nom ? (
         <span className="text-[10px] font-black whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
           <span className="hidden 2xl:inline">{nom}</span><span className="2xl:hidden">{court}</span>
@@ -523,7 +523,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               </div>
               {onRevertToSaved && (
                 <button onClick={() => { setIsMobileMenuOpen(false); onRevertToSaved(); }} data-testid="menu-revert-saved"
-                  title="Le projet revient à sa dernière sauvegarde (Pro Tools : Revert to Saved). Ta version actuelle est gardée dans « Versions de la session »."
+                  title="Le projet revient à sa dernière sauvegarde (Revert to Saved). Ta version actuelle est gardée dans « Versions de la session »."
                   className="w-full min-h-11 px-4 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-3">
                   <i className="w-5 text-center text-amber-300 fas fa-clock-rotate-left" aria-hidden="true"></i><span>Revenir à la version enregistrée…</span>
                 </button>
@@ -585,7 +585,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
                   <span>Compensation de latence (PDC)</span>
                 </button>}
-                {onTogglePunch && !simple && <button onClick={() => { onTogglePunch(); setIsMobileMenuOpen(false); }} aria-pressed={isPunchActive} title="REC ne remplace que la zone rouge de la règle (Pro Tools : punch-in / punch-out). Pré-roll, post-roll : bouton ▾ du punch dans la barre."
+                {onTogglePunch && !simple && <button onClick={() => { onTogglePunch(); setIsMobileMenuOpen(false); }} aria-pressed={isPunchActive} title="REC ne remplace que la zone rouge de la règle (punch-in / punch-out). Pré-roll, post-roll : bouton ▾ du punch dans la barre."
                   className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isPunchActive ? 'bg-red-500/15 text-red-300' : 'bg-white/[0.04] text-slate-300'}`}>
                   <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isPunchActive ? 'bg-red-400' : 'bg-slate-500'}`}></span></span>
                   <span>Punch-in / punch-out</span>
@@ -869,10 +869,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <PunchControls foldPrio={27} punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
               onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
           )}
-          <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Pro Tools : Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
           {onOpenMetronome && !simple && (
             <button {...barItem('metronome-reglages', 30)} type="button" onClick={onOpenMetronome} data-testid="open-metronome" aria-label="Réglages du métronome et du décompte"
-              title="Clic et décompte : son, volume, accent, prise seulement, sortie, décompte en mesures ou en temps, pré-roll (Pro Tools : Click/Countoff Options)"
+              title="Clic et décompte : son, volume, accent, prise seulement, sortie, décompte en mesures ou en temps, pré-roll (Click/Countoff Options)"
               className="nova-hit-tactile hidden md:flex h-8 w-4 -ml-1.5 rounded-md items-center justify-center text-slate-500 hover:text-white">
               <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
             </button>
@@ -955,7 +955,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {!simple && <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} onClick={onOpenTempo} />}
         {onTap && !simple && (
           <button {...barItem('tap', 31)} type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="transport-tap"
-            title="Tap tempo : tape au rythme de la prod (ou touche T, comme dans Pro Tools). Le tempo s'affiche, « Tempo et mesure » pour l'appliquer."
+            title="Tap tempo : tape au rythme de la prod (ou touche T, comme dans les studios pro). Le tempo s'affiche, « Tempo et mesure » pour l'appliquer."
             aria-label="Tap tempo"
             className="hidden sm:flex shrink-0 whitespace-nowrap nova-hit-tactile h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-white/10 text-slate-400 hover:text-white select-none touch-manipulation">
             TAP{tapBpm ? <span className="ml-1 mono text-amber-300">{tapBpm}</span> : null}

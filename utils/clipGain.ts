@@ -218,11 +218,11 @@ export function offsetGainRange(pts: ClipGainPoint[] | undefined, a: number, b: 
 export type PencilShape = 'free' | 'line' | 'triangle' | 'square' | 'random';
 
 export const PENCIL_SHAPES: { id: PencilShape; label: string; icon: string; hint: string }[] = [
-  { id: 'free', label: 'Libre', icon: 'fa-signature', hint: 'Dessine la ligne à main levée (« Free Hand » du crayon de Pro Tools). Grille active : un point par pas de grille.' },
-  { id: 'line', label: 'Ligne', icon: 'fa-slash', hint: 'Une droite du point de départ au point d’arrivée (« Line » de Pro Tools).' },
-  { id: 'triangle', label: 'Triangle', icon: 'fa-wave-square', hint: 'Montées et descentes régulières, une période par pas de grille (« Triangle » de Pro Tools) : glisse vers le haut ou le bas pour l’amplitude.' },
-  { id: 'square', label: 'Carré', icon: 'fa-chart-simple', hint: 'Créneaux haut / bas, un par pas de grille (« Square » de Pro Tools), avec des rampes de 5 ms contre les clics.' },
-  { id: 'random', label: 'Aléatoire', icon: 'fa-shuffle', hint: 'Un niveau au hasard par pas de grille (« Random » de Pro Tools), entre le départ et la hauteur du pointeur.' },
+  { id: 'free', label: 'Libre', icon: 'fa-signature', hint: 'Dessine la ligne à main levée (« Free Hand » du crayon). Grille active : un point par pas de grille.' },
+  { id: 'line', label: 'Ligne', icon: 'fa-slash', hint: 'Une droite du point de départ au point d’arrivée (« Line »).' },
+  { id: 'triangle', label: 'Triangle', icon: 'fa-wave-square', hint: 'Montées et descentes régulières, une période par pas de grille (« Triangle ») : glisse vers le haut ou le bas pour l’amplitude.' },
+  { id: 'square', label: 'Carré', icon: 'fa-chart-simple', hint: 'Créneaux haut / bas, un par pas de grille (« Square »), avec des rampes de 5 ms contre les clics.' },
+  { id: 'random', label: 'Aléatoire', icon: 'fa-shuffle', hint: 'Un niveau au hasard par pas de grille (« Random »), entre le départ et la hauteur du pointeur.' },
 ];
 
 /** Générateur pseudo-aléatoire stable (même tracé pendant tout le geste). */

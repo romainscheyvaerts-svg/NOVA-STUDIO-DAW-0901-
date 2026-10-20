@@ -127,7 +127,7 @@ const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, o
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="strip-title">
       <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="strip-silence">
         <div className="mb-3 flex items-center">
-          <h2 id="strip-title" className="mr-auto text-[15px] font-black text-white" title="Supprimer les silences : découpe le clip et retire les blancs entre les phrases (Pro Tools : Strip Silence, Ctrl+U)">{simple ? 'Supprimer les silences' : 'Strip Silence : retirer les blancs'}</h2>
+          <h2 id="strip-title" className="mr-auto text-[15px] font-black text-white" title="Supprimer les silences : découpe le clip et retire les blancs entre les phrases (Strip Silence, Ctrl+U)">{simple ? 'Supprimer les silences' : 'Strip Silence : retirer les blancs'}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
         </div>
         <p className="mb-3 text-[12px] text-slate-400">
@@ -136,10 +136,10 @@ const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, o
         </p>
         <canvas ref={canvasRef} className="mb-4 h-24 w-full rounded-lg border border-white/5" aria-label="Aperçu : en bleu, ce qui est gardé" />
         <div className="grid gap-3 sm:grid-cols-2">
-          {field({ k: 'thresholdDb', label: 'Seuil', min: -80, max: -10, step: 1, unit: 'dB', hint: "Sous ce niveau, c'est un blanc (Pro Tools : Strip Threshold)" })}
-          {field({ k: 'minStripMs', label: 'Blanc minimum', min: 50, max: 2000, step: 10, unit: 'ms', hint: "Un blanc plus court est gardé : respirations, coupures entre les mots (Pro Tools : Minimum Strip Duration)" })}
-          {field({ k: 'startPadMs', label: 'Marge avant', min: 0, max: 500, step: 5, unit: 'ms', hint: "Gardé avant chaque passage : l'attaque, la respiration (Pro Tools : Clip Start Pad)" })}
-          {field({ k: 'endPadMs', label: 'Marge après', min: 0, max: 1000, step: 5, unit: 'ms', hint: "Gardé après chaque passage : la fin du mot (Pro Tools : Clip End Pad)" })}
+          {field({ k: 'thresholdDb', label: 'Seuil', min: -80, max: -10, step: 1, unit: 'dB', hint: "Sous ce niveau, c'est un blanc (Strip Threshold)" })}
+          {field({ k: 'minStripMs', label: 'Blanc minimum', min: 50, max: 2000, step: 10, unit: 'ms', hint: "Un blanc plus court est gardé : respirations, coupures entre les mots (Minimum Strip Duration)" })}
+          {field({ k: 'startPadMs', label: 'Marge avant', min: 0, max: 500, step: 5, unit: 'ms', hint: "Gardé avant chaque passage : l'attaque, la respiration (Clip Start Pad)" })}
+          {field({ k: 'endPadMs', label: 'Marge après', min: 0, max: 1000, step: 5, unit: 'ms', hint: "Gardé après chaque passage : la fin du mot (Clip End Pad)" })}
         </div>
         <div className="mt-4 rounded-lg bg-black/30 px-3 py-2 text-[12px] text-slate-300" role="status" data-testid="strip-summary">
           {noAudio > 0 && <span className="mr-2 text-amber-300">{noAudio} clip(s) sans audio chargé ignoré(s).</span>}

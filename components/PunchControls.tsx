@@ -56,21 +56,21 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
   return (
     <div {...fold('punch', foldPrio ?? 0)} className="hidden md:flex items-center gap-1" data-nova-target="punch">
       <button onClick={onTogglePunch} aria-pressed={isPunchActive}
-        title={`Punch-in / punch-out (comme dans Pro Tools) : REC ne remplace que la zone rouge de la règle (${zone}), avec un crossfade aux bords. La zone vient de ta sélection, sinon de la boucle.`}
+        title={`Punch-in / punch-out : REC ne remplace que la zone rouge de la règle (${zone}), avec un crossfade aux bords. La zone vient de ta sélection, sinon de la boucle.`}
         className={`nova-hit-tactile h-8 px-2 rounded-lg flex items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
         PUNCH
       </button>
       {onUpdatePunch && (
         <>
           <button onClick={() => onUpdatePunch({ preRollOn: !preOn })} aria-pressed={preOn}
-            title={`Pré-roll (comme dans Pro Tools) : la lecture repart ${howLong(preBars, preSec)} avant le point d'entrée pour te caler ; seul ce qui suit est gardé. Clic : activer / couper. Durée (mesures ou secondes) dans le menu ▾.`}
+            title={`Pré-roll : la lecture repart ${howLong(preBars, preSec)} avant le point d'entrée pour te caler ; seul ce qui suit est gardé. Clic : activer / couper. Durée (mesures ou secondes) dans le menu ▾.`}
             {...fold('punch-pre', 5)} className={`${foldPrio === undefined ? 'hidden xl:flex' : 'flex'} items-center whitespace-nowrap ${chip(preOn)}`}>PRÉ {label(preBars, preSec, preOn)}</button>
           <button onClick={() => onUpdatePunch({ postRollOn: !postOn })} aria-pressed={postOn}
-            title={`Post-roll (comme dans Pro Tools) : la lecture continue ${howLong(postBars, postSec)} après le point de sortie, puis s'arrête. Clic : activer / couper.`}
+            title={`Post-roll : la lecture continue ${howLong(postBars, postSec)} après le point de sortie, puis s'arrête. Clic : activer / couper.`}
             {...fold('punch-post', 5)} className={`${foldPrio === undefined ? 'hidden xl:flex' : 'flex'} items-center whitespace-nowrap ${chip(postOn)}`}>POST {label(postBars, postSec, postOn)}</button>
           {onToggleQuickPunch && (
             <button {...fold('quickpunch', 23)} onClick={onToggleQuickPunch} aria-pressed={quick}
-              title="QuickPunch (comme dans Pro Tools) : pendant la lecture, REC (ou R) entre dans l'enregistrement sur la piste armée, un 2e appui en sort, sans arrêter la musique. Idéal pour refaire une fin de phrase."
+              title="QuickPunch : pendant la lecture, REC (ou R) entre dans l'enregistrement sur la piste armée, un 2e appui en sort, sans arrêter la musique. Idéal pour refaire une fin de phrase."
               className={`nova-hit-tactile h-6 px-1.5 rounded-md text-[9px] font-black tracking-wider border transition-all ${quick ? 'bg-red-500/25 text-red-300 border-red-500/50' : 'text-slate-500 border-white/10 hover:text-white'}`}>
               QP
             </button>
@@ -87,7 +87,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
           <div className="fixed inset-0 z-[400]" onMouseDown={() => setOpen(false)} />
           <div role="dialog" aria-label="Réglages du punch" className="fixed z-[401] w-[290px] rounded-xl border border-white/10 bg-nv-surface p-3 shadow-2xl text-[11px] text-slate-300"
             style={{ left: pos.x, top: pos.y }}>
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Punch (Pro Tools)</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Punch</div>
             <p className="text-[10px] text-slate-500 mb-2">Zone : <span className="text-red-300 font-mono">{zone}</span>. Glisse ses poignées rouges dans la règle, ou clic droit dans la règle.</p>
             {(['pre', 'post'] as const).map(which => {
               const on = which === 'pre' ? preOn : postOn;
@@ -110,7 +110,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
                       </button>
                     ))}
                   </div>
-                  <div className="flex gap-1 mt-1" title="En secondes, comme le pré-roll min:sec de Pro Tools : utile sur un son sans tempo (podcast, voix libre)">
+                  <div className="flex gap-1 mt-1" title="En secondes, comme le pré-roll min:sec : utile sur un son sans tempo (podcast, voix libre)">
                     {ROLL_CHOICES_SEC.map(sv => (
                       <button key={sv} onClick={() => onUpdatePunch(which === 'pre' ? { preRollSec: sv, preRollOn: true } : { postRollSec: sv, postRollOn: true })}
                         className={`flex-1 h-7 rounded-md border text-[10px] font-bold ${on && sec === sv ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
@@ -122,7 +122,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
               );
             })}
             <div className="flex items-center justify-between mt-2">
-              <span className="font-bold" title="Longueur des fondus enchaînés posés aux points d'entrée et de sortie (« QuickPunch Crossfade Length » dans Pro Tools)">Crossfade aux bords</span>
+              <span className="font-bold" title="Longueur des fondus enchaînés posés aux points d'entrée et de sortie (« QuickPunch Crossfade Length »)">Crossfade aux bords</span>
               <select value={xfMs} onChange={e => onUpdatePunch({ crossfadeMs: Number(e.target.value) })}
                 className="bg-black/40 border border-white/10 rounded px-1 h-7 text-[11px]">
                 {[0, 5, 10, 20, 50, 100].map(v => <option key={v} value={v}>{v} ms</option>)}

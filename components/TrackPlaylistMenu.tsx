@@ -71,12 +71,12 @@ export const PlaylistMenu: React.FC<{ track: Track; anchor: { x: number; y: numb
       <div className="my-1 h-px bg-nv-line" />
       <button type="button" role="menuitem" data-testid="playlist-new" className={`${row} hover:bg-nv-accent/10`}
         onClick={() => { run('playlistNew', { trackIds: [track.id] }); onClose(); }}
-        title="Pro Tools « New Playlist » : une piste vide pour une nouvelle version ; l’actuelle est gardée">
+        title="« New Playlist » : une piste vide pour une nouvelle version ; l’actuelle est gardée">
         <i className="fas fa-plus w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Nouvelle playlist (vide)</span><span className="text-[10px] text-nv-muted">{keyHint('pt.playlistNew')}</span>
       </button>
       <button type="button" role="menuitem" data-testid="playlist-duplicate" className={`${row} hover:bg-nv-accent/10`}
         onClick={() => { run('playlistNew', { trackIds: [track.id], duplicate: true }); onClose(); }}
-        title="Pro Tools « Duplicate Playlist » : copie de travail avant un nettoyage, une version clean, un autre comp">
+        title="« Duplicate Playlist » : copie de travail avant un nettoyage, une version clean, un autre comp">
         <i className="fas fa-clone w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Dupliquer la playlist</span><span className="text-[10px] text-nv-muted">{keyHint('pt.playlistDuplicate')}</span>
       </button>
       {(() => {
@@ -85,12 +85,12 @@ export const PlaylistMenu: React.FC<{ track: Track; anchor: { x: number; y: numb
         return (<>
           <button type="button" role="menuitem" data-testid="playlist-from-selection" className={`${row} hover:bg-nv-accent/10`}
             onClick={() => { run('playlistFromSelection', {}); onClose(); }}
-            title="Pro Tools « Copy Selection to New Playlist » : la plage sélectionnée part dans une version à part ; on entend toujours la même">
+            title="« Copy Selection to New Playlist » : la plage sélectionnée part dans une version à part ; on entend toujours la même">
             <i className="fas fa-share-square w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Copier la sélection vers une nouvelle playlist</span>
           </button>
           <button type="button" role="menuitem" data-testid="playlist-move-selection" className={`${row} hover:bg-nv-accent/10`}
             onClick={() => { run('playlistFromSelection', { move: true }); onClose(); }}
-            title="Pro Tools « Move Selection to New Playlist » : la plage quitte la version qu’on entend">
+            title="« Move Selection to New Playlist » : la plage quitte la version qu’on entend">
             <i className="fas fa-cut w-4 text-center text-[10px] text-nv-muted" /><span className="flex-1">Déplacer la sélection vers une nouvelle playlist</span>
           </button>
         </>);
@@ -114,7 +114,7 @@ export const PlaylistChip: React.FC<{ track: Track }> = ({ track }) => {
       <button type="button" data-testid={`playlist-chip-${track.id}`}
         onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom + 4 }); }}
         onMouseDown={e => e.stopPropagation()}
-        title={`Playlist « ${name} » (${i + 1} / ${list.length}) : clic pour changer de version, en créer ou en dupliquer (Pro Tools : sélecteur de playlist)`}
+        title={`Playlist « ${name} » (${i + 1} / ${list.length}) : clic pour changer de version, en créer ou en dupliquer (sélecteur de playlist)`}
         aria-label={`Playlist ${name}, ${i + 1} sur ${list.length}`}
         className="nova-hit-tactile h-5 max-w-[72px] shrink-0 rounded-md border border-cyan-400/50 bg-cyan-500/10 px-1 text-[9px] font-black text-cyan-300 [[data-theme=light]_&]:text-cyan-700 flex items-center gap-0.5">
         <i className="fas fa-list text-[8px]" /><span className="truncate">{short}</span><i className="fas fa-caret-down text-[8px]" />

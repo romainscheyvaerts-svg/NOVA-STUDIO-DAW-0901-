@@ -274,7 +274,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   type="button"
                   aria-label={plugin.isInactive ? `Rendre ${plugin.name} actif` : plugin.isEnabled ? `Désactiver ${plugin.name}` : `Activer ${plugin.name}`}
                   aria-pressed={plugin.isEnabled && !plugin.isInactive}
-                  title={plugin.isInactive ? 'Inactif (Pro Tools) : touche pour le rendre actif' : undefined}
+                  title={plugin.isInactive ? 'Inactif : touche pour le rendre actif' : undefined}
                   onClick={() => (plugin.isInactive ? structureBus.emit({ kind: 'pluginState', trackId: current.id, pluginId: plugin.id, state: 'active' }) : onToggleBypass?.(current.id, plugin.id))}
                   className={`w-11 h-11 rounded-lg flex items-center justify-center ${plugin.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-500'}`}
                 >

@@ -61,9 +61,9 @@ const ArrangeLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, m
   const items = (sec: Section) => [
     { label: `Dupliquer « ${sec.name} » à la suite`, onClick: () => act(sec, 'copy', sec.end), title: 'Logic : Arrangement › Dupliquer' },
     { label: 'Sélectionner la section (toutes les pistes)', onClick: () => selectSection(sec) },
-    { label: 'Insérer du temps avant…', onClick: () => openR12Panel('time', { preset: { mode: 'insert', at: sec.start } }), title: 'Pro Tools : Insert Time' },
+    { label: 'Insérer du temps avant…', onClick: () => openR12Panel('time', { preset: { mode: 'insert', at: sec.start } }), title: 'Insert Time' },
     'separator' as const,
-    { label: `Supprimer la section (le temps se referme)`, danger: true, onClick: () => runTimeOp({ kind: 'delete', id: newTimeOpId(), start: sec.start, end: sec.end, tracks: 'all', rulers: true }), title: 'Pro Tools : Cut Time' },
+    { label: `Supprimer la section (le temps se referme)`, danger: true, onClick: () => runTimeOp({ kind: 'delete', id: newTimeOpId(), start: sec.start, end: sec.end, tracks: 'all', rulers: true }), title: 'Cut Time' },
   ];
 
   const onDown = (e: React.PointerEvent, sec: Section) => {
@@ -104,7 +104,7 @@ const ArrangeLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, m
           title="Glisser = dupliquer (au doigt ; à la souris, tiens Alt ou Ctrl)"
           className={`nova-hit-tactile ml-auto h-6 rounded-md px-1.5 text-[10px] font-bold ${copyMode ? 'bg-fuchsia-500 text-black' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}>Copier</button>
         <button type="button" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: 0 } })} aria-label="Insérer ou supprimer du temps"
-          title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Cut Time)" className="nova-hit-tactile w-6 h-6 rounded-md text-slate-400 hover:text-white hover:bg-white/10 shrink-0"><i className="fas fa-arrows-alt-h text-[10px]" /></button>
+          title="Insérer / supprimer du temps (Insert Silence, Cut Time)" className="nova-hit-tactile w-6 h-6 rounded-md text-slate-400 hover:text-white hover:bg-white/10 shrink-0"><i className="fas fa-arrows-alt-h text-[10px]" /></button>
         <button type="button" onClick={() => arrangeLaneStore.set(false)} aria-label="Masquer la piste Arrangement" title="Masquer la piste Arrangement (fenêtre Temps → « Afficher la piste Arrangement » pour la remettre)"
           className="nova-hit-tactile w-6 h-6 rounded-md text-slate-500 hover:text-white hover:bg-white/10 shrink-0"><i className="fas fa-eye-slash text-[10px]" /></button>
       </div>

@@ -65,7 +65,7 @@ export const ControlSurfaceSettings: React.FC = () => {
               <select className={sel} value={config.protocol} disabled={busy} aria-label="Protocole de la surface"
                 onChange={e => run(() => controlSurface.setProtocol(e.target.value === 'hui' ? 'hui' : 'mcu'))}>
                 <option value="mcu">Mackie Control (MCU)</option>
-                <option value="hui">HUI (Pro Tools)</option>
+                <option value="hui">HUI</option>
               </select>
             </label>
             <label className="space-y-1.5 block">

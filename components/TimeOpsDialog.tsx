@@ -67,7 +67,7 @@ const TimeOpsDialog: React.FC<{ state: DAWState; preset?: TimeDialogPreset; onCl
           <button type="button" onClick={onClose} aria-label="Fermer" className="nova-hit-tactile w-8 h-8 rounded-lg text-nv-muted hover:text-nv-ink"><i className="fas fa-times" /></button>
         </div>
         <div role="radiogroup" aria-label="Opération" className="flex gap-1 rounded-xl bg-nv-well p-1">
-          {([['insert', 'Insérer du temps', 'Pro Tools : Insert Silence (Ctrl+Maj+E) / Insert Time'], ['delete', 'Supprimer du temps', 'Pro Tools : Cut Time']] as const).map(([m, label, pt]) => (
+          {([['insert', 'Insérer du temps', 'Insert Silence (Ctrl+Maj+E) / Insert Time'], ['delete', 'Supprimer du temps', 'Cut Time']] as const).map(([m, label, pt]) => (
             <button key={m} type="button" role="radio" aria-checked={mode === m} data-testid={`timeops-mode-${m}`} title={pt} onClick={() => setMode(m)}
               className={`nova-hit-tactile flex-1 h-9 rounded-lg text-[12px] font-bold ${mode === m ? 'bg-nv-accent text-black' : 'text-nv-muted hover:text-nv-ink'}`}>{label}</button>
           ))}

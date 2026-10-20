@@ -95,14 +95,14 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
             <li key={a.id} id={`palette-${a.id}`} role="option" aria-selected={i === index} aria-disabled={!!a.disabledReason || undefined}
               data-palette-index={i} data-palette-id={a.id}
               onMouseMove={() => { if (i !== index) setIndex(i); }} onClick={() => launch(a)}
-              title={a.disabledReason || (a.pt ? `Pro Tools : ${a.pt}` : undefined)}
+              title={a.disabledReason || (a.pt ? `${a.pt}` : undefined)}
               className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl px-3 py-1.5 ${i === index ? 'bg-nv-accent/15' : ''} ${a.disabledReason ? 'opacity-50' : ''}`}>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold text-nv-ink">{a.label}</span>
                 {a.disabledReason
                   ? <span className="block truncate text-[11px] text-amber-400">{a.disabledReason}</span>
                   : a.detail ? <span className="block truncate text-[11px] text-nv-muted">{a.detail}</span>
-                  : a.pt ? <span className="block truncate text-[11px] text-nv-muted">Pro Tools : {a.pt}</span> : null}
+                  : a.pt ? <span className="block truncate text-[11px] text-nv-muted">Équivalent : {a.pt}</span> : null}
               </span>
               <span className="hidden shrink-0 text-[10px] font-bold uppercase tracking-wide text-nv-muted sm:inline">{a.group}</span>
               {a.keys && <kbd className="shrink-0 rounded-md border border-nv-line/20 bg-nv-line/5 px-2 py-0.5 font-mono text-[11px] text-nv-ink">{a.keys}</kbd>}

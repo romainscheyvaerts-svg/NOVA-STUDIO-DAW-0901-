@@ -84,9 +84,9 @@ export function saveMidiRecPrefs(p: MidiRecPrefs) {
 }
 
 export const MODE_LABELS: Record<MidiRecMode, { label: string; hint: string }> = {
-  replace: { label: 'Remplacer', hint: 'La zone enregistrée est effacée puis réécrite (Pro Tools : MIDI Merge éteint, FL : Replace).' },
-  merge: { label: 'Fusionner', hint: 'Tes notes s’ajoutent à celles déjà là (Pro Tools : MIDI Merge, FL : Overdub, Live : MIDI Arrangement Overdub).' },
-  loop: { label: 'Boucle', hint: 'La prise tourne sur la boucle (Pro Tools : Loop Record, FL : Loop recording).' },
+  replace: { label: 'Remplacer', hint: 'La zone enregistrée est effacée puis réécrite (MIDI Merge éteint, FL : Replace).' },
+  merge: { label: 'Fusionner', hint: 'Tes notes s’ajoutent à celles déjà là (MIDI Merge, FL : Overdub, Live : MIDI Arrangement Overdub).' },
+  loop: { label: 'Boucle', hint: 'La prise tourne sur la boucle (Loop Record, FL : Loop recording).' },
 };
 
 // ---------------------------------------------------------------------------

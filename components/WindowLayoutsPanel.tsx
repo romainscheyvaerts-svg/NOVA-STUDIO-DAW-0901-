@@ -34,7 +34,7 @@ const WindowLayoutsPanel: React.FC<{ onClose: () => void; notify: (m: string) =>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-nv-well text-nv-muted hover:text-nv-ink">✕</button>
         </div>
         <p className="mb-3 text-[12px] text-nv-muted">
-          Une disposition retient la vue, les panneaux ouverts et le zoom. Rappel : Ctrl+Maj+1 à 5, ou au pavé « . » N « * » comme Pro Tools ;
+          Une disposition retient la vue, les panneaux ouverts et le zoom. Rappel : Ctrl+Maj+1 à 5, ou au pavé « . » N « * » comme dans les studios pro ;
           pavé « . » N « / » enregistre la vue actuelle.
         </p>
         <ul className="space-y-2">
