@@ -76,6 +76,8 @@ export interface PluginCrashEvent {
 
 /** Attente avant le n-ième essai de reconnexion (1 s, 2 s, 4 s, 8 s, puis 10 s). */
 export const reconnectDelayMs = (attempt: number): number => Math.min(10000, 1000 * Math.pow(2, Math.max(0, attempt - 1)));
+/** Lecture des plugins en cours sur le pont : liste relue toutes les 3 s. */
+export const PROBE_POLL_MS = 3000;
 
 /**
  * (pont v6) Un plugin vient d'ouvrir une fenêtre d'activation / de licence au
@@ -101,6 +103,8 @@ export interface BridgeState {
   error: string | null;
   version: number | null;
   pluginCount: number;
+  /** Change à chaque nouvelle liste de plugins (la page relit getCachedPlugins()). */
+  pluginsRev?: number;
   /** Le pont sait rendre des instruments VST3 (v5 et plus). */
   instruments: boolean;
   /** Lecture des plugins en cours sur le pont (instrument ou effet ?) : [lus, total]. */
@@ -541,6 +545,7 @@ class NovaBridgeService {
         this.projectFrames.clear();
         this.stemsJobs.clear();
         this.voiceJobs.clear();
+        this.followProbe(false); // relue à la reconnexion (listPlugins après HELLO)
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
           if (this.wantsAutoReconnect()) {
@@ -741,11 +746,36 @@ class NovaBridgeService {
       ...(p.quarantined ? { quarantined: true } : {}),
     }));
     const prog = Array.isArray(r.probe_progress) ? r.probe_progress : null;
+    const sig = this.plugins.map(p => `${p.id}|${p.isInstrument}|${p.license || ''}`).join('\n');
+    if (sig !== this.pluginsSig) { this.pluginsSig = sig; this.pluginsRev++; }
     this.setBridgeState({
       pluginCount: this.plugins.length,
+      pluginsRev: this.pluginsRev,
       instrumentsPending: r.instruments_pending ? [Number(prog?.[0]) || 0, Number(prog?.[1]) || 0] : null,
     });
+    this.followProbe(!!r.instruments_pending);
     return this.plugins;
+  }
+
+  private pluginsSig = '';
+  private pluginsRev = 0;
+  private probePollTimer: number | null = null;
+
+  /**
+   * Lecture des plugins en cours sur le pont (1re fois sur un PC : shells Waves, Antares…) :
+   * la liste est relue toute seule toutes les 3 s jusqu'à la fin, pour que les plugins
+   * apparaissent sans clic. Un seul minuteur ; rien quand la lecture est finie.
+   */
+  private followProbe(pending: boolean) {
+    if (!pending) {
+      if (this.probePollTimer !== null) { window.clearTimeout(this.probePollTimer); this.probePollTimer = null; }
+      return;
+    }
+    if (this.probePollTimer !== null) return;
+    this.probePollTimer = window.setTimeout(() => {
+      this.probePollTimer = null;
+      if (this.isConnected()) this.listPlugins().catch(() => { /* relue à la reconnexion */ });
+    }, PROBE_POLL_MS);
   }
 
   /** Instruments VST3 du PC (la liste suit la lecture faite par le pont). */

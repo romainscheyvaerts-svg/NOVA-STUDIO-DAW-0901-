@@ -7,6 +7,11 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.5
+- Tes plugins VST3 (Waves, Antares…) sont détectés tout seuls à la première ouverture, sans clic.
+- Onglet VST : la lecture des plugins s'affiche (compteur) et la liste se complète au fur et à mesure.
+- Les plugins Waves apparaissent en premier.
+
 ## 1.5.4
 - Nouvelle édition « hors ligne » sur clé USB : Nova Studio s'ouvre sans compte et sans Internet.
 - Nova Pro offert par le studio : affiché « sans limite » au lieu d'un décompte en jours.

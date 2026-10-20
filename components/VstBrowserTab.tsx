@@ -75,7 +75,8 @@ const VstBrowserTab: React.FC<{
   const [loadingList, setLoadingList] = useState(false);
   const connected = bridge.status === 'connected';
 
-  // Liste demandée une fois connecté (jamais de connexion automatique).
+  // Liste demandée une fois connecté ; pendant la lecture des plugins par le pont (1re fois
+  // sur un PC : Waves, Antares…), novaBridge la relit tout seul et elle se complète ici.
   const refresh = (rescan = false) => {
     setLoadingList(true);
     return novaBridge.listPlugins(rescan)
@@ -84,6 +85,8 @@ const VstBrowserTab: React.FC<{
       .finally(() => setLoadingList(false));
   };
   useEffect(() => { if (connected) void refresh(); }, [connected]);
+  useEffect(() => { setPlugins(novaBridge.getCachedPlugins()); }, [bridge.pluginsRev]);
+  const lecture = connected ? bridge.instrumentsPending : null;
 
   const handleDragStart = (e: React.DragEvent, p: BridgePlugin) => {
     e.dataTransfer.setData('pluginType', 'VST3');
@@ -126,6 +129,15 @@ const VstBrowserTab: React.FC<{
           <i className={`fas fa-sync-alt ${loadingList ? 'animate-spin' : ''}`}></i>
         </button>
       </div>
+      {lecture && (
+        <div role="status" data-testid="vst-probe-progress" className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 p-3 text-[11px] text-cyan-100">
+          <p className="font-bold"><i className="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>Lecture des plugins de ce PC : {lecture[0]} / {lecture[1]}</p>
+          <p className="mt-1 text-cyan-200/80">Première fois seulement. Les plugins (Waves, Antares…) apparaissent au fur et à mesure, tu peux déjà travailler.</p>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+            <div className="h-full bg-cyan-400 transition-all" style={{ width: `${lecture[1] ? Math.round((lecture[0] / lecture[1]) * 100) : 0}%` }} />
+          </div>
+        </div>
+      )}
       <AutotuneVstSettings />
       <div className="relative">
         <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-xs text-slate-600"></i>
@@ -169,7 +181,10 @@ const VstBrowserTab: React.FC<{
       {filtered.length === 0 && (
         <div className="text-center py-10 opacity-60">
           <i className="fas fa-plug text-2xl text-slate-600 mb-2"></i>
-          <p className="text-[11px] text-slate-500">{loadingList ? 'Recherche des plugins…' : 'Aucun plugin VST3 trouvé.'}</p>
+          <p className="text-[11px] text-slate-500">{loadingList || lecture ? 'Recherche des plugins…' : 'Aucun plugin VST3 trouvé.'}</p>
+          {!loadingList && !lecture && !searchTerm.trim() && (
+            <p className="mt-1 text-[10px] text-slate-500">Nova lit les plugins VST3 (dossier C:\Program Files\Common Files\VST3). Les plugins installés seulement pour Pro Tools (AAX) n'y sont pas : réinstalle-les en cochant VST3.</p>
+          )}
         </div>
       )}
     </div>

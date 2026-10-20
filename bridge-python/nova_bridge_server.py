@@ -215,6 +215,13 @@ from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrum
 
 VERSION = 15
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
+# Lecture des plugins (1re fois sur un PC) : par paquets, la liste se complète au fur et à mesure.
+PROBE_CHUNK = 24
+
+
+def probe_order(path: str):
+    """Shells d'abord (WaveShell de Waves : des centaines de plugins dans un seul fichier)."""
+    return (0 if "shell" in os.path.basename(path).lower() else 1, path.lower())
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
 ORPHAN_GRACE_S = 90          # un slot survit 90 s à une déconnexion (rechargement de page)
@@ -445,14 +452,22 @@ class NovaBridgeServer:
                 if not todo:
                     return
                 self._probed.update(todo)
-                self.probe_progress = [0, len(todo)]
+                # 1re fois sur un PC (rien en cache) : les shells d'abord (WaveShell de Waves : des
+                # centaines de plugins dans un fichier), puis par paquets. La liste se complète au fur
+                # et à mesure (la page la relit pendant la lecture) au lieu d'attendre la fin du tout.
+                todo.sort(key=probe_order)
+                total = len(todo)
+                self.probe_progress = [0, total]
+                for start in range(0, total, PROBE_CHUNK):
+                    chunk = todo[start:start + PROBE_CHUNK]
 
-                def progress(done, total):
-                    self.probe_progress = [done, total]
+                    def progress(done, _n, base=start):
+                        self.probe_progress = [base + done, total]
 
-                results = await self.loop.run_in_executor(
-                    self.misc_pool, lambda: vst_probe.probe_bundles(todo, MAIN_SCRIPT, progress))
-                self.plugins = vst_probe.apply_classes(self.plugins, results)
+                    results = await self.loop.run_in_executor(
+                        self.misc_pool, lambda c=chunk, pr=progress: vst_probe.probe_bundles(c, MAIN_SCRIPT, pr))
+                    self.plugins = vst_probe.apply_classes(self.plugins, results)
+                    self.probe_progress = [min(start + len(chunk), total), total]
                 n = sum(1 for p in self.plugins if p.get("is_instrument"))
                 logger.info(f"🎹 {n} instruments VST3 disponibles")
         except Exception as e:
