@@ -90,7 +90,7 @@ export const DEVERB_HANDLE = 0.5;
 export function deverbBlock(c: Clip | null | undefined): string | null {
   if (!c) return 'Clip introuvable.';
   const b = audioSuiteBlock(c);
-  if (b) return b.replace('AudioSuite traite', 'Le retrait de réverbe traite');
+  if (b) return b.replace('Ce traitement', 'Le retrait de réverbe');
   if (c.duration < 0.5) return 'Clip trop court (une demi-seconde minimum).';
   return null;
 }

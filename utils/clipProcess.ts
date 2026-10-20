@@ -20,7 +20,7 @@ export type AudioSuiteStep = AudioSuiteInfo['steps'][number];
 
 /** Ce clip peut-il être traité ? (sinon : la raison, à afficher) */
 export const audioSuiteBlock = (c: Clip): string | null => {
-  if (c.type === TrackType.MIDI || c.notes) return 'AudioSuite traite l’audio : convertis d’abord le MIDI en audio (Commit ou Consolider avec effets).';
+  if (c.type === TrackType.MIDI || c.notes) return 'Ce traitement ne marche que sur l’audio : convertis d’abord le MIDI en audio (Commit ou Consolider avec effets).';
   if (!c.bufferId && !c.buffer) return 'Le son de ce clip n’est pas encore chargé.';
   if (c.isReversed) return 'Clip inversé : consolide-le d’abord (Alt+Maj+3), puis traite-le.';
   if (c.warp && c.warp.mode && c.warp.mode !== 'OFF') return 'Clip calé sur le tempo (warp) : consolide-le d’abord (Alt+Maj+3), puis traite-le.';
@@ -39,7 +39,8 @@ export const audioSuiteRegion = (c: Pick<Clip, 'offset' | 'duration'>, bufferDur
   return { from, to, lead: off - from };
 };
 
-const SUFFIX_RE = /\s*\((AudioSuite[^)]*)\)$/;
+// « (traité : …) » ; « (AudioSuite : …) » dans les projets d'avant la 1.5.7.
+const SUFFIX_RE = /\s*\(((?:traité|AudioSuite)[^)]*)\)$/;
 
 /**
  * Changements du clip une fois le son traité enregistré sous `newBufferId`
@@ -66,7 +67,7 @@ export const audioSuitePatch = (c: Clip, o: { newBufferId: string; from: number;
   return {
     bufferId: o.newBufferId,
     offset,
-    name: `${baseName} (AudioSuite : ${steps.map(s => s.name).join(' + ')})`.slice(0, 80),
+    name: `${baseName} (traité : ${steps.map(s => s.name).join(' + ')})`.slice(0, 80),
     audioSuite: info,
   };
 };

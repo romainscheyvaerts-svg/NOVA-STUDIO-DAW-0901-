@@ -1162,7 +1162,7 @@ def scen_couverture(page, vp, theme):
 
     def audiosuite():
         set_range(page, 0, 2, ("lead",))
-        tap_or_click(page.locator("[role=toolbar][aria-label='Actions sur la sélection de plage'] button[aria-label=AudioSuite]").first, touch)
+        tap_or_click(page.locator("[role=toolbar][aria-label='Actions sur la sélection de plage'] button[aria-label=Traiter]").first, touch)
         v = visible(page, "[data-testid=audiosuite-dialog]")
         escape(page); clear_range(page)
         return v

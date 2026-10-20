@@ -83,7 +83,7 @@ export const CLEAN_HANDLE = 0.5;
 export function cleanBlock(c: Clip | null | undefined): string | null {
   if (!c) return 'Clip introuvable : il a peut-être été supprimé.';
   const b = audioSuiteBlock(c);
-  if (b) return b.replace('AudioSuite traite', 'Le nettoyage traite');
+  if (b) return b.replace('Ce traitement', 'Le nettoyage');
   if (c.duration < 0.3) return 'Clip trop court (0,3 s minimum) : agrandis-le ou choisis la prise entière.';
   return null;
 }

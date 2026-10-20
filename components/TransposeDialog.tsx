@@ -33,7 +33,7 @@ interface Props {
 const has = (id: string) => !!audioBufferRegistry.get(id);
 
 const AlgoHelp: Record<ElasticInfo['algo'], { label: string; title: string }> = {
-  auto: { label: 'Auto', title: 'NOVA écoute le son et choisit : voix seule → moteur voix ; beat, sample, accords → moteur polyphonique (choix de l’algorithme Elastic Audio).' },
+  auto: { label: 'Auto', title: 'NOVA écoute le son et choisit : voix seule → moteur voix ; beat, sample, accords → moteur polyphonique (choix automatique de l’algorithme).' },
   voice: { label: 'Voix', title: 'Voix seule (PSOLA, comme la justesse note par note) : timbre naturel, pas d’effet « chipmunk » (Monophonic · Logic : Flex Pitch · Live : Tones).' },
   poly: { label: 'Beat / sample', title: 'Son polyphonique (beat entier, sample, accords) : vocodeur de phase avec attaques nettes (Polyphonic · Logic : Polyphonic · Live : Complex Pro · FL : Pro mode).' },
 };
@@ -150,7 +150,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">{simple ? 'Changer la tonalité' : 'Transposer / étirer le clip'}</h2>
-            <p className="text-[11px] text-nv-muted" title="Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose et Warp · FL : Pitch et Stretch du clip">
+            <p className="text-[11px] text-nv-muted" title="Logic : Flex Pitch · Live : Transpose et Warp · FL : Pitch et Stretch du clip">
               {resolved.length > 1 ? `${resolved.length} clips` : `« ${first!.elastic?.sourceName || first!.name} »`} · la hauteur change, pas le tempo. L'original est gardé.
             </p>
           </div>
@@ -210,7 +210,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
                 <input type="number" min={30} max={300} step={0.01} value={sampleBpm} placeholder="BPM" onChange={e => { setSampleBpm(e.target.value); setEstimated(false); }} aria-label="Tempo du sample (BPM)" data-testid="transpose-sample-bpm"
                   className="w-20 rounded-lg border border-nv-line bg-nv-panel px-2 py-1 text-right text-[12px] tabular-nums" />
                 <button type="button" onClick={fitTempo} className={`${btn} flex-1`} data-testid="transpose-fit-tempo"
-                  title="Cale le sample sur le tempo du projet, sans changer sa hauteur (Elastic Audio et Conform · Live : Warp · Logic : Smart Tempo)">
+                  title="Cale le sample sur le tempo du projet, sans changer sa hauteur (Live : Warp · Logic : Smart Tempo)">
                   <i className="fas fa-clock mr-1.5" />Caler sur {Math.round(bpm * 100) / 100} BPM
                 </button>
               </div>

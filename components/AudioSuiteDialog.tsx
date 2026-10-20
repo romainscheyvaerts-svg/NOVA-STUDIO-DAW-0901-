@@ -168,7 +168,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
           return { ...t, clips: base.map(c => (patches.has(c.id) ? patchClip(c, patches.get(c.id)!) : c)) };
         }),
       }));
-      notify(`🎛️ AudioSuite « ${step.name} » appliqué à ${patches.size} clip${patches.size > 1 ? 's' : ''}. L'original est gardé : menu du clip → « Revenir à l'original ». Ctrl+Z pour annuler.`);
+      notify(`🎛️ Traitement « ${step.name} » appliqué à ${patches.size} clip${patches.size > 1 ? 's' : ''}. L'original est gardé : menu du clip → « Revenir à l'original ». Ctrl+Z pour annuler.`);
       onClose();
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -193,12 +193,12 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
 
   return (
     <div className="fixed inset-0 z-[700] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" onClick={() => !busy && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="AudioSuite" data-testid="audiosuite-dialog" onClick={e => e.stopPropagation()}
+      <div role="dialog" aria-modal="true" aria-label="Traitement de clip" data-testid="audiosuite-dialog" onClick={e => e.stopPropagation()}
         className="w-full sm:max-w-md space-y-3 rounded-t-2xl sm:rounded-2xl border border-nv-line bg-nv-panel p-4 text-nv-ink shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[15px] font-black">AudioSuite</h2>
-            <p className="text-[11px] text-nv-muted" title="AudioSuite · Logic : Traitement de fichier · Ableton : effet puis Consolidate · FL : Edison">
+            <h2 className="text-[15px] font-black">Traitement de clip</h2>
+            <p className="text-[11px] text-nv-muted" title="Logic : Traitement de fichier · Ableton : effet puis Consolidate · FL : Edison">
               Traite {resolved.length} clip{resolved.length > 1 ? 's' : ''}{range ? ' de la plage' : ''} avec un effet, comme le traitement hors ligne des studios. L'original est gardé.
             </p>
           </div>

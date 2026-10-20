@@ -80,7 +80,7 @@ describe('R24 · voix par l’IA locale (logique)', () => {
     const after = patchClip(clip, patch);
     expect(after.bufferId).toBe('dv');
     expect(after.offset).toBeCloseTo(0.5, 9);
-    expect(after.name).toBe('Lead (AudioSuite : Réverbe retirée 80 %)');
+    expect(after.name).toBe('Lead (traité : Réverbe retirée 80 %)');
     expect(after.audioSuite?.steps[0]).toEqual({ type: 'AI_DEVERB', name: 'Réverbe retirée 80 %', at: 9 });
     expect(after.transcript?.bufferId).toBe('dv');
     expect(after.transcript?.words[0].s).toBeCloseTo(1, 9);

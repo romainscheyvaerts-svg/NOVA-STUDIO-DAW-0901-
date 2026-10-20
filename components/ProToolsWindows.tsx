@@ -125,7 +125,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         }),
       } : t)),
     }));
-    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: "↩️ Clip revenu à l'original (AudioSuite). Ctrl+Z pour retrouver le son traité." })); } catch { /* hors navigateur */ }
+    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: "↩️ Clip revenu à l'original (avant traitement). Ctrl+Z pour retrouver le son traité." })); } catch { /* hors navigateur */ }
   }, [setState]);
   // Calage au tempo (R13, warp d'Ableton) : un clip calé suit le tempo du projet (rendu refait
   // depuis l'original, une fois le geste fini).

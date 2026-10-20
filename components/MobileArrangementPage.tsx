@@ -869,7 +869,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     <button type="button" data-testid={`beat-key-${track.id}`}
                       onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
                       aria-label={`Changer la tonalité de ${track.name}`}
-                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Elastic Audio · Live : Transpose · FL : Pitch)"
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Live : Transpose · FL : Pitch)"
                       className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-arrows-up-down"></i>
                     </button>

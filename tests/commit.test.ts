@@ -151,11 +151,11 @@ describe('AudioSuite', () => {
     const p1 = audioSuitePatch(clip, { newBufferId: 'p1', from: 2.25, step: { type: 'COMPRESSOR', name: 'Compresseur', at: 1 } });
     const c1 = patchClip(clip, p1);
     expect([c1.bufferId, c1.offset, c1.start, c1.duration]).toEqual(['p1', 1, 10, 2]);
-    expect(c1.name).toBe('Prise 3 (AudioSuite : Compresseur)');
+    expect(c1.name).toBe('Prise 3 (traité : Compresseur)');
     expect(c1.audioSuite).toMatchObject({ sourceBufferId: 'orig', regionStart: 2.25 });
     // Deuxième traitement empilé.
     const c2 = patchClip(c1, audioSuitePatch(c1, { newBufferId: 'p2', from: 0.1, step: { type: 'REVERB', name: 'Réverbe', at: 2 } }));
-    expect(c2.name).toBe('Prise 3 (AudioSuite : Compresseur + Réverbe)');
+    expect(c2.name).toBe('Prise 3 (traité : Compresseur + Réverbe)');
     expect(c2.audioSuite!.steps.map(s => s.name)).toEqual(['Compresseur', 'Réverbe']);
     const back = patchClip(c2, audioSuiteRevertPatch(c2, () => true)!);
     expect(back).toEqual(clip);

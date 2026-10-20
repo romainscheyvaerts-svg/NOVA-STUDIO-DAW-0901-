@@ -188,7 +188,7 @@ def run_touch(b, vp, tag):
         check(f"{tag} : toucher « Traitement » ouvre le sous-menu à côté", bool(sub) and sub["x"] + sub["w"] <= 1024, sub and f"x={sub['x']} w={sub['w']}")
     small = page.evaluate("""() => [...document.querySelectorAll('[role=menu] button[role=menuitem]')].filter(b => b.getClientRects().length && b.getBoundingClientRect().height < 36).map(b => b.innerText.trim().slice(0, 30))""")
     check(f"{tag} : entrées d'au moins 36 px au doigt", not small, small[:3])
-    it = page.locator("[role=menu] button", has_text="AudioSuite").locator("visible=true").first
+    it = page.locator("[role=menu] button", has_text="Traiter avec un effet").locator("visible=true").first
     it.tap(); page.wait_for_timeout(800)
     opened = page.evaluate("() => !!document.querySelector('[role=dialog]')")
     check(f"{tag} : toucher Traitement › AudioSuite ouvre la fenêtre", opened)

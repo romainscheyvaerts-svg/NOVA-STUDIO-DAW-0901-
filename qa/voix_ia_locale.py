@@ -433,7 +433,7 @@ def scenario_real(page, log, res, vp):
                          "apres_ctrl_y_audiosuite": "audioSuite" in d_redo["tracks"][1]["clips"][0]}
     # Revenir à l'original (menu du clip)
     clip_menu(page, "Voix pièce")
-    menu_item(page, "Revenir à l’original \\(AudioSuite\\)").click()
+    menu_item(page, "Revenir à l’original \\(avant traitement\\)").click()
     page.wait_for_timeout(1500)
     d_rev, _ = project_json(page, "C_apres_retour")
     c = d_rev["tracks"][1]["clips"][0]

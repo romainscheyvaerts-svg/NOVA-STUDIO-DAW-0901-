@@ -15,7 +15,9 @@ import ts from 'typescript';
 const ROOT = path.resolve(__dirname, '..');
 const DIRS = ['components', 'hooks', 'utils', 'services', 'engine', 'plugins'];
 const FILES = ['App.tsx', 'index.tsx', 'ecoute.tsx', 'morceau.tsx', 'types.ts'];
-const BRAND = /pro ?tools|pro-tools|\bavid\b/i;
+// Noms de fonctions déposés par le même éditeur (forme affichée, avec capitales : les
+// identifiants internes en minuscules comme 'audiosuite' restent libres).
+const BRAND = /pro ?tools|pro-tools|\bavid\b|(?-i:AudioSuite|Elastic Audio)/i;
 const SIGLE = /\bPT\b/;
 const INTERNES = new Set(['protools', 'nova-protools', 'nova_protools_bridge']);
 
@@ -44,7 +46,7 @@ function chainesFautives(file: string): string[] {
     else if (n.kind === ts.SyntaxKind.JsxText) t = n.getText();
     if (t && (BRAND.test(t) || SIGLE.test(t))) {
       const p = n.parent;
-      const importe = p && (ts.isImportDeclaration(p) || ts.isExportDeclaration(p));
+      const importe = (p && (ts.isImportDeclaration(p) || ts.isExportDeclaration(p))) || /^\.\.?\//.test(t); // import('./…') à la demande
       const motsCles = p && ts.isPropertyAssignment(p) && p.name.getText() === 'keywords';
       if (!importe && !motsCles && !INTERNES.has(t)) {
         const { line } = sf.getLineAndCharacterOfPosition(n.getStart());

@@ -73,7 +73,7 @@ describe('lot 1 · nettoyer la voix : réglages et clip', () => {
     const after = patchClip(clip, cleanPatch(clip, { newBufferId: 'vc', from: reg.from, options: { strength: 'strong' }, now: 9 }));
     expect(after.bufferId).toBe('vc');
     expect(after.offset).toBeCloseTo(0.5, 9);
-    expect(after.name).toBe('Lead (AudioSuite : Voix nettoyée (Fort))');
+    expect(after.name).toBe('Lead (traité : Voix nettoyée (Fort))');
     expect(after.audioSuite?.steps[0]).toEqual({ type: 'AI_VOICE_CLEAN', name: 'Voix nettoyée (Fort)', at: 9 });
     expect(after.audioSuite?.sourceBufferId).toBe('orig');
     expect(after.transcript?.bufferId).toBe('vc');

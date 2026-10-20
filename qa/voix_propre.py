@@ -213,7 +213,7 @@ def scenario_desktop(page, log, res, vp):
                          "ctrl_z": lsb_gap(yu, ref)}
     # Revenir à l'original (menu du clip)
     clip_menu(page, "Voix", x=700)
-    menu_item(page, "Revenir à l’original \\(AudioSuite\\)").click()
+    menu_item(page, "Revenir à l’original \\(avant traitement\\)").click()
     page.wait_for_timeout(1500)
     d_rev, _ = save_zip(page, OUT / "A_apres_retour.zip")
     cr = d_rev["tracks"][0]["clips"][0]
