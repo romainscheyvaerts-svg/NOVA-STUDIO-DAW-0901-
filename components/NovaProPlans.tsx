@@ -19,16 +19,20 @@ interface Props {
   compact?: boolean;
 }
 
-export const joursOffertsLabel = (n: number) => (n <= 1 ? 'dernier jour' : `${n} jours restants`);
+/** Au-delà d'un an (Nova Pro offert « à vie » par le studio), un décompte en jours n'a plus de sens. */
+export const SANS_LIMITE_JOURS = 366;
+export const joursOffertsLabel = (n: number) => (n <= 1 ? 'dernier jour' : n > SANS_LIMITE_JOURS ? 'sans limite' : `${n} jours restants`);
 
 /** Bandeau « Nova Pro offert : X jours restants » (achat d'une licence, séance au studio). */
 export const ProGiftCounter: React.FC<{ status?: BillingStatus | null }> = ({ status }) => {
   const c = status?.pro?.cadeau;
   if (!c?.active || status?.pro?.paid) return null;
-  const pourquoi = c.sources.some(s => s.source === 'studio') ? 'séance au studio'
+  const pourquoi = c.sources.some(s => s.source === 'manuel') ? 'offert par le studio'
+    : c.sources.some(s => s.source === 'studio') ? 'séance au studio'
     : c.sources.some(s => s.source === 'instru' || s.source === 'melodie_exclusive') ? 'licence achetée'
     : 'mélodie achetée';
-  const fin = c.until ? new Date(c.until).toLocaleDateString('fr-BE', { day: 'numeric', month: 'long' }) : '';
+  const sansLimite = c.days_left > SANS_LIMITE_JOURS;
+  const fin = c.until && !sansLimite ? new Date(c.until).toLocaleDateString('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   return (
     <p className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-[12px] text-violet-100" role="status" data-testid="pro-gift-counter">
       🎁 <b>Nova Pro offert</b> ({pourquoi}) : <b>{joursOffertsLabel(c.days_left)}</b>{fin ? `, jusqu'au ${fin}` : ''}.
