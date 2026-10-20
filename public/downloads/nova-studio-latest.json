@@ -1,0 +1,15 @@
+{
+  "version": "1.5.3",
+  "url": "downloads/NovaStudioSetup-1.5.3.exe",
+  "sha256": "8829600dc7d0a93ab49d6d344ccbe9d5a88757e85b43f58877b7cc8101de3556",
+  "size": 51126772,
+  "date": "2026-10-20T20:26:04+02:00",
+  "notes": [
+    "Nova Studio se met maintenant à jour tout seul : la nouvelle version se télécharge en arrière-plan.",
+    "Tu es prévenu quand elle est prête : « Redémarrer et mettre à jour » ou « Plus tard ».",
+    "Sans rien faire, elle s'installe quand tu fermes Nova Studio (jamais pendant un enregistrement).",
+    "Réglages : « Mises à jour automatiques » et « Rechercher maintenant », avec la version installée.",
+    "Mode simple plus clair : le beat et une seule piste pour enregistrer ta voix.",
+    "« Créer un compte » crée directement ton compte Make Music."
+  ]
+}
