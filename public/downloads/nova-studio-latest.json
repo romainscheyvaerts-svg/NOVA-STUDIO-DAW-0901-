@@ -1,12 +1,12 @@
 {
-  "version": "1.5.4",
-  "url": "downloads/NovaStudioSetup-1.5.4.exe",
-  "sha256": "5b9720ac58d648dc03da71382551f4c22ea8f80f24d1dc59be092d1c8e526797",
-  "size": 51131575,
-  "date": "2026-10-20T21:29:08+02:00",
+  "version": "1.5.5",
+  "url": "downloads/NovaStudioSetup-1.5.5.exe",
+  "sha256": "43a8a39ae19e19eeb8ae398df687f10dd9879c852d6baf5051b05231ca61f5a7",
+  "size": 51129919,
+  "date": "2026-10-20T22:04:41+02:00",
   "notes": [
-    "Nouvelle édition « hors ligne » sur clé USB : Nova Studio s'ouvre sans compte et sans Internet.",
-    "Nova Pro offert par le studio : affiché « sans limite » au lieu d'un décompte en jours.",
-    "Corrections et améliorations de stabilité."
+    "Tes plugins VST3 (Waves, Antares…) sont détectés tout seuls à la première ouverture, sans clic.",
+    "Onglet VST : la lecture des plugins s'affiche (compteur) et la liste se complète au fur et à mesure.",
+    "Les plugins Waves apparaissent en premier."
   ]
 }
