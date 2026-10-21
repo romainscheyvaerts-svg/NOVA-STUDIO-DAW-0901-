@@ -117,6 +117,11 @@ BATTERIE = [
     # existant intact) ; « Créer un compte » = compte Make Music (règles du site, e-mail de confirmation, renvoi, non confirmé),
     # fenêtre Nova Pro, palette, téléphone ; compte Make Music seul : séances en ligne dans « Ouvrir un projet ».
     ("simple_compte", []),
+    # 21/10/2026 : 💬 talkback (bouton « Talk » de la barre, touche N : court = reste ouvert, maintenu = tant qu'on tient) :
+    # au studio, voix mesurée dans la sortie casque et absente du master, de l'écoute de la régie, de l'export et de la prise
+    # (dim −15 dB, coupé pendant la prise, micro rendu après 20 s) ; en collaboration simulée, N ouvre le talkback EN DIRECT
+    # chez l'autre (« 🎙️ Nina te parle » dans la barre de l'ingé) ; bureau sombre et clair, téléphone.
+    ("talkback", []),
     # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
     ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
     # B7 : voix par l'IA locale (pont de test 8803 + module voix installé : Whisper sur la carte graphique).

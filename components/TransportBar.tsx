@@ -42,6 +42,8 @@ export interface TransportTalkback {
   keyHint: string;
   /** Qui te parle en ce moment (talkback reçu en collaboration). */
   talking: string[];
+  /** Pourquoi il ne s'ouvre pas (« Coupé pendant la prise », « Micro indisponible »), quelques secondes. */
+  blocked?: string | null;
   /** Appui / relâchement (souris, doigt) : appui court = verrouillé, maintenu = tant qu'on tient. */
   onButton: (down: boolean) => void;
   /** Clavier sur le bouton (Entrée) : ouvre verrouillé / coupe. */
@@ -944,6 +946,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <i className={`fas ${talkback.on ? 'fa-microphone' : 'fa-comment-dots'} text-xs`} aria-hidden="true"></i>
               <span {...barItem('libelle-talkback', 5)} className="hidden lg:inline font-black uppercase text-[9px] tracking-wider">Talk</span>
             </button>
+          )}
+          {talkback && talkback.blocked && (!simple || talkback.collab) && (
+            <span role="status" data-testid="talkback-blocked" title={`Talkback : ${talkback.blocked}`}
+              className="shrink min-w-0 max-w-[10rem] truncate h-8 px-2 rounded-lg flex items-center text-[11px] font-black bg-amber-400 text-black">
+              🎙️ {talkback.blocked}
+            </span>
           )}
           {talkback && talkback.talking.length > 0 && (
             <span role="status" data-testid="talkback-talking" title={talkingLabel(talkback.talking)}

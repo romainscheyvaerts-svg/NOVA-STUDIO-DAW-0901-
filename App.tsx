@@ -7776,6 +7776,14 @@ function Studio() {
   const talkSettings = useTalkbackSettings();
   const [localTalkOn, setLocalTalkOn] = useState(false);
   const [talkLatched, setTalkLatched] = useState(false);
+  /** Pourquoi le talkback ne s'ouvre pas (prise en cours, micro refusé…) : dit À CÔTÉ du bouton quelques secondes. */
+  const [talkBlocked, setTalkBlocked] = useState<string | null>(null);
+  const talkBlockedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashTalkBlocked = (why: string) => {
+    setTalkBlocked(why);
+    if (talkBlockedTimer.current) clearTimeout(talkBlockedTimer.current);
+    talkBlockedTimer.current = setTimeout(() => setTalkBlocked(null), 4000);
+  };
   const talkAppliedRef = useRef(false);
   const talkGenRef = useRef(0);
   const talkLatchRef = useRef<TalkbackLatch | null>(null);
@@ -7790,11 +7798,11 @@ function Studio() {
     if (collabRef.current) {
       // En collaboration : le talkback EN DIRECT existant (des deux côtés).
       if (!rtcRef.current) {
-        if (open) { setAiNotification('🎙️ Talkback : la liaison en direct avec la séance n’est pas encore prête, réessaie dans un instant.'); latch.forceClose(); }
+        if (open) { setAiNotification('🎙️ Talkback : la liaison en direct avec la séance n’est pas encore prête, réessaie dans un instant.'); flashTalkBlocked('Liaison pas prête'); latch.forceClose(); }
         return;
       }
       const ok = await setTalk(open);
-      if (open && !ok && gen === talkGenRef.current) latch.forceClose();
+      if (open && !ok && gen === talkGenRef.current) { flashTalkBlocked('Micro indisponible'); latch.forceClose(); }
       return;
     }
     if (!open) {
@@ -7805,6 +7813,7 @@ function Studio() {
     }
     if (stateRef.current.isRecording) {
       setAiNotification('🎙️ Talkback coupé pendant la prise : ta voix finirait dans le micro de l’artiste. Parle-lui à l’arrêt.');
+      flashTalkBlocked('Coupé pendant la prise');
       latch.forceClose();
       return;
     }
@@ -7812,6 +7821,7 @@ function Studio() {
     const r = await localTalkback.open(talkbackSettingsStore.get().deviceId);
     if (gen !== talkGenRef.current) { if (!talkAppliedRef.current) localTalkback.close(); return; }
     if (r.ok === false) {
+      flashTalkBlocked(((r as { error?: { name?: string } }).error)?.name === 'EngineNotReady' ? 'Moteur pas prêt' : 'Micro indisponible');
       setAiNotification(((r as { error?: { name?: string } }).error)?.name === 'EngineNotReady' ? '🎙️ Talkback : le moteur audio n’est pas prêt. Lance la lecture une fois, puis réessaie.' : talkbackMicError((r as { error?: unknown }).error));
       latch.forceClose();
       return;
@@ -7848,6 +7858,7 @@ function Studio() {
     if (!state.isRecording || collab) return;
     if (talkLatchRef.current?.open) {
       talkLatchRef.current.forceClose();
+      flashTalkBlocked('Coupé pendant la prise');
       setAiNotification('🎙️ Prise en cours : talkback coupé (ta voix ne doit pas finir dans le micro de l’artiste).');
     }
     applyLocalTalkPlan(false);
@@ -10560,7 +10571,7 @@ function Studio() {
       <div className="relative z-50">
         <PanelBoundary name="la barre de transport" compact>
         <TransportBar
-          talkback={talkAvailable ? { on: talkbackOpen, latched: talkLatched && talkbackOpen, collab: !!collab, keyHint: shortcutHint('nova.talkback'), talking: collabTalking, onButton: talkButton, onToggle: talkToggle } : null}
+          talkback={talkAvailable ? { on: talkbackOpen, latched: talkLatched && talkbackOpen, collab: !!collab, keyHint: shortcutHint('nova.talkback'), talking: collabTalking, blocked: talkBlocked, onButton: talkButton, onToggle: talkToggle } : null}
           dspTracks={state.tracks}
           onDspFreezeTrack={(id) => { void freezeTrackRef.current(id); }}
           dspSafety={{ isRecording: !!state.isRecording, bridgeConnected: novaBridge.isConnected(), busyTrackIds: Object.keys(collabLiveStore.get().recs || {}) }}

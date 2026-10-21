@@ -5426,6 +5426,9 @@ export class AudioEngine {
   /** Où part la voix du talkback : 'cue' (mixes casque) ou 'main' (sortie d'écoute, sans mix casque). */
   public getTalkbackRoute(): 'cue' | 'main' { return this.cueMixes.length ? 'cue' : 'main'; }
 
+  /** Dernier plan appliqué (voix, musique) : diagnostic et tests. */
+  public getTalkbackPlan(): { talkGain: number; musicGain: number } { return { ...this.talkPlan }; }
+
   /**
    * Voix du talkback (gain, 0 = coupée) et musique de l'écoute et des casques (1 = normale,
    * dim pendant que l'ingé parle). La voix ne va JAMAIS vers le master : seulement les

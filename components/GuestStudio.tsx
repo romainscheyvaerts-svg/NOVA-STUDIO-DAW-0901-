@@ -4,6 +4,7 @@ import type { CollabStatusView } from '../utils/collabStatus';
 import type { PeerView } from '../utils/collabPeers';
 import { PEER_STATE_TONE } from '../utils/collabPeers';
 import MicLevelMeter from './MicLevelMeter';
+import { isShortcut } from '../utils/keymap';
 
 /**
  * « Artiste invité » : l'écran de l'artiste qui rejoint la séance de l'ingé
@@ -124,6 +125,8 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (GUEST_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) return;
+      // Talkback (N par défaut, utils/talkback) : parler à l'ingé au clavier reste permis.
+      if (isShortcut(e, 'nova.talkback')) return;
       e.stopImmediatePropagation();
     };
     window.addEventListener('keydown', onKey, true);
