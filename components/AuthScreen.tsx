@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { AuthStage, User } from '../types';
 import { authService } from '../services/AuthService';
-import { isSupabaseConfigured } from '../services/supabase';
+import { catalogSupabase, GOOGLE_RETURN_PARAM, isSupabaseConfigured } from '../services/supabase';
+import { GoogleButton } from './GoogleButton';
 import { resendConfirmation } from '../services/makeMusicSignup';
 import { isNovaDesktop } from '../utils/desktopApp';
 import MakeMusicSignupForm from './MakeMusicSignupForm';
@@ -51,6 +52,25 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose, initi
     } else {
       setNeedsConfirm(!!result.needsConfirm);
       setError(result.message || "Erreur de connexion");
+    }
+  };
+
+  // « Continuer avec Google » (site) : le compte Make Music, comme sur studiomakemusic.com.
+  // L'appli Windows a sa propre porte (DesktopAccessGate : Google s'ouvre dans le navigateur).
+  const canGoogle = useRealAuth && !isNovaDesktop();
+  const handleGoogle = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const back = new URL(window.location.href);
+      back.hash = '';
+      back.searchParams.set(GOOGLE_RETURN_PARAM, '1');
+      const { error: err } = await catalogSupabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: back.toString() } });
+      if (err) throw err;
+      // La page part chez Google : rien d'autre à faire ici.
+    } catch {
+      setLoading(false);
+      setError('Connexion Google impossible pour le moment. Réessaie, ou connecte-toi avec ton e-mail.');
     }
   };
 
@@ -161,6 +181,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose, initi
         {/* --- LOGIN FORM --- */}
         {stage === 'LOGIN' && (
           <form onSubmit={handleLogin} className="space-y-5">
+            {canGoogle && <GoogleButton onClick={handleGoogle} disabled={loading} />}
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1 block">Email</label>
               <input 
