@@ -42,12 +42,13 @@ self.addEventListener('fetch', (e) => {
       try {
         const res = await fetch(req);
         // Seule la page du DAW sert de copie hors ligne : la page d'écoute d'un client
-        // (/ecoute.html, lien d'écoute) ne doit pas la remplacer.
-        const daw = !url.pathname.endsWith('/ecoute.html');
+        // (/ecoute.html, lien d'écoute) et la fenêtre détachée (/popout.html, console sur
+        // un 2e écran) ne doivent pas la remplacer.
+        const daw = !url.pathname.endsWith('/ecoute.html') && !url.pathname.endsWith('/popout.html');
         if (daw && res.ok) (await caches.open(CACHE)).put('/', res.clone());
         return res;
       } catch {
-        if (url.pathname.endsWith('/ecoute.html')) return Response.error();
+        if (url.pathname.endsWith('/ecoute.html') || url.pathname.endsWith('/popout.html')) return Response.error();
         return (await caches.match('/')) || Response.error();
       }
     })());
