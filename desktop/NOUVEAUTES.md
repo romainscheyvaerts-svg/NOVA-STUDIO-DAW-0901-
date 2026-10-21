@@ -7,6 +7,10 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.8
+- Waves : tous tes plugins sont détectés, même à la toute première ouverture (les groupes Waves sont lus l'un après l'autre).
+- Un groupe Waves qui ne répond pas est relu tout de suite, au lieu d'attendre le prochain démarrage.
+
 ## 1.5.7
 - Plus léger sur les PC peu puissants : presque rien ne tourne quand le studio est à l'arrêt.
 - « Mode léger » (Réglages audio) : activé tout seul sur les petits PC, moins d'effets visuels, le son n'est pas touché.

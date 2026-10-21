@@ -629,9 +629,16 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
 
         # Certains plugins bloquent au chargement (licence, service absent…) :
         # plusieurs enfants en parallèle pour que ces attentes se chevauchent.
+        # Sauf les shells Waves : deux WaveShell lus en même temps se bloquent l'un l'autre
+        # (service de licences Waves partagé ; seul, chacun répond en moins de 20 s). Ils sont
+        # tous lus l'un après l'autre par un même enfant, les autres plugins à côté.
+        shells = [b for b in todo if is_shell(b)]
+        others = [b for b in todo if not is_shell(b)]
         workers = max(1, min(WORKERS, len(todo)))
-        threads = [threading.Thread(target=_run_child, args=(_child_command(main_script), todo[k::workers], fresh, done_and_save),
-                                    daemon=True) for k in range(workers)]
+        n_other = max(1, workers - 1) if shells else workers
+        lots = ([shells] if shells else []) + [others[k::n_other] for k in range(n_other)]
+        threads = [threading.Thread(target=_run_child, args=(_child_command(main_script), lot, fresh, done_and_save),
+                                    daemon=True) for lot in lots if lot]
         for th in threads:
             th.start()
         for th in threads:
@@ -641,14 +648,20 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
         # appartenir à un autre enfant : la fenêtre n'était pas vue, ou l'enfant
         # s'arrêtait quand l'autre était fermé.
         for _ in range(2 if workers > 1 else 0):
-            # (Un shell resté muet a déjà eu SHELL_TIMEOUT_S : relu au prochain démarrage, pas ici.)
-            again = [b for b in todo if (fresh.get(b) or {}).get("st") in ("crash", "hang")
-                     and not (is_shell(b) and (fresh.get(b) or {}).get("st") == "hang")]
+            again = [b for b in others if (fresh.get(b) or {}).get("st") in ("crash", "hang")]
             if not again:
                 break
             second: Dict[str, Probe] = {}
             _run_child(_child_command(main_script), again, second, lambda: None)
             fresh.update(second)
+        # Shell resté muet ou arrêté : relu une fois tout seul, dans un enfant neuf (plus rien d'autre
+        # ne tourne), plutôt que d'attendre le prochain démarrage.
+        for b in shells:
+            if (fresh.get(b) or {}).get("st") in ("crash", "hang"):
+                second = {}
+                _run_child(_child_command(main_script), [b], second, lambda: None)
+                if (second.get(b) or {}).get("st") == "ok":
+                    fresh.update(second)
         results.update(fresh)
         with lock:
             flush()

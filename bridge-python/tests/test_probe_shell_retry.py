@@ -79,5 +79,45 @@ class ShellRetry(unittest.TestCase):
         self.assertIn("Bizarre", names)                         # illisible (pas un shell) : gardé
 
 
+
+
+class ShellsSequentiels(unittest.TestCase):
+    """Deux WaveShell lus en même temps se bloquent l'un l'autre : tous dans un seul enfant,
+    l'un après l'autre ; un shell resté muet est relu tout seul aussitôt."""
+
+    def test_shells_dans_un_seul_enfant_et_relu_seul(self):
+        vst_probe._shells_retried.clear()
+        shells = [rf"C:\VST3\WaveShell1-VST3 {v}_x64.vst3" for v in ("14.21", "16.7", "17.1")]
+        autres = [rf"C:\VST3\Plug{i}.vst3" for i in range(7)]
+        lots = []
+        appels = {"n": 0}
+
+        def fake_child(_cmd, paths, results, on_done):
+            lots.append(list(paths))
+            for p in paths:
+                if p.endswith("16.7_x64.vst3") and len(paths) > 1:
+                    results[p] = {"c": None, "st": "hang"}   # bloqué à côté des autres shells
+                else:
+                    results[p] = {"c": [(os.path.basename(p), "Fx", "Waves")], "st": "ok"}
+                on_done()
+
+        saved = (vst_probe._load_cache, vst_probe._save_cache, vst_probe._fingerprint, vst_probe._run_child, vst_probe.platform.system)
+        vst_probe._load_cache = lambda: {}
+        vst_probe._save_cache = lambda d: None
+        vst_probe._fingerprint = lambda b: (1.0, 10)
+        vst_probe._run_child = fake_child
+        vst_probe.platform.system = lambda: "Windows"
+        try:
+            res = vst_probe.probe_bundles(autres + shells, "x")
+        finally:
+            (vst_probe._load_cache, vst_probe._save_cache, vst_probe._fingerprint, vst_probe._run_child, vst_probe.platform.system) = saved
+        avec_shell = [l for l in lots if any(vst_probe.is_shell(p) for p in l)]
+        self.assertEqual(avec_shell[0], shells)                        # tous ensemble, dans l'ordre
+        self.assertTrue(all(not vst_probe.is_shell(p) for l in lots if l is not avec_shell[0] and len(l) > 1 for p in l))
+        self.assertEqual(avec_shell[-1], [shells[1]])                  # 16.7 relu tout seul
+        self.assertEqual(res[shells[1]]["st"], "ok")
+        self.assertTrue(all(res[p]["st"] == "ok" for p in autres))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
