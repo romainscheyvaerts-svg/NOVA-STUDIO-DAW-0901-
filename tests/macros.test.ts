@@ -45,7 +45,7 @@ describe('jouer une macro', () => {
     expect(t.get().past.length).toBe(5);
   });
 
-  it('express : les 5 commandes d'un coup (une étape), sans attendre l'écran entre elles', async () => {
+  it("express : les 5 commandes d'un coup (une étape), sans attendre l'écran entre elles", async () => {
     const s = studio();
     const r = await playSteps(['split', 'fade', 'norm', 'dup', 'nudge'], s.actions, s.hooks, { express: true });
     expect(r.ran.length).toBe(5);
