@@ -219,7 +219,19 @@ export class CollabClient {
     this.horizon = Math.max(this.horizon, this.floorSeq);
     this.safeSeq = Math.max(this.safeSeq, this.floorSeq);
     this.setStatus({ joined: true, reachable: true });
-    const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
+    this.realtimeName = r.channel;
+    await this.connectRealtime(r.channel);
+    if (this.closed) return r.members;
+    this.listenNetwork();
+    if (!this.timer) this.timer = setInterval(() => { this.realtimeWatchdog(); void this.catchUp(); void this.flush(); }, POLL_MS);
+    await this.catchUp();
+    void this.flush();
+    return r.members;
+  }
+
+  /** Canal du direct (diffusion + présence) ; résout quand il est branché ou après le délai de grâce. */
+  private async connectRealtime(name: string): Promise<void> {
+    const ch = catalogSupabase.channel(name, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
     this.channelRef = ch;
     ch.on('broadcast', { event: 'op' }, ({ payload }) => { void this.receive(payload as CollabOp); });
     // Messages éphémères (lecture de l'hôte, mesure de latence, empreintes, audio en direct) : pas de journal.
@@ -247,41 +259,106 @@ export class CollabClient {
     let subscribedOnce = false;
     await new Promise<void>((resolve) => {
       ch.subscribe(async (status: string) => {
-        if (this.closed) return;
+        // Ancien canal remplacé par une reconnexion : ses nouvelles ne comptent plus.
+        if (this.closed || ch !== this.channelRef) return;
         if (status === 'SUBSCRIBED') {
+          // Canal enregistré AVANT de vider la file : la 1re modification renvoyée part aussi en direct.
+          this.channel = ch;
           this.setStatus({ realtime: 'live' });
           this.subscribed = true;
+          this.realtimeDownAt = 0;
           try { await ch.track({ name: this.name, role: this.role, ...this.presenceMeta }); } catch { /* présence : réessayée à la reconnexion */ }
           // Reconnexion du direct : on rattrape ce qui a été manqué et on vide la file.
-          if (subscribedOnce) { void this.catchUp(); void this.flush(); }
+          if (subscribedOnce || this.realtimeAttempts > 0) { void this.catchUp(); void this.flush(); }
           subscribedOnce = true;
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          // Le client Supabase se reconnecte tout seul ; en attendant, le rattrapage (10 s) prend le relais.
+          // Le client Supabase se reconnecte parfois tout seul ; sinon (onglet resté en arrière-plan,
+          // connexion expirée…) le chien de garde, le retour sur l'onglet ou « Réessayer » rebranchent
+          // le canal. En attendant, le rattrapage (10 s) prend le relais.
           this.subscribed = false;
+          if (!this.realtimeDownAt) this.realtimeDownAt = Date.now();
           this.setStatus({ realtime: 'down' });
           this.onPresence([]);
         }
       });
-      setTimeout(() => { if (!subscribedOnce && !this.closed) this.setStatus({ realtime: 'down' }); resolve(); }, SUBSCRIBE_GRACE_MS);
+      setTimeout(() => {
+        if (!subscribedOnce && !this.closed && ch === this.channelRef) {
+          if (!this.realtimeDownAt) this.realtimeDownAt = Date.now();
+          this.setStatus({ realtime: 'down' });
+        }
+        resolve();
+      }, SUBSCRIBE_GRACE_MS);
     });
-    if (this.closed) return r.members;
-    this.channel = ch;
-    this.listenNetwork();
-    if (!this.timer) this.timer = setInterval(() => { void this.catchUp(); void this.flush(); }, POLL_MS);
-    await this.catchUp();
-    void this.flush();
-    return r.members;
+    if (!this.closed && ch === this.channelRef) this.channel = ch;
+  }
+
+  private realtimeName = '';
+  /** Direct coupé depuis (ms), 0 s'il est branché. */
+  private realtimeDownAt = 0;
+  private realtimeAttempts = 0;
+  private lastRealtimeAttempt = 0;
+  private reconnecting: Promise<void> | null = null;
+
+  /**
+   * Rebranche le direct : jeton de connexion rafraîchi (il a pu expirer pendant que l'onglet
+   * dormait), ancien canal retiré, nouveau canal. Sans effet s'il est déjà branché.
+   */
+  async reconnectRealtime(): Promise<void> {
+    if (this.closed || this.subscribed || !this.realtimeName) return;
+    if (this.reconnecting) return this.reconnecting;
+    this.reconnecting = (async () => {
+      this.realtimeAttempts++;
+      this.lastRealtimeAttempt = Date.now();
+      this.setStatus({ realtime: 'connecting' });
+      try {
+        const auth: any = (catalogSupabase as any).auth;
+        const rt: any = (catalogSupabase as any).realtime;
+        if (auth?.getSession && rt?.setAuth) {
+          const { data } = await auth.getSession();
+          const token = data?.session?.access_token;
+          if (token) await Promise.resolve(rt.setAuth(token));
+        }
+      } catch { /* jeton : le client le gère, on rebranche quand même */ }
+      const old = this.channel || this.channelRef;
+      this.channel = null;
+      this.channelRef = null;
+      try { if (old) await catalogSupabase.removeChannel(old); } catch { /* déjà fermé */ }
+      if (this.closed) return;
+      await this.connectRealtime(this.realtimeName);
+    })().finally(() => { this.reconnecting = null; });
+    return this.reconnecting;
+  }
+
+  /** Toutes les 10 s : direct coupé depuis 20 s → nouvel essai (de plus en plus espacés, 2 min au plus). */
+  private realtimeWatchdog() {
+    if (this.closed || this.subscribed || !this.realtimeDownAt || this.reconnecting) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // onglet caché : au retour
+    const now = Date.now();
+    const wait = Math.min(120_000, 20_000 * Math.pow(2, Math.max(0, this.realtimeAttempts - 1)));
+    if (now - this.realtimeDownAt < 20_000 || now - this.lastRealtimeAttempt < wait) return;
+    void this.reconnectRealtime();
   }
 
   private listenNetwork() {
     if (this.unlisten.length || typeof window === 'undefined' || !window.addEventListener) return;
     const w = window;
-    const online = () => { this.setStatus({ browserOffline: false }); void this.catchUp(); void this.flush(); };
+    const online = () => { this.setStatus({ browserOffline: false }); void this.reconnectRealtime(); void this.catchUp(); void this.flush(); };
     const offline = () => this.setStatus({ browserOffline: true });
     w.addEventListener('online', online);
     w.addEventListener('offline', offline);
     this.unlisten.push(() => w.removeEventListener('online', online), () => w.removeEventListener('offline', offline));
+    // Retour sur l'onglet (il dormait en arrière-plan : le navigateur ralentit ses minuteurs et le
+    // direct a pu tomber) : on rebranche et on rattrape tout de suite.
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      const visible = () => {
+        if (document.visibilityState !== 'visible') return;
+        if (!this.subscribed) { this.realtimeAttempts = 0; void this.reconnectRealtime(); }
+        void this.catchUp(); void this.flush();
+      };
+      document.addEventListener('visibilitychange', visible);
+      this.unlisten.push(() => document.removeEventListener('visibilitychange', visible));
+    }
     try { if (typeof navigator !== 'undefined' && navigator.onLine === false) this.setStatus({ browserOffline: true }); } catch { /* */ }
   }
 
@@ -329,6 +406,8 @@ export class CollabClient {
   /** « Réessayer » : rattrapage et envoi tout de suite (sans attendre les 10 s). */
   async retryNow(): Promise<void> {
     this.setStatus({ lastError: null });
+    // « Réessayer le direct » : le canal est rebranché (avant, seul le rattrapage repartait).
+    if (!this.subscribed) { this.realtimeAttempts = 0; await this.reconnectRealtime(); }
     await this.catchUp();
     await this.flush();
   }
