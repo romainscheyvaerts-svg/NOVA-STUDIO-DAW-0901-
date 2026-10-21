@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ContextMenuItem, PluginInstance, Track, TrackSend, TrackType } from '../types';
 import {
   ancestorsOf, busesOf, busListeners, createFolder, createVca, dissolveFolder, folderDescendants, isEffectivelyInactive,
@@ -32,8 +32,59 @@ import { PlaylistChip } from './TrackPlaylistMenu';
 
 // ─── Contexte : toutes les pistes (pour les en-têtes, qui ne reçoivent que la leur) ──
 
-export const StructureTracksContext = createContext<Track[] | null>(null);
-export const useStructureTracks = () => useContext(StructureTracksContext);
+/**
+ * Source des pistes de la séance pour les en-têtes : un abonnement, pas le tableau lui-même.
+ * Avant, le contexte portait `state.tracks` : chaque changement de n'importe quelle piste
+ * (fader, clip déplacé, automation écrite) redessinait les ~100 en-têtes et leurs effets.
+ * Chaque composant lit maintenant une valeur dérivée (`useStructureSelect`) et ne se
+ * redessine que si elle change.
+ */
+export interface StructureTracksSource {
+  get(): Track[] | null;
+  subscribe(cb: () => void): () => void;
+}
+export const StructureTracksContext = createContext<StructureTracksSource | null>(null);
+
+/** Source à poser dans le Provider : `set()` à chaque rendu, `notify()` après le rendu (effet). */
+export function createStructureTracksSource(): StructureTracksSource & { set(t: Track[]): void; notify(): void } {
+  let tracks: Track[] | null = null;
+  let notified: Track[] | null = null;
+  const subs = new Set<() => void>();
+  return {
+    get: () => tracks,
+    set: (t: Track[]) => { tracks = t; },
+    notify: () => { if (notified === tracks) return; notified = tracks; subs.forEach(cb => cb()); },
+    subscribe: (cb: () => void) => { subs.add(cb); return () => { subs.delete(cb); }; },
+  };
+}
+
+const byIdCache = new WeakMap<Track[], Map<string, Track>>();
+/** Index par id des pistes (calculé une fois par version du tableau). */
+export const tracksById = (all: Track[] | null): Map<string, Track> => {
+  if (!all) return new Map();
+  let m = byIdCache.get(all);
+  if (!m) { m = new Map(all.map(t => [t.id, t])); byIdCache.set(all, m); }
+  return m;
+};
+
+/** Lecture des pistes au moment d'un geste ou d'un rendu (n'abonne à rien). */
+export const useStructureTracksGetter = (): (() => Track[] | null) => {
+  const src = useContext(StructureTracksContext);
+  return useCallback(() => (src ? src.get() : null), [src]);
+};
+
+/**
+ * Valeur dérivée de toutes les pistes (chaîne, nombre, booléen : comparée par ===) :
+ * le composant ne se redessine que si elle change.
+ */
+export function useStructureSelect<T extends string | number | boolean | null>(select: (all: Track[] | null) => T): T {
+  const src = useContext(StructureTracksContext);
+  const sel = useRef(select);
+  sel.current = select;
+  const sub = useCallback((cb: () => void) => (src ? src.subscribe(cb) : () => {}), [src]);
+  const snap = () => sel.current(src ? src.get() : null);
+  return useSyncExternalStore(sub, snap, snap);
+}
 
 const mapTrack = (id: string, f: (t: Track) => Track) => (tracks: Track[]) => tracks.map(t => (t.id === id ? f(t) : t));
 const uid = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -261,9 +312,13 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
  * « Activer » en un clic.
  */
 export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
-  const all = useStructureTracks();
-  const byId = useMemo(() => new Map((all || []).map(t => [t.id, t])), [all]);
-  const anc = useMemo(() => ancestorsOf(track, byId), [track, byId]);
+  const getAll = useStructureTracksGetter();
+  // Dossiers parents (couleur, inactif) : seule leur signature réveille l'en-tête.
+  const ancKey = useStructureSelect(all => (track.parentFolderId
+    ? ancestorsOf(track, tracksById(all)).map(a => `${a.id}\u0001${a.color}\u0001${a.isInactive ? 1 : 0}\u0001${a.name}`).join('\u0002')
+    : ''));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const anc = useMemo(() => (ancKey ? ancestorsOf(track, tracksById(getAll())) : []), [track, ancKey, getAll]);
   const inactive = track.isInactive || anc.some(a => a.isInactive);
   const inheritedFrom = !track.isInactive ? anc.find(a => a.isInactive) : undefined;
   return (
@@ -291,11 +346,11 @@ export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
 
 /** Pastille dossier / VCA à côté du nom de la piste (clic : replier / déplier le dossier). */
 export const TrackStructureInline: React.FC<{ track: Track }> = ({ track }) => {
-  const all = useStructureTracks();
+  // Membres d'un VCA, pistes d'un dossier : des nombres (pas tout le tableau des pistes).
+  const members = useStructureSelect(all => (track.isVca && all ? vcaMembers(track, all).length : 0));
+  const kids = useStructureSelect(all => (track.folder && all ? all.filter(t => t.parentFolderId === track.id).length : 0));
   // Playlists de la piste (plusieurs versions) : pastille avec le nom de celle qu'on entend.
   if (!track.folder && !track.isVca) return (track.playlists?.length || 0) > 1 ? <PlaylistChip track={track} /> : null;
-  const members = track.isVca && all ? vcaMembers(track, all).length : 0;
-  const kids = track.folder && all ? all.filter(t => t.parentFolderId === track.id).length : 0;
   return (
     <span className="shrink-0 flex items-center gap-1">
           {track.folder && (

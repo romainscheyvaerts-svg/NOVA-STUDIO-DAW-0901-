@@ -10,7 +10,7 @@ import TrackCpuBadge from './TrackCpuBadge';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
-import { useLiveParam } from '../utils/automationLiveStore';
+import { getLive, liveKey, useLiveParam, useLiveView } from '../utils/automationLiveStore';
 import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
@@ -38,6 +38,31 @@ import { sendTransferMenuItems } from '../utils/sendFader';
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
  * micro, consigne… Un clic pour l'écrire ; il voyage avec le projet et en collaboration.
  */
+/**
+ * Fader, pan et valeur en dB qui suivent l'automation pendant la lecture : seuls ces éléments
+ * se redessinent, et seulement quand ce qu'ils affichent change (au demi-pixel, au dixième de dB).
+ * Avant, toute la tranche (inserts, envois, mètres) se redessinait à chaque image.
+ */
+const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElement | null> }> = ({ track, host }) => {
+  const pos = useLiveView(track.id, 'volume', track.volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 1024) / 1024);
+  const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
+  React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
+  return (
+    <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-nv-raised'}`} style={{ bottom: `calc(${pos * 100}% - 28px)` }}>
+      <div className={`w-full h-0.5 ${track.type === TrackType.BUS ? 'bg-black' : 'bg-cyan-500'}`} />
+    </div>
+  );
+};
+const LiveDbText: React.FC<{ track: Track }> = ({ track }) => {
+  const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
+  // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la tranche.
+  return <div className="mt-2 h-4 leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300" style={{ contain: 'strict' }}>{text}</div>;
+};
+const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
+  const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);
+  return <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({ ...track, pan: val })} />;
+};
+
 const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const c = track.comment || '';
@@ -267,11 +292,11 @@ const ChannelStrip: React.FC<{
   // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
   // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
   // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
-  const shownVolume = useLiveParam(track.id, 'volume', track.volume);
-  const shownPan = useLiveParam(track.id, 'pan', track.pan);
-  const faderPos = Math.sqrt(Math.max(0, shownVolume) / 1.5);
+  // Valeur entendue lue au moment du geste ; l'affichage suit seul (LiveFaderCap, LivePanKnob).
+  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
   const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
       min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
+      valueNow: () => Math.sqrt(Math.max(0, getLive(liveKey(track.id, 'volume')) ?? track.volume) / 1.5),
       sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
       // Automation Touch / Latch / Write / Trim : l'appui et le relâchement bornent l'écriture.
       onStart: () => automationRecorder.touch(track.id, 'volume'),
@@ -470,7 +495,7 @@ const ChannelStrip: React.FC<{
         <div className="mb-2"><StripHead track={track} onUpdate={onUpdate} /></div>
 
         <div className="mb-2 flex flex-col items-center">
-           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={shownPan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
+           <LivePanKnob track={track} onUpdate={onUpdate} />
         </div>
 
         <div className="flex-1 flex space-x-3 px-2">
@@ -482,13 +507,12 @@ const ChannelStrip: React.FC<{
                 title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
                 role="slider"
                 aria-label={`Volume ${track.name}`}
-                aria-valuetext={gainToDbText(shownVolume)}
+                aria-valuetext={gainToDbText(track.volume)}
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
-                style={{ width: 'var(--fader-width)' }}
+                // Taille donnée par la tranche : le capuchon qui suit l'automation ne refait que cette boîte.
+                style={{ width: 'var(--fader-width)', contain: 'layout style' }}
               >
-                 <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-nv-raised'}`} style={{ bottom: `calc(${(Math.sqrt(shownVolume / 1.5))*100}% - 28px)` }}>
-                    <div className={`w-full h-0.5 ${track.type === TrackType.BUS ? 'bg-black' : 'bg-cyan-500'}`} />
-                 </div>
+                 <LiveFaderCap track={track} host={faderTrackRef} />
               </div>
            </div>
            {/* Vrais mètres G / D (R11) + réduction de gain des dynamiques de la piste. */}
@@ -496,7 +520,7 @@ const ChannelStrip: React.FC<{
              label={isMaster ? 'Sortie master' : track.name} className={isMaster ? 'w-[44px]' : 'w-[30px]'} />
         </div>
 
-        <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(shownVolume)}</div>
+        <LiveDbText track={track} />
         {isMaster && (
           <button type="button" onClick={() => loudnessPanel.toggle()} data-testid="mixer-loudness"
             title="Fenêtre Loudness : LUFS intégré / court terme / momentané, LRA, crête vraie, corrélation, goniomètre, spectre"

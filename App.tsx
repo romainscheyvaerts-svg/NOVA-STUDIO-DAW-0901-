@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
@@ -215,7 +215,7 @@ import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
 import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
 import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
-import { StructureTracksContext } from './components/TrackStructure';
+import { StructureTracksContext, createStructureTracksSource } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import { CollabRtc, RtcSignal, RtcQuality } from './services/CollabRtc';
@@ -1228,6 +1228,11 @@ function Studio() {
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+  // Pistes pour les en-têtes (TrackStructure) : un abonnement stable ; seuls les en-têtes dont
+  // la valeur lue change se redessinent (avant : tous, à chaque changement d'une seule piste).
+  const structureTracks = useMemo(() => createStructureTracksSource(), []);
+  structureTracks.set(state.tracks);
+  useLayoutEffect(() => { structureTracks.notify(); }, [state.tracks, structureTracks]);
   // Lot 8 : tonalité du projet pour Nova Tune posé depuis la console (One Knob, presets voix).
   useEffect(() => {
     setProjectKeyReader(() => ({ key: typeof stateRef.current.projectKey === 'number' ? stateRef.current.projectKey : null, scale: stateRef.current.projectScale || null }));
@@ -10574,7 +10579,7 @@ function Studio() {
             <>
               {shownView === 'ARRANGEMENT' && (
                 <PanelBoundary name="l'arrangement">
-                <StructureTracksContext.Provider value={state.tracks}>
+                <StructureTracksContext.Provider value={structureTracks}>
                 <ArrangementView
                    rulerOverlay={rulerOverlay}
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
