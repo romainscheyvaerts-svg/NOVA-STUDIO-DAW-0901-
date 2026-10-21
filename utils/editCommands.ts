@@ -34,7 +34,9 @@ export type EditCommandId =
   | 'playlistNew' | 'playlistStep' | 'playlistRecent' | 'playlistSwitch' | 'playlistRename' | 'playlistDelete'
   | 'writeAutomation' | 'soloMode' | 'batchRender' | 'ioSetup'
   // Écarts Pro Tools, 2e tour (hooks/useProToolsEcarts2) : sélection → nouvelle playlist, Write to Start / End / All / Punch, Glide, fusion d'un VCA.
-  | 'playlistFromSelection' | 'writeAutomationSpan' | 'glideAutomation' | 'vcaCoalesce';
+  | 'playlistFromSelection' | 'writeAutomationSpan' | 'glideAutomation' | 'vcaCoalesce'
+  // Section d'écoute (utils/monitorCommands) : mono, côtés, Dim, couper, remise à zéro, mode de solo (dans le mix / AFL / PFL).
+  | 'monitorMono' | 'monitorSide' | 'monitorDim' | 'monitorCut' | 'monitorReset' | 'soloListen';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 

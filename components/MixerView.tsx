@@ -18,6 +18,8 @@ import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStruct
 import { sendSlots, shownTrackIds } from '../utils/trackStructure';
 import TrackMeter from './meters/TrackMeter';
 import StripHead from './meters/StripHead';
+import { MasterMonitorStrip } from './MonitorSection';
+import { useMonitor } from '../utils/monitorSection';
 import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
 import { withTrackComment } from '../utils/sessionNotes';
@@ -235,6 +237,8 @@ const ChannelStrip: React.FC<{
   const [fxMenu, setFxMenu] = useState<{ x: number; y: number; p: PluginInstance } | null>(null);
   // Appui long sur Solo / Muet (tablette au doigt, sans Alt+clic) : menu « toutes les pistes », solo safe.
   const sm = useSoloMuteLongPress(track, allTracks);
+  // Mode de solo (utils/monitorSection) : le bouton s'appelle AFL / PFL quand le solo est une écoute.
+  const listenMode = useMonitor().listen;
   const { consumed: fxConsumed, ...fxLpHandlers } = useLongPress((x, y) => { const id = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('[data-fx-id]')?.getAttribute('data-fx-id'); const p = track.plugins.find(pl => pl.id === id); if (p) setFxMenu({ x, y, p }); });
   // Renommer la tranche : double-clic sur le nom (G12), ou tout de suite pour un nouveau bus.
   const [renaming, setRenaming] = useState(!!autoRename);
@@ -504,10 +508,12 @@ const ChannelStrip: React.FC<{
             <i className="fas fa-wave-square mr-1 text-[9px]" />Loudness
           </button>
         )}
+        {/* Section d'écoute (mono, côtés, Dim, couper, volume) : ce qu'on entend, jamais l'export. */}
+        {isMaster && <MasterMonitorStrip />}
         <div className="mt-2 flex space-x-2">
            {/* Alt+clic = toutes les tranches, Ctrl+clic sur Solo = solo safe (Pro Tools, utils/soloMute). */}
            <button {...sm.muteProps} onClick={(e) => { if (sm.muteConsumed()) return; if (!isMaster && muteClickKind(e) === 'all') { runEditCommand('muteAll', { on: !track.isMuted }); return; } onUpdate({...track, isMuted: !track.isMuted}); }} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? 'Couper le son de cette tranche' : 'Couper le son de cette tranche — Alt+clic ou appui long : toutes les tranches'}>Muet</button>{sm.menuEl}
-           <button {...sm.soloProps} onClick={(e) => { if (sm.soloConsumed()) return; const k = isMaster ? 'toggle' : soloClickKind(e); if (k === 'all') { runEditCommand('soloAll', { on: !track.isSolo }); return; } if (k === 'safe') { runEditCommand('soloSafe', { trackIds: [track.id] }); return; } onUpdate({...track, isSolo: !track.isSolo}); }} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}${track.soloSafe ? ' (solo safe)' : ''}`} data-solo-safe={track.soloSafe ? '1' : undefined} className={`nova-hit-tactile relative flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-cyan-400/70 text-cyan-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? "N'écouter que cette tranche" : `${track.soloSafe ? 'Solo safe : reste audible quand une autre tranche est en solo. ' : ''}N'écouter que cette tranche — Alt+clic : tous les solos ; Ctrl+clic : solo safe ; appui long : menu`}>{track.soloSafe && <i className="fas fa-shield-alt mr-0.5 text-[8px]" aria-hidden="true" />}Solo</button>
+           <button {...sm.soloProps} onClick={(e) => { if (sm.soloConsumed()) return; const k = isMaster ? 'toggle' : soloClickKind(e); if (k === 'all') { runEditCommand('soloAll', { on: !track.isSolo }); return; } if (k === 'safe') { runEditCommand('soloSafe', { trackIds: [track.id] }); return; } onUpdate({...track, isSolo: !track.isSolo}); }} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}${track.soloSafe ? ' (solo safe)' : ''}`} data-solo-safe={track.soloSafe ? '1' : undefined} className={`nova-hit-tactile relative flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-cyan-400/70 text-cyan-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? "N'écouter que cette tranche" : `${track.soloSafe ? 'Solo safe : reste audible quand une autre tranche est en solo. ' : ''}${listenMode !== 'sip' ? `Écoute ${listenMode.toUpperCase()}, sans couper le mix ni changer l'export : ` : ''}N'écouter que cette tranche — Alt+clic : tous les solos ; Ctrl+clic : solo safe ; appui long : menu`}>{track.soloSafe && <i className="fas fa-shield-alt mr-0.5 text-[8px]" aria-hidden="true" />}{!isMaster && listenMode !== 'sip' ? listenMode.toUpperCase() : 'Solo'}</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-transparent text-amber-400' : 'bg-white/[0.05] border-transparent text-white'}`}>

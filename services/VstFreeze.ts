@@ -11,6 +11,7 @@ import {
 import { makeFreezeBase, PRE_VOLUME } from '../utils/preFxEdits';
 import { vstAutomationFor, vstAutomationSig } from '../utils/vstAutomation';
 import { keyRoutes } from '../engine/sidechain';
+import { monitorStore } from '../utils/monitorSection';
 
 /**
  * Rendu des effets VST3 (via le pont du PC) dans l'audio de la piste, pour que
@@ -593,7 +594,8 @@ export async function prepareTracksForOffline(tracks: Track[], onStep?: (msg: st
     const idx = out.findIndex(x => x.id === bus.id);
     if (bridge) {
       try {
-        const solo = out.some(x => x.isSolo);
+        // Solo AFL / PFL : écoute seulement, il ne choisit pas ce qui est rendu (utils/soloListen).
+        const solo = monitorStore.get().listen === 'sip' && out.some(x => x.isSolo);
         const sources = busSources(bus, out).filter(s => !s.isMuted && (!solo || s.isSolo || !!s.soloSafe) && !!sourcePlayable(s));
         if (sources.length === 0) { out[idx] = { ...bus, isFrozen: false }; continue; }
         const sr = audioEngine.getProjectSampleRate();

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { ViewType, Theme, User } from '../types';
 import ProMasterMeter from './ProMasterMeter';
 import { LufsChip } from './meters/LoudnessPanel';
+import { MonitorBadges, MonitorButton, MatrixButtons, DimCutButtons } from './MonitorSection';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { openMidiPanel, useComputerKeyboard, useMidiRecPrefs } from './MidiInputHost';
@@ -307,7 +308,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     navigateur: 'navigateur', historique: 'annuler / rétablir', ouvrir: 'ouvrir', sauver: 'sauvegarder', import: 'importer',
     'midi-fichiers': 'MIDI', partager: 'partager', master: 'Master Nova', exporter: 'exporter', audio: 'réglages audio',
     pdc: 'PDC', punch: 'punch', guide: 'guide', capturer: 'capturer', 'metronome-reglages': 'clic et décompte', tap: 'tap tempo',
-    vues: simple ? 'mode avancé' : 'vues', palette: 'chercher une action (Ctrl+K)', feedback: 'signaler un bug', theme: 'thème', compte: 'compte', affichage: "mode d'affichage", 'midi-clavier': 'MIDI', 'midi-absent': 'MIDI',
+    ecoute: 'écoute (mono, Dim, AFL / PFL)', vues: simple ? 'mode avancé' : 'vues', palette: 'chercher une action (Ctrl+K)', feedback: 'signaler un bug', theme: 'thème', compte: 'compte', affichage: "mode d'affichage", 'midi-clavier': 'MIDI', 'midi-absent': 'MIDI',
   };
   const foldedNames = folded.map(f => FOLD_LABELS[f]).filter(Boolean);
 
@@ -598,6 +599,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
                   <span>Compensation de latence (PDC)</span>
                 </button>}
+                {!simple && <div className="rounded-xl bg-white/[0.04] p-3 space-y-2" data-testid="menu-monitor">
+                  <div className="text-[11px] font-semibold text-slate-300">Écoute <span className="font-normal text-slate-500">(hors export)</span></div>
+                  <MatrixButtons compact />
+                  <DimCutButtons compact />
+                </div>}
                 {onTogglePunch && !simple && <button onClick={() => { onTogglePunch(); setIsMobileMenuOpen(false); }} aria-pressed={isPunchActive} title="REC ne remplace que la zone rouge de la règle (punch-in / punch-out). Pré-roll, post-roll : bouton ▾ du punch dans la barre."
                   className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isPunchActive ? 'bg-red-500/15 text-red-300' : 'bg-white/[0.04] text-slate-300'}`}>
                   <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isPunchActive ? 'bg-red-400' : 'bg-slate-500'}`}></span></span>
@@ -869,6 +875,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {!simple && <div {...barItem('vumetre', 6)} className="hidden md:block"><ProMasterMeter /></div>}
         {/* LUFS du master en direct (R11) : ouvre la fenêtre Loudness. */}
         {!simple && <div className="hidden lg:block"><LufsChip /></div>}
+        {/* Section d'écoute (mono, Dim, volume d'écoute, AFL / PFL) : hors export. Pastilles visibles tant qu'un réglage est actif, même en mode simple. */}
+        {!simple && <div {...barItem('ecoute', 28)} className="hidden md:flex"><MonitorButton /></div>}
+        <MonitorBadges className="shrink-0" />
         
         <div className="flex items-center space-x-2 md:space-x-3 px-3 md:px-4 py-1.5 rounded-2xl" style={{ backgroundColor: 'var(--bg-item)' }}>
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>

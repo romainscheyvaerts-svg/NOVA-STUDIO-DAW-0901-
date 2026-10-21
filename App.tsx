@@ -322,6 +322,7 @@ import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/track
 import { useProToolsEcarts } from './hooks/useProToolsEcarts';
 import { useProToolsEcarts2 } from './hooks/useProToolsEcarts2';
 import { soloModeStore } from './utils/soloModes';
+import { installMonitorCommands } from './utils/monitorCommands';
 import { droppedPassNote, patchMeta, nextTakeNumber, listLanes, duplicateTake, renameTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
@@ -350,6 +351,9 @@ import NotificationsHost, { NotificationsInline } from './components/Notificatio
 import { pushStore } from './services/PushNotify';
 import { howTo } from './utils/howTo';
 import { GUIDES, guidesForPrompt, howToIntro, matchHowToQuestion, projectFacts } from './utils/guides';
+
+// Section d'écoute (mono, Dim, couper, AFL / PFL) : commandes des raccourcis et de la palette, posées une fois.
+installMonitorCommands();
 
 /** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
 const MOBILE_PAGE_NAMES: Record<string, string> = {

@@ -1,6 +1,8 @@
 
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
 import { soloSilencedIds } from '../utils/soloMute';
+import { monitorStore, monitorCoefs, monitorGain, type MonitorSnapshot } from '../utils/monitorSection';
+import { listenTaps, liveSoloSilenced, tracksForRender, type ListenTap } from '../utils/soloListen';
 import { Track, Clip, PluginInstance, TrackType, PluginParameter, AutomationPoint } from '../types';
 import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice } from '../services/ASIOBridge';
 import { ASIOInput } from './ASIOInput';
@@ -329,6 +331,26 @@ export class AudioEngine {
   /** Sortie principale : master (mainSel) + mix casque écouté ; part vers le navigateur et la carte. */
   private mainSel: GainNode | null = null;
   private mainOut: GainNode | null = null;
+  /**
+   * Section d'écoute (utils/monitorSection) : APRÈS la sortie principale, jamais
+   * dans l'export. mainOut → monMain ┐
+   *                listenBus → monSolo ┴→ monSum → [matrice mono / côtés] → monOut → navigateur + carte.
+   */
+  private monMain: GainNode | null = null;
+  private monSolo: GainNode | null = null;
+  private monSum: GainNode | null = null;
+  private monMatrix: { split: ChannelSplitterNode; merge: ChannelMergerNode; coef: GainNode[] } | null = null;
+  private monMatrixOn = false;
+  private monOut: GainNode | null = null;
+  /** Bus d'écoute AFL / PFL : les pistes en solo y sont prélevées (utils/soloListen). */
+  private listenBus: GainNode | null = null;
+  private listenTapNodes = new Map<string, { from: AudioNode; tap: GainNode; point: ListenTap['point'] }>();
+  private listenActive = false;
+  /** Dernières pistes reçues (brutes et vues par le moteur) : changement de mode de solo, bus d'écoute. */
+  private lastRawTracks: Track[] = [];
+  private lastViewTracks: Track[] = [];
+  private monitorUnsub: (() => void) | null = null;
+  private appliedListenMode: MonitorSnapshot['listen'] = monitorStore.get().listen;
   private asioInputChannels = 2;
   private asioOutputChannels = 2;
   private asioBlockSize = 256;
@@ -520,7 +542,10 @@ export class AudioEngine {
     this.mainSel.connect(this.mainOut);
     this.cueEngine = new CueMixEngine(this.ctx);
     this.cueEngine.listenOut.connect(this.mainOut);
-    this.mainOut.connect(this.browserOutput);
+    // Section d'écoute (mono / côtés, Dim, coupure, volume, bus AFL / PFL) : après
+    // les mètres du master, donc hors de l'export et des mesures du mix.
+    this.buildMonitorSection();
+    this.monOut!.connect(this.browserOutput);
     this.browserOutput.connect(this.ctx.destination);
     
     this.masterAnalyzer.connect(this.masterSplitter);
@@ -597,6 +622,7 @@ export class AudioEngine {
       this.masterAnalyzerL, this.masterAnalyzerR, this.browserOutput, this.mainSel, this.mainOut, this.monitorGain]) {
       try { n?.disconnect(); } catch { /* */ }
     }
+    this.disposeMonitorSection();
     this.previewGain = this.previewAnalyzer = null;
     this.masterOutput = this.browserOutput = this.mainSel = this.mainOut = this.monitorGain = null;
     this.masterLimiter = null; this.masterAnalyzer = null; this.masterSplitter = null;
@@ -1427,9 +1453,12 @@ export class AudioEngine {
    * @param options.pluginAutomation avec preFader : l'automation des réglages d'effets
    *        est rejouée quand même (Commit / bounce : le rendu remplace les effets).
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate?: number, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean } = {}): Promise<AudioBuffer> {
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate?: number, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean; soloIsDeliberate?: boolean } = {}): Promise<AudioBuffer> {
     // Fréquence du rendu : celle du projet par défaut (avant : 44,1 kHz codé en dur).
     if (!targetSampleRate) targetSampleRate = this.getProjectSampleRate();
+    // Solo d'écoute AFL / PFL (utils/soloListen) : il ne touche jamais un rendu. Les solos
+    // posés par l'appelant lui-même (stems, voix seules : options.soloIsDeliberate) restent.
+    if (!options.soloIsDeliberate) tracks = tracksForRender(tracks, monitorStore.get().listen);
     // Pistes guides (R3) : entendues pendant la prise, jamais dans un export, un master ni un mix auto.
     // (Gel d'une piste, rendu avant fader : la piste elle-même est rendue. Lecture ralentie, R13 : on les entend, comme en lecture.)
     if (!options.preFader && !options.keepGuides) tracks = tracks.filter(t => !t.isGuide);
@@ -4409,6 +4438,8 @@ export class AudioEngine {
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
     meterBank.detachTrack(trackId);
     disposeStrip(dsp.strip);
+    const lt = this.listenTapNodes.get(trackId);
+    if (lt) { try { lt.tap.disconnect(); } catch (e) {} this.listenTapNodes.delete(trackId); }
 
     this.tracksDSP.delete(trackId);
     this.recomputePdc();
@@ -4416,11 +4447,23 @@ export class AudioEngine {
 
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
+    try {
+      this.updateTrackCore(track, allTracks);
+    } finally {
+      // Bus d'écoute AFL / PFL : prélèvements reposés après un éventuel recâblage.
+      this.syncListen();
+    }
+  }
+
+  private updateTrackCore(track: Track, allTracks: Track[]) {
+    if (!this.ctx) return;
     // Structure Pro Tools (utils/trackStructure) : piste inactive, dossier simple
     // ou VCA = rien dans le moteur ; Muet / Solo de dossier, VCA et bus nommés résolus.
     {
       const src = allTracks.find(t => t.id === track.id) === track ? allTracks : allTracks.map(t => (t.id === track.id ? track : t));
+      this.lastRawTracks = src;
       const view = engineView(src);
+      this.lastViewTracks = view.tracks;
       this.vcaScale = view.vcaScale;
       const played = view.byId.get(track.id);
       if (!played) { if (this.tracksDSP.has(track.id)) this.disposeTrack(track.id); return; }
@@ -4432,7 +4475,8 @@ export class AudioEngine {
     // Pre-cree les DSP de toutes les pistes: sinon une piste routee vers un bus
     // declare APRES elle dans le tableau retombait silencieusement sur le master.
     allTracks.forEach(t => this.ensureTrackDSP(t));
-    this.soloSilencedIds = this.computeSoloSilencedIds(allTracks);
+    // En AFL / PFL, rien n'est coupé dans le mix : le solo s'entend par le bus d'écoute.
+    this.soloSilencedIds = liveSoloSilenced(allTracks, t => this.isSourceTrackType(t), monitorStore.get().listen);
 
     const dsp = this.ensureTrackDSP(track);
     if (!dsp) return;
@@ -4980,6 +5024,152 @@ export class AudioEngine {
     this.masterOutput.gain.linearRampToValueAtTime(g, t + rampSec);
   }
 
+  // ─── Section d'écoute (mono / côtés, Dim, coupure, volume d'écoute, AFL / PFL) ──
+  // Tout ici agit APRÈS la sortie du master (et ses mètres) : ce que l'ingé
+  // entend, jamais un fichier exporté (renderProject n'a pas cette section).
+  // Natif uniquement (gains, séparateur, fusion) : rien ne tourne de plus quand
+  // le studio est à l'arrêt, et la matrice n'est câblée qu'en mono / côtés.
+
+  private buildMonitorSection() {
+    const ctx = this.ctx;
+    if (!ctx || !this.mainOut) return;
+    const g = () => { const n = ctx.createGain(); n.channelCount = 2; n.channelCountMode = 'explicit'; n.channelInterpretation = 'speakers'; return n; };
+    this.monMain = g();
+    this.monSolo = g();
+    this.monSolo.gain.value = 0;
+    this.monSum = g();
+    this.monOut = g();
+    this.listenBus = g();
+    this.mainOut.connect(this.monMain);
+    this.listenBus.connect(this.monSolo);
+    this.monMain.connect(this.monSum);
+    this.monSolo.connect(this.monSum);
+    const split = ctx.createChannelSplitter(2);
+    const merge = ctx.createChannelMerger(2);
+    // coef : G→G', D→G', G→D', D→D'
+    const coef = [0, 1, 2, 3].map(() => { const n = ctx.createGain(); n.channelCount = 1; n.channelCountMode = 'explicit'; return n; });
+    split.connect(coef[0], 0); split.connect(coef[1], 1);
+    split.connect(coef[2], 0); split.connect(coef[3], 1);
+    coef[0].connect(merge, 0, 0); coef[1].connect(merge, 0, 0);
+    coef[2].connect(merge, 0, 1); coef[3].connect(merge, 0, 1);
+    merge.connect(this.monOut);
+    this.monMatrix = { split, merge, coef };
+    this.monMatrixOn = false;
+    this.monSum.connect(this.monOut);
+    this.listenActive = false;
+    this.applyMonitor(monitorStore.get(), true);
+    if (!this.monitorUnsub) {
+      this.monitorUnsub = monitorStore.subscribe(() => {
+        const s = monitorStore.get();
+        this.applyMonitor(s, false);
+        if (s.listen !== this.appliedListenMode) this.applySoloListenMode();
+      });
+    }
+  }
+
+  private disposeMonitorSection() {
+    for (const { tap } of this.listenTapNodes.values()) { try { tap.disconnect(); } catch { /* */ } }
+    this.listenTapNodes.clear();
+    const m = this.monMatrix;
+    for (const n of [this.monMain, this.monSolo, this.monSum, this.monOut, this.listenBus, m?.split, m?.merge, ...(m?.coef || [])]) {
+      try { n?.disconnect(); } catch { /* */ }
+    }
+    this.monMain = this.monSolo = this.monSum = this.monOut = this.listenBus = null;
+    this.monMatrix = null;
+    this.monMatrixOn = false;
+    this.listenActive = false;
+  }
+
+  /** Matrice, volume, Dim, coupure. `now` : sans rampe (création du graphe). */
+  private applyMonitor(s: MonitorSnapshot, now: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || !this.monSum || !this.monOut || !this.monMatrix) return;
+    const t = ctx.currentTime;
+    const set = (p: AudioParam, v: number) => { if (now) { p.cancelScheduledValues(t); p.setValueAtTime(v, t); } else p.setTargetAtTime(v, t, 0.012); };
+    const wantMatrix = s.matrix !== 'stereo';
+    const c = monitorCoefs(s.matrix);
+    const [a, b, d, e] = this.monMatrix.coef;
+    // Coefficients posés tout de suite (la matrice n'est entendue qu'une fois rebranchée).
+    a.gain.value = c.ll; b.gain.value = c.rl; d.gain.value = c.lr; e.gain.value = c.rr;
+    if (wantMatrix !== this.monMatrixOn) {
+      // Bascule en un bloc (quelques ms au plus) : le Dim / la coupure suivent la rampe.
+      try { this.monSum.disconnect(); } catch { /* */ }
+      this.monSum.connect(wantMatrix ? this.monMatrix.split : this.monOut);
+      this.monMatrixOn = wantMatrix;
+    }
+    set(this.monOut.gain, monitorGain(s));
+  }
+
+  /** Mix ou bus d'écoute AFL / PFL vers la section d'écoute (et coupure de la collaboration). */
+  private applyMonitorRouting() {
+    const ctx = this.ctx;
+    if (!ctx || !this.monMain || !this.monSolo) return;
+    const t = ctx.currentTime;
+    const solo = this.listenActive && !this.collabOutputMuted;
+    this.monMain.gain.setTargetAtTime(this.listenActive ? 0 : 1, t, 0.008);
+    this.monSolo.gain.setTargetAtTime(solo ? 1 : 0, t, 0.008);
+  }
+
+  /**
+   * Bus d'écoute AFL / PFL : prélève les pistes en solo (après fader et pan pour
+   * AFL, avant fader pour PFL). Appelé après chaque mise à jour de piste : un
+   * recâblage (disconnect) retire le prélèvement, il est reposé ici. Rien à faire
+   * en « solo dans le mix » sans prélèvement en place.
+   */
+  private syncListen() {
+    const mode = monitorStore.get().listen;
+    if (mode === 'sip' && !this.listenTapNodes.size && !this.listenActive) return;
+    if (!this.ctx || !this.listenBus) return;
+    const want = listenTaps(this.lastViewTracks, mode);
+    const wanted = new Map(want.map(w => [w.id, w.point]));
+    for (const [id, x] of [...this.listenTapNodes]) {
+      const dsp = this.tracksDSP.get(id);
+      const from = dsp ? (x.point === 'pre' ? dsp.preFaderTap : dsp.output) : undefined;
+      if (wanted.get(id) !== x.point || !from || from !== x.from) {
+        try { x.from.disconnect(x.tap); } catch { /* déjà débranché (recâblage) */ }
+        try { x.tap.disconnect(); } catch { /* */ }
+        this.listenTapNodes.delete(id);
+      }
+    }
+    for (const w of want) {
+      const dsp = this.tracksDSP.get(w.id);
+      const from = dsp ? (w.point === 'pre' ? dsp.preFaderTap : dsp.output) : undefined;
+      if (!from) continue;
+      let x = this.listenTapNodes.get(w.id);
+      if (!x) {
+        const tap = this.ctx.createGain();
+        tap.channelCount = 2; tap.channelCountMode = 'explicit'; tap.channelInterpretation = 'speakers';
+        tap.connect(this.listenBus);
+        x = { from, tap, point: w.point };
+        this.listenTapNodes.set(w.id, x);
+      }
+      // Idempotent : rebranché après un recâblage de la piste, sans doublon sinon.
+      from.connect(x.tap);
+    }
+    const active = this.listenTapNodes.size > 0;
+    if (active !== this.listenActive) {
+      this.listenActive = active;
+      this.applyMonitorRouting();
+      try { window.dispatchEvent(new CustomEvent('nova:listen-bus', { detail: active })); } catch { /* hors navigateur */ }
+    }
+  }
+
+  /** Changement de mode de solo : gains des pistes et bus d'écoute repris pour toutes les pistes. */
+  private applySoloListenMode() {
+    this.appliedListenMode = monitorStore.get().listen;
+    const all = this.lastRawTracks;
+    if (!this.ctx || !all.length) { this.syncListen(); return; }
+    for (const t of all) { try { this.updateTrack(t, all); } catch (e) { console.warn('[AudioEngine] mode de solo', t.id, e); } }
+    this.syncListen();
+  }
+
+  /** Sortie de la section d'écoute (QA, mesures de ce qu'on entend). */
+  public getMonitorOutput(): AudioNode | null { return this.monOut; }
+  /** Bus d'écoute AFL / PFL actif (une piste au moins y est prélevée). */
+  public isListenBusActive(): boolean { return this.listenActive; }
+  /** Pistes prélevées par le bus d'écoute (diagnostic, QA). */
+  public getListenTaps(): { id: string; point: ListenTap['point'] }[] { return [...this.listenTapNodes].map(([id, x]) => ({ id, point: x.point })); }
+
   /** Contexte audio de lecture (lecteur du morceau de référence). */
   public getAudioContext(): AudioContext | null { return this.ctx; }
 
@@ -5007,6 +5197,7 @@ export class AudioEngine {
   public setCollabOutputMuted(muted: boolean) {
     this.collabOutputMuted = muted;
     if (this.mainOut && this.ctx) this.mainOut.gain.setTargetAtTime(muted ? 0 : 1, this.ctx.currentTime, 0.02);
+    this.applyMonitorRouting();
   }
   public isCollabOutputMuted() { return this.collabOutputMuted; }
 
@@ -5319,7 +5510,8 @@ export class AudioEngine {
     const ctx = this.ctx;
     const n = layout.dests.length;
     const merger = ctx.createChannelMerger(n);
-    const sources: (AudioNode | null)[] = [this.mainOut, ...layout.mixIds.map(id => this.cueEngine?.outputOf(id) || null)];
+    // Sortie principale = après la section d'écoute (mono, Dim, volume d'écoute, AFL / PFL) : la carte entend comme l'ordinateur.
+    const sources: (AudioNode | null)[] = [this.monOut || this.mainOut, ...layout.mixIds.map(id => this.cueEngine?.outputOf(id) || null)];
     const parts: AudioNode[] = [merger];
     sources.forEach((s, k) => {
       if (!s) return;

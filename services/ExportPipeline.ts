@@ -20,6 +20,8 @@ import { encodeFlac } from '../utils/flac';
 import { resampleChannels } from '../utils/resample';
 import { exportSpan, finalLength, applyTail, type TailSettings } from '../utils/exportTail';
 import { withoutSoloSafe } from '../utils/soloMute';
+import { tracksForRender } from '../utils/soloListen';
+import { monitorStore } from '../utils/monitorSection';
 import { planStems, withoutGuides, type StemGrouping, type ReturnsMode, MASTER } from '../utils/stemPlan';
 import { extensionOf, stemFileNames } from '../utils/exportNaming';
 import { integratedLufs, truePeakDb } from '../utils/loudness';
@@ -93,7 +95,9 @@ export const outputBits = (s: Pick<ExportSettings, 'format' | 'bits'>): 16 | 24 
   s.format === 'MP3' ? 16 : s.format === 'FLAC' ? (s.bits === 16 ? 16 : 24) : s.bits;
 
 async function render(tracks: Track[], s: ExportSettings, seconds: number, onP?: (p: number) => void): Promise<Float32Array[]> {
-  const b = await audioEngine.renderProject(tracks, seconds, s.start, renderRate(), onP);
+  // Les solos d'écoute AFL / PFL sont retirés à l'entrée (runExport, renderMixChannels) : ceux qui restent
+  // ici sont ceux de l'export lui-même (stems, voix seules), à respecter.
+  const b = await audioEngine.renderProject(tracks, seconds, s.start, renderRate(), onP, { soloIsDeliberate: true });
   return chans(b).map(c => new Float32Array(c));
 }
 
@@ -165,7 +169,8 @@ export function markersInRange(markers: { name: string; time: number }[] | undef
  * Les guides sont retirés ici, quelle que soit la source.
  */
 export async function runExport(allTracks: Track[], s: ExportSettings, projectMarkers: { name: string; time: number }[] = [], onProgress: Progress = () => {}): Promise<ExportResult> {
-  const tracks = withoutGuides(allTracks);
+  // Solo AFL / PFL = écoute seulement : jamais dans un fichier (utils/soloListen).
+  const tracks = tracksForRender(withoutGuides(allTracks), monitorStore.get().listen);
   const span = exportSpan(s.start, s.end, s.tail);
   const nominal = span.end - span.start;
   const sr = outputRate(s);
@@ -273,7 +278,8 @@ export async function runExport(allTracks: Track[], s: ExportSettings, projectMa
  */
 export async function renderMixChannels(allTracks: Track[], s: Pick<ExportSettings, 'start' | 'end' | 'tail' | 'sampleRate' | 'format'>,
   onProgress: Progress = () => {}, renderFrames?: number): Promise<{ ch: Float32Array[]; sampleRate: number; renderFrames: number }> {
-  const tracks = withoutGuides(allTracks);
+  // Solo AFL / PFL = écoute seulement : jamais dans un fichier (utils/soloListen).
+  const tracks = tracksForRender(withoutGuides(allTracks), monitorStore.get().listen);
   const span = exportSpan(s.start, s.end, s.tail);
   const raw = await render(tracks, s as ExportSettings, span.renderDuration, p => onProgress(Math.min(95, p), 'Mixage du morceau…'));
   const rr = renderRate();
