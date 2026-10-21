@@ -189,7 +189,11 @@ async ({ rate, cfg }) => {
 
 
 def running_qa() -> int:
-    """Scénarios qa/*.py en cours sur la machine (machine partagée : on attend s'il y en a 2 ou plus)."""
+    """Scénarios qa/*.py en cours sur la machine (machine partagée : on attend s'il y en a 2 ou plus).
+    FIDEL_SANS_ATTENTE=1 : pas d'attente (machine partagée avec d'autres agents qui lancent sans cesse
+    leurs propres scénarios ; les lectures dérangées sont de toute façon refaites jusqu'à 3 fois)."""
+    if os.environ.get("FIDEL_SANS_ATTENTE") == "1":
+        return 0
     import subprocess
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command",

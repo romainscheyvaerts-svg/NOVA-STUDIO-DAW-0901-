@@ -133,6 +133,12 @@ BATTERIE = [
     # installation à la fermeture puis relance, « Mis à jour ✓ », appli ancienne (carte web), réglages.
     ("desktop_maj_auto", []),
     ("desktop_hors_ligne", []),
+    # 21/10/2026 (perfseance) : grosse séance de mix rap, 96 pistes × 4 effets NOVA (EQ, compresseur, de-esser,
+    # envoi reverb), 4 bus, automation, 60 s de lecture : charge et coût du fil audio, sous-régimes, temps
+    # d'image (lecture et édition), fil principal, mémoire, démarrage. Mesure seule (objectifs rapportés).
+    ("banc_grosse_seance", []),
+    # Surcharge processeur (40 pistes × 3 effets) : compteur, alerte avec solutions, mode sécurité.
+    ("surcharge_cpu", []),
 ]
 
 
