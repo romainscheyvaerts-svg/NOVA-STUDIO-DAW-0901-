@@ -28,6 +28,9 @@ import { NovaMasterTransientUI } from '../plugins/MasterTransientPlugin';
 import { MixFxNode } from './mixfx/MixFxNode';
 import { MB_DEFAULTS, DYN_DEFAULTS, mixFxAutomatable } from './mixfx/mixFxParams';
 import { NovaMultibandCompUI, NovaDynamicEqUI } from '../plugins/MixFxPlugins';
+import { FxRackNode, type RackHost } from './FxRackNode';
+import { rackDefaults, RACK_AUTOMATABLE } from './fxRack';
+import { NovaFxRackUI } from '../plugins/FxRackPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -41,8 +44,11 @@ export interface RegisteredPlugin {
   /** Infobulle : à quoi ça sert, avec l'équivalent dans les autres DAW. */
   description: string;
   defaultParams: () => Record<string, any>;
-  /** Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. `bpm` : tempo du projet. */
-  create: (ctx: BaseAudioContext, plugin: PluginInstance, bpm?: number) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
+  /**
+   * Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. `bpm` : tempo du projet.
+   * `host` : fabrique d'effets du moteur (le rack parallèle y crée les effets de ses branches).
+   */
+  create: (ctx: BaseAudioContext, plugin: PluginInstance, bpm?: number, host?: RackHost) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
   /** Fenêtre d'édition (reçoit le nœud, les réglages et le rappel de modification). */
   ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void; trackId?: string }>;
   /** Réglages automatisables (éditeur d'automation). */
@@ -236,6 +242,19 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new MixFxNode(ctx, 'DYNEQ', plugin.params || {}),
     ui: NovaDynamicEqUI as any,
     automatable: mixFxAutomatable('DYNEQ'),
+  },
+  // --- Rack d'effets parallèles (22/10/2026, engine/fxRack.ts) ---------------------------
+  {
+    type: 'FXRACK',
+    name: 'Rack parallèle',
+    category: 'Utilitaires',
+    icon: 'fa-code-branch',
+    color: '#fb923c',
+    description: 'Divise le son en 2 à 4 branches qui jouent en même temps (ou en 2-3 bandes de fréquence, ou centre / côtés), chacune avec ses effets et son niveau, puis les mélange au son d’origine : compression parallèle, réverbe seulement sur les aigus, saturation sur les côtés. Latences des branches réalignées automatiquement.',
+    defaultParams: () => rackDefaults() as any,
+    create: (ctx, plugin, _bpm, host) => new FxRackNode(ctx, plugin, host),
+    ui: NovaFxRackUI as any,
+    automatable: RACK_AUTOMATABLE,
   },
 ];
 

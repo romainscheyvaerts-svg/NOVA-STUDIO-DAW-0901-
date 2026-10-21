@@ -4321,7 +4321,8 @@ export class AudioEngine {
       default: {
         // Effets déclarés dans le registre (engine/pluginRegistry.ts), ex. le limiteur NOVA.
         const reg = getRegisteredPlugin(plugin.type);
-        if (reg) { node = reg.create(ctx, plugin, bpm); break; }
+        // Fabrique passée au registre : le rack parallèle y crée les effets de ses branches (même contexte).
+        if (reg) { node = reg.create(ctx, plugin, bpm, { createPlugin: (p) => this.createPluginNode(p, bpm, ctx) }); break; }
       }
         const bypassIn = ctx.createGain();
         const bypassOut = ctx.createGain();

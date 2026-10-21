@@ -316,11 +316,168 @@ def eq_audio():
     return out
 
 
+# ─────────────────────────────── Rack parallèle (écart 13) ───────────────────────────────
+def rack_bureau(theme="dark"):
+    out = {}
+    log = Log(f"mixpro_rack_{theme}")
+    with sync_playwright() as p:
+        b = launch(p)
+        ctx, pg = new_page(b, "pc", log)
+        pg.add_init_script(APP_MODULE_INIT)
+        pg.add_init_script(f"try {{ localStorage.setItem('nova_simple_mode', '0'); localStorage.setItem('nova_theme', '{theme}'); localStorage.setItem('nova_welcome_seen', '1'); }} catch (e) {{}}")
+        r = {"name": f"mixpro_rack_{theme}"}
+        open_studio(pg, r, vp="pc")
+        close_welcome(pg)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+        win, where = add_effect_on(pg, "FXRACK", "rack")
+        if not win:
+            check(f"[{theme}] Rack : ajout par « Ajouter un effet » (recherche « rack »)", False, where); ctx.close(); b.close(); return out
+        out["piste"] = where
+        out["titre"] = win.locator("h2").first.inner_text()
+        out["branches"] = win.locator("[data-nova-rack-branch]").count()
+        check(f"[{theme}] Rack : ajouté (« {out['titre']} »), 2 branches vides par défaut", "rack" in out["titre"].lower() and out["branches"] == 2, out)
+        # Compresseur dans la branche 2 : la fenêtre de l'effet s'ouvre sous la façade.
+        win.locator("[data-nova-rack-add-fx='2']").click(); pg.wait_for_timeout(300)
+        win.locator(".hw-rack-menu [data-fx-id='COMPRESSOR']").click(); pg.wait_for_timeout(1200)
+        child = win.locator("[data-nova-rack-child='COMPRESSOR']")
+        out["fenetre_effet"] = child.count()
+        st = plugins_of(pg, "FXRACK")
+        rp = st[0]["params"] if st else {}
+        out["branche2"] = [x.get("type") for x in (rp.get("branches") or [{}, {}])[1].get("plugins", [])] if rp else None
+        check(f"[{theme}] Rack : « + Effet » dans la branche 2 → Compresseur dans le projet, sa fenêtre s'ouvre dans le rack",
+              out["fenetre_effet"] == 1 and out["branche2"] == ["COMPRESSOR"], out)
+        if child.count():
+            sl = child.locator("[role=slider]").first
+            before = sl.get_attribute("aria-valuenow")
+            sl.focus(); pg.keyboard.press("End"); pg.wait_for_timeout(400)
+            after = sl.get_attribute("aria-valuenow")
+            st = plugins_of(pg, "FXRACK")
+            cparams = st[0]["params"]["branches"][1]["plugins"][0]["params"] if st else {}
+            out["bouton_effet"] = [before, after]
+            check(f"[{theme}] Rack : un bouton de l'effet de la branche tourne et le réglage arrive dans le projet",
+                  before != after and bool(cparams), {"bouton": out["bouton_effet"], "reglages": {k: cparams.get(k) for k in list(cparams)[:6]}})
+        shot_window(pg, win, f"rack_{theme}_compresseur_branche2")
+        lay = faces_ok(pg, "FXRACK")
+        out["mise_en_page"] = lay
+        check(f"[{theme}] Rack : rien de coupé ni de chevauché, pas de débordement", lay.get("ok"), lay)
+        node = pg.evaluate(ENGINE_NODE, {"t": st[0]["trackId"], "p": st[0]["pluginId"]}) if st else None
+        out["moteur"] = node
+        check(f"[{theme}] Rack : le moteur a créé le rack (latence 0 avec un compresseur)", node is not None and node.get("latency_ms") == 0, node)
+        if theme == "dark":
+            # Mélange, branche ajoutée, division en bandes puis centre / côtés.
+            key_knob(pg, win, "mix", "Home")
+            win.locator("[data-nova-rack-add-branch]").click(); pg.wait_for_timeout(500)
+            n3 = win.locator("[data-nova-rack-branch]").count()
+            st = plugins_of(pg, "FXRACK")
+            out["mix_et_branches"] = {"mix": st[0]["params"].get("mix"), "branches_ecran": n3, "branches_projet": len(st[0]["params"].get("branches") or [])}
+            check("Rack : mélange à 0 % et 3e branche dans le projet", out["mix_et_branches"] == {"mix": 0, "branches_ecran": 3, "branches_projet": 3}, out["mix_et_branches"])
+            key_knob(pg, win, "mix", "End")
+            win.locator("[data-nova-rack-mode='bandes']").click(); pg.wait_for_timeout(600)
+            labels = [x.strip() for x in win.locator("[data-nova-rack-label]").all_inner_texts()]
+            out["bandes"] = {"noms": labels, "coupures": win.locator("[data-nova-param='x1'], [data-nova-param='x2']").count()}
+            shot_window(pg, win, f"rack_{theme}_bandes")
+            check("Rack : division en 3 bandes (Grave / Médium / Aigu, 2 coupures)", labels[:3] == ["Grave", "Médium", "Aigu"] and out["bandes"]["coupures"] == 2, out["bandes"])
+            win.locator("[data-nova-rack-mode='ms']").click(); pg.wait_for_timeout(600)
+            labels = [x.strip() for x in win.locator("[data-nova-rack-label]").all_inner_texts()]
+            out["ms"] = labels
+            shot_window(pg, win, f"rack_{theme}_centre_cotes")
+            lay = faces_ok(pg, "FXRACK")
+            check("Rack : division centre / côtés (2 branches), rien de coupé", labels[:2] == ["Centre", "Côtés"] and win.locator("[data-nova-rack-branch]").count() == 2 and lay.get("ok"), {"noms": labels, "mise_en_page": lay})
+            close_plugin(pg)
+            proj = save_project(pg)
+            racks = [pl.get("params", {}) for t in proj.get("tracks", []) for pl in (t.get("plugins") or []) if pl.get("type") == "FXRACK"]
+            out["sauvegarde"] = [{"mode": x.get("mode"), "branches": [[y.get("type") for y in bb.get("plugins", [])] for bb in x.get("branches", [])]} for x in racks]
+            check("Rack : sauvegarde (.zip) → project.json porte la division et le Compresseur de la branche 2",
+                  any(x["mode"] == "ms" and any("COMPRESSOR" in bb for bb in x["branches"]) for x in out["sauvegarde"]), out["sauvegarde"])
+        else:
+            close_plugin(pg)
+        out["erreurs_page"] = [x["text"][:200] for x in log.errors()][:6]
+        check(f"[{theme}] Rack : aucune erreur de page liée au rack", not [x for x in log.errors() if re.search(r"rack|Rack", x["text"])], out["erreurs_page"])
+        ctx.close(); b.close()
+    return out
+
+
+RACK_AUDIO = r"""
+async () => {
+  const M = p => window.__novaAppModule(p);
+  const { audioEngine: e } = await M('/engine/AudioEngine.ts'); const { TrackType } = await M('/types.ts');
+  const { builtinPlugin } = await M('/utils/sessionTemplate.ts');
+  const R = await M('/engine/fxRack.ts');
+  await e.init(); const SR = e.ctx.sampleRate; const n = Math.round(1.0 * SR);
+  const buf = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: SR });
+  let s = 11; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff - 0.5; };
+  for (let c = 0; c < 2; c++) { const x = buf.getChannelData(c); for (let i = 0; i < n; i++) x[i] = 0.3 * rnd(); }
+  const rack = (p) => ({ id: 'rk', name: 'Rack', type: 'FXRACK', isEnabled: true, latency: 0, params: p });
+  const tr = (plugins, b = buf) => [{ id: 'v', name: 'v', type: TrackType.AUDIO, volume: 1, pan: 0, isMuted: false, isSolo: false, sends: [], automationLanes: [], outputTrackId: 'master', plugins,
+     clips: [{ id: 'c', type: TrackType.AUDIO, start: 0.1, duration: b.duration, offset: 0, buffer: b, gain: 1, name: 'c', fadeIn: 0, fadeOut: 0, color: '#fff' }] }];
+  const r = async (pl, b) => await e.renderProject(tr(pl, b), 1.3, 0, SR);
+  const dry = await r([]);
+  const worst = (a, b, k = 1) => { let m = 0; for (let c = 0; c < 2; c++) { const x = a.getChannelData(c), y = b.getChannelData(c); for (let i = 0; i < x.length; i++) m = Math.max(m, Math.abs(x[i] - k * y[i])); } return m; };
+  const out = {};
+  out.defauts_ecart = worst(await r([rack(R.rackDefaults())]), dry);
+  const two = R.rackDefaults(); two.branches.forEach(b => { b.level = 0; });
+  out.deux_branches_0db_ecart_x2 = worst(await r([rack(two)]), dry, 2);
+  const eqLin = builtinPlugin('PROEQ12', { phase: 'linear' }, 'eq-lin'); eqLin.params.bands[0].isEnabled = false; eqLin.params.bands[11].isEnabled = false;
+  const lat = R.rackDefaults(); lat.branches[1].plugins = [eqLin]; lat.mix = 70;
+  out.latence_realignee_ecart = worst(await r([rack(lat)]), dry);
+  // 3 bandes : sinus à 60 Hz, 200 Hz, 1 kHz, 3 kHz, 12 kHz — niveau rendu / niveau sec.
+  const bands = R.withMode(R.rackDefaults(), 'bandes', 3);
+  out.bandes_db = {};
+  for (const f of [60, 200, 1000, 3000, 12000]) {
+    const sb = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: SR });
+    for (let c = 0; c < 2; c++) { const x = sb.getChannelData(c); for (let i = 0; i < n; i++) x[i] = 0.25 * Math.sin(2 * Math.PI * f * i / SR); }
+    const a = (await r([rack(bands)], sb)).getChannelData(0), d = (await r([], sb)).getChannelData(0);
+    let ea = 0, ed = 0; for (let i = Math.round(0.4 * SR); i < Math.round(1.0 * SR); i++) { ea += a[i] * a[i]; ed += d[i] * d[i]; }
+    out.bandes_db[f] = +(10 * Math.log10(ea / ed)).toFixed(3);
+  }
+  return out;
+}
+"""
+
+
+def rack_audio():
+    from fidelite_export import JS as FJS, SEUIL
+    out = {}
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True, executable_path=CHROME, args=["--autoplay-policy=no-user-gesture-required"])
+        pg = b.new_page()
+        errs = []
+        pg.on("pageerror", lambda x: errs.append(str(x)[:300]))
+        pg.add_init_script(APP_MODULE_INIT)
+        pg.add_init_script("try { localStorage.setItem('nova_welcome_seen', '1'); } catch (e) {}")
+        pg.goto(os.environ.get("NOVA_URL", "http://127.0.0.1:3522/"), wait_until="domcontentloaded", timeout=120000)
+        pg.wait_for_timeout(4000)
+        pg.set_default_timeout(900000)
+        a = pg.evaluate(RACK_AUDIO)
+        out["moteur"] = a
+        check("Rack (export) : réglages par défaut (2 branches vides à −6 dB) = son sec AU BIT PRÈS", a["defauts_ecart"] == 0, a)
+        check("Rack (export) : 2 branches vides à 0 dB = +6,02 dB exact (×2)", a["deux_branches_0db_ecart_x2"] == 0, a)
+        check("Rack (export) : branche avec un EQ à phase linéaire (43 ms) → branches et son sec réalignés, PDC : son sec (< −90 dB)",
+              a["latence_realignee_ecart"] < 3.2e-5, a)
+        check("Rack (export) : 3 bandes vides → la somme se reconstruit à ±0,1 dB (60 Hz – 12 kHz)", all(abs(v) <= 0.1 for v in a["bandes_db"].values()), a["bandes_db"])
+        comp = {"id": "rk-comp", "name": "Compresseur", "type": "COMPRESSOR", "isEnabled": True, "latency": 0,
+                "params": {"threshold": -24, "ratio": 4, "knee": 6, "attack": 0.005, "release": 0.1, "makeupGain": 1.4, "isEnabled": True}}
+        over = {"branches": [{"id": "rb-1", "level": -6.020599913279624, "plugins": []}, {"id": "rb-2", "level": -3, "plugins": [comp]}], "mix": 80}
+        for rate in (44100, 48000):
+            rr = pg.evaluate(FJS, {"rate": rate, "cfg": {"kind": "seul", "type": "FXRACK", "over": over}})
+            worst = max((rr.get(k) or {}).get("ecart_max_lsb16", 99) for k in ("depuis_0", "depuis_milieu"))
+            out[f"FXRACK_{rate}"] = {"pire_lsb16": worst, "depuis_0": (rr.get("depuis_0") or {}).get("ecart_max_lsb16"), "depuis_milieu": (rr.get("depuis_milieu") or {}).get("ecart_max_lsb16")}
+            check(f"Lecture = export rack (compression parallèle) à {rate} Hz : écart ≤ {SEUIL} LSB 16 bits", worst <= SEUIL, out[f"FXRACK_{rate}"])
+        out["erreurs_page"] = errs[:5]
+        check("Rack (moteur) : aucune erreur de page", not errs, errs[:5])
+        b.close()
+    return out
+
+
 t0 = time.time()
 if want("eq"):
     res["eq_sombre"] = eq_bureau("dark")
     res["eq_clair"] = eq_bureau("light")
     res["eq_audio"] = eq_audio()
+if want("rack"):
+    res["rack_sombre"] = rack_bureau("dark")
+    res["rack_clair"] = rack_bureau("light")
+    res["rack_audio"] = rack_audio()
 res["secondes"] = round(time.time() - t0)
 res["verifs"] = checks
 res["ok"] = all(c["ok"] for c in checks)
