@@ -1,12 +1,11 @@
 {
-  "version": "1.5.9",
-  "url": "downloads/NovaStudioSetup-1.5.9.exe",
-  "sha256": "9c470ae4b54b7934b73f4e6284ee51fcdaa74c951dcd0671c48cdd8857f1d55e",
-  "size": 51133067,
-  "date": "2026-10-21T18:59:02+02:00",
+  "version": "1.5.10",
+  "url": "downloads/NovaStudioSetup-1.5.10.exe",
+  "sha256": "1b69782eb46fe3bedc1cf6cdbbef86aa53678864f12eb7f2b1c33e1142776e68",
+  "size": 51134930,
+  "date": "2026-10-21T19:19:52+02:00",
   "notes": [
-    "Playlist des prises gardées visible dès l'ouverture, au-dessus de ta piste d'enregistrement : chaque prise gardée pendant le rec y ajoute une ligne.",
-    "Onglet VST : tous tes plugins s'affichent (la liste s'arrêtait à 300).",
-    "Waves : une seule ligne par plugin, avec Stéréo / Mono / Mono → stéréo en petits boutons (au lieu de 734 lignes)."
+    "Playlist : glisse simplement un clip vers le haut, dans la playlist au-dessus de ta piste : il y ajoute une ligne, la playlist grandit à chaque clip.",
+    "Ça marche avec tous les clips audio, pas seulement les prises enregistrées dans Nova."
   ]
 }
