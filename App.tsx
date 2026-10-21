@@ -116,7 +116,7 @@ import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
 import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, timeToQuarters, quartersToTime, type TempoEvent } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
-import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing } from './utils/collabTempo';
+import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing, tempoHistoryMove, undoKeepsAudio } from './utils/collabTempo';
 import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
 import { syncLinkedClips, duplicateLinked, makeUnique, unlinked } from './utils/linkedClips';
 import { freezeMidiFx, midiFxKeyStore, sanitizeMidiFx, activeFx, type MidiFxSlot } from './engine/midiFx';
@@ -642,7 +642,14 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
   </div>
 );
 
-const useUndoRedo = (initialState: DAWState) => {
+/**
+ * Annuler / rétablir : préparation d'une étape (hors du reducer, qui reste pur). Rend une
+ * transformation pure de l'état restauré, ou null (instantané tel quel). Sert à la collaboration :
+ * une étape qui change le tempo part chez les autres AVEC le suivi (utils/collabTempo).
+ */
+type HistoryMove = (present: DAWState, restored: DAWState) => ((present: DAWState, restored: DAWState) => DAWState) | null;
+
+const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<HistoryMove | null>) => {
   // lastChangeAt : heure de la dernière modification RÉELLE du projet (pas une
   // sélection ni un changement de vue), pour l'anti-rebond des entrées.
   const [history, setHistory] = useState<UndoHistory<DAWState>>({ past: [], present: initialState, future: [] });
@@ -746,13 +753,26 @@ const useUndoRedo = (initialState: DAWState) => {
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
     return out as DAWState;
   };
-  const undo = useCallback(() => { setHistory(curr => { if (curr.past.length === 0 || curr.present.isRecording) return curr; const snap = curr.past[curr.past.length - 1]; return { past: curr.past.slice(0, -1), present: withProjectOf(curr.present, snap), future: [cleanStateForHistory(curr.present), ...curr.future] }; }); }, []);
-  const redo = useCallback(() => { setHistory(curr => { if (curr.future.length === 0 || curr.present.isRecording) return curr; const snap = curr.future[0]; return { past: [...curr.past, cleanStateForHistory(curr.present)], present: withProjectOf(curr.present, snap), future: curr.future.slice(1) }; }); }, []);
-
   // Un son supprimé doit rester en mémoire tant qu'une étape d'annulation y fait
   // référence : sinon Ctrl+Z ramenait un clip muet.
   const historyRef = useRef(history);
   historyRef.current = history;
+  /** Étape préparée hors du reducer (effets de bord : opération de collaboration), appliquée dedans. */
+  const prepareMove = (snap: DAWState | undefined) => {
+    const h = historyRef.current;
+    if (!snap || !moveRef?.current || h.present.isRecording) return null;
+    try { return moveRef.current(h.present, withProjectOf(h.present, snap)); } catch { return null; }
+  };
+  const undo = useCallback(() => {
+    const tf = prepareMove(historyRef.current.past[historyRef.current.past.length - 1]);
+    setHistory(curr => { if (curr.past.length === 0 || curr.present.isRecording) return curr; const snap = curr.past[curr.past.length - 1]; const restored = withProjectOf(curr.present, snap); return { past: curr.past.slice(0, -1), present: tf ? tf(curr.present, restored) : restored, future: [cleanStateForHistory(curr.present), ...curr.future] }; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const redo = useCallback(() => {
+    const tf = prepareMove(historyRef.current.future[0]);
+    setHistory(curr => { if (curr.future.length === 0 || curr.present.isRecording) return curr; const snap = curr.future[0]; const restored = withProjectOf(curr.present, snap); return { past: [...curr.past, cleanStateForHistory(curr.present)], present: tf ? tf(curr.present, restored) : restored, future: curr.future.slice(1) }; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const isBufferInHistory = useCallback((bufferId: string) => {
     const h = historyRef.current;
     return [...h.past, ...h.future].some(s => s.tracks.some(t => trackBufferIds(t).includes(bufferId)));
@@ -1265,7 +1285,9 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, beginUndoGroup, endUndoGroup, canUndo, canRedo } = useUndoRedo(initialState);
+  // Annuler / rétablir en collaboration : une étape qui change le tempo part AVEC le suivi (réglé plus bas).
+  const historyMoveRef = useRef<HistoryMove | null>(null);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, beginUndoGroup, endUndoGroup, canUndo, canRedo } = useUndoRedo(initialState, historyMoveRef);
   const vocalCoachNode = vocalCoach ? <PanelBoundary name="Voix et flow" overlay onClose={() => setVocalCoach(null)}><Suspense fallback={null}><VocalWarmup initialTab={vocalCoach} onClose={() => setVocalCoach(null)} projectKey={state.projectKey} projectScale={state.projectScale} preferredInputId={state.tracks.find(t => t.isTrackArmed)?.inputDeviceId || null} /></Suspense></PanelBoundary> : null;
   
   // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
@@ -2095,6 +2117,8 @@ function Studio() {
    * AVANT tout le reste (repères, contenu) avec `follow` : chacun fait le même
    * déplacement, une seule fois.
    */
+  /** Collaboration : clips que seul le suivi du tempo a bougés → connus de tous (réglé plus bas, rememberFollowed). */
+  const rememberFollowedRef = useRef<((before: Track[], after: Track[], unsendableOnly: boolean) => void) | null>(null);
   const applyTempoChange = useCallback((patch: { bpm?: number; timeSignature?: TimeSignature; tempoEvents?: TempoEvent[] }, opts: { keepAudio?: boolean; quiet?: boolean } = {}) => {
     const cur = stateRef.current;
     const next = { ...patch };
@@ -2115,6 +2139,7 @@ function Studio() {
         knownTempoSigRef.current = sig;
         c.client.queue('tempo', 'tempo', { ...op, follow: { id: epoch, keepAudio } } as unknown as Record<string, unknown>);
       }
+      rememberFollowedRef.current?.(cur.tracks, preview.state.tracks, true);
     }
     setState(prev => followTempo(prev, next, { keepAudio, epoch }).state);
     if (!opts.quiet && !preview.report.unchanged) {
@@ -6403,6 +6428,33 @@ function Studio() {
   };
 
   /**
+   * Changement de tempo suivi (utils/tempoFollow) : chacun fait le MÊME déplacement. Les clips que
+   * seul le suivi a bougés sont donc connus de tous ; les clips modifiés ici et pas encore partis
+   * le restent. `unsendableOnly` (chez l'auteur) : seulement les pistes dont on n'envoie pas le
+   * contenu (celles d'un autre ; les siennes partent comme avant). Avant (22/10/2026), ces clips
+   * restaient « en attente d'envoi » pour toujours : les modifications suivantes de leur
+   * propriétaire étaient mises de côté chez l'auteur du changement, jamais appliquées.
+   */
+  const rememberFollowed = (before: Track[], after: Track[], unsendableOnly: boolean) => {
+    const c = collabRef.current;
+    if (!c) return;
+    const me = { role: c.role, key: c.key };
+    const guestRights = isLimitedGuest(c.role, stateRef.current.collabGuestRights) ? stateRef.current.collabGuestRights : null;
+    const prevById = new Map(before.map(t => [t.id, t] as const));
+    for (const t of after) {
+      const prev = prevById.get(t.id);
+      const known = knownContentRef.current.get(t.id);
+      if (!prev || !known || prev.clips === t.clips) continue;
+      if (unsendableOnly && canSendContent(t, me) && (!guestRights || guestCanEditContent(t, c.key, guestRights))) continue;
+      const pending = pendingClipIds(known, prev.clips || []);
+      const prevClips = new Map((prev.clips || []).map(x => [x.id, x] as const));
+      const moved = (t.clips || []).filter(x => !pending.has(x.id) && prevClips.has(x.id) && prevClips.get(x.id) !== x);
+      if (moved.length) knownContentRef.current.set(t.id, noteMerged(known, moved, [], undefined));
+    }
+  };
+  rememberFollowedRef.current = rememberFollowed;
+
+  /**
    * Même réglage de la session (tempo, groupes, ordre, tonalité, repères, accords) modifié ici
    * et en route vers le serveur : on ne sait pas encore qui est le plus récent. L'opération
    * reçue est mise de côté et rejouée quand notre numéro du journal est connu (onSent) — la
@@ -6972,7 +7024,9 @@ function Studio() {
           const quiet = stateRef.current.tracks
             .filter(t => isEmptyDelta(contentDelta(knownContentRef.current.get(t.id), metaSigOf(contentOf(t)), t.clips || [])))
             .map(t => t.id);
+          const beforeTracks = stateRef.current.tracks;
           remoteSet(prev => applyTempoOpFollowing(prev, op).state);
+          rememberFollowed(beforeTracks, stateRef.current.tracks, false);
           for (const id of quiet) {
             const t = stateRef.current.tracks.find(x => x.id === id);
             if (!t) continue;
@@ -8358,6 +8412,22 @@ function Studio() {
     knownTempoSigRef.current = sig;
     c.client.queue('tempo', 'tempo', op as unknown as Record<string, unknown>);
   }, [state.bpm, state.timeSignature, state.tempoEvents, collab]);
+  // Ctrl+Z / Ctrl+Y d'un changement de tempo en collaboration : l'opération inverse part AVEC le
+  // suivi, AVANT le contenu (comme applyTempoChange), et l'état local est calculé comme chez les
+  // autres (utils/collabTempo tempoHistoryMove) : tout le monde revient au même endroit.
+  historyMoveRef.current = (present, restored) => {
+    const c = collabRef.current;
+    if (!c) return null;
+    const epoch = newFollowId();
+    const keepAudio = undoKeepsAudio(present, restored);
+    const move = tempoHistoryMove(present, restored, { epoch, keepAudio });
+    if (!move) return null;
+    knownTempoSigRef.current = tempoOpSig(move.op);
+    c.client.queue('tempo', 'tempo', move.op as unknown as Record<string, unknown>);
+    rememberFollowedRef.current?.(present.tracks, move.state.tracks, true);
+    audioEngine.setBpm(move.op.bpm);
+    return (cur, rest) => tempoHistoryMove(cur, rest, { epoch, keepAudio })?.state ?? rest;
+  };
 
   // Groupes (R12) : une seule opération pour toute la liste (et les réglages : suspension, <TOUT>).
   const knownGroupsSigRef = useRef<string | null>(null);
@@ -8635,6 +8705,8 @@ function Studio() {
       fingerprint: () => sessionPrint(stateRef.current),
       /** Ce qui est partagé d'une piste, en clair (pour dire précisément ce qui diffère). */
       parts: (id: string) => { const t = stateRef.current.tracks.find(x => x.id === id); return t ? JSON.parse(JSON.stringify(trackParts(t))) : null; },
+      /** Clips tenus pour « modifiés ici, pas encore partis » (une réception les met de côté), par piste. */
+      pending: () => Object.fromEntries(stateRef.current.tracks.map(t => [t.id, [...pendingClipIds(knownContentRef.current.get(t.id), t.clips || [])]]).filter(([, v]) => (v as string[]).length)),
       messages: () => collabMessagesRef.current.map(m => ({ from: m.from, text: m.text, mine: !!m.mine, pending: !!m.pending })),
       history: () => collabHistoryRef.current.map(h => ({ who: h.who, text: h.text, undo: !!h.undo, undone: !!h.undone })),
       audio: () => ({ rtc: rtcRef.current?.connectionStates() || {}, remote: remoteAudioRef.current, talkOn: talkOnRef.current, mixOut: mixOutOnRef.current }),

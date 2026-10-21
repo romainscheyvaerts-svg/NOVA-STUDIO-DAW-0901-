@@ -341,6 +341,37 @@ def run():
             upd(A, "d.arrangements = [{ id: 'arr-court', name: 'Version courte', sections: ['__debut', 'mk-refrain'], mutedClipIds: [] }];")
         step("Session : tempo 92 + tonalité (Max), repère (Sam), accord (Lina), groupe (Max), note (Max), arrangement (Lina)", song)
 
+        # ------------------------------------------------------------ 6b. tempo suivi puis Ctrl+Z (22/10/2026)
+        # Lina (artiste) change le tempo (le contenu garde sa mesure, chez tous), puis l'annule : l'opération
+        # inverse part AVEC le suivi ; les clips des pistes qu'elle ne possède pas (Sam, beat) reviennent aussi.
+        POS = "d.tracks.flatMap(t => t.clips.map(c => [c.id, Math.round(c.start * 1e6) / 1e6])).sort((a, b) => a[0] < b[0] ? -1 : 1)"
+
+        def tempo_undo():
+            before = st(A, POS)
+            bpm0 = st(A, "d.bpm")
+            A.evaluate("() => window.DAW_CONTROL.setBpm(120, { keepAudio: false, quiet: true })")
+            propagate("tempo suivi (→ 120)", [E, B], lambda pg: st(pg, "d.bpm === 120"), timeout=20)
+            if converge("tempo 120 suivi : même contenu chez tous") is None:
+                raise RuntimeError("le changement de tempo ne converge pas")
+            moved = {k: sum(1 for (i, s), (_, s0) in zip(st(pg, POS), before) if abs(s - s0) > 1e-6) for k, pg in (("A", A), ("E", E), ("B", B))}
+            A.wait_for_timeout(1500)
+            pend1 = {k: pg.evaluate("() => window.__novaCollab.pending()") for k, pg in (("A", A), ("E", E), ("B", B))}
+            check("tempo suivi (Lina) : aucun clip resté « en attente d'envoi » (ni chez elle sur la piste de Sam, ni chez les autres)", not any(pend1.values()))
+            A.evaluate("() => { try { document.activeElement && document.activeElement.blur && document.activeElement.blur(); } catch (e) {} }")
+            A.keyboard.press("Control+z")
+            wait_for(A, lambda: st(A, "d.bpm") == bpm0, 10, what="Ctrl+Z chez Lina")
+            propagate("annulation du tempo", [E, B], lambda pg: st(pg, f"d.bpm === {bpm0}"), timeout=20)
+            back = {k: st(pg, POS) for k, pg in (("A", A), ("E", E), ("B", B))}
+            # Plus rien de « modifié ici, pas encore parti » : sinon les modifications suivantes des autres seraient mises de côté.
+            A.wait_for_timeout(1500)
+            pend = {k: pg.evaluate("() => window.__novaCollab.pending()") for k, pg in (("A", A), ("E", E), ("B", B))}
+            check("tempo suivi puis Ctrl+Z : aucun clip resté « en attente d'envoi » chez personne", not any(pend.values()))
+            ecarts = {k: [i for (i, s), (_, s0) in zip(v, before) if abs(s - s0) > 1e-6] for k, v in back.items()}
+            check("tempo suivi puis Ctrl+Z (Lina) : chez Lina, Max et Sam, chaque clip revient à sa seconde d'avant (±1 µs)",
+                  all(not e and len(back[k]) == len(before) for k, e in ecarts.items()))
+            return {"bpm": [bpm0, 120, bpm0], "clips": len(before), "clips_deplaces_par_le_changement": moved, "ecarts_apres_annulation": ecarts, "en_attente": pend, "en_attente_apres_changement": pend1}
+        step("Lina change le tempo (92 → 120, contenu suivi) puis Ctrl+Z : tout revient, chez tous, aux mêmes positions", tempo_undo)
+
         # ------------------------------------------------------------ 7. transposition (R13), MIDI + CC (R16), structure, suppression
         def tracks_more():
             tid = ids.get("A")

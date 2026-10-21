@@ -44,7 +44,10 @@ export const hashOf = (v: unknown): string => fnv(JSON.stringify(canon(v)));
 /** Pistes qui voyagent (le beat non acheté, lui aussi : sa présence et son mix). */
 export const isSharedTrack = (t: Track): boolean => !!t && typeof t.id === 'string';
 
-const CLIP_LOCAL = new Set(['buffer', 'freezeRef', 'isFreezeSlice', 'audioRef', 'isOffline', 'isUnlicensed', 'color']);
+// tempoEpoch : marque du dernier changement de tempo suivi (un clip ne bouge pas deux fois pour le même
+// changement), pas du contenu. Un membre qui rejoue le journal (rechargement) n'applique que la dernière
+// opération tempo : mêmes positions, sans forcément la même marque (changement puis annulation).
+const CLIP_LOCAL = new Set(['buffer', 'freezeRef', 'isFreezeSlice', 'audioRef', 'isOffline', 'isUnlicensed', 'color', 'tempoEpoch']);
 
 /** Ce qui compte d'un clip (position, son, gain, fondus, éditions). */
 export function clipShape(c: Clip): Record<string, unknown> {

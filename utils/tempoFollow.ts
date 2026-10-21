@@ -79,7 +79,7 @@ export const remapper = (from: TempoMap, to: TempoMap) => (t: number): number =>
 
 /** Piste du beat importé (catalogue ou PC) : la piste « instrumental ». */
 const isBeatTrackId = (t: Track) => t.id === 'instrumental';
-const isMidiClip = (c: Clip) => Array.isArray(c.notes) || c.type === TrackType.MIDI;
+export const isMidiClip = (c: Clip) => Array.isArray(c.notes) || c.type === TrackType.MIDI;
 export const isWarpedClip = (c: Clip) => !!c.warp?.enabled;
 
 /**
