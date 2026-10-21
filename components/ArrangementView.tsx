@@ -2671,6 +2671,10 @@ useEffect(() => {
         { label: 'Éditeur spectral…', icon: 'fa-chart-area',
           title: 'Voir le spectre du clip et effacer un bruit précis (toux, sonnerie, chaise) en traçant une zone',
           onClick: () => { openNovaWindow('spectral-editor', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } });
+      // L5 · écart 18 : éditer la prise par son texte (mode avancé, clip transcrit).
+      if (!simple && c.transcript) voice.push({ label: 'Éditer par le texte…', icon: 'fa-i-cursor',
+        title: 'La prise se lit comme un texte : sélectionner des mots, effacer un mot, une respiration ou un silence, découper par phrase, corriger un mot',
+        onClick: () => { openNovaWindow('voice-text-edit', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } });
       if (c.transcript) voice.push({ label: c.transcript.show ? 'Masquer le texte du clip' : 'Afficher le texte au-dessus du clip', icon: 'fa-font',
         title: 'Les paroles transcrites s’affichent sur le clip, à leur place dans le temps',
         onClick: () => { const pch = setTranscriptShown(c, !c.transcript?.show); if (pch) onEditClip?.(cm.trackId, c.id, 'UPDATE_PROPS', pch); close(); } });

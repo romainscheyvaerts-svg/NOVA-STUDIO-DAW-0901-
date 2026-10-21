@@ -18,7 +18,9 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // Lot 1 « Voix propre » : nettoyer la voix en un clic (site, téléphone, appli).
   | 'voice-clean'
   // L5 · écart 7 : réparer la voix (plosives, clics, bourdonnement, saturation), éditeur spectral.
-  | 'voice-repair' | 'spectral-editor';
+  | 'voice-repair' | 'spectral-editor'
+  // L5 · écart 18 : éditer la voix par le texte (transcription locale).
+  | 'voice-text-edit';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
