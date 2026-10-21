@@ -31,7 +31,7 @@ import { busById, busesOf, engineView } from '../utils/trackStructure';
  * VST3 (R10) : la clé part au pont avec l'audio (4 canaux) ; elle n'est utilisée que si l'hôte du pont
  * alimente l'entrée side-chain du plugin (LOAD_PLUGIN sidechain_inputs > 0, voir bridge-python/vst_sidechain.py).
  */
-export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'VST3'] as const;
+export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'MBCOMP', 'DYNEQ', 'VST3'] as const;
 export const supportsSidechain = (type: string) => (SIDECHAIN_TYPES as readonly string[]).includes(type);
 
 export const BUS_KEY_PREFIX = 'bus:';

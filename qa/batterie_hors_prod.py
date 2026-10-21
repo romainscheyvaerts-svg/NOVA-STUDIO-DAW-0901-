@@ -194,6 +194,10 @@ BATTERIE = [
     # 22/10/2026 · restes : automation d'un effet placé dans une branche du rack parallèle (gain de compensation du
     # Compresseur ×1 → ×2 = +6,02 dB à l'export, Off = rien), proposé dans l'éditeur, lecture = export au bit près (44,1 / 48 kHz).
     ("rack_automation", []),
+    # 22/10/2026 · restes : clé externe (side-chain) sur le Compresseur multibande et l'EQ dynamique : kick muet → la basse
+    # se creuse pendant chaque kick (≈ −19 dB), voix muette → la nappe baisse de la plage (−6 dB), rien entre les salves ;
+    # lecture = export au bit près (44,1 / 48 kHz).
+    ("mixfx_cle", []),
 ]
 
 
