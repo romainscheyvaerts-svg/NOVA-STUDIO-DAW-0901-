@@ -7,6 +7,13 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.11
+- Talkback : touche N (appui court = reste ouvert, maintenu = tant que tu tiens), bouton « Talk » à côté de REC, en collaboration comme dans le casque de l'artiste au studio.
+- Nouveaux effets de mix : compresseur multibande et EQ dynamique (calme une résonance seulement quand elle ressort).
+- Écoute de l'ingé : mono, côtés, Dim −20 dB, volume d'écoute, solo AFL / PFL ; reverb avec ta propre réponse impulsionnelle (WAV).
+- Grosses séances plus fluides : l'interface ne rame plus pendant la lecture, deux fois moins de mémoire, trois fois moins de charge à l'arrêt.
+- Collaboration : le direct se rebranche tout seul après une coupure ou quand tu reviens sur l'onglet.
+
 ## 1.5.10
 - Playlist : glisse simplement un clip vers le haut, dans la playlist au-dessus de ta piste : il y ajoute une ligne, la playlist grandit à chaque clip.
 - Ça marche avec tous les clips audio, pas seulement les prises enregistrées dans Nova.
