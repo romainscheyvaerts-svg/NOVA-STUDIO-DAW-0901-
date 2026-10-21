@@ -7,6 +7,13 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.12
+- Tempo : le changer garde tes notes, clips et automation sur la grille ; rampes d'accélération ; option « garder les clips audio à leur place ».
+- MIDI vivant : arpège, accords et gamme forcée en direct, clips liés (modifier un motif modifie ses copies), LFO calés sur le tempo.
+- Mix pro : EQ centre/côtés et phase linéaire, racks d'effets parallèles, scènes de mix A/B/C/D, masteriser un EP ou un album.
+- Voix : réparer (plosives, clics de bouche, bourdonnement, saturation), éditeur spectral, éditer la voix par le texte, étirement haute qualité.
+- Pro : échange DAWproject, pistes épinglées et filtrées, macros, console sur un 2e écran, vidéo calée à l'image.
+
 ## 1.5.11
 - Talkback : touche N (appui court = reste ouvert, maintenu = tant que tu tiens), bouton « Talk » à côté de REC, en collaboration comme dans le casque de l'artiste au studio.
 - Nouveaux effets de mix : compresseur multibande et EQ dynamique (calme une résonance seulement quand elle ressort).
