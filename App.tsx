@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix, TimeSignature } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
 import { pickCleanTarget } from './utils/voiceCleanLabels';
@@ -112,9 +112,10 @@ import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
-import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange } from './utils/tempoMap';
+import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, timeToQuarters, quartersToTime, type TempoEvent } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
-import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp } from './utils/collabTempo';
+import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing } from './utils/collabTempo';
+import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
 import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
@@ -1829,6 +1830,23 @@ function Studio() {
     if (!stillUsed && !isBufferInHistory(bufferId)) audioBufferRegistry.remove(bufferId);
   }, []);
 
+  /**
+   * L3 · Tempo de calage d'un clip calé : celui qui fait tenir sa longueur
+   * musicale (en noires, au tempo d'origine) entre son début et la même
+   * position musicale dans la carte du projet. Sans changement de tempo : le
+   * tempo du projet ; à cheval sur un changement ou une rampe : le tempo moyen.
+   */
+  const tempoCibleCalage = (c: Clip, s: DAWState): number => {
+    if (!(s.tempoEvents || []).length) return s.bpm;
+    const srcBpm = c.warp?.sourceBpm ?? c.warp?.originalBpm;
+    const srcDur = c.warp?.sourceDuration ?? c.duration;
+    if (!srcBpm || !(srcDur > 0)) return s.bpm;
+    const m = buildTempoMap(s.bpm, s.timeSignature, s.tempoEvents);
+    const qLen = (srcDur * srcBpm) / 60;
+    const sec = quartersToTime(m, timeToQuarters(m, c.start) + qLen) - c.start;
+    return sec > 0 ? Math.round(((60 * qLen) / sec) * 1e6) / 1e6 : s.bpm;
+  };
+
   /** Evite de lancer deux etirements concurrents sur le meme clip. */
   const calagesEnCoursRef = useRef<Set<string>>(new Set());
 
@@ -1898,8 +1916,8 @@ function Studio() {
     // controle de tempo). On ne peut pas se contenter d'ignorer les demandes
     // arrivees entre-temps, sinon le clip reste cale sur un tempo perime : on
     // relance sur la valeur courante.
-    const bpmCourant = stateRef.current.bpm;
     const clipAJour = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
+    const bpmCourant = clipAJour ? tempoCibleCalage(clipAJour, stateRef.current) : stateRef.current.bpm;
     if (clipAJour?.warp?.enabled && Math.abs((clipAJour.warp.originalBpm ?? bpmCourant) - bpmCourant) > 0.01) {
       caleClipSurTempoRef.current?.(trackId, clipId, bpmCourant, true);
     }
@@ -1915,17 +1933,16 @@ function Studio() {
    * de tempo lancerait des dizaines d'etirements.
    */
   useEffect(() => {
-    const bpm = state.bpm;
     const minuteur = setTimeout(() => {
       stateRef.current.tracks.forEach(t => t.clips.forEach(c => {
-        if (c.warp?.enabled && c.warp.originalBpm !== undefined
-            && Math.abs(c.warp.originalBpm - bpm) > 0.01) {
-          caleClipSurTempo(t.id, c.id, bpm, true);
-        }
+        if (!c.warp?.enabled || c.warp.originalBpm === undefined) return;
+        // L3 : le tempo de la piste tempo à l'endroit du clip (changements, rampes), pas seulement celui du début.
+        const bpm = tempoCibleCalage(c, stateRef.current);
+        if (Math.abs(c.warp.originalBpm - bpm) > 0.01) caleClipSurTempo(t.id, c.id, bpm, true);
       }));
     }, 500);
     return () => clearTimeout(minuteur);
-  }, [state.bpm, caleClipSurTempo]);
+  }, [state.bpm, state.tempoEvents, state.timeSignature, caleClipSurTempo]);
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
     if (action === 'NORMALIZE') {
@@ -2015,13 +2032,48 @@ function Studio() {
     }));
   };
 
-  const handleUpdateBpm = useCallback((newBpm: number) => { 
+  /**
+   * L3 · Changement de tempo, de mesure ou de piste tempo fait ICI : le contenu
+   * garde sa position musicale (utils/tempoFollow) — notes et clips MIDI, clips
+   * calés, automation, repères, accords, boucle ; les clips audio non calés
+   * suivent aussi, sauf « garder les clips audio à leur place » (réglage du
+   * projet, automatique avec un beat importé non calé). Une seule mise à jour :
+   * une seule étape d'annulation. En collaboration, l'opération « tempo » part
+   * AVANT tout le reste (repères, contenu) avec `follow` : chacun fait le même
+   * déplacement, une seule fois.
+   */
+  const applyTempoChange = useCallback((patch: { bpm?: number; timeSignature?: TimeSignature; tempoEvents?: TempoEvent[] }, opts: { keepAudio?: boolean; quiet?: boolean } = {}) => {
+    const cur = stateRef.current;
+    const next = { ...patch };
     // On borne AVANT d'informer le moteur : sinon un tempo hors limites etait
     // envoye aux plugins synchronises alors que l'etat affichait la valeur bornee.
-    const bpm = Math.max(20, Math.min(999, Number.isFinite(newBpm) ? newBpm : 120));
-    audioEngine.setBpm(bpm);
-    setState(prev => ({ ...prev, bpm })); 
+    if (next.bpm !== undefined) {
+      next.bpm = Math.max(20, Math.min(999, Number.isFinite(next.bpm) ? next.bpm : 120));
+      audioEngine.setBpm(next.bpm);
+    }
+    const keepAudio = opts.keepAudio ?? keepAudioFor(cur);
+    const epoch = newFollowId();
+    const preview = followTempo(cur, next, { keepAudio, epoch });
+    const c = collabRef.current;
+    if (c) {
+      const op = tempoOpOf(preview.state);
+      const sig = tempoOpSig(op);
+      if (sig !== knownTempoSigRef.current) {
+        knownTempoSigRef.current = sig;
+        c.client.queue('tempo', 'tempo', { ...op, follow: { id: epoch, keepAudio } } as unknown as Record<string, unknown>);
+      }
+    }
+    setState(prev => followTempo(prev, next, { keepAudio, epoch }).state);
+    if (!opts.quiet && !preview.report.unchanged) {
+      const what = followSummary(preview.report);
+      if (what) setAiNotification(`🎼 Tempo ${Math.round(cur.bpm * 100) / 100}${next.bpm !== undefined && next.bpm !== cur.bpm ? ` → ${Math.round(next.bpm * 100) / 100}` : ''} BPM : ${what}. Ctrl+Z pour revenir.`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setState]);
+
+  const handleUpdateBpm = useCallback((newBpm: number, opts: { keepAudio?: boolean; quiet?: boolean } = {}) => {
+    applyTempoChange({ bpm: newBpm }, opts);
+  }, [applyTempoChange]);
   
   const handleUpdateTrack = useCallback((updatedTrack: Track) => {
     const previousTrack = stateRef.current.tracks.find(t => t.id === updatedTrack.id);
@@ -3416,7 +3468,8 @@ function Studio() {
   // Beat importé du PC : tempo et tonalité détectés, proposés en un geste (hooks/useImportTempo).
   const importTempo = useImportTempo({
     getProject: () => stateRef.current,
-    applyBpm: (bpm) => handleUpdateBpm(bpm),
+    // Le tempo suit le beat importé : l'audio déjà posé garde sa place (il est calé sur ce beat).
+    applyBpm: (bpm) => handleUpdateBpm(bpm, { keepAudio: true }),
     applyKey: (rootKey, scale) => applyProjectKey(rootKey, scale),
     notify: (text) => setAiNotification(text),
     keyName: (rootKey, scale) => nomTonalite(rootKey, scale),
@@ -6762,7 +6815,23 @@ function Studio() {
           noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a réglé le tempo (${was.bpm} → ${op.bpm} BPM)`, undo: { kind: 'tempo', op: was as unknown as Record<string, unknown> } });
         }
         audioEngine.setBpm(op.bpm);
-        remoteSet(prev => applyTempoOp(prev, op));
+        if (op.follow) {
+          // L3 : le contenu garde sa mesure, par le même calcul que chez l'auteur (utils/tempoFollow).
+          // Pistes sans modification locale en attente : le déplacement est « connu », rien ne
+          // repart (sinon un écho en retard ramènerait d'anciennes positions pendant un glisser).
+          const quiet = stateRef.current.tracks
+            .filter(t => isEmptyDelta(contentDelta(knownContentRef.current.get(t.id), metaSigOf(contentOf(t)), t.clips || [])))
+            .map(t => t.id);
+          remoteSet(prev => applyTempoOpFollowing(prev, op).state);
+          for (const id of quiet) {
+            const t = stateRef.current.tracks.find(x => x.id === id);
+            if (!t) continue;
+            rememberTrack(t, { mix: true, content: true });
+            remoteTouchedRef.current.add(id); contentResetRef.current.add(id);
+          }
+          (stateRef.current.markers || []).forEach(m => knownMarkersRef.current.set(m.id, markerSig(m)));
+          (stateRef.current.chords || []).forEach(ch => { if (!pendingChordsRef.current.has(ch.id)) knownChordsRef.current.set(ch.id, chordSig(ch)); });
+        } else remoteSet(prev => applyTempoOp(prev, op));
         if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
@@ -7522,11 +7591,12 @@ function Studio() {
       setState(prev => { const n: any = { ...prev }; for (const [k, v] of Object.entries(u.fields)) { if (v === null) delete n[k]; else n[k] = v; } return n; });
     } else if (u.kind === 'tempo') {
       const op = sanitizeTempoOp(u.op);
-      if (op) { audioEngine.setBpm(op.bpm); setState(prev => applyTempoOp(prev, op)); }
+      // L3 : le contenu revient avec le tempo (même mesure), chez tout le monde.
+      if (op) applyTempoChange({ bpm: op.bpm, timeSignature: op.timeSignature, tempoEvents: op.tempoEvents }, { quiet: true });
     }
     setCollabHistory(h => h.map(x => (x.id === id ? { ...x, undone: true } : x)));
     setAiNotification(`↩️ Annulé : ${e.who} ${e.text}. Le retour en arrière part chez tout le monde.`);
-  }, [setState]);
+  }, [setState, applyTempoChange]);
   const collabHistoryRef = useRef(collabHistory);
   collabHistoryRef.current = collabHistory;
   const canUndoEntryRef = useRef(canUndoEntry);
@@ -8830,7 +8900,7 @@ function Studio() {
       if (!beatLoadCancelledByUser()) setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
       return;
     }
-    if (inst.bpm) handleUpdateBpm(inst.bpm);
+    if (inst.bpm) handleUpdateBpm(inst.bpm, { keepAudio: true, quiet: true });
     // Tablette / petit écran (G14) : le store prenait 320 px et ne laissait que
     // 370 px de timeline. Beat choisi → on le replie (▤ en haut à gauche le rouvre).
     if (!isMobileRef.current && window.innerWidth < 1280) setIsSidebarOpen(false);
@@ -8849,7 +8919,7 @@ function Studio() {
         if (!inst.bpm) {
           const debut = Math.min(10, buf.duration * 0.2);
           const bpm = await AudioAnalysisEngine.detectBPMAdvanced(buf, debut, Math.min(30, buf.duration * 0.6)).catch(() => 0);
-          if (bpm >= 60 && bpm <= 200) handleUpdateBpm(bpm);
+          if (bpm >= 60 && bpm <= 200) handleUpdateBpm(bpm, { keepAudio: true, quiet: true });
         }
       }
     }
@@ -11236,10 +11306,9 @@ function Studio() {
         <Suspense fallback={null}>
           <TempoDialog open={tempoDialog.open} onClose={() => setTempoDialog({ open: false, focusBar: null })}
             bpm={state.bpm} timeSignature={state.timeSignature} events={state.tempoEvents || []}
-            onChange={p => {
-              if (p.bpm !== undefined) handleUpdateBpm(p.bpm);
-              if (p.timeSignature || p.tempoEvents) setState(prev => ({ ...prev, ...(p.timeSignature ? { timeSignature: p.timeSignature } : {}), ...(p.tempoEvents ? { tempoEvents: p.tempoEvents } : {}) }));
-            }}
+            onChange={p => applyTempoChange(p)}
+            audioMode={state.tempoAudioMode} autoKeepAudio={hasUnwarpedBeat(state.tracks)}
+            onAudioMode={m => setState(prev => ({ ...prev, tempoAudioMode: m }))}
             suggestedBar={timeToPosition(tempoMapStore.get(), playheadStore.get()).bar}
             focusBar={tempoDialog.focusBar}
             tempoLaneOn={tempoLaneShown} onTempoLane={on => tempoLaneStore.set(on)} />

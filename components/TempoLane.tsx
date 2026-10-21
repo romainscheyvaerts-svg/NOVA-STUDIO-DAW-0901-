@@ -52,7 +52,7 @@ const TempoLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, eve
   return (
     <div className="shrink-0 flex border-b relative z-30" data-testid="tempo-lane" style={{ height: TEMPO_LANE_H, borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
       <div className="shrink-0 flex items-center gap-1.5 px-2 border-r" style={{ width: headerWidth, borderColor: 'var(--border-dim)' }}
-        title="Piste tempo : changements de tempo et de mesure (règles Tempo et Meter ; Logic : piste Tempo globale)">
+        title="Piste tempo : changements de tempo et de mesure, rampes d'accélération ou de ralentissement">
         <i className="fas fa-tachometer-alt text-[10px] text-amber-300" aria-hidden />
         <span className="text-[11px] font-black truncate" style={{ color: 'var(--text-primary)' }}>Tempo</span>
         <span className="text-[10px] font-mono text-slate-400 truncate">{start.bpm} · {start.num}/{start.den}</span>
@@ -63,15 +63,27 @@ const TempoLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, eve
         {step >= 10 && bars.map(b => (
           <div key={b.bar} className="absolute top-0 bottom-0 border-l pointer-events-none" style={{ left: b.time * zoomH - scrollLeft, borderColor: 'var(--grid-line)' }} />
         ))}
+        {/* Rampes (L3) : bande en dégradé du début de la rampe jusqu'au tempo atteint. */}
+        {map.segments.map((r, i) => {
+          if (r.bpmEnd === undefined || !map.segments[i + 1]) return null;
+          const x0 = r.time * zoomH - scrollLeft, x1 = map.segments[i + 1].time * zoomH - scrollLeft;
+          if (x1 < 0 || x0 > width) return null;
+          const up = r.bpmEnd > r.bpm;
+          return (
+            <div key={`ramp-${r.bar}`} aria-hidden className="absolute bottom-[2px] h-[6px] pointer-events-none rounded-sm" data-testid={`tempo-ramp-band-${r.bar}`}
+              style={{ left: x0, width: Math.max(2, x1 - x0), background: `linear-gradient(to right, rgba(245,158,11,${up ? 0.12 : 0.55}), rgba(245,158,11,${up ? 0.55 : 0.12}))` }} />
+          );
+        })}
         {changes.map(s => {
           const left = s.time * zoomH - scrollLeft;
           if (left < -120 || left > width + 10) return null;
           const prev = map.segments[map.segments.indexOf(s) - 1];
-          const label = [prev && prev.bpm === s.bpm ? null : `♩ ${s.bpm}`, prev && prev.num === s.num && prev.den === s.den ? null : `${s.num}/${s.den}`].filter(Boolean).join(' · ') || `♩ ${s.bpm}`;
+          const ramp = prev && prev.bpmEnd !== undefined ? (s.bpm > prev.bpm ? '↗ ' : '↘ ') : '';
+          const label = ramp + ([prev && prev.bpm === s.bpm ? null : `♩ ${s.bpm}`, prev && prev.num === s.num && prev.den === s.den ? null : `${s.num}/${s.den}`].filter(Boolean).join(' · ') || `♩ ${s.bpm}`);
           return (
             <button key={s.bar} type="button" data-testid={`tempo-badge-${s.bar}`}
               onClick={e => { e.stopPropagation(); onPick(s.bar); }}
-              title={`Mesure ${s.bar + 1} : ${s.bpm} BPM, ${s.num}/${s.den}. Clic pour modifier ou supprimer.`}
+              title={`Mesure ${s.bar + 1} : ${s.bpm} BPM, ${s.num}/${s.den}${ramp ? ` (atteint en rampe depuis la mesure ${prev.bar + 1})` : ''}. Clic pour modifier ou supprimer.`}
               className="absolute top-[3px] h-5 px-1.5 rounded-md border text-[10px] font-black whitespace-nowrap bg-amber-500/15 border-amber-500/50 text-amber-300 hover:bg-amber-500/30"
               style={{ left: Math.max(0, left) }}>
               {label}

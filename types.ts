@@ -464,6 +464,12 @@ export interface Clip {
    * (utils/voiceLyrics). Une ancienne version ignore ce champ.
    */
   transcript?: ClipTranscript;
+  /**
+   * L3 · Dernier changement de tempo qui a déplacé ce clip (utils/tempoFollow) :
+   * en collaboration, un clip déjà déplacé pour ce changement ne bouge pas deux
+   * fois. Une ancienne version l'ignore.
+   */
+  tempoEpoch?: string;
 }
 
 /** R24 : un mot transcrit (temps en secondes du son du clip). */
@@ -1260,6 +1266,13 @@ export interface DAWState {
   timeSignature: TimeSignature;  // NEW
   /** Changements de tempo et de mesure (piste tempo, R2). utils/tempoMap. */
   tempoEvents?: import('./utils/tempoMap').TempoEvent[];
+  /**
+   * L3 · Changement de tempo et clips audio NON calés (utils/tempoFollow) :
+   * « follow » = leur début suit la mesure, « keep » = ils gardent leur place
+   * (beat importé). Absent : automatique (gardés s'il y a un beat importé non
+   * calé). MIDI, clips calés, automation et repères suivent toujours.
+   */
+  tempoAudioMode?: import('./utils/tempoFollow').TempoAudioMode;
   projectKey?: number; 
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */

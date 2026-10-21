@@ -239,7 +239,7 @@ export function deleteChordsTime(chords: ChordEvent[], s: number, e: number): Ch
 
 // ─── Piste tempo, mesure par mesure ────────────────────────────────────────────
 
-interface BarDesc { bpm: number; num: number; den: number }
+interface BarDesc { bpm: number; num: number; den: number; /** Rampe qui arrive au début de cette mesure (L3). */ ramp?: boolean }
 const same = (a: BarDesc, b: BarDesc) => Math.abs(a.bpm - b.bpm) < 1e-9 && a.num === b.num && a.den === b.den;
 const barSecOf = (b: BarDesc) => (60 / b.bpm) * (4 / b.den) * b.num;
 const beatSecOf = (b: BarDesc) => (60 / b.bpm) * (4 / b.den);
@@ -251,7 +251,8 @@ function toBars(map: TempoMap, n: number): BarDesc[] {
   for (let bar = 0; bar < n; bar++) {
     while (si + 1 < segs.length && segs[si + 1].bar <= bar) si++;
     const s = segs[si];
-    out.push({ bpm: s.bpm, num: s.num, den: s.den });
+    const ramp = si > 0 && s.bar === bar && segs[si - 1].bpmEnd !== undefined;
+    out.push({ bpm: s.bpm, num: s.num, den: s.den, ...(ramp ? { ramp: true } : {}) });
   }
   return out;
 }
@@ -268,6 +269,8 @@ function fromBars(bars: BarDesc[], old: TempoEvent[] | undefined, gen: IdGen): {
     const ev: TempoEvent = { id: prev?.id || gen(`tempo-${i}`), bar: i };
     if (Math.abs(p.bpm - b.bpm) > 1e-9) ev.bpm = b.bpm;
     if (p.num !== b.num || p.den !== b.den) { ev.numerator = b.num; ev.denominator = b.den; }
+    // Rampe (L3) : elle suit la mesure qui la portait (insérée ou supprimée avec elle).
+    if (b.ramp && ev.bpm !== undefined) ev.ramp = true;
     events.push(ev);
   }
   return { bpm: first.bpm, timeSignature: { numerator: first.num, denominator: first.den }, tempoEvents: events };
@@ -297,7 +300,8 @@ export function insertTempoTime(s: TempoPart, at: number, len: number, gen: IdGe
   const w = where(map, at);
   const bars = toBars(map, sizeFor(s, w.bar + 1));
   // Ce qu'on insère prend le tempo juste AVANT l'instant (le changement posé à `at` recule avec la suite).
-  const ins = w.onBar && w.bar > 0 ? bars[w.bar - 1] : bars[w.bar];
+  const insAt = w.onBar && w.bar > 0 ? bars[w.bar - 1] : bars[w.bar];
+  const ins: BarDesc = { bpm: insAt.bpm, num: insAt.num, den: insAt.den };
   const k = Math.floor(len / barSecOf(ins) + 1e-6);
   const rem = len - k * barSecOf(ins);
   const r = rem / beatSecOf(ins);

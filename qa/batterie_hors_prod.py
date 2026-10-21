@@ -146,6 +146,10 @@ BATTERIE = [
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
     ("mixfx", []),
+    # 22/10/2026 · L3 temps musical : tempo 90 → 140 par la fenêtre Tempo (notes, clips, repère, boucle : même mesure | temps |
+    # tick ; export = projet écrit directement à 140), Ctrl+Z en une étape, « garder les clips audio à leur place », rampe
+    # 120 → 100 (clics à ±1 ms, bande de la piste tempo), sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
+    ("tempo_musical", []),
 ]
 
 

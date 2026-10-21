@@ -6,8 +6,14 @@
  */
 import type { DAWState, TimeSignature } from '../types';
 import { tempoSignature, type TempoEvent } from './tempoMap';
+import { sanitizeFollow, followTempo, type TempoFollowWire, type FollowState, type TempoFollowReport } from './tempoFollow';
 
-export interface TempoOp { bpm: number; timeSignature: TimeSignature; tempoEvents: TempoEvent[] }
+/**
+ * `follow` (L3, absent d'une ancienne version) : le changement déplace le
+ * contenu pour qu'il garde sa mesure (utils/tempoFollow). Chaque membre fait le
+ * même calcul en le recevant ; l'option audio part avec lui.
+ */
+export interface TempoOp { bpm: number; timeSignature: TimeSignature; tempoEvents: TempoEvent[]; follow?: TempoFollowWire }
 
 export const tempoOpOf = (s: Pick<DAWState, 'bpm' | 'timeSignature' | 'tempoEvents'>): TempoOp => ({
   bpm: s.bpm,
@@ -33,13 +39,26 @@ export function sanitizeTempoOp(raw: unknown): TempoOp | null {
     if (Number.isFinite(b) && b >= 20 && b <= 999) ev.bpm = b;
     const en = Number(e.numerator), ed = Number(e.denominator);
     if (Number.isInteger(en) && en >= 1 && en <= 32 && [1, 2, 4, 8, 16, 32].includes(ed)) { ev.numerator = en; ev.denominator = ed; }
+    if (e.ramp === true) ev.ramp = true;
     return [ev];
   });
-  return { bpm, timeSignature: ts, tempoEvents: events };
+  const follow = sanitizeFollow(r.follow);
+  return { bpm, timeSignature: ts, tempoEvents: events, ...(follow ? { follow } : {}) };
 }
 
 /** Applique l'opération à l'état (même référence si rien ne change). */
 export function applyTempoOp<S extends Pick<DAWState, 'bpm' | 'timeSignature' | 'tempoEvents'>>(state: S, op: TempoOp): S {
   if (tempoOpSig(tempoOpOf(state)) === tempoOpSig(op)) return state;
   return { ...state, bpm: op.bpm, timeSignature: op.timeSignature, tempoEvents: op.tempoEvents };
+}
+
+/**
+ * Opération reçue avec `follow` (L3) : le tempo change ET le contenu garde sa
+ * mesure, par le même calcul que chez l'auteur. Sans `follow` (ancienne
+ * version, annulation) : le tempo seul, comme avant.
+ */
+export function applyTempoOpFollowing<S extends FollowState>(state: S, op: TempoOp): { state: S; report: TempoFollowReport | null } {
+  if (tempoOpSig(tempoOpOf(state)) === tempoOpSig(op)) return { state, report: null };
+  if (!op.follow) return { state: applyTempoOp(state, op), report: null };
+  return followTempo(state, { bpm: op.bpm, timeSignature: op.timeSignature, tempoEvents: op.tempoEvents }, { keepAudio: op.follow.keepAudio, epoch: op.follow.id });
 }
