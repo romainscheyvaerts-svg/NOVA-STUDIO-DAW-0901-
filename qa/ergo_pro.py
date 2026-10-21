@@ -722,7 +722,164 @@ def deuxieme_ecran(b):
         ctx.close()
 
 
-SECTIONS = {"dawproject": dawproject, "epingler": epingler, "macros": macros, "deuxieme_ecran": deuxieme_ecran}
+# ── Vidéo à l'image ─────────────────────────────────────────────────────────────────────
+NOWIN = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0)
+FLASHES = [1.0, 3.0, 4.5]
+
+
+def _run(args, **kw):
+    import subprocess
+    return subprocess.run(args, capture_output=True, creationflags=NOWIN, **kw)
+
+
+def clap_video(path: Path):
+    """Clip de test (6 s, 1280×720, 30 i/s, VP9 + Opus) : écran noir, une image blanche et un clic au même instant (×3)."""
+    import numpy as np
+    clicks = OUT / "clap_clics.wav"
+    x = np.zeros(SR * 6, np.float32)
+    for t in FLASHES:
+        i = int(round(t * SR)); x[i:i + 480] = 0.8 * np.sin(2 * np.pi * 2000 * np.arange(480) / SR)
+    clicks.write_bytes(wav([x.tolist()]))
+    enable = "+".join(f"between(t,{t:.4f},{t + 1 / 30 - 0.001:.4f})" for t in FLASHES)
+    r = _run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30:d=6", "-i", str(clicks),
+              "-vf", f"drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='{enable}'", "-c:v", "libvpx-vp9", "-b:v", "1M", "-deadline", "realtime",
+              "-c:a", "libopus", "-b:a", "128k", "-shortest", str(path)])
+    if r.returncode: raise RuntimeError(r.stderr.decode(errors="replace")[-800:])
+
+
+def ff_frames_luma(path: Path):
+    import numpy as np
+    r = _run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "frame=pts_time,best_effort_timestamp_time", "-of", "json", str(path)], text=True)
+    pts = [float(f.get("pts_time") or f.get("best_effort_timestamp_time") or 0) for f in json.loads(r.stdout or "{}").get("frames", [])]
+    v = _run(["ffmpeg", "-v", "error", "-i", str(path), "-vf", "scale=64:36,format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "-"])
+    L = np.frombuffer(v.stdout, np.uint8).reshape(-1, 36, 64).reshape(-1, 36 * 64).mean(axis=1)
+    a = _run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"])
+    x = np.frombuffer(a.stdout, np.float32)
+    info = json.loads(_run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)], text=True).stdout or "{}")
+    return pts, L, x, info
+
+
+def measure_clap(path: Path):
+    import numpy as np
+    pts, L, x, info = ff_frames_luma(path)
+    n = min(len(pts), len(L))
+    flashes = [pts[i] for i in range(n) if L[i] > 180 and (i == 0 or L[i - 1] <= 180)]
+    peak = float(np.abs(x).max() or 1)
+    loud = np.abs(x) > 0.3 * peak
+    on, last = [], -1e9
+    for i in np.nonzero(loud[1:] & ~loud[:-1])[0] + 1:
+        if i - last >= 0.3 * SR: on.append(i / SR); last = i
+    pairs = [{"clic_s": round(o, 4), "flash_s": round(min(flashes, key=lambda f: abs(f - o)), 4)} for o in on if flashes and min(abs(f - o) for f in flashes) < 0.4]
+    for p in pairs: p["ecart_ms"] = round((p["flash_s"] - p["clic_s"]) * 1000, 1)
+    codecs = [s.get("codec_name") for s in info.get("streams", [])]
+    return {"flashs": [round(f, 4) for f in flashes], "clics": [round(o, 4) for o in on], "paires": pairs, "codecs": codecs}
+
+
+FRAME_LUMA_JS = """() => { const v = document.querySelector('[data-testid=video-element]'); if (!v || !v.videoWidth) return null;
+  const c = document.createElement('canvas'); c.width = 32; c.height = 18; const g = c.getContext('2d'); g.drawImage(v, 0, 0, 32, 18);
+  const d = g.getImageData(0, 0, 32, 18).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i]; return { luma: s / (d.length / 4), t: v.currentTime }; }"""
+
+
+def video(b):
+    R = res.setdefault("video", {})
+    clip = OUT / "clap.webm"
+    clap_video(clip)
+    src = measure_clap(clip)
+    R["source"] = src
+    zp = OUT / "video_projet.zip"
+    write_project(zp, make_state("Video QA", [track("lead", "Voix", [], color="#a78bfa")]), {})
+    for theme in ("dark", "light"):
+        log = Log(f"ergo_video_{theme}")
+        ctx, page = new_page(b, "pc1366", log=log, touch=False)
+        page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
+        open_project(page, zp, f"video_{theme}_00")
+        palette(page, "importer une vidéo", "pal.videoImport")
+        page.locator("[data-testid=video-import-dialog]").wait_for(timeout=8000)
+        page.set_input_files("[data-testid=video-input]", str(clip))
+        page.locator("[data-testid=video-review]").wait_for(timeout=30000)
+        prev = page.locator("[data-testid=video-preview]").inner_text()
+        check(f"{theme} : aperçu de la vidéo (durée, taille)", "0:06" in prev and "1280×720" in prev, prev)
+        shot(page, f"video_{theme}_01_import")
+        cov = page.evaluate(COVER_JS, "[data-testid=video-import-dialog] button")
+        check(f"{theme} : fenêtre d'import : rien de recouvert", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]])
+        page.locator("[data-testid=video-import-go]").click()
+        page.locator("[data-testid=video-lane]").wait_for(timeout=30000)
+        page.locator("[data-testid=video-element]").wait_for(timeout=15000)
+        page.wait_for_timeout(1500)
+        tr = st(page, "s => { const t = s.tracks.find(x => x.name === 'Son de la vidéo'); return t && { n: t.clips.length, start: t.clips[0].start, dur: t.clips[0].duration, id: t.clips[0].bufferId }; }")
+        check(f"{theme} : couloir vidéo + piste « Son de la vidéo » posée à 0:00", tr and tr["n"] == 1 and abs(tr["start"]) < 1e-9 and abs(tr["dur"] - 6) < 0.1, tr)
+        if theme == "dark":
+            # Le clic du son importé tombe sur l'image blanche (≤ 1 image).
+            on = page.evaluate("""async (id) => { const { audioBufferRegistry: R } = await window.__novaAppModule('/utils/audioBufferRegistry.ts');
+              const b = R.get(id); const x = b.getChannelData(0); const out = []; let last = -1e9; let pk = 0; for (let i = 0; i < x.length; i++) pk = Math.max(pk, Math.abs(x[i]));
+              for (let i = 1; i < x.length; i++) if (Math.abs(x[i]) > 0.3 * pk && Math.abs(x[i - 1]) <= 0.3 * pk && i - last > 0.3 * b.sampleRate) { out.push(i / b.sampleRate); last = i; } return out; }""", tr["id"])
+            R["clics_son_importe"] = on
+            check("son importé : clics à 1,0 / 3,0 / 4,5 s (±10 ms)", len(on) == 3 and all(abs(a - e) <= 0.010 for a, e in zip(on, FLASHES)), on)
+            # À l'arrêt : l'image suit la tête de lecture (image blanche à 3,0 s, noire juste avant).
+            page.evaluate("() => window.DAW_CONTROL.seek(3.016)"); page.wait_for_timeout(700)
+            w = page.evaluate(FRAME_LUMA_JS)
+            page.evaluate("() => window.DAW_CONTROL.seek(2.95)"); page.wait_for_timeout(700)
+            k = page.evaluate(FRAME_LUMA_JS)
+            check("à l'arrêt : image blanche à 3,016 s, noire à 2,95 s (l'image suit la tête de lecture)", w and k and w["luma"] > 200 and k["luma"] < 40, [w, k])
+            shot(page, "video_dark_02_image")
+            # En lecture : écart image ↔ tête de lecture mesuré.
+            page.evaluate("() => window.DAW_CONTROL.seek(0.5)"); page.wait_for_timeout(300)
+            page.evaluate("() => window.DAW_CONTROL.togglePlay()")
+            page.wait_for_timeout(600)
+            drift = page.evaluate("""async () => { const out = []; const t0 = performance.now();
+              const { audioEngine } = await window.__novaAppModule('/engine/AudioEngine.ts');
+              const v = document.querySelector('[data-testid=video-element]'); const off = window.__novaVideoSync.offset;
+              while (performance.now() - t0 < 2500) { await new Promise(r => requestAnimationFrame(r)); if (!v.paused) out.push(Math.abs(v.currentTime - (audioEngine.getCurrentTime() - off))); }
+              out.sort((a, b) => a - b); return { n: out.length, med: out[Math.floor(out.length / 2)] || null, p95: out[Math.floor(out.length * 0.95)] || null, max: out[out.length - 1] || null }; }""")
+            page.evaluate("() => window.DAW_CONTROL.stop()")
+            R["lecture_ecart_s"] = drift
+            check(f"en lecture : image et tête de lecture à ≤ 1 image (95 % des mesures : {round((drift['p95'] or 1) * 1000)} ms)", drift["n"] > 30 and drift["p95"] is not None and drift["p95"] <= 1 / 30 + 0.005, drift)
+            # Décaler d'une image : la vidéo ET son son bougent ensemble.
+            page.locator("[data-testid=video-nudge-right]").click(); page.wait_for_timeout(400)
+            off = float(page.locator("[data-testid=video-lane]").get_attribute("data-video-offset"))
+            a_start = st(page, "s => s.tracks.find(x => x.name === 'Son de la vidéo').clips[0].start")
+            pos = page.locator("[data-testid=video-lane]").get_attribute("data-sync")
+            check("◀ ▶ : une image plus tard, le son suit (son calé)", abs(off - 1 / 30) < 1e-6 and abs(a_start - 1 / 30) < 1e-6 and pos == "cale", [off, a_start, pos])
+            page.locator("[data-testid=video-nudge-left]").click(); page.wait_for_timeout(300)
+            # L'image sur le 2e écran : même calage dans la fenêtre détachée.
+            with ctx.expect_page(timeout=15000) as pv:
+                page.locator("[data-testid=video-viewer-popout]").click()
+            vp = pv.value
+            vp.wait_for_selector("[data-testid=video-element]", timeout=15000)
+            page.evaluate("() => window.DAW_CONTROL.seek(4.516)"); vp.wait_for_timeout(900)
+            lw = vp.evaluate(FRAME_LUMA_JS)
+            check("image sur le 2e écran : fenêtre détachée calée (image blanche à 4,516 s)", lw and lw["luma"] > 200, lw)
+            shot(vp, "video_dark_02b_image_2e_ecran")
+            vp.close(); page.wait_for_timeout(900)
+            check("fenêtre de l'image fermée : l'image revient dans le studio", page.locator("[data-testid=video-viewer-window]").count() == 1)
+            # Export de la vidéo avec le mix.
+            palette(page, "exporter la vidéo avec le mix", "pal.videoExport")
+            page.locator("[data-testid=video-export-dialog]").wait_for(timeout=8000)
+            shot(page, "video_dark_03_export")
+            with page.expect_download(timeout=300000) as dl:
+                page.locator("[data-testid=video-export-go]").click()
+            page.locator("[data-testid=video-export-done]").wait_for(timeout=300000)
+            out = OUT / f"export_video.{dl.value.suggested_filename.rsplit('.', 1)[-1]}"
+            dl.value.save_as(str(out))
+            info = page.evaluate("() => window.__novaVideoExport")
+            m = measure_clap(out)
+            R["export"] = {"info": info, "mesure": m}
+            worst = max([abs(p["ecart_ms"]) for p in m["paires"]] or [999])
+            check(f"export : MP4 ({'+'.join(str(c) for c in m['codecs'])}), 3 flashs et 3 clics calés à ≤ 1 image (pire : {worst} ms)",
+                  len(m["paires"]) == 3 and worst <= 34, m)
+            shot(page, "video_dark_04_export_fait")
+            page.locator("[data-testid=video-export-dialog] button[aria-label=Fermer]").click()
+        else:
+            shot(page, "video_light_02_couloir")
+        cov = page.evaluate(COVER_JS, "[data-testid=video-lane] button, [data-testid=video-viewer-window] button, [data-nova-dock] button, button[aria-label*='Nova'], button[aria-label*='assistant' i]")
+        check(f"{theme} : couloir et image : rien de recouvert", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]])
+        errs = log.errors()
+        check(f"{theme} : aucune erreur dans la console", not errs, errs[:5])
+        save_log(log)
+        ctx.close()
+
+
+SECTIONS = {"dawproject": dawproject, "epingler": epingler, "macros": macros, "deuxieme_ecran": deuxieme_ecran, "video": video}
 
 if __name__ == "__main__":
     wanted = [a for a in sys.argv[1:] if a in SECTIONS] or list(SECTIONS)

@@ -217,6 +217,9 @@ import { togglePin } from './utils/trackPins';
 import { configureMacros, macroPaletteActions, openMacrosTabNext } from './utils/macros';
 import PopoutHost, { ConsoleElsewhere } from './components/PopoutHost';
 import { togglePopout, usePopout } from './utils/popoutWindow';
+import VideoTrackLane from './components/VideoTrackLane';
+import VideoHost from './components/VideoHost';
+import { openVideoExport, openVideoImport, toggleVideoViewer } from './utils/videoTrack';
 import { openDawProjectExport, openDawProjectImport } from './utils/dawproject/dawProjectBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
@@ -10503,6 +10506,11 @@ function Studio() {
       a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf logiciel studio séance session exporter ingé bwf' }),
       a('Pistes', 'pal.trackSearch', 'Filtrer les pistes : nom, voix, couleur, état (grosses séances)', () => openTrackSearch(), { keywords: 'chercher filtrer filtre trouver piste pistes voix grosse séance liste' }),
       a('Pistes', 'pal.trackPin', 'Épingler / désépingler la piste sélectionnée en haut', () => { const id = stateRef.current.selectedTrackId; if (id && id !== 'master') setAiNotification(togglePin(id) ? '📌 Piste épinglée en haut de l’arrangement' : 'Piste désépinglée'); }, { keywords: 'épingler épingle pin garder en haut visible défiler' }),
+      ...(isMobile ? [] : [
+        a('Fichier', 'pal.videoImport', 'Importer une vidéo (caler la musique ou la voix sur l’image)', () => openVideoImport(), { keywords: 'vidéo video clip film image mp4 mov importer caler synchro pub court métrage' }),
+        a('Fichier', 'pal.videoExport', 'Exporter la vidéo avec le mix (MP4)', () => openVideoExport(), { keywords: 'vidéo video clip mp4 exporter mix image' }),
+        a('Vues', 'pal.videoViewer', 'Afficher / masquer l’image de la vidéo', () => toggleVideoViewer(), { keywords: 'vidéo video image écran lecteur' }),
+      ]),
       a('Fichier', 'pal.dawpImport', 'Ouvrir un projet DAWproject (format ouvert d’un autre logiciel de musique)', () => openDawProjectImport(), { keywords: 'dawproject daw projet format ouvert importer échange logiciel musique' }),
       a('Fichier', 'pal.dawpExport', 'Exporter en DAWproject (format ouvert, pour un autre logiciel de musique)', () => openDawProjectExport(), { keywords: 'dawproject daw projet format ouvert exporter échange logiciel musique' }),
       a('Fichier', 'pal.distribution', '🚀 Prêt pour Spotify / Apple / TikTok ? (contrôle avant distribution)', () => openDistribution(), { keywords: 'distribution spotify apple deezer tiktok distrokid tunecore livraison sortir sortie release paquet' }),
@@ -10734,6 +10742,7 @@ function Studio() {
           {!isMobile && (
             <>
               <PinnedTracksPane visible={shownView === 'ARRANGEMENT'} tracks={state.tracks} projectId={state.exportKey || state.id} selectedTrackId={state.selectedTrackId} onSelectTrack={onSelectTrackStable} onSeek={handleSeek} />
+              <VideoTrackLane visible={shownView === 'ARRANGEMENT'} projectId={state.exportKey || state.id} tracks={state.tracks} />
               {shownView === 'ARRANGEMENT' && (
                 <PanelBoundary name="l'arrangement">
                 <StructureTracksContext.Provider value={state.tracks}>
@@ -10986,6 +10995,7 @@ function Studio() {
         <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         <DawProjectHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {!isMobile && <PopoutHost renderConsole={renderMixer} />}
+        <VideoHost getState={() => stateRef.current} getOwned={() => ownedInstruments} isPlaying={state.isPlaying} notify={setAiNotification} enabled={!isMobile} />
         <DistributionHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>

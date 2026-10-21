@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Track, TrackType } from '../types';
 import { setPinsProject, togglePin, usePinnedIds } from '../utils/trackPins';
 import { applyTracks } from '../utils/structureBus';
-import { readLayoutPart } from '../utils/windowLayouts';
+import { useArrangementView, type ArrangementViewport as View } from '../hooks/useArrangementView';
 import { playheadStore } from '../utils/playheadStore';
 import { useSimpleMode } from '../utils/simpleMode';
 
@@ -15,35 +15,8 @@ import { useSimpleMode } from '../utils/simpleMode';
  *
  * Aucune épingle : rien n'est rendu (léger).
  */
-interface View { h: number; scroll: number; header: number }
-
 const ROW_H = 36;
 const fmt = (t: Track) => (t.type === TrackType.AUDIO ? 'fa-wave-square' : t.type === TrackType.BUS || t.type === TrackType.SEND ? 'fa-random' : 'fa-music');
-
-/** Défilement et zoom de l'arrangement (le conteneur porte data-follow). */
-function useArrangementView(active: boolean): View {
-  const [v, setV] = useState<View>({ h: 40, scroll: 0, header: 296 });
-  useEffect(() => {
-    if (!active) return;
-    let el: HTMLElement | null = null;
-    let raf = 0;
-    const read = () => {
-      raf = 0;
-      if (!el || !el.isConnected) el = document.querySelector('main [data-follow]');
-      const z = readLayoutPart('zoom');
-      const side = el?.firstElementChild?.firstElementChild as HTMLElement | null | undefined;
-      const next = { h: Number.isFinite(z?.h) ? z.h : 40, scroll: el ? el.scrollLeft : (Number.isFinite(z?.scroll) ? z.scroll : 0), header: side?.offsetWidth || 296 };
-      setV(o => (o.h === next.h && o.scroll === next.scroll && o.header === next.header ? o : next));
-    };
-    const onScroll = (e: Event) => { if (e.target === el || (e.target as HTMLElement)?.matches?.('[data-follow]')) { if (!raf) raf = requestAnimationFrame(read); } };
-    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
-    // Zoom (molette, curseur, disposition) : relu 4 fois par seconde, sans rendu si rien ne bouge.
-    const iv = window.setInterval(read, 250);
-    read();
-    return () => { document.removeEventListener('scroll', onScroll, { capture: true } as any); window.clearInterval(iv); if (raf) cancelAnimationFrame(raf); };
-  }, [active]);
-  return v;
-}
 
 const Playhead: React.FC<{ view: View }> = ({ view }) => {
   const ref = useRef<HTMLDivElement>(null);

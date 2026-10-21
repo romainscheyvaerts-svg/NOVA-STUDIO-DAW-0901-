@@ -18,14 +18,14 @@ import { useSyncExternalStore } from 'react';
  * `openPopout` rend false et l'appelant le dit. Nova Studio : la vue web laisse ouvrir
  * cette page (desktop/nova_desktop.py).
  */
-export type PopoutId = 'console';
+export type PopoutId = 'console' | 'video';
 
 export interface Geometry { x: number; y: number; w: number; h: number }
 export interface PopoutHandle { id: PopoutId; win: Window; container: HTMLElement; close: () => void }
 
 const GEO_KEY = 'nova_popout_geometry_v1';
-const TITLES: Record<PopoutId, string> = { console: 'Console · NOVA' };
-const DEFAULT_GEO: Record<PopoutId, Geometry> = { console: { x: 80, y: 80, w: 1280, h: 720 } };
+const TITLES: Record<PopoutId, string> = { console: 'Console · NOVA', video: 'Image · NOVA' };
+const DEFAULT_GEO: Record<PopoutId, Geometry> = { console: { x: 80, y: 80, w: 1280, h: 720 }, video: { x: 120, y: 120, w: 960, h: 580 } };
 
 const open = new Map<PopoutId, PopoutHandle>();
 /** Fenêtres demandées, encore en chargement. */
