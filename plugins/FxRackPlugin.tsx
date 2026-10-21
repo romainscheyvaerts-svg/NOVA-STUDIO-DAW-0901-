@@ -69,7 +69,7 @@ export const NovaFxRackUI: React.FC<Props> = ({ node, initialParams, onParamsCha
   return (
     <HwWindow type="FXRACK" width={940} accent={ACCENT} accentInk="#1c0f06" latencyMs={lat}
       idleHelp={<>Rack parallèle : le son se divise en branches qui jouent en même temps, chacune avec ses effets, puis elles sont mélangées au son d’origine. <span style={{ color: '#7d8696' }}>Survole un réglage : son rôle s’affiche ici.</span></>}>
-      <Faceplate finish="copper" model="Rack parallèle" kicker="Branches · mélange" modelStyle="wide">
+      <Faceplate finish="copper" model="Rack parallèle" kicker="Branches · mélange" modelStyle="wide" className="hw-touch">
         <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
           <HwSection title="Division" className="flex-[2_1_360px] min-w-0">
             <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Division du son" data-nova-param="mode">

@@ -723,6 +723,60 @@ def album_page(vp="pc", theme="dark"):
     return out
 
 
+# ─────────────────────────────── Téléphone 390 × 844 (EQ et rack) ───────────────────────────────
+def telephone():
+    out = {}
+    log = Log("mixpro_tel390")
+    with sync_playwright() as p:
+        b = launch(p)
+        ctx, pg = new_page(b, "tel390", log)
+        pg.add_init_script("try { localStorage.setItem('nova_simple_mode', '0'); localStorage.setItem('nova_welcome_seen', '1'); } catch (e) {}")
+        open_studio(pg, {"name": "mixpro_tel"}, vp="tel390")
+        close_welcome(pg)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+        for typ, q in (("PROEQ12", "Pro-EQ"), ("FXRACK", "rack")):
+            m = pg.get_by_text("Mixer", exact=True)
+            if m.count():
+                m.last.click(); pg.wait_for_timeout(900)
+            add = pg.get_by_role("button", name=re.compile("Ajouter un effet"))
+            if not add.count():
+                check(f"[téléphone] {typ} : bouton « Ajouter un effet »", False); continue
+            add.first.scroll_into_view_if_needed(); add.first.click(); pg.wait_for_timeout(700)
+            search = pg.locator("input[aria-label='Chercher un effet']")
+            if search.count():
+                search.first.fill(q); pg.wait_for_timeout(400)
+            item = pg.locator(f"[data-testid='add-effect-menu'] [data-fx-id='{typ}']")
+            if not item.count():
+                check(f"[téléphone] {typ} : dans le menu", False); pg.keyboard.press("Escape"); continue
+            item.first.click(); pg.wait_for_timeout(1500)
+            win = pg.locator(f"[data-nova-plugin='{typ}']")
+            if not win.count():
+                check(f"[téléphone] {typ} : fenêtre ouverte", False); continue
+            if typ == "PROEQ12":
+                ch = win.locator("[data-nova-channel='mid']").first
+                ch.scroll_into_view_if_needed(); bx = ch.bounding_box(); ch.click(); pg.wait_for_timeout(300)
+                st = plugins_of(pg, "PROEQ12")
+                got = (st[0]["params"]["bands"][0].get("channel") if st else None)
+                extra = {"canal_bande1": got, "hauteur_bouton": round(bx["height"]) if bx else None}
+                ok_extra = got == "mid" and (bx or {}).get("height", 0) >= 44
+            else:
+                add_fx = win.locator("[data-nova-rack-add-fx='1']").first
+                add_fx.scroll_into_view_if_needed(); bx = add_fx.bounding_box()
+                add_fx.click(); pg.wait_for_timeout(300)
+                win.locator(".hw-rack-menu [data-fx-id='VOCALSATURATOR']").click(); pg.wait_for_timeout(1000)
+                st = plugins_of(pg, "FXRACK")
+                got = [x.get("type") for x in st[0]["params"]["branches"][0]["plugins"]] if st else None
+                extra = {"branche1": got, "hauteur_bouton": round(bx["height"]) if bx else None}
+                ok_extra = got == ["VOCALSATURATOR"]
+            shot_window(pg, win, f"{typ.lower()}_tel390")
+            lay = faces_ok(pg, typ)
+            out[typ] = {**extra, "mise_en_page": lay}
+            check(f"[téléphone] {typ} : réglage au doigt arrivé dans le projet, rien de coupé, pas de débordement", ok_extra and lay.get("ok"), out[typ])
+            close_plugin(pg)
+        ctx.close(); b.close()
+    return out
+
+
 t0 = time.time()
 if want("eq"):
     res["eq_sombre"] = eq_bureau("dark")
@@ -735,6 +789,8 @@ if want("rack"):
 if want("scenes"):
     res["scenes_sombre"] = scenes_bureau("dark")
     res["scenes_clair"] = scenes_bureau("light")
+if want("telephone"):
+    res["telephone"] = telephone()
 if want("album"):
     res["album_sombre"] = album_page("pc", "dark")
     res["album_telephone_clair"] = album_page("tel390", "light")

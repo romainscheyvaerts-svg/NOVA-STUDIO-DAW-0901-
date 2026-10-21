@@ -1049,7 +1049,7 @@ export const ProEQ12UI: React.FC<{
   return (
     <HwWindow type="PROEQ12" width={880} accent={EQ_ACCENT} accentInk="#04131c"
       idleHelp={<>Égaliseur paramétrique 12 bandes : retire ce qui gêne, ajoute de la présence ou de l’air. Glisse les points de l’écran, ou choisis une bande dessous et tourne ses boutons. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
-      <Faceplate finish="black" className="hw-finish-midnight" model="Égaliseur" kicker="Paramétrique · 12 bandes" modelStyle="wide" style={{ ['--hw-accent' as any]: EQ_ACCENT }}>
+      <Faceplate finish="black" className="hw-finish-midnight hw-touch" model="Égaliseur" kicker="Paramétrique · 12 bandes" modelStyle="wide" style={{ ['--hw-accent' as any]: EQ_ACCENT }}>
         <div className="hw-screen-tabs justify-end" role="group" aria-label="Échelle de l’écran">
           <span className="hw-silk hw-silk-soft mr-auto" style={{ textAlign: 'left' }}>Échelle</span>
           {[12, 30].map(r => (
