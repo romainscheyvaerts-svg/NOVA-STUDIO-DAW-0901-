@@ -57,7 +57,12 @@ BUILTINS = [
     ("MASTERSYNC", "MASTERSYNC", {}),
     ("AUTOTUNE", "AUTOTUNE", {}),
 ]
-REGISTRY_OVERRIDES = {"DJFILTER": {"filter": -0.5}, "TIMEFX": {"half": 1}}
+REGISTRY_OVERRIDES = {"DJFILTER": {"filter": -0.5}, "TIMEFX": {"half": 1},
+                      # Effets de mix (21/10/2026) : défauts neutres, réglés ici pour travailler sur la voix d'essai.
+                      "MBCOMP": {"bands": 4, "x1": 150, "x2": 1500, "x3": 6000, "b1Thr": -30, "b1Ratio": 4, "b2Thr": -30, "b2Ratio": 4,
+                                 "b3Thr": -36, "b3Ratio": 6, "b4Thr": -40, "b4Ratio": 3},
+                      "DYNEQ": {"d1Range": -6, "d1Thr": -40, "d2Range": -8, "d2Thr": -40, "d2Freq": 1760, "d2Q": 4, "d3Range": -6, "d3Thr": -45,
+                                "d3Freq": 7040, "d4Range": 4, "d4Thr": -50, "d4Freq": 15000}}
 
 JS = r"""
 async ({ rate, cfg }) => {

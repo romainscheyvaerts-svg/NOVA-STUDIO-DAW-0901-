@@ -827,6 +827,36 @@
   --hw-edge-lo: rgba(60, 70, 90, 0.45);
   --hw-well: rgba(30, 40, 60, 0.08);
 }
+
+/* Effets de mix (21/10/2026) : Compresseur multibande (marine), EQ dynamique (glace). */
+.hw-finish-navy {
+  --hw-face-solid: #1b2440;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(163, 230, 53, 0.08), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #222d50 0%, #1b2440 58%, #141b31 100%);
+  --hw-ink: #eef2ff;
+  --hw-ink-soft: #b4bfd9;
+  --hw-accent: #a3e635;
+  --hw-rule: rgba(238, 242, 255, 0.18);
+  --hw-edge-hi: rgba(210, 225, 255, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.3);
+}
+.hw-finish-ice {
+  --hw-face-solid: #dfe9f0;
+  --hw-face:
+    radial-gradient(130% 70% at 50% -10%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(0deg, rgba(20, 60, 90, 0.025) 0 1px, rgba(255, 255, 255, 0.03) 1px 3px),
+    linear-gradient(180deg, #eaf2f7 0%, #dfe9f0 55%, #cddbe5 100%);
+  --hw-ink: #0f1d29;
+  --hw-ink-soft: #3b4d5e;
+  --hw-accent: #c026d3;
+  --hw-rule: rgba(15, 29, 41, 0.24);
+  --hw-edge-hi: rgba(255, 255, 255, 0.85);
+  --hw-edge-lo: rgba(50, 70, 90, 0.45);
+  --hw-well: rgba(20, 40, 60, 0.08);
+}
+
 /* Grands chiffres d'afficheur (tempo, tonalité du Master) */
 .hw-lcd-big { font-size: 30px; line-height: 1.05; padding: 8px 14px; letter-spacing: 0.02em; }
 .hw-lcd-big small { font-size: 11px; }

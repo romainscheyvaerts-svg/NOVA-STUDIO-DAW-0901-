@@ -28,6 +28,10 @@ export const FX_COST_MS: Record<string, number> = {
   LIMITER: 10,
   // Mastering Transient : deux STFT (512 et 128 points) + limiteur à crête vraie (mesuré ≈ 5,6 % d'un cœur sous Node).
   MASTERTRANSIENT: 55,
+  // Effets de mix (21/10/2026, mesurés sous Node, 48 kHz stéréo) : multibande 4 bandes qui comprime 12,6 ms,
+  // EQ dynamique 4 bandes actives ~10 ms ; au repos (taux 1:1, plage 0 dB) bien moins.
+  MBCOMP: 14,
+  DYNEQ: 12,
   HARMONIZER: 30,
   VOICESHIFT: 25,
   TIMEFX: 15,

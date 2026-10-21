@@ -25,6 +25,9 @@ import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI, NovaVoxStripUI } from 
 import { MasterTransientNode } from './MasterTransientNode';
 import { MT_AUTOMATABLE, MT_DEFAULTS } from './masterTransientParams';
 import { NovaMasterTransientUI } from '../plugins/MasterTransientPlugin';
+import { MixFxNode } from './mixfx/MixFxNode';
+import { MB_DEFAULTS, DYN_DEFAULTS, mixFxAutomatable } from './mixfx/mixFxParams';
+import { NovaMultibandCompUI, NovaDynamicEqUI } from '../plugins/MixFxPlugins';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -208,6 +211,31 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new MasterTransientNode(ctx, plugin.params || {}),
     ui: NovaMasterTransientUI as any,
     automatable: MT_AUTOMATABLE,
+  },
+  // --- Effets de mix (21/10/2026) : multibande et EQ dynamique (engine/mixfx) ----------
+  {
+    type: 'MBCOMP',
+    name: 'Compresseur multibande',
+    category: 'Dynamique',
+    icon: 'fa-layer-group',
+    color: '#a3e635',
+    description: 'Compresseur 3 ou 4 bandes (filtres Linkwitz-Riley, somme plate) : seuil, taux, attaque, relâchement et gain par bande, solo et contournement, mètre de réduction par bande. Sur une piste ou un bus (comme le Multipressor de Logic, le Multiband Compressor de Cubase ou le Multiband Dynamics de Live).',
+    defaultParams: () => ({ ...MB_DEFAULTS }),
+    create: (ctx, plugin) => new MixFxNode(ctx, 'MBCOMP', plugin.params || {}),
+    ui: NovaMultibandCompUI as any,
+    automatable: mixFxAutomatable('MBCOMP'),
+  },
+  {
+    type: 'DYNEQ',
+    name: 'EQ dynamique',
+    category: 'Égaliseur',
+    icon: 'fa-wave-square',
+    color: '#c026d3',
+    description: 'Égaliseur 4 bandes anti-résonances : chaque cloche ne baisse (ou ne monte) que quand sa bande dépasse le seuil, au plus de sa plage ; écoute de la bande pour trouver la résonance (comme le mode dynamique du Channel EQ de Logic ou le Frequency 2 de Cubase).',
+    defaultParams: () => ({ ...DYN_DEFAULTS }),
+    create: (ctx, plugin) => new MixFxNode(ctx, 'DYNEQ', plugin.params || {}),
+    ui: NovaDynamicEqUI as any,
+    automatable: mixFxAutomatable('DYNEQ'),
   },
 ];
 

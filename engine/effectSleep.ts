@@ -31,7 +31,7 @@
  */
 
 /** Effets qui savent dormir : aucun LFO, aucun pont, état « au repos » déclaré ou purement linéaire. */
-export const SLEEP_SAFE = new Set(['PROEQ12', 'COMPRESSOR', 'DEESSER', 'VOCALSATURATOR']);
+export const SLEEP_SAFE = new Set(['PROEQ12', 'COMPRESSOR', 'DEESSER', 'VOCALSATURATOR', 'MBCOMP', 'DYNEQ']);
 /** Niveau « muet » de la sentinelle (≈ −240 dBFS) : sous ce niveau, aucun format de fichier ne le voit. */
 export const QUIET_LEVEL = 1e-12;
 /** Silence minimal avant la mise en veille (s), latence de la chaîne en plus. */
