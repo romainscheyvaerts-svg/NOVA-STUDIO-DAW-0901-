@@ -296,6 +296,16 @@ def run_session(p, url, proj, n, seconds, gestures=True, profile=True, label="ba
         cdp = ctx.new_cdp_session(page)
         cdp.send("Performance.enable")
         page.evaluate("() => window.DAW_CONTROL.seek(0)")
+        # Repos (séance ouverte, rien ne joue) : ce qui tourne encore à l'arrêt.
+        page.wait_for_timeout(5000)
+        q0 = proc_snapshot(bcdp); mr0 = metrics(cdp)
+        b.start_tracing(page=page, categories=["toplevel"])
+        tq = time.time(); page.wait_for_timeout(8000)
+        evq = json.loads(b.stop_tracing()); evq = evq["traceEvents"] if isinstance(evq, dict) else evq
+        q1 = proc_snapshot(bcdp); mr1 = metrics(cdp)
+        r["repos"] = {"cpu_processus_pct": proc_cpu(q0, q1), "fils_ms_s": thread_busy(evq, time.time() - tq),
+                      "fil_principal": main_thread_rate(mr0, mr1, time.time() - tq)}
+        r["repos"]["cpu_navigateur_pct"] = round(sum(r["repos"]["cpu_processus_pct"].values()), 1)
         G.ensure_playing(page)
         page.wait_for_timeout(6000)   # chauffe : worklets compilés, premières veilles
         G.ensure_playing(page)
@@ -395,6 +405,9 @@ def summary(r):
             "script_ms_s": fp.get("script_ms_s"), "compositeur_ms_s": th.get("VizCompositorThread"), "cpu_navigateur_pct": r.get("cpu_navigateur_pct"),
             "tas_js_mo": mm.get("tas_js_mo"), "navigateur_prive_mo": mm.get("navigateur_prive_mo"), "ouverture_s": r.get("ouverture_s"),
             "veille_moy": (r.get("veille") or {}).get("pistes_en_veille_moy"),
+            "repos_cpu_navigateur_pct": (r.get("repos") or {}).get("cpu_navigateur_pct"),
+            "repos_fil_audio_ms_s": ((r.get("repos") or {}).get("fils_ms_s") or {}).get("Realtime AudioWorklet thread"),
+            "repos_fil_principal_ms_s": ((r.get("repos") or {}).get("fils_ms_s") or {}).get("CrRendererMain"),
             "fil_principal_fenetre_eq_ms_s": (((r.get("fenetres_effets") or {}).get("eq") or {}).get("fils_ms_s") or {}).get("CrRendererMain"),
             "fil_principal_fenetre_comp_ms_s": (((r.get("fenetres_effets") or {}).get("compresseur") or {}).get("fils_ms_s") or {}).get("CrRendererMain")}
 
