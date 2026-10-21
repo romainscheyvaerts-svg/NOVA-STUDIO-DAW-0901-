@@ -97,6 +97,8 @@ export const GUEST_REFUSED_SONG_FIELDS = ['projectKey', 'projectScale', 'arrange
  */
 export const GUEST_FORBIDDEN_KINDS = new Set([
   'tempo', 'order', 'groups', 'chords', 'beatswap', 'timeop', 'lock', 'listen', 'notes', 'own', 'freeze', GUEST_RIGHTS_KIND,
+  // Scènes de mix (22/10/2026) : la console entière, réservée à l'ingé.
+  'scenes',
 ]);
 
 export interface GuestVerdict {

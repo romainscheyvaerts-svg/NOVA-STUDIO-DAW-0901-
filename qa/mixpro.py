@@ -469,6 +469,104 @@ def rack_audio():
     return out
 
 
+# ─────────────────────────────── Scènes de mix (écart 20) ───────────────────────────────
+STATE_MIX = """() => { const st = window.DAW_CONTROL.getState();
+  return { tracks: st.tracks.map(t => ({ id: t.id, volume: t.volume, pan: t.pan, isMuted: !!t.isMuted, sends: (t.sends || []).map(s => [s.id, s.level, !!s.isEnabled]), plugins: (t.plugins || []).map(p => [p.id, !!p.isEnabled, JSON.stringify(p.params)]) })),
+           scenes: (st.mixScenes || []).map(s => ({ slot: s.slot, deleted: !!s.deleted, n: Object.keys(s.tracks || {}).length })) }; }"""
+
+RENDER_SIG = """async () => { const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
+  const st = window.DAW_CONTROL.getState(); const b = await e.renderProject(st.tracks, 6, 4);
+  let h = 0, energy = 0; for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i += 1) { const v = Math.round(d[i] * 1e9); h = (h * 31 + v) | 0; energy += d[i] * d[i]; } }
+  return { h, energy: +energy.toFixed(6) }; }"""
+
+MOVE_MIX = """() => { const c = window.DAW_CONTROL; const st = c.getState();
+  const ts = st.tracks.filter(t => t.type === 'AUDIO' || t.id === 'master').slice(0, 3);
+  ts.forEach((t, i) => c.updateTrack({ ...t, volume: Math.max(0.05, t.volume * (0.4 + 0.2 * i)), pan: i === 0 ? -0.6 : 0.5, isMuted: i === 1 ? !t.isMuted : t.isMuted,
+    plugins: (t.plugins || []).map(p => ({ ...p, isEnabled: !p.isEnabled })) }));
+  return ts.map(t => t.id); }"""
+
+
+def scenes_bureau(theme="dark"):
+    out = {}
+    log = Log(f"mixpro_scenes_{theme}")
+    with sync_playwright() as p:
+        b = launch(p)
+        ctx, pg = new_page(b, "pc", log)
+        pg.add_init_script(APP_MODULE_INIT)
+        pg.add_init_script(f"try {{ localStorage.setItem('nova_simple_mode', '0'); localStorage.setItem('nova_theme', '{theme}'); localStorage.setItem('nova_welcome_seen', '1'); localStorage.removeItem('nova_scene_parts'); }} catch (e) {{}}")
+        r = {"name": f"mixpro_scenes_{theme}"}
+        open_studio(pg, r, vp="pc")
+        close_welcome(pg)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+        open_mixer(pg)
+        panel = pg.locator("[data-nova-scenes]")
+        out["panneau"] = panel.count()
+        check(f"[{theme}] Scènes : panneau A / B / C / D dans la console", panel.count() == 1 and pg.locator("[data-nova-scene]").count() == 4, out)
+        if not panel.count():
+            ctx.close(); b.close(); return out
+        panel.scroll_into_view_if_needed()
+        # Sur la piste du beat : un effet, pour que la scène porte aussi des réglages d'effet.
+        if theme == "dark":
+            win, _ = add_effect_on(pg, "PROEQ12", "Pro-EQ")
+            if win:
+                win.locator(".hw-band").nth(4).click(); key_knob(pg, win, "gain", "PageUp"); close_plugin(pg)
+            open_mixer(pg)
+        base = pg.evaluate(STATE_MIX)
+        sig0 = pg.evaluate(RENDER_SIG) if theme == "dark" else None
+        pg.locator("[data-nova-scene='A']").click(); pg.wait_for_timeout(500)
+        s1 = pg.evaluate(STATE_MIX)
+        out["apres_A"] = s1["scenes"]
+        st_a = pg.locator("[data-nova-scene='A']").get_attribute("data-state")
+        check(f"[{theme}] Scènes : clic sur A vide → console enregistrée (scène A dans le projet, allumée)",
+              any(x["slot"] == "A" and not x["deleted"] and x["n"] >= 2 for x in s1["scenes"]) and st_a == "active", {"scenes": s1["scenes"], "etat_A": st_a})
+        moved_ids = pg.evaluate(MOVE_MIX); pg.wait_for_timeout(700)
+        pg.locator("[data-nova-scene='B']").click(); pg.wait_for_timeout(500)
+        moved = pg.evaluate(STATE_MIX)
+        out["pistes_bougees"] = moved_ids
+        check(f"[{theme}] Scènes : console bougée puis enregistrée en B (B allumée, A éteinte)",
+              moved["tracks"] != base["tracks"] and pg.locator("[data-nova-scene='B']").get_attribute("data-state") == "active"
+              and pg.locator("[data-nova-scene='A']").get_attribute("data-state") == "pleine", {"bougees": moved_ids})
+        shot_window(pg, panel, f"scenes_{theme}_ab")
+        # Rappel de A : la console revient exactement, en une étape d'annulation.
+        pg.locator("[data-nova-scene='A']").click(); pg.wait_for_timeout(900)
+        back = pg.evaluate(STATE_MIX)
+        check(f"[{theme}] Scènes : rappel de A → volumes, pans, muets et effets EXACTEMENT ceux de A", back["tracks"] == base["tracks"],
+              {"ecarts": [t["id"] for t, u in zip(back["tracks"], base["tracks"]) if t != u]})
+        if theme == "dark":
+            sig1 = pg.evaluate(RENDER_SIG)
+            out["rendu"] = {"avant": sig0, "apres_rappel": sig1}
+            check("Scènes : export après le rappel de A identique au bit près à l'export d'origine", sig0 == sig1 and sig0["energy"] > 0, out["rendu"])
+            pg.evaluate("() => window.DAW_CONTROL.undo()"); pg.wait_for_timeout(700)
+            und = pg.evaluate(STATE_MIX)
+            check("Scènes : un seul Ctrl+Z annule le rappel (console de B)", und["tracks"] == moved["tracks"], {"egal_B": und["tracks"] == moved["tracks"]})
+            pg.evaluate("() => window.DAW_CONTROL.redo()"); pg.wait_for_timeout(500)
+            # Comparaison A ⇄ B
+            pg.locator("[data-nova-scene-compare]").click(); pg.wait_for_timeout(700)
+            cmp1 = pg.evaluate(STATE_MIX)
+            pg.locator("[data-nova-scene-compare]").click(); pg.wait_for_timeout(700)
+            cmp2 = pg.evaluate(STATE_MIX)
+            check("Scènes : « A⇄B » passe de A à B puis revient à A", cmp1["tracks"] == moved["tracks"] and cmp2["tracks"] == base["tracks"], {})
+            # Rappel partiel : seulement les volumes.
+            pg.locator("[data-nova-scenes-menu]").click(); pg.wait_for_timeout(300)
+            menu = pg.locator("[data-testid='scenes-menu']")
+            for part in ("pans", "mutes", "sends", "plugins"):
+                menu.locator(f"[data-nova-scene-part='{part}']").uncheck()
+            shot_window(pg, menu, f"scenes_{theme}_menu")
+            menu.get_by_role("button", name="Fermer").click(); pg.wait_for_timeout(200)
+            pg.locator("[data-nova-scene='B']").click(); pg.wait_for_timeout(700)
+            part = pg.evaluate(STATE_MIX)
+            vol_ok = [t["volume"] for t in part["tracks"]] == [t["volume"] for t in moved["tracks"]]
+            rest_ok = [(t["pan"], t["isMuted"], t["plugins"]) for t in part["tracks"]] == [(t["pan"], t["isMuted"], t["plugins"]) for t in base["tracks"]]
+            check("Scènes : rappel partiel « Volumes » seulement → volumes de B, pans / muets / effets de A gardés", vol_ok and rest_ok, {"volumes": vol_ok, "reste": rest_ok})
+            proj = save_project(pg)
+            out["sauvegarde"] = [(s.get("slot"), len(s.get("tracks") or {})) for s in (proj.get("mixScenes") or [])]
+            check("Scènes : sauvegarde (.zip) → project.json porte les scènes A et B", [x[0] for x in out["sauvegarde"]] == ["A", "B"], out["sauvegarde"])
+        out["erreurs_page"] = [x["text"][:200] for x in log.errors()][:6]
+        check(f"[{theme}] Scènes : aucune erreur de page", not [x for x in log.errors() if re.search(r"scene|Scène|mixSnapshots", x["text"], re.I)], out["erreurs_page"])
+        ctx.close(); b.close()
+    return out
+
+
 t0 = time.time()
 if want("eq"):
     res["eq_sombre"] = eq_bureau("dark")
@@ -478,6 +576,9 @@ if want("rack"):
     res["rack_sombre"] = rack_bureau("dark")
     res["rack_clair"] = rack_bureau("light")
     res["rack_audio"] = rack_audio()
+if want("scenes"):
+    res["scenes_sombre"] = scenes_bureau("dark")
+    res["scenes_clair"] = scenes_bureau("light")
 res["secondes"] = round(time.time() - t0)
 res["verifs"] = checks
 res["ok"] = all(c["ok"] for c in checks)

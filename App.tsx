@@ -339,6 +339,8 @@ import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
 import { useEditModes } from './hooks/useEditModes';
 import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine/pluginRegistry';
+import { applyScene, captureScene, deleteScene, liveScenes, mergeScenes, readScenesOp, upsertScene, SCENES_KIND } from './utils/mixSnapshots';
+import type { SceneAction } from './components/MixScenesPanel';
 import { pluginDisplayName } from './utils/pluginLabel';
 import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
 import { requestBreaths } from './utils/breathBus';
@@ -3975,6 +3977,24 @@ function Studio() {
     return () => { off(); dspMonitor.detach(); };
   }, [dspSafetyOf, setAiNotification]);
 
+  // Scènes de mix A / B / C / D (utils/mixSnapshots) : enregistrer / effacer sans étape d'annulation
+  // (comme les commentaires), rappeler en UNE étape ; en collaboration, la scène part à tous (« scenes »).
+  const handleMixScene = useCallback((a: SceneAction) => {
+    const c = collabRef.current;
+    const by = c ? c.name : 'local';
+    if (a.kind === 'recall') {
+      const scene = liveScenes(stateRef.current.mixScenes).find(x => x.slot === a.slot);
+      if (!scene) return;
+      setState(prev => { const r = applyScene(prev.tracks, scene, a.parts); return r.changed ? { ...prev, tracks: r.tracks } : prev; });
+      return;
+    }
+    const scene = a.kind === 'save' ? captureScene(stateRef.current.tracks, a.slot, { by }) : null;
+    const list = scene ? upsertScene(stateRef.current.mixScenes, scene) : deleteScene(stateRef.current.mixScenes, a.slot, by);
+    const sent = list.find(x => x.slot === a.slot)!;
+    setSilently(s => ({ ...s, mixScenes: list }));
+    try { c?.client.queue(`scene:${a.slot}`, SCENES_KIND, { upsert: [sent] }); } catch { /* hors ligne : partira au retour */ }
+  }, [setState, setSilently]);
+
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === trackId);
@@ -6345,6 +6365,19 @@ function Studio() {
       return;
     }
     switch (o.kind) {
+      case SCENES_KIND: {
+        // Scènes de mix (utils/mixSnapshots) : le plus récent gagne, emplacement par emplacement.
+        const inc = readScenesOp(p);
+        const r = mergeScenes(stateRef.current.mixScenes, inc);
+        if (!r.changed.length) break;
+        remoteSetSilently(s => ({ ...s, mixScenes: mergeScenes(s.mixScenes, inc).list }));
+        if (!o.replay) {
+          const gone = r.changed.filter(sl => r.list.find(x => x.slot === sl)?.deleted);
+          const saved = r.changed.filter(sl => !gone.includes(sl));
+          setAiNotification(`🎚️ ${o.author_name} a ${saved.length ? `enregistré la scène ${saved.join(', ')}` : ''}${saved.length && gone.length ? ' et ' : ''}${gone.length ? `effacé la scène ${gone.join(', ')}` : ''}.`);
+        }
+        break;
+      }
       case 'comments':
       case 'mixver':
         // Chantier 11 : commentaires horodatés, versions envoyées / validées (fusion qui converge).
@@ -10746,6 +10779,7 @@ function Studio() {
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
                     sendViewSlot={sendViewSlot}
+                    mixScenes={state.mixScenes} onMixScene={handleMixScene}
                  /></Suspense></PanelBoundary>
               )}
 

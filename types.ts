@@ -1364,6 +1364,11 @@ export interface DAWState {
    */
   mixVersions?: import('./utils/mixVersions').MixVersion[];
   /**
+   * Scènes de mix A / B / C / D (22/10/2026) : instantanés des réglages de la console (volumes,
+   * panoramiques, muets, envois, effets), rappel partiel possible. utils/mixSnapshots ; opération « scenes ».
+   */
+  mixScenes?: import('./utils/mixSnapshots').MixScene[];
+  /**
    * Arrangements du morceau (« clean » / « explicite », « radio edit »…) : ordre
    * des sections de la piste Arrangement et clips coupés. utils/arrangements.
    */

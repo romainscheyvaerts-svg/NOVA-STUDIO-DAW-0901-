@@ -20,7 +20,7 @@ import type { DAWState } from '../types';
 /** Ce qui fait une nouvelle version : si rien de ceci n'a changé, rien à écrire. */
 export function projectSignature(st: DAWState): unknown[] {
   const s = st as any;
-  return [st.tracks, s.lyrics, st.bpm, st.name, st.markers, s.chords, st.timeSignature, s.projectNotes, s.arrangements, s.clipBin, s.timelineComments, s.mixVersions];
+  return [st.tracks, s.lyrics, st.bpm, st.name, st.markers, s.chords, st.timeSignature, s.projectNotes, s.arrangements, s.clipBin, s.timelineComments, s.mixVersions, s.mixScenes];
 }
 
 export function sameSignature(a: unknown[] | null | undefined, b: unknown[] | null | undefined): boolean {

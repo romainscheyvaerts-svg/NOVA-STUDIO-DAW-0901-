@@ -1,4 +1,6 @@
 
+import { MixScenesPanel, type SceneAction } from './MixScenesPanel';
+import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
@@ -718,12 +720,15 @@ const MixerView: React.FC<{
   onUpdateGroup?: (group: TrackGroup) => void,
   onDeleteGroup?: (groupId: string) => void,
   /** Send View (Pro Tools) : envoi a-j affiché en grand dans chaque tranche (null : vue normale). */
-  sendViewSlot?: number | null
+  sendViewSlot?: number | null,
+  /** Scènes de mix A / B / C / D (utils/mixSnapshots) et leurs gestes (App). */
+  mixScenes?: MixScene[],
+  onMixScene?: (a: SceneAction) => void
 }> = ({
   tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin,
   onDropPluginOnTrack, onRequestAddPlugin, onAddBus,
   onCopyPluginToTrack, onReorderPlugins,
-  trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup, sendViewSlot = null
+  trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup, sendViewSlot = null, mixScenes, onMixScene
 }) => {
   // Pistes masquées : hors de la console (comme Pro Tools) ; dossiers simples sans tranche ; VCA à part.
   // (masquée elle-même, ou dans un dossier masqué / replié).
@@ -830,6 +835,12 @@ const MixerView: React.FC<{
          <MixerStructureButtons tracks={tracks} />
          <SoloMuteIndicators tracks={tracks} vertical />
          <SendViewPicker slot={sendViewSlot} />
+         {onMixScene && (
+           <>
+             <div className="w-8 h-px bg-white/10 my-1"></div>
+             <MixScenesPanel tracks={tracks} scenes={mixScenes} onAction={onMixScene} />
+           </>
+         )}
          
          {/* Create Group Button (inspired by Pro Tools) */}
          {onCreateGroup && (
