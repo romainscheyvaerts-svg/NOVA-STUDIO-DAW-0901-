@@ -93,7 +93,7 @@ import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, fre
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
-import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
+import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents, frameTime } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
@@ -339,6 +339,8 @@ export class AudioEngine {
   private schedulerTimer: number | null = null;
   private nextScheduleTime: number = 0;
   private playbackStartTime: number = 0; 
+  /** Instant du contexte où le point de départ s'entend (après le pré-roulement de latence) : la tête l'attend jusque-là. */
+  private prerollUntil = 0;
   private pausedAt: number = 0; 
 
   // Latency & Rec
@@ -1868,16 +1870,15 @@ export class AudioEngine {
     }
 
     // --- 2-PDC bis. Pré-roll (22/10/2026) : un son qui commence avant la latence compensée de sa piste
-    // (égaliseur à phase linéaire, limiteur… sur le master) perdait son début dans un export depuis 0.
-    // Ce graphe (jamais rendu) est abandonné : rendu commencé `pre` plus tôt puis rogné. À partir de 0,
-    // chaque échantillon est celui du rendu sans pré-roll ; seul le début n'est plus coupé.
-    if (startOffset === 0 && !(options as any).__sansPreRoll) {
+    // (égaliseur à phase linéaire, limiteur… sur le master) perdait son début dans un export.
+    // Ce graphe (jamais rendu) est abandonné : rendu commencé `pre` plus tôt puis rogné. Même règle
+    // que la lecture (utils/pdc latencyPreroll, startPlayback) : depuis 0 comme depuis le milieu.
+    if (startOffset >= 0 && !(options as any).__sansPreRoll) {
       let lat = 0;
       rendered.forEach(rt => { lat = Math.max(lat, (rt.latency || 0) + (rt.down || 0)); });
-      const first = tracks.reduce((m, t) => (t.clips || []).reduce((mm, c) => Math.min(mm, c.start), m), Infinity);
-      if (lat > 0 && lat <= 2 && first < lat) {
-        const pre = Math.ceil(lat * targetSampleRate) / targetSampleRate;
-        const full = await this.renderProject(tracksIn, totalDuration + pre, -pre, targetSampleRate, onProgress, { ...options, __sansPreRoll: true } as any);
+      const pre = latencyPreroll(lat, targetSampleRate, tracks.flatMap(t => t.clips || []), startOffset);
+      if (pre > 0) {
+        const full = await this.renderProject(tracksIn, totalDuration + pre, startOffset - pre, targetSampleRate, onProgress, { ...options, __sansPreRoll: true } as any);
         const skip = Math.round(pre * targetSampleRate);
         const out = new AudioBuffer({ length: totalSamples, numberOfChannels: full.numberOfChannels, sampleRate: targetSampleRate });
         for (let c = 0; c < full.numberOfChannels; c++) out.copyToChannel(full.getChannelData(c).subarray(skip, skip + totalSamples), c);
@@ -2414,6 +2415,7 @@ export class AudioEngine {
     });
     this.playbackStartTime += k;
     this.nextScheduleTime += k;   // même point du morceau, k plus tard
+    if (this.prerollUntil) this.prerollUntil += k;
     const now = this.ctx.currentTime;
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, now); });
     this.resyncTimelineEffects();
@@ -3202,10 +3204,18 @@ export class AudioEngine {
     // resetEffectsAt) et découpent le son en blocs exactement comme l'export (bloc 0 = départ).
     const quantum = 128 / this.ctx.sampleRate;
     this.nextScheduleTime = Math.ceil(Math.max(this.ctx.currentTime + 0.01, opts.at ?? 0) / quantum - 1e-6) * quantum;
-    // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
-    // exactement là (1er kick de la batterie, 1re 808) était sautée.
-    this.playbackStartTime = this.nextScheduleTime - startOffset;
-    this.midiRunStart = startOffset;
+    // Pré-roulement de latence (PDC, 22/10/2026) : avec un effet à latence (EQ à phase linéaire,
+    // limiteur à anticipation…), le son posé avant la latence compensée était coupé à l'écoute.
+    // Comme l'export (même règle, utils/pdc latencyPreroll) : l'audio part `pre` plus tôt, le point
+    // de départ s'entend `pre` après le 1er bloc ; la tête de lecture reste sur le départ jusque-là.
+    const lat = this.pdcSuspended ? 0 : tracks.reduce((m, t) => Math.max(m, this.getTrackLatency(t.id)), 0);
+    const pre = latencyPreroll(lat, this.ctx.sampleRate, tracks.flatMap(t => t.clips || []), startOffset);
+    // (Départ différé `at` ou pré-roulement : la tête reste sur le départ, elle ne recule plus avant.)
+    this.prerollUntil = this.nextScheduleTime + pre;
+    // Le point de départ (moins le pré-roulement) tombe pile au début de la 1re fenêtre : une note
+    // posée exactement là (1er kick de la batterie, 1re 808) était sautée.
+    this.playbackStartTime = this.nextScheduleTime + pre - startOffset;
+    this.midiRunStart = startOffset - pre;
     this.flashbackRunStart(this.nextScheduleTime, this.playbackStartTime);
     // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
@@ -3304,6 +3314,8 @@ export class AudioEngine {
     if (this.practice) return this.practiceTime();
 
     const now = this.ctx.currentTime;
+    // Départ pas encore entendu (pré-roulement de latence, départ différé) : la tête l'attend.
+    if (now < this.prerollUntil) return Math.max(0, this.pausedAt);
     let startTime = this.playbackStartTime;
     if (this.pendingLoopWrap) {
       if (now < this.pendingLoopWrap.atContextTime) {

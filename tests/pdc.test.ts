@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computePdc, PdcNode } from '../utils/pdc';
+import { computePdc, PdcNode, latencyPreroll } from '../utils/pdc';
 
 const net = (o: Record<string, [number, string[]]>) => new Map<string, PdcNode>(Object.entries(o).map(([k, [latency, outputs]]) => [k, { latency, outputs }]));
 
@@ -33,5 +33,28 @@ describe('compensation de latence (PDC)', () => {
     const r = computePdc(net({ a: [99, ['']], b: [-1, ['']] }));
     expect(r.get('a')!.total).toBe(4);
     expect(r.get('b')!.total).toBe(0);
+  });
+});
+
+describe('latencyPreroll (pré-roulement de latence, lecture = export)', () => {
+  const SR = 44100;
+  const lat = 1896 / SR;   // EQ à phase linéaire (≈ 43 ms)
+  it('grosse caisse à 0 : le transport part la latence plus tôt, arrondie à l\'échantillon', () => {
+    expect(latencyPreroll(lat, SR, [{ start: 0, duration: 0.5 }], 0) * SR).toBeCloseTo(1896, 9);
+  });
+  it('latence = nombre entier d\'échantillons : jamais un échantillon de trop', () => {
+    const l = 2048 / 48000 + 1e-15;
+    expect(Math.round(latencyPreroll(l, 48000, [{ start: 0, duration: 1 }], 0) * 48000)).toBe(2048);
+  });
+  it('lecture lancée au milieu : un son qui couvre le départ ou commence juste après', () => {
+    expect(latencyPreroll(lat, SR, [{ start: 0, duration: 10 }], 5)).toBeGreaterThan(0);
+    expect(latencyPreroll(lat, SR, [{ start: 5.02, duration: 1 }], 5)).toBeGreaterThan(0);
+  });
+  it('rien à couper : aucun pré-roulement', () => {
+    expect(latencyPreroll(lat, SR, [{ start: 0.1, duration: 1 }], 0)).toBe(0);
+    expect(latencyPreroll(lat, SR, [{ start: 0, duration: 1 }], 5)).toBe(0);
+    expect(latencyPreroll(0, SR, [{ start: 0, duration: 1 }], 0)).toBe(0);
+    expect(latencyPreroll(3, SR, [{ start: 0, duration: 1 }], 0)).toBe(0);
+    expect(latencyPreroll(lat, SR, [{ start: 0, duration: 1 }], -1)).toBe(0);
   });
 });

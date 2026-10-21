@@ -187,6 +187,10 @@ BATTERIE = [
     # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
     # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
     ("modulateurs", []),
+    # 22/10/2026 · restes : lecture avec un effet à latence sur le master (EQ linéaire 43 ms, + limiteur) : grosse caisse
+    # posée à 0,000 s entendue entière (pré-roulement du transport), depuis 0 et depuis le milieu, 44,1 et 48 kHz ;
+    # lecture = export au bit près ; tête de lecture jamais avant le départ ni en avance sur le son.
+    ("pdc_preroll_lecture", []),
 ]
 
 
