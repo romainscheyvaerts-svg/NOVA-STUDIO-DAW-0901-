@@ -3,6 +3,7 @@ import { breathSig } from './breathEnvelope';
 import { envelopeDbAt, gainPointsSig, sortGainPoints } from './clipGain';
 import { vstAutomationSig } from './vstAutomation';
 import { KIT_BAKE_REFUSAL, usesKitSounds } from './drumKitLibrary';
+import { trackUserIrKeys } from './userIr';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -306,6 +307,9 @@ export const trackBufferIds = (t: Track): string[] => {
   if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
   (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
   (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
+  // Réponses impulsionnelles importées par les réverbes de la piste (utils/userIr) : gardées en mémoire,
+  // dans les versions de l'appareil et à l'ouverture.
+  ids.push(...trackUserIrKeys(t));
   return ids;
 };
 

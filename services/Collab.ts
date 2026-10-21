@@ -11,6 +11,7 @@ import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
 import { mergeQueuedOps, structureOf } from '../utils/collabMerge';
 import { isVocalTrack as isVocalTrackPure, ownsContent as ownsContentPure } from '../utils/collabPeers';
 import { inactivePlaylistClips, playlistsForWire } from '../utils/trackPlaylists';
+import { trackUserIrKeys } from '../utils/userIr';
 
 /**
  * Collaboration à distance (artiste, ingé son, beatmaker) sur une session en
@@ -697,6 +698,9 @@ export const contentOf = (t: Track) => ({
   // ignore ce champ et joue le comp. Absent (piste sans prise) : rien
   // d'envoyé, le contenu reste identique à celui d'une ancienne version.
   takeMeta: t.takeMeta && t.takeMeta.length ? t.takeMeta : undefined,
+  // Réponses de réverbe importées (utils/userIr) : leur son part avec le contenu de la piste (le réglage de
+  // l'effet, lui, voyage avec le mix). Champ ajouté, absent sans réponse importée : ignoré des anciennes versions.
+  ...(trackUserIrKeys(t).length ? { userIrs: trackUserIrKeys(t) } : {}),
   // Playlists de la piste (utils/trackPlaylists) : champ ajouté, absent sans playlist ; une ancienne version joue l'active.
   ...(t.playlists?.length ? { playlists: playlistsForWire(t, clipForWire) } : {}),
   // Respirations (rôle de la piste pour le traitement auto) : champ ajouté, ignoré des anciennes versions.
@@ -726,6 +730,8 @@ export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
   // Sampler mélodique (R18) : son perso (les instruments R20 sont sur le site, rien à envoyer).
   // Son des kits NOVA : jamais envoyé, l'autre poste le charge depuis sa propre bibliothèque.
   t.melodicSampler?.sampleId && !t.melodicSampler.kitRef ? samplerBufferKey(t.melodicSampler.sampleId) : undefined,
+  // Réponses impulsionnelles importées par les réverbes de la piste : la réverbe sonne pareil chez l'autre.
+  ...trackUserIrKeys(t),
 ].filter(Boolean) as string[]));
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,
