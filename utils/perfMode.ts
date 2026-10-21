@@ -4,8 +4,10 @@
  * Posé avant le premier affichage par le script d'index.html (attribut html[data-perf="lite"]) :
  * choix de l'utilisateur dans localStorage « nova_perf » (« leger » / « complet »), sinon
  * détection (≤ 2 cœurs, ou ≤ 4 cœurs et ≤ 4 Go). En mode léger : aucun flou, pas d'animations
- * décoratives en boucle (CSS d'index.html), affichage de la lecture à 30 images/s.
- * L'audio n'est jamais touché.
+ * décoratives en boucle (CSS d'index.html), affichage de la lecture à 30 images/s, fenêtres
+ * d'effets à 15 images/s (utils/uiFrame) ; côté audio, seulement plus de marge (séquenceur
+ * « équilibré », tampon de sortie « balanced », sauf réglage de latence choisi) : le son
+ * calculé, lui, ne change jamais.
  */
 export type PerfChoice = 'auto' | 'leger' | 'complet';
 

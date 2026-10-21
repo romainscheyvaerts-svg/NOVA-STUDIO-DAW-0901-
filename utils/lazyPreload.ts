@@ -53,3 +53,15 @@ export function preloadWhenIdle(items: { preload: () => void }[], delayMs = 2500
   const t = window.setTimeout(step, delayMs);
   return () => { stopped = true; window.clearTimeout(t); if (idle !== null) w.cancelIdleCallback?.(idle); if (timer !== null) window.clearTimeout(timer); };
 }
+
+/**
+ * Fenêtre / bandeau du studio chargé à part (paquet principal plus léger : l'accueil s'affiche
+ * plus vite sur un petit PC), avec son PROPRE Suspense sans repli : son arrivée ne fait jamais
+ * clignoter le reste du studio. `preload()` le charge d'avance (pendant l'accueil).
+ */
+export function lazyQuiet<P extends object>(factory: () => Promise<{ default: React.ComponentType<P> }>): React.FC<P> & { preload: () => void } {
+  const L = lazyWithPreload(factory as () => Promise<{ default: React.ComponentType<any> }>);
+  const W = ((props: P) => React.createElement(React.Suspense, { fallback: null }, React.createElement(L, props))) as React.FC<P> & { preload: () => void };
+  W.preload = () => L.preload();
+  return W;
+}

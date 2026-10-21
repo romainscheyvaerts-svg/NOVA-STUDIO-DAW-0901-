@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { fadeInOnInsert, smoothSet } from './vocalDspUtils';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, type KnobProps } from './hw';
 import { useHwCanvas, hwCtx } from './hw/screens';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * PROFESSIONAL STEREO IMAGER v3.0
@@ -463,7 +464,7 @@ const StereoScope: React.FC<{ node: StereoSpreaderNode; width: number }> = ({ no
     let raf = 0, lastTxt = '', lastAt = 0;
     let dL: Float32Array | null = null, dR: Float32Array | null = null;
     const loop = (t: number) => {
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
       const aL = node?.analyzerL, aR = node?.analyzerR;
       if (!aL || !aR) return;
       const n = aL.fftSize;
@@ -509,8 +510,8 @@ const StereoScope: React.FC<{ node: StereoSpreaderNode; width: number }> = ({ no
         if (led.current) { led.current.style.setProperty('--led', st.col); led.current.dataset.on = 'true'; }
       }
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node, canvasRef]);
   return (
     <div className="flex flex-col gap-2 w-full min-w-0">

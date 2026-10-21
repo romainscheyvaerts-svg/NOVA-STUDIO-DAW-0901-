@@ -1,6 +1,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 const MasterVisualizer: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -46,7 +47,7 @@ const MasterVisualizer: React.FC = () => {
     const draw = () => {
       animationFrameId = 0;
       if (!running()) return;
-      animationFrameId = requestAnimationFrame(draw);
+      animationFrameId = requestUiFrame(draw);
       if (width <= 0 || height <= 0) return;
 
       ctx.clearRect(0, 0, width, height);
@@ -93,7 +94,7 @@ const MasterVisualizer: React.FC = () => {
       }
     };
 
-    const restart = () => { if (running() && !animationFrameId) animationFrameId = requestAnimationFrame(draw); };
+    const restart = () => { if (running() && !animationFrameId) animationFrameId = requestUiFrame(draw); };
     const io = new IntersectionObserver(entries => {
       onScreen = entries[entries.length - 1]?.isIntersecting ?? true;
       restart();
@@ -103,7 +104,7 @@ const MasterVisualizer: React.FC = () => {
     restart();
 
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (animationFrameId) cancelUiFrame(animationFrameId);
       ro.disconnect();
       io.disconnect();
       document.removeEventListener('visibilitychange', restart);

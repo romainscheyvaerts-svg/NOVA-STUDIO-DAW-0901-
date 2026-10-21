@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 
 /**
  * Valeurs d'automation entendues pendant la lecture, pour que les faders
@@ -41,6 +41,21 @@ const subscribe = (key: string, fn: () => void) => {
   if (!set) { set = new Set(); listeners.set(key, set); }
   set.add(fn);
   return () => { set!.delete(fn); if (!set!.size) listeners.delete(key); };
+};
+
+/**
+ * Ce qu'un élément affiche de la valeur entendue (largeur arrondie au pixel, texte en dB…) :
+ * le composant ne se redessine que si CE RÉSULTAT change. Une rampe d'automation change la
+ * valeur à chaque image ; l'affichage arrondi, quelques fois par seconde seulement.
+ * `view` doit rendre une chaîne ou un nombre (comparés par ===).
+ */
+export const useLiveView = <T extends string | number>(trackId: string, param: string, fallback: number, view: (v: number) => T): T => {
+  const key = liveKey(trackId, param);
+  const sub = useCallback((fn: () => void) => subscribe(key, fn), [key]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const snap = () => { const v = values.get(key); return viewRef.current(v === undefined ? fallback : v); };
+  return useSyncExternalStore(sub, snap, snap);
 };
 
 /** Valeur à afficher : l'automation entendue pendant la lecture, sinon `fallback`. */

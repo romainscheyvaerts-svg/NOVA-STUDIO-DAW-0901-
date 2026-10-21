@@ -27,6 +27,11 @@ export interface KnobOptions {
   horizontal?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
+  /**
+   * Valeur réelle au moment du geste, si elle bouge sans redessiner le composant
+   * (automation pendant la lecture : seul le visuel du potard suit la courbe).
+   */
+  valueNow?: () => number;
 }
 
 export const KNOB_HINT = 'Glisser pour régler · Maj : réglage fin · molette · double-clic : valeur par défaut';
@@ -59,6 +64,7 @@ export const useKnobInteraction = (
   };
 
   const emit = (v: number) => { if (Number.isFinite(v)) latest.current.onChange(v); };
+  const current = () => { const f = latest.current.options.valueNow; return f ? f() : latest.current.value; };
 
   const reset = useCallback(() => {
     const c = cfg();
@@ -76,7 +82,7 @@ export const useKnobInteraction = (
     if (e.detail >= 2) { reset(); return; }
 
     let last = c.horizontal ? e.clientX : e.clientY;
-    let norm = c.toNorm(latest.current.value);
+    let norm = c.toNorm(current());
     latest.current.options.onStart?.();
 
     const onMouseMove = (m: MouseEvent) => {
@@ -109,7 +115,7 @@ export const useKnobInteraction = (
     lastTapRef.current = now;
 
     let last = c.horizontal ? e.touches[0].clientX : e.touches[0].clientY;
-    let norm = c.toNorm(latest.current.value);
+    let norm = c.toNorm(current());
     latest.current.options.onStart?.();
 
     const onTouchMove = (t: TouchEvent) => {
@@ -141,7 +147,7 @@ export const useKnobInteraction = (
     w.preventDefault();
     w.stopPropagation();
     const step = (latest.current.options.wheelStep ?? 0.01) * (w.shiftKey ? 0.1 : 1);
-    const n = c.toNorm(latest.current.value) + (w.deltaY < 0 ? step : -step);
+    const n = c.toNorm(current()) + (w.deltaY < 0 ? step : -step);
     emit(c.fromNorm(n));
   });
   const wheelRef = useCallback((el: HTMLElement | null) => {

@@ -192,7 +192,17 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
       const r = entries[entries.length - 1].contentRect;
       if (resize(r.width, r.height)) frame(performance.now());
     }) : null;
+    // Mètre hors de l'écran (piste plus bas dans la liste, console défilée) : rien n'est dessiné.
+    // À 96 pistes, ~3 000 dessins de canvas par seconde, dont la plupart invisibles.
+    let visible = true;
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(entries => {
+      const e = entries[entries.length - 1];
+      const was = visible;
+      visible = e.isIntersecting;
+      if (visible && !was) { lastKey = ''; lastClip = -1; lastRead = ''; lastGr = ''; frame(performance.now()); }
+    }) : null;
     const frame = (now: number) => {
+      if (!visible) return;
       if (!W) { if (ro) return; resize(); }
       const v = meterBank.view(pointId, now);
       const s = meterPrefs.scale();
@@ -226,10 +236,11 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
       }
     };
     ro?.observe(canvas);
+    io?.observe(canvas);
     if (!ro) { resize(); frame(performance.now()); }
     const unsub = meterClock.subscribe(frame);
     const unsubPrefs = meterPrefs.subscribe(() => { lastKey = ''; frame(performance.now()); });
-    return () => { unsub(); unsubPrefs(); ro?.disconnect(); };
+    return () => { unsub(); unsubPrefs(); ro?.disconnect(); io?.disconnect(); };
   }, [pointId, grTrackId, vertical, marks]);
 
   const onMenu = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); };

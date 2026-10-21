@@ -43,10 +43,10 @@ import InputSelect from './InputSelect';
 import { noteArmClick } from '../utils/multiRecord';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
-import { TrackStructureBadge, TrackStructureInline, StructureTracksContext } from './TrackStructure';
+import { TrackStructureBadge, TrackStructureInline, useStructureSelect, useStructureTracksGetter } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
-import { useLiveParam } from '../utils/automationLiveStore';
+import { getLive, liveKey, useLiveParam, useLiveView } from '../utils/automationLiveStore';
 import { STANDARD_SENDS, sendLabel, sendColor } from '../utils/sendLabels';
 
 interface TrackHeaderProps {
@@ -143,6 +143,42 @@ const HorizontalSendFader: React.FC<{
 };
 
 
+/**
+ * Volume et pan qui suivent l'automation pendant la lecture : seuls ces petits éléments
+ * se redessinent (avant, toute la piste se redessinait à chaque image, effets compris,
+ * pour chaque piste automatisée : le fil principal saturait à 96 pistes).
+ * L'infobulle et la valeur lue par le lecteur d'écran du parent suivent aussi.
+ */
+const LivePanNeedle: React.FC<{ trackId: string; pan: number; host: React.RefObject<HTMLDivElement | null> }> = ({ trackId, pan, host }) => {
+  // Angle au degré près (± 140°) : redessin seulement quand l'aiguille bouge vraiment.
+  const deg = useLiveView(trackId, 'pan', pan, v => Math.round(v * 140));
+  // Valeur lue par le lecteur d'écran : suit la courbe (l'infobulle garde le réglage de la piste).
+  const text = useLiveView(trackId, 'pan', pan, panToText);
+  React.useLayoutEffect(() => {
+    const el = host.current; if (!el) return;
+    if (el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text);
+  }, [text, host]);
+  return <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${deg}deg) translateY(-1px)` }} />;
+};
+const LiveVolumeFill: React.FC<{ trackId: string; volume: number; color: string; adjusting: boolean; host: React.RefObject<HTMLDivElement | null> }> = ({ trackId, volume, color, adjusting, host }) => {
+  // Remplissage au 1/512 près (moins d'un demi-pixel), déplacé par le GPU (scaleX, pas de mise en page).
+  const fill = useLiveView(trackId, 'volume', volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 512) / 512);
+  const text = useLiveView(trackId, 'volume', volume, gainToDbText);
+  React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
+  return (
+    <div
+      data-testid="vol-fill"
+      className={`h-full w-full origin-left ${adjusting ? 'brightness-150' : 'brightness-100'}`}
+      style={{ transform: `scaleX(${fill})`, backgroundColor: color, boxShadow: adjusting ? `0 0 10px ${color}` : 'none' }}
+    />
+  );
+};
+const LiveVolumeText: React.FC<{ trackId: string; volume: number }> = ({ trackId, volume }) => {
+  const text = useLiveView(trackId, 'volume', volume, gainToDbText);
+  // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la piste.
+  return <span className="inline-block w-12 h-3 leading-3 shrink-0 text-right text-[9px] font-mono tabular-nums text-slate-300 pointer-events-none" style={{ contain: 'strict' }}>{text}</span>;
+};
+
 const TrackHeader: React.FC<TrackHeaderProps> = ({ 
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
   onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument, takesCount, takesOpen, onToggleTakes
@@ -201,11 +237,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   };
   // Retours de la session (pistes d'envoi), pas seulement les 3 retours livrés par NOVA : un projet
   // importé ou une reverb ajoutée par l'ingé (« Reverb », « Écho »…) apparaît ici.
-  const sessionTracks = useContext(StructureTracksContext);
-  const sendIds: string[] = (() => {
-    const own = (sessionTracks || []).filter(t => t.type === TrackType.SEND && t.id !== track.id).map(t => t.id);
+  // Abonné seulement aux retours de la séance (id, nom, couleur) : les autres pistes ne le redessinent pas.
+  const getSessionTracks = useStructureTracksGetter();
+  const sendsKey = useStructureSelect(all => (all || []).filter(t => t.type === TrackType.SEND && t.id !== track.id)
+    .map(t => `${t.id}\u0001${t.name}\u0001${t.color}`).join('\u0002'));
+  const sendIds: string[] = React.useMemo(() => {
+    const own = sendsKey ? sendsKey.split('\u0002').map(x => x.split('\u0001')[0]) : [];
     return own.length ? own : [...STANDARD_SENDS];
-  })();
+  }, [sendsKey]);
 
   const handleFXClick = (e: React.MouseEvent | React.TouchEvent, p: PluginInstance) => {
     e.stopPropagation();
@@ -317,15 +356,19 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   };
 
   // Pendant la lecture, volume et pan suivent leur automation (comme Pro Tools en Read / Touch).
-  const shownVolume = useLiveParam(track.id, 'volume', track.volume);
-  const shownPan = useLiveParam(track.id, 'pan', track.pan);
+  // Lue au moment du geste (les éléments visibles suivent la courbe d'eux-mêmes : LivePanNeedle…).
+  const shownVolumeNow = () => getLive(liveKey(track.id, 'volume')) ?? track.volume;
+  const shownPanNow = () => getLive(liveKey(track.id, 'pan')) ?? track.pan;
+  const panHostRef = useRef<HTMLDivElement | null>(null);
+  const volHostRef = useRef<HTMLDivElement | null>(null);
   // Pan : glisser vertical, Maj = fin, molette, double-clic = centre
-  const panKnob = useKnobInteraction(shownPan, (v) => onUpdate({ ...track, pan: Math.abs(v) < 0.005 ? 0 : v }), {
-    min: -1, max: 1, sensitivity: 200, defaultValue: 0,
+  const panKnob = useKnobInteraction(track.pan, (v) => onUpdate({ ...track, pan: Math.abs(v) < 0.005 ? 0 : v }), {
+    min: -1, max: 1, sensitivity: 200, defaultValue: 0, valueNow: shownPanNow,
     onStart: () => automationRecorder.touch(track.id, 'pan'), onEnd: () => automationRecorder.release(track.id, 'pan'),
   });
   // Volume : molette et double-clic = 0 dB (course en racine du gain)
-  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, shownVolume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005 });
+  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }),
+    { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005, valueNow: () => Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5) });
 
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
@@ -338,7 +381,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     if (e.detail >= 2) { volKnob.handleDoubleClick(); return; }
     setIsAdjustingVolume(true);
     automationRecorder.touch(track.id, 'volume');
-    dragHorizontal(e, Math.sqrt(Math.max(0, shownVolume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
+    dragHorizontal(e, Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
   };
 
   const handleVolumeTouchStart = (e: React.TouchEvent) => {
@@ -423,7 +466,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       ? (track.plugins.find(p => p.type === 'MELODIC_SAMPLER' || p.type === 'DRUM_SAMPLER') || drumRackFakePlugin)
       : null;
       
-  const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
+  // Même tableau tant que les effets ne changent pas : la mesure « +N » de TrackInsertStrip (mise en page forcée) ne se refait qu'alors.
+  const insertPlugins = React.useMemo(() => track.plugins.filter(p => p.id !== instrumentPlugin?.id), [track.plugins, instrumentPlugin?.id]);
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
   // « Feat à distance » : à qui est la piste, et qui enregistre dessus en ce moment.
@@ -748,13 +792,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         {!simple && track.id !== 'master' && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
         <div
           {...panKnob.bind}
-          title={`Panoramique ${panToText(shownPan)} : glisser (Maj = fin), molette, double-clic = centre`}
+          ref={(el) => { panHostRef.current = el; panKnob.bind.ref(el); }}
+          title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
           role="slider"
           aria-label={`Panoramique ${track.name}`}
-          aria-valuetext={panToText(shownPan)}
+          aria-valuetext={panToText(track.pan)}
           className="nova-hit-tactile relative w-7 h-7 rounded-full bg-nv-raised border border-white/10 flex items-center justify-center cursor-ns-resize shadow-sm hover:border-cyan-500/30 transition-all touch-none group/pan"
         >
-          <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${shownPan * 140}deg) translateY(-1px)` }} />
+          <LivePanNeedle trackId={track.id} pan={track.pan} host={panHostRef} />
         </div>
         {/* Valeur du panoramique lisible (F2) : « C », « G 30 », « D 30 ». */}
         <span className="w-7 shrink-0 text-[9px] font-mono tabular-nums text-slate-400 pointer-events-none" aria-hidden="true">{panToText(track.pan)}</span>
@@ -775,7 +820,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           )}
           <div className="flex-1 flex flex-col justify-center h-6 relative">
           <div
-            ref={volKnob.wheelRef}
+            ref={(el) => { volHostRef.current = el; volKnob.wheelRef(el); }}
             onMouseDown={handleVolumeMouseDown}
             onTouchStart={handleVolumeTouchStart}
             onTouchMove={handleVolumeTouchMove}
@@ -784,24 +829,17 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
             role="slider"
             aria-label={`Volume ${track.name}`}
-            aria-valuetext={gainToDbText(shownVolume)}
+            aria-valuetext={gainToDbText(track.volume)}
             className={`nova-hit-tactile h-3 relative cursor-ew-resize group/vol touch-none ${track.volumeLock && collabRole && collabRole !== 'artist' ? 'pointer-events-none opacity-60' : ''}`}
           >
             {/* Cadre arrondi à part : son overflow-hidden coupait la zone tactile (.nova-hit-tactile) */}
             <div className="h-full bg-black/60 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`}
-                style={{
-                  width: `${(Math.sqrt(shownVolume / 1.5)) * 100}%`,
-                  backgroundColor: track.color,
-                  boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
-                }}
-              />
+              <LiveVolumeFill trackId={track.id} volume={track.volume} color={track.color} adjusting={isAdjustingVolume} host={volHostRef} />
             </div>
           </div>
           </div>
           {/* Valeur à droite, hors de la barre colorée (F2) : lisible à tout volume. */}
-          <span className="w-12 shrink-0 text-right text-[9px] font-mono tabular-nums text-slate-300 pointer-events-none">{gainToDbText(shownVolume)}</span>
+          <LiveVolumeText trackId={track.id} volume={track.volume} />
         </div>
       </div>
       
@@ -812,6 +850,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           className="relative mt-1 p-1 bg-nv-panel rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
         >
             {sendIds.map(id => {
+              const sessionTracks = getSessionTracks();
               const t = sessionTracks?.find(x => x.id === id);
               return (
                 <HorizontalSendFader key={id} trackId={track.id} label={sendLabel(id, sessionTracks)} color={t && !STANDARD_SENDS.includes(id as any) ? t.color : sendColor(id)}

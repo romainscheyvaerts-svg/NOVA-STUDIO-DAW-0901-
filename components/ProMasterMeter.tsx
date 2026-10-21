@@ -60,28 +60,68 @@ const sample = (an: AnalyserNode | null, ch: 0 | 1, now: number, dt: number) => 
   if (pk >= 0.99995) { if (!levels.clip) clipAt = playheadStore.get(); levels.clip = true; } // ≥ 0 dBFS : vraie saturation
 };
 
-const tick = (now: number) => {
-  raf = requestAnimationFrame(tick);
-  const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 1 / 60;
+/**
+ * Boucle partagée, sobre (PC peu puissants) :
+ *  - 30 images/s au plus (le canvas ne change pas plus vite à l'œil) ;
+ *  - rien tant qu'aucun vumètre n'est à l'écran (barre du transport repliée, console fermée) ;
+ *  - au repos (crêtes retombées, maintien expiré, signal muet), sonde 4 fois par seconde
+ *    seulement : dès qu'un son arrive (écoute du micro, lecture), la boucle repart.
+ * Avant : 60 images/s et deux lectures d'analyseur de 2 048 points par image, même à l'arrêt.
+ */
+const visible = new Set<() => void>();
+let probe: ReturnType<typeof setTimeout> | null = null;
+const FRAME_MS = 1000 / 30;
+const atRest = () => levels.peak[0] <= FLOOR_DB && levels.peak[1] <= FLOOR_DB && levels.rms[0] <= FLOOR_DB && levels.rms[1] <= FLOOR_DB
+  && levels.hold[0] <= FLOOR_DB && levels.hold[1] <= FLOOR_DB;
+
+const step = (now: number) => {
+  const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 1 / 30;
   lastT = now;
   sample(audioEngine.masterAnalyzerL, 0, now, dt);
   sample(audioEngine.masterAnalyzerR, 1, now, dt);
   listeners.forEach(l => l());
 };
 
+const tick = (now: number) => {
+  raf = 0;
+  if (!visible.size) return;
+  if (lastT && now - lastT < FRAME_MS - 2) { raf = requestAnimationFrame(tick); return; }
+  step(now);
+  if (atRest()) { lastT = 0; schedule(true); return; }
+  raf = requestAnimationFrame(tick);
+};
+
+function schedule(slow = false) {
+  if (raf || probe || !visible.size) return;
+  if (!slow) { raf = requestAnimationFrame(tick); return; }
+  probe = setTimeout(() => { probe = null; if (!visible.size) return; step(performance.now()); if (atRest()) schedule(true); else { lastT = 0; schedule(); } }, 250);
+}
+
+const stopLoop = () => {
+  if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  if (probe) { clearTimeout(probe); probe = null; }
+};
+
 const subscribe = (l: () => void) => {
   listeners.add(l);
-  if (!raf) { lastT = 0; raf = requestAnimationFrame(tick); }
   return () => {
     listeners.delete(l);
-    if (listeners.size === 0 && raf) { cancelAnimationFrame(raf); raf = 0; }
+    visible.delete(l);
+    if (!visible.size) stopLoop();
   };
+};
+
+/** Un vumètre entre / sort de l'écran. */
+const setVisible = (l: () => void, on: boolean) => {
+  if (on) { visible.add(l); lastT = 0; schedule(); }
+  else { visible.delete(l); if (!visible.size) stopLoop(); }
 };
 
 const resetClip = () => {
   levels.clip = false;
   levels.hold = [-90, -90];
   listeners.forEach(l => l());
+  schedule();
 };
 
 const fmtDb = (db: number) => (db <= FLOOR_DB ? '-∞' : (db > 0 ? '+' : '') + db.toFixed(1));
@@ -199,7 +239,14 @@ const ProMasterMeter: React.FC<Props> = ({ orientation = 'horizontal', className
     ro?.observe(canvas);
     resize(); draw();
     const unsub = subscribe(draw);
-    return () => { unsub(); ro?.disconnect(); };
+    // À l'écran seulement (un canvas masqué par la largeur de la barre ne coûte plus rien).
+    const io = typeof IntersectionObserver !== 'undefined'
+      ? new IntersectionObserver(entries => setVisible(draw, entries[entries.length - 1].isIntersecting)) : null;
+    if (io) io.observe(canvas); else setVisible(draw, true);
+    // Départ de la lecture : la boucle repart tout de suite (sans attendre la sonde lente).
+    const onStart = () => { lastT = 0; stopLoop(); schedule(); };
+    window.addEventListener('nova:transport-start', onStart);
+    return () => { unsub(); ro?.disconnect(); io?.disconnect(); window.removeEventListener('nova:transport-start', onStart); };
   }, [vertical]);
 
   const clipBase = vertical ? 'w-full h-6 rounded text-[9px] font-black' : 'h-5 px-1 rounded text-[8px] font-black';

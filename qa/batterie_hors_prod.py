@@ -146,6 +146,12 @@ BATTERIE = [
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
     ("mixfx", []),
+    # 21/10/2026 (perfseance) : grosse séance de mix rap, 96 pistes × 4 effets NOVA (EQ, compresseur, de-esser,
+    # envoi reverb), 4 bus, automation, 60 s de lecture : charge et coût du fil audio, sous-régimes, temps
+    # d'image (lecture et édition), fil principal, mémoire, démarrage. Mesure seule (objectifs rapportés).
+    ("banc_grosse_seance", []),
+    # Surcharge processeur (40 pistes × 3 effets) : compteur, alerte avec solutions, mode sécurité.
+    ("surcharge_cpu", []),
 ]
 
 
