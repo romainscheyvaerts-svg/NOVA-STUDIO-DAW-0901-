@@ -1545,6 +1545,8 @@ export class AudioEngine {
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate?: number, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean; soloIsDeliberate?: boolean } = {}): Promise<AudioBuffer> {
     // Fréquence du rendu : celle du projet par défaut (avant : 44,1 kHz codé en dur).
     if (!targetSampleRate) targetSampleRate = this.getProjectSampleRate();
+    /** Pistes telles que reçues (pré-roll : le rendu est relancé avec elles). */
+    const tracksIn = tracks;
     // Solo d'écoute AFL / PFL (utils/soloListen) : il ne touche jamais un rendu. Les solos
     // posés par l'appelant lui-même (stems, voix seules : options.soloIsDeliberate) restent.
     if (!options.soloIsDeliberate) tracks = tracksForRender(tracks, monitorStore.get().listen);
@@ -1853,6 +1855,24 @@ export class AudioEngine {
       });
       // Effets calés sur le morceau (gate rythmique) : temps 0 du rendu = startOffset du morceau.
       rendered.forEach(rt => { if (rt.pluginNodes) this.syncChainTimeline([...rt.pluginNodes.values()], -startOffset, rt.down || 0); });
+    }
+
+    // --- 2-PDC bis. Pré-roll (22/10/2026) : un son qui commence avant la latence compensée de sa piste
+    // (égaliseur à phase linéaire, limiteur… sur le master) perdait son début dans un export depuis 0.
+    // Ce graphe (jamais rendu) est abandonné : rendu commencé `pre` plus tôt puis rogné. À partir de 0,
+    // chaque échantillon est celui du rendu sans pré-roll ; seul le début n'est plus coupé.
+    if (startOffset === 0 && !(options as any).__sansPreRoll) {
+      let lat = 0;
+      rendered.forEach(rt => { lat = Math.max(lat, (rt.latency || 0) + (rt.down || 0)); });
+      const first = tracks.reduce((m, t) => (t.clips || []).reduce((mm, c) => Math.min(mm, c.start), m), Infinity);
+      if (lat > 0 && lat <= 2 && first < lat) {
+        const pre = Math.ceil(lat * targetSampleRate) / targetSampleRate;
+        const full = await this.renderProject(tracksIn, totalDuration + pre, -pre, targetSampleRate, onProgress, { ...options, __sansPreRoll: true } as any);
+        const skip = Math.round(pre * targetSampleRate);
+        const out = new AudioBuffer({ length: totalSamples, numberOfChannels: full.numberOfChannels, sampleRate: targetSampleRate });
+        for (let c = 0; c < full.numberOfChannels; c++) out.copyToChannel(full.getChannelData(c).subarray(skip, skip + totalSamples), c);
+        return out;
+      }
     }
 
     // --- 2a. Batterie Make Music : mix par pad (effets + envois) aussi à l'export
@@ -4402,7 +4422,8 @@ export class AudioEngine {
       default: {
         // Effets déclarés dans le registre (engine/pluginRegistry.ts), ex. le limiteur NOVA.
         const reg = getRegisteredPlugin(plugin.type);
-        if (reg) { node = reg.create(ctx, plugin, bpm); break; }
+        // Fabrique passée au registre : le rack parallèle y crée les effets de ses branches (même contexte).
+        if (reg) { node = reg.create(ctx, plugin, bpm, { createPlugin: (p) => this.createPluginNode(p, bpm, ctx) }); break; }
       }
         const bypassIn = ctx.createGain();
         const bypassOut = ctx.createGain();
@@ -4689,6 +4710,12 @@ export class AudioEngine {
           if (!this.isPlaying && typeof entry.instance.restoreStatic === 'function' && !hasPluginLane(lanes, p.id)) entry.instance.restoreStatic();
         }
       });
+      // Latence changée par un réglage (phase linéaire de l'égaliseur, anticipation du limiteur…) : PDC recalculée.
+      {
+        const latOf = (id: string) => { const l = dsp.pluginChain.get(id)?.instance?.latency; return (typeof l === 'number' && l > 0 && l < 0.5) ? l : 0; };
+        const lat = (dsp.chainIds || []).reduce((acc, id) => acc + latOf(id), 0);
+        if (Math.abs(lat - (dsp.pluginLatency || 0)) > 1e-9) this.recomputeTrackLatency(track.id);
+      }
       this.resetMuteGain(track, dsp);
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);

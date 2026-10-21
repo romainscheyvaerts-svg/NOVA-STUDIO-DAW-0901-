@@ -22,7 +22,7 @@ import { LOUDNESS_TITLE } from '../utils/jargon';
  * 24 bits ou MP3. Écoute gratuite et illimitée ; l'export suit la règle
  * d'export de NOVA (services/quickMasterBilling.ts).
  */
-interface Props { onClose: () => void }
+interface Props { onClose: () => void; /** Plusieurs titres : ouvre « Masteriser un EP / un album ». */ onOpenAlbum?: () => void }
 
 const PREF_KEY = 'nova.quickmaster.prefs';
 const readPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { return {}; } };
@@ -39,7 +39,7 @@ const SectionTitle: React.FC<{ n?: string; children: React.ReactNode; right?: Re
   </div>
 );
 
-const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
+const QuickMasterPage: React.FC<Props> = ({ onClose, onOpenAlbum }) => {
   const saved = useMemo(readPrefs, []);
   const { theme } = useTheme();
   const [style, setStyle] = useState<QmStyleId>(saved.style || 'rap');
@@ -338,6 +338,10 @@ const QuickMasterPage: React.FC<Props> = ({ onClose }) => {
           <input ref={trackInput} type="file" accept={ACCEPT} className="hidden" data-qm-input="" onChange={e => { const f = e.target.files?.[0]; if (f) void loadTrack(f); e.target.value = ''; }} />
           <input ref={refInput} type="file" accept={ACCEPT} className="hidden" data-qm-ref-input="" onChange={e => { const f = e.target.files?.[0]; if (f) void loadRef(f); e.target.value = ''; }} />
 
+          {/* Plusieurs titres : le mastering d'un EP / d'un album. */}
+          {!file && onOpenAlbum ? (
+            <p className="text-center text-[12px] text-slate-400" data-qm-album-lien="">Plusieurs titres ? <button type="button" onClick={onOpenAlbum} data-qm-album="" className="underline font-bold text-amber-300 hover:text-amber-200">Masteriser un EP / un album</button> (même niveau, enchaînements, ISRC)</p>
+          ) : null}
           {/* 1. Le morceau */}
           {!file ? (
             <button type="button" data-qm-drop="" onClick={() => trackInput.current?.click()} disabled={!!busy}

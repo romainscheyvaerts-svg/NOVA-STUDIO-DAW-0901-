@@ -7,7 +7,9 @@ export type HwFinish = 'cream' | 'black' | 'silver' | 'burgundy' | 'graphite' | 
   // Fin des façades (1.5.1)
   | 'petrol' | 'pearl' | 'rose' | 'sky' | 'sand' | 'lilac'
   // Effets de mix (21/10/2026) : Compresseur multibande, EQ dynamique
-  | 'navy' | 'ice';
+  | 'navy' | 'ice'
+  // Mix et mastering pro (22/10/2026) : Rack parallèle
+  | 'copper';
 
 /** Logo NOVA (étoile à quatre branches + mot), à l'encre de la façade. */
 export const NovaLogo: React.FC<{ className?: string; size?: number }> = ({ className, size = 13 }) => (

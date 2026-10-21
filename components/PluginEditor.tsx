@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { PluginInstance, Track } from '../types';
+import { PluginInstance, Track, TrackType } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { AutoTuneUI } from '../plugins/AutoTunePlugin';
 import { AutotuneEngineNote } from './AutotuneVstPanel';
@@ -296,7 +296,8 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       case 'STEREOSPREADER': return <StereoSpreaderUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       case 'DEESSER': return <VocalDeEsserUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       case 'DENOISER': return <VocalDenoiserUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
-      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams}
+        trackKind={trackId === 'master' ? 'master' : (track?.type === TrackType.BUS || track?.type === TrackType.SEND) ? 'bus' : track ? 'piste' : undefined} />;
       case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       default: {

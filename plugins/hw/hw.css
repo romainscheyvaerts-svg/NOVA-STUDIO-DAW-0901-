@@ -857,6 +857,38 @@
   --hw-well: rgba(20, 40, 60, 0.08);
 }
 
+.hw-finish-copper {
+  --hw-face-solid: #3a241a;
+  --hw-face:
+    repeating-linear-gradient(90deg, rgba(255, 230, 210, 0.022) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 70% at 50% -10%, rgba(251, 146, 60, 0.12), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #472c1f 0%, #3a241a 58%, #2a1912 100%);
+  --hw-ink: #fbeee3;
+  --hw-ink-soft: #d9bfa9;
+  --hw-accent: #fb923c;
+  --hw-rule: rgba(251, 238, 227, 0.18);
+  --hw-edge-hi: rgba(255, 220, 190, 0.16);
+  --hw-well: rgba(0, 0, 0, 0.3);
+}
+/* Rack parallèle : une colonne par branche */
+.hw-rack-branches { display: grid; gap: 10px; grid-template-columns: repeat(var(--rack-n, 2), minmax(0, 1fr)); }
+@media (max-width: 639px) { .hw-rack-branches { grid-template-columns: minmax(0, 1fr); } }
+.hw-rack-branch { background: var(--hw-well); border: 1px solid var(--hw-rule); border-top: 3px solid var(--rack-c, #fb923c); border-radius: 10px; padding: 8px 8px 10px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.hw-rack-branch[data-off='true'] { opacity: 0.55; }
+.hw-rack-fx { display: flex; align-items: center; gap: 4px; min-height: 32px; background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 0 4px 0 6px; color: var(--hw-ink); font: 700 11px/1.2 Inter, system-ui, sans-serif; }
+.hw-rack-fx[data-sel='true'] { border-color: var(--rack-c, #fb923c); box-shadow: 0 0 0 1px var(--rack-c, #fb923c) inset; }
+.hw-rack-fx[data-bypass='true'] .hw-rack-fx-name { opacity: 0.5; text-decoration: line-through; }
+.hw-rack-fx button { min-height: 28px; min-width: 28px; border-radius: 6px; color: var(--hw-ink-soft); }
+.hw-rack-fx button:hover { color: var(--hw-ink); background: rgba(255, 255, 255, 0.08); }
+.hw-rack-fx .hw-rack-fx-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hw-ink); }
+.hw-rack-add { min-height: 32px; border: 1px dashed var(--hw-rule); border-radius: 7px; color: var(--hw-ink-soft); font: 700 11px Inter, system-ui, sans-serif; }
+.hw-rack-add:hover { color: var(--hw-ink); border-color: var(--rack-c, #fb923c); }
+.hw-rack-menu { max-height: 240px; overflow-y: auto; background: #1a120d; border: 1px solid var(--hw-rule); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.hw-rack-menu button { text-align: left; padding: 7px 8px; border-radius: 6px; color: #fbeee3; font: 600 12px Inter, system-ui, sans-serif; min-height: 32px; }
+.hw-rack-menu button:hover, .hw-rack-menu button:focus-visible { background: rgba(251, 146, 60, 0.2); }
+.hw-rack-empty { color: var(--hw-ink-soft); font: 600 10.5px/1.35 Inter, system-ui, sans-serif; padding: 4px 2px; }
+.hw-rack-child { margin-top: 12px; border: 1px solid rgba(251, 146, 60, 0.45); border-radius: 12px; padding: 8px; background: rgba(0, 0, 0, 0.25); }
+
 /* Grands chiffres d'afficheur (tempo, tonalité du Master) */
 .hw-lcd-big { font-size: 30px; line-height: 1.05; padding: 8px 14px; letter-spacing: 0.02em; }
 .hw-lcd-big small { font-size: 11px; }

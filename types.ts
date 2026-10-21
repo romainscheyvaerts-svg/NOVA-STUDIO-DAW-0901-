@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP' | 'MASTERTRANSIENT' | 'MBCOMP' | 'DYNEQ' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP' | 'MASTERTRANSIENT' | 'MBCOMP' | 'DYNEQ' | 'FXRACK' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -1365,6 +1365,11 @@ export interface DAWState {
    * (validée / retouches demandées). utils/mixVersions ; opération « mixver ».
    */
   mixVersions?: import('./utils/mixVersions').MixVersion[];
+  /**
+   * Scènes de mix A / B / C / D (22/10/2026) : instantanés des réglages de la console (volumes,
+   * panoramiques, muets, envois, effets), rappel partiel possible. utils/mixSnapshots ; opération « scenes ».
+   */
+  mixScenes?: import('./utils/mixSnapshots').MixScene[];
   /**
    * Arrangements du morceau (« clean » / « explicite », « radio edit »…) : ordre
    * des sections de la piste Arrangement et clips coupés. utils/arrangements.

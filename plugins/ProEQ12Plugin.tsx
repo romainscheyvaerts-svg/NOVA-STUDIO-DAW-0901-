@@ -1,6 +1,11 @@
 
-import { AutomationSet, MappedParam, parseEqKey } from '../engine/automationParams';
+import { AutomationSet, MappedParam, parseEqKey, type ParamTarget } from '../engine/automationParams';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { EqProWorklet, eqLinearLatencySamples, eqProNeeded } from '../engine/eqProWorklet';
+import type { EqChannel } from '../engine/eqLinearCore';
+import { isOfflineContext } from './vocalDspUtils';
+import { useSimpleMode } from '../utils/simpleMode';
+import { isLiteMode } from '../utils/perfMode';
 import { gainDbFr } from '../utils/pluginUi';
 import { Faceplate, HwSection, HwWindow, Knob, Led, PushButton, useHwHelp } from './hw';
 import { fmtHzFr, frNum, useHwCanvas } from './hw/screens';
@@ -32,12 +37,21 @@ export interface ProEQBand {
   isEnabled: boolean;
   isSolo: boolean;
   color?: string;
+  /**
+   * Canal traité par la bande (22/10/2026) : stéréo (défaut, anciens projets), centre (Mid),
+   * côtés (Side), gauche ou droite. Hors stéréo, l'égaliseur passe par engine/eqLinearCore.ts.
+   */
+  channel?: EqChannel;
 }
 
 export interface ProEQ12Params {
   bands: ProEQBand[];
   isEnabled: boolean;
   masterGain: number;
+  /** Phase (22/10/2026) : « minimum » (naturelle, défaut, sans latence) ou « linear » (latence annoncée au PDC). */
+  phase?: 'minimum' | 'linear';
+  /** Résolution de la phase linéaire : « normale » (~43 ms) ou « haute » (grave plus précis, ~171 ms). */
+  linQuality?: 'normale' | 'haute';
 }
 
 const MIN_FREQ = 20;
@@ -161,19 +175,140 @@ export class ProEQ12Node {
 
     // Cablage : entree -> bandes actives en serie -> sortie (analyse du spectre en dérivation).
     for (let i = 0; i < 12; i++) this.voices.push(this.createVoice(this.params.bands[i].type));
-    // Chaque réglage d'une bande pilote ses DEUX filtres (A/B) : le changement de type reste sans clic.
-    const nyq = ctx.sampleRate / 2;
-    this.voices.forEach((v, i) => {
-      const b = this.params.bands[i];
-      const both = (k: 'frequency' | 'Q' | 'gain') => v.filters.map(f => ({ param: f[k] }));
-      this.auto.add(`b${i + 1}Freq`, new MappedParam(ctx, both('frequency'), { min: 10, max: Math.min(22000, nyq * 0.99), value: Number.isFinite(b?.frequency) ? b.frequency : 1000, affine: true }));
-      this.auto.add(`b${i + 1}Gain`, new MappedParam(ctx, both('gain'), { min: -40, max: 40, value: 0, affine: true }));
-      this.auto.add(`b${i + 1}Q`, new MappedParam(ctx, both('Q'), { min: 0.0001, max: 1000, value: Number.isFinite(b?.q) ? b.q : 1, affine: true }));
-    });
+    this.buildBandAuto(null);
     this.auto.add('masterGain', new MappedParam(ctx, [{ param: this.output.gain }], { min: 0, max: 4, value: 1, affine: true }));
     this.relink();
     this.applyAll(true);
+    // Mid / Side ou phase linéaire dès la création (projet rouvert, export) : chemin pro tout de suite.
+    this.syncPro(true);
   }
+
+  /**
+   * Réglages automatisables des bandes. Chaque réglage pilote les DEUX filtres (A/B) de sa bande
+   * (le changement de type reste sans clic) et, quand il existe, le réglage du cœur pro (worklet).
+   */
+  private buildBandAuto(pro: EqProWorklet | null) {
+    const ctx = this.ctx;
+    const nyq = ctx.sampleRate / 2;
+    this.voices.forEach((v, i) => {
+      const b = this.params.bands[i];
+      const t = this.targets[i];
+      const tg = (k: 'frequency' | 'Q' | 'gain', key: string) => {
+        const arr: ParamTarget[] = v.filters.map(f => ({ param: f[k] }));
+        const wp = pro?.param(key);
+        if (wp) arr.push({ param: wp });
+        return arr;
+      };
+      const f0 = t ? t.freq : Number.isFinite(b?.frequency) ? b.frequency : 1000;
+      const q0 = t ? t.q : Number.isFinite(b?.q) ? b.q : 1;
+      this.auto.add(`b${i + 1}Freq`, new MappedParam(ctx, tg('frequency', `b${i + 1}Freq`), { min: 10, max: Math.min(22000, nyq * 0.99), value: f0, affine: true }));
+      this.auto.add(`b${i + 1}Gain`, new MappedParam(ctx, tg('gain', `b${i + 1}Gain`), { min: -40, max: 40, value: t ? t.gain : 0, affine: true }));
+      this.auto.add(`b${i + 1}Q`, new MappedParam(ctx, tg('Q', `b${i + 1}Q`), { min: 0.0001, max: 1000, value: q0, affine: true }));
+    });
+  }
+
+  // ── Chemin « pro » : Mid / Side par bande, phase linéaire (engine/eqLinearCore.ts) ──
+  /** Cœur pro (worklet), créé seulement quand une bande est hors stéréo ou la phase linéaire. */
+  private pro: EqProWorklet | null = null;
+  private proReady: Promise<void> | null = null;
+  /** Le son passe par le cœur pro (sinon : filtres natifs, comme les anciens projets). */
+  private proOn = false;
+  private proFailed = false;
+  private switchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Valeurs fixes des 36 réglages de bande (ordre du cœur : fréquence, gain, Q). */
+  private proValues(): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < 12; i++) { const t = this.targets[i]; out.push(t ? t.freq : 1000, t ? t.gain : 0, t ? t.q : 1); }
+    return out;
+  }
+
+  /**
+   * Réglages effectifs : piste armée (retour casque, `lowLatency` posé par le moteur) = phase
+   * naturelle, sans latence ; la phase linéaire revient dès que la piste est désarmée.
+   */
+  private effParams(): Record<string, any> {
+    const p = this.params as any;
+    return p.lowLatency && p.phase === 'linear' ? { ...p, phase: 'minimum' } : p;
+  }
+
+  /** Chemin pro voulu : bande hors stéréo ou phase linéaire (et worklet disponible). */
+  private proWanted(): boolean { return !this.proFailed && eqProNeeded(this.effParams()); }
+
+  /**
+   * Crée / met à jour / quitte le cœur pro. Bascule en direct : fondu de 10 ms à l'entrée,
+   * changement de chemin, fondu de retour (aucun clic). À la création et à l'export : immédiat.
+   */
+  private syncPro(initial = false) {
+    if (this.disposed) return;
+    const want = this.proWanted();
+    if (want && !this.pro) {
+      const pw = new EqProWorklet(this.ctx, this.effParams(), this.proValues());
+      this.pro = pw;
+      this.proReady = pw.ready.then(() => {
+        if (this.disposed || this.pro !== pw) return;
+        if (pw.failed) {
+          // Pas d'AudioWorklet : égaliseur classique (stéréo, phase naturelle), latence nulle.
+          this.proFailed = true; this.pro = null;
+          if (this.proOn) { this.proOn = false; this.relink(); }
+          return;
+        }
+        // Réglages automatisables reliés aussi au cœur pro, puis réglages reposés tels quels.
+        this.buildBandAuto(pw);
+        this.firstApply = true;
+        this.applyAll(true);
+        pw.send(this.effParams());
+        if (this.proOn) this.relink();
+      });
+    }
+    if (this.pro) this.pro.send(this.effParams());
+    if (want === this.proOn && !this.switchTimer) return;
+    if (initial || isOfflineContext(this.ctx)) { this.proOn = want; this.relink(); return; }
+    this.crossSwitch(want);
+  }
+
+  private crossSwitch(want: boolean) {
+    if (this.switchTimer) clearTimeout(this.switchTimer);
+    const g = this.input.gain, now = this.ctx.currentTime;
+    try { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + 0.01); } catch { /* contexte fermé */ }
+    const go = () => {
+      this.switchTimer = null;
+      if (this.disposed) return;
+      const w = this.proWanted();
+      if (w !== this.proOn) { this.proOn = w; this.relink(); }
+      // Retour au classique : le cœur pro est libéré (rien ne tourne pour rien).
+      if (!w && this.pro) {
+        this.pro.dispose(); this.pro = null; this.proReady = null;
+        this.buildBandAuto(null); this.firstApply = true; this.applyAll(true);
+      }
+      const t = this.ctx.currentTime;
+      try { g.cancelScheduledValues(t); g.setValueAtTime(0, t); g.linearRampToValueAtTime(1, t + 0.01); } catch { /* */ }
+    };
+    // Vers le cœur pro : on attend qu'il soit prêt (quelques ms au premier usage).
+    const wait = want && this.proReady ? this.proReady : Promise.resolve();
+    this.switchTimer = setTimeout(() => { wait.then(go, go); }, 15);
+  }
+
+  /** Retard ajouté (s), compensé par le moteur (PDC) : D échantillons en phase linéaire, sinon 0. */
+  public get latency(): number {
+    if (!this.proWanted() || this.effParams().phase !== 'linear') return 0;
+    return eqLinearLatencySamples(this.ctx.sampleRate, this.params.linQuality) / this.ctx.sampleRate;
+  }
+
+  /** Cœur pro chargé (l'export l'attend avant de rendre) ; rien à attendre sinon. */
+  public get ready(): Promise<void> | undefined { return this.proReady || undefined; }
+
+  /** Départ de lecture : le cœur pro repart de l'état d'une instance neuve (comme l'export). */
+  public resetAt(at: number) { if (this.proOn) this.pro?.resetAt(at); }
+
+  /** Veille des effets : filtres natifs = sans état à déclarer ; cœur pro = son propre repos. */
+  public isAtRest(): boolean { return !this.proOn || !this.pro || this.pro.isAtRest(); }
+
+  /** Le son passe par le cœur pro (Mid / Side ou phase linéaire). */
+  public isPro(): boolean { return this.proOn; }
+
+  /** Fréquence d'échantillonnage du contexte (latence affichée). */
+  public get sampleRate(): number { return this.ctx.sampleRate; }
 
   /**
    * AudioParam d'un réglage automatisable (R8) : « b3Freq », « b3Gain », « b3Q », « masterGain » ; sinon null.
@@ -251,12 +386,18 @@ export class ProEQ12Node {
     const next0: [AudioNode, AudioNode] = [this.input, this.preAnalyzer];
     next.push(next0);
     let last: AudioNode = this.preAnalyzer;
-    for (const v of this.voices) {
-      if (!v.inChain) continue;
-      if (this.compactOn) { const f = v.filters[v.slot]; next.push([last, f]); last = f; }
-      else { next.push([last, v.input]); last = v.out; }
+    if (this.proOn) {
+      // Chemin pro : analyse d'entrée -> cœur (worklet) -> sortie. Avant qu'il soit prêt : rien ne sort.
+      const pn = this.pro?.node;
+      if (pn) { next.push([last, pn]); last = pn; next.push([last, this.output]); }
+    } else {
+      for (const v of this.voices) {
+        if (!v.inChain) continue;
+        if (this.compactOn) { const f = v.filters[v.slot]; next.push([last, f]); last = f; }
+        else { next.push([last, v.input]); last = v.out; }
+      }
+      next.push([last, this.output]);
     }
-    next.push([last, this.output]);
     const has = (arr: [AudioNode, AudioNode][], l: [AudioNode, AudioNode]) => arr.some(x => x[0] === l[0] && x[1] === l[1]);
     for (const l of this.links) if (!has(next, l)) { try { l[0].disconnect(l[1]); } catch (e) { /* déjà coupé */ } }
     for (const l of next) if (!has(this.links, l)) l[0].connect(l[1]);
@@ -436,6 +577,7 @@ export class ProEQ12Node {
     }
     this.params = next;
     this.applyAll();
+    this.syncPro();
   }
 
   /** Bandes réellement calculées (diagnostic, tests). */
@@ -460,6 +602,8 @@ export class ProEQ12Node {
     this.disposed = true;
     if (this.settleTimer) { clearTimeout(this.settleTimer); this.settleTimer = null; }
     if (this.postTimer) { clearInterval(this.postTimer); this.postTimer = null; }
+    if (this.switchTimer) { clearTimeout(this.switchTimer); this.switchTimer = null; }
+    if (this.pro) { this.pro.dispose(); this.pro = null; }
     try { this.input.disconnect(); } catch (e) {}
     try { this.preAnalyzer.disconnect(); } catch (e) {}
     try { this.postAnNode?.disconnect(); } catch (e) {}
@@ -497,6 +641,21 @@ const FILTER_ICON: Record<ProEQFilterType, string> = {
   lowpass: 'M1 3 L 15 3 C 19 3, 21 13, 25 13',
   notch: 'M1 4 L 10 4 C 12 4, 12.4 13, 13 13 C 13.6 13, 14 4, 16 4 L 25 4',
 };
+/** Canal traité par une bande (mode avancé). */
+const CHANNELS: { id: EqChannel; label: string; tag: string; aria: string; help: string }[] = [
+  { id: 'stereo', label: 'Stéréo', tag: '', aria: 'Stéréo (les deux canaux)', help: 'La bande traite les deux canaux pareil (comme avant).' },
+  { id: 'mid', label: 'Centre', tag: 'M', aria: 'Centre (Mid)', help: 'Centre (Mid) : seulement ce qui est au milieu (voix lead, kick, basse). Les côtés ne bougent pas.' },
+  { id: 'side', label: 'Côtés', tag: 'S', aria: 'Côtés (Side)', help: 'Côtés (Side) : seulement ce qui est large (réverbe, doublages, ambiance). Le centre ne bouge pas.' },
+  { id: 'left', label: 'Gauche', tag: 'G', aria: 'Canal gauche', help: 'Seulement le canal gauche (corriger une prise stéréo déséquilibrée).' },
+  { id: 'right', label: 'Droite', tag: 'D', aria: 'Canal droit', help: 'Seulement le canal droit (corriger une prise stéréo déséquilibrée).' },
+];
+const chanOf = (b: ProEQBand | undefined): EqChannel => (b?.channel && CHANNELS.some(c => c.id === b.channel) ? b.channel : 'stereo');
+/** Couleurs des courbes par canal quand des bandes ne traitent qu'un côté. */
+const DOMAIN_CURVES: Record<'ms' | 'lr', { id: EqChannel; label: string; color: string }[]> = {
+  ms: [{ id: 'mid', label: 'Centre', color: '#f8fafc' }, { id: 'side', label: 'Côtés', color: '#f0abfc' }],
+  lr: [{ id: 'left', label: 'Gauche', color: '#86efac' }, { id: 'right', label: 'Droite', color: '#fdba74' }],
+};
+
 const FilterIcon: React.FC<{ type: ProEQFilterType }> = ({ type }) => (
   <svg width="26" height="14" viewBox="0 0 26 14" aria-hidden="true"><path d={FILTER_ICON[type]} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
@@ -642,13 +801,38 @@ const EqScreen: React.FC<{
         c.lineTo(w, mid); c.closePath();
         c.globalAlpha = 0.22; c.fillStyle = col; c.fill(); c.globalAlpha = 1;
       }
-      // Courbe totale (filtres réels du moteur : suit aussi l'automation).
-      c.beginPath();
-      for (let i = 0; i < cols; i++) {
-        const y = yOf(20 * Math.log10(Math.max(resp[i], 1e-5)));
-        if (i === 0) c.moveTo(0, y); else c.lineTo((i / (cols - 1)) * w, y);
+      // Bandes hors stéréo (Mid / Side, gauche / droite) : une courbe par canal, avec sa légende.
+      const soloIdx = p.bands.findIndex(bb => bb && bb.isSolo && bb.isEnabled !== false);
+      const live = (i: number) => p.isEnabled !== false && (soloIdx >= 0 ? soloIdx === i : p.bands[i]?.isEnabled !== false);
+      const used = new Set(p.bands.map((bb, i) => (live(i) ? chanOf(bb) : 'stereo')));
+      const domains = [...(used.has('mid') || used.has('side') ? DOMAIN_CURVES.ms : []), ...(used.has('left') || used.has('right') ? DOMAIN_CURVES.lr : [])];
+      if (!domains.length) {
+        // Courbe totale (filtres réels du moteur : suit aussi l'automation).
+        c.beginPath();
+        for (let i = 0; i < cols; i++) {
+          const y = yOf(20 * Math.log10(Math.max(resp[i], 1e-5)));
+          if (i === 0) c.moveTo(0, y); else c.lineTo((i / (cols - 1)) * w, y);
+        }
+        c.strokeStyle = '#f8fafc'; c.lineWidth = 2.2; c.shadowColor = 'rgba(125,211,252,0.6)'; c.shadowBlur = 6; c.stroke(); c.shadowBlur = 0;
+      } else {
+        c.font = '700 9.5px Inter, system-ui, sans-serif'; c.textBaseline = 'middle';
+        let lx = w - 8;
+        domains.slice().reverse().forEach((d) => {
+          c.beginPath();
+          for (let i = 0; i < cols; i++) {
+            let sum = 0;
+            p.bands.forEach((bb, k) => { const ch = chanOf(bb); if (live(k) && (ch === 'stereo' || ch === d.id)) sum += bandResponseDb(bb, freqs[i], sr); });
+            const y = yOf(sum);
+            if (i === 0) c.moveTo(0, y); else c.lineTo((i / (cols - 1)) * w, y);
+          }
+          c.strokeStyle = d.color; c.lineWidth = 2; c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 4; c.stroke(); c.shadowBlur = 0;
+          // Légende (en haut à droite) : trait de couleur + nom du canal.
+          const tw = c.measureText(d.label).width;
+          c.textAlign = 'right'; c.fillStyle = d.color; c.fillText(d.label, lx, bottom - 9);
+          c.fillRect(lx - tw - 18, bottom - 10, 12, 2.5);
+          lx -= tw + 30;
+        });
       }
-      c.strokeStyle = '#f8fafc'; c.lineWidth = 2.2; c.shadowColor = 'rgba(125,211,252,0.6)'; c.shadowBlur = 6; c.stroke(); c.shadowBlur = 0;
       // Points des bandes (la bande choisie au-dessus, plus grande).
       const order = p.bands.map((_, i) => i).filter(i => i !== sel).concat(sel);
       c.font = '800 9px Inter, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -663,6 +847,14 @@ const EqScreen: React.FC<{
         c.fillStyle = on ? col : '#3b4250'; c.fill();
         c.lineWidth = i === sel ? 2.5 : 1.2; c.strokeStyle = i === sel ? '#ffffff' : 'rgba(0,0,0,0.65)'; c.stroke();
         c.fillStyle = on ? '#0b0f17' : '#cbd5e1'; c.fillText(String(i + 1), x, y + 0.5);
+        // Canal de la bande (M, S, G, D) en petite pastille au-dessus du point.
+        const tag = CHANNELS.find(ch => ch.id === chanOf(bb))?.tag;
+        if (tag) {
+          c.font = '800 8px Inter, system-ui, sans-serif';
+          c.fillStyle = '#0b0f17'; c.beginPath(); c.arc(x + rad * 0.85, y - rad * 0.85, 6, 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#f8fafc'; c.fillText(tag, x + rad * 0.85, y - rad * 0.85 + 0.5);
+          c.font = '800 9px Inter, system-ui, sans-serif';
+        }
       }
     };
 
@@ -813,7 +1005,14 @@ const EqScreen: React.FC<{
   );
 };
 
-export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Params, onParamsChange?: (p: ProEQ12Params) => void }> = ({ node, initialParams, onParamsChange }) => {
+export const ProEQ12UI: React.FC<{
+  node: ProEQ12Node, initialParams: ProEQ12Params, onParamsChange?: (p: ProEQ12Params) => void;
+  /** Piste de l'égaliseur : la phase linéaire (latence) est réservée au master et aux bus. */
+  trackKind?: 'master' | 'bus' | 'piste';
+}> = ({ node, initialParams, onParamsChange, trackKind }) => {
+  const { simple } = useSimpleMode();
+  const [lite, setLite] = useState(() => isLiteMode());
+  useEffect(() => { const f = () => setLite(isLiteMode()); window.addEventListener('nova:perf-mode', f); return () => window.removeEventListener('nova:perf-mode', f); }, []);
   const [params, setParams] = useState<ProEQ12Params>(() => (initialParams && Array.isArray(initialParams.bands) && initialParams.bands.length
     ? initialParams : { ...DEFAULT_EQ, ...(initialParams || {}), bands: DEFAULT_EQ.bands.map(b => ({ ...b })) }));
   const paramsRef = useRef(params);
@@ -840,11 +1039,20 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
   const gainless = noGain(band.type);
   const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
   const master = Number.isFinite(params.masterGain) ? params.masterGain : 1;
+  // Mode avancé : canal de chaque bande (Mid / Side, gauche / droite) et phase linéaire.
+  const advanced = !simple;
+  const chan = chanOf(band);
+  const linear = params.phase === 'linear';
+  const sr = node?.sampleRate || 48000;
+  const latMs = (q?: string) => Math.round((eqLinearLatencySamples(sr, q) / sr) * 1000);
+  const linBlocked = !linear && (lite || trackKind === 'piste');
+  const linWhy = lite ? 'Indisponible en mode léger (PC peu puissant) : la phase linéaire demande plus de calcul.'
+    : 'Réservée au master et aux bus : sur une piste seule, la latence gênerait le retour casque.';
 
   return (
     <HwWindow type="PROEQ12" width={880} accent={EQ_ACCENT} accentInk="#04131c"
       idleHelp={<>Égaliseur paramétrique 12 bandes : retire ce qui gêne, ajoute de la présence ou de l’air. Glisse les points de l’écran, ou choisis une bande dessous et tourne ses boutons. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
-      <Faceplate finish="black" className="hw-finish-midnight" model="Égaliseur" kicker="Paramétrique · 12 bandes" modelStyle="wide" style={{ ['--hw-accent' as any]: EQ_ACCENT }}>
+      <Faceplate finish="black" className="hw-finish-midnight hw-touch" model="Égaliseur" kicker="Paramétrique · 12 bandes" modelStyle="wide" style={{ ['--hw-accent' as any]: EQ_ACCENT }}>
         <div className="hw-screen-tabs justify-end" role="group" aria-label="Échelle de l’écran">
           <span className="hw-silk hw-silk-soft mr-auto" style={{ textAlign: 'left' }}>Échelle</span>
           {[12, 30].map(r => (
@@ -864,7 +1072,7 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
               style={{ ['--band' as any]: bandColor(b, i) }} onClick={() => setSel(i)}
               title={`Bande ${i + 1} : ${(FILTER_LABELS[b.type] || { label: b.type }).label}, ${Math.round(b.frequency)} Hz${b.isEnabled === false ? ' (coupée)' : ''}`} aria-label={`Bande ${i + 1}`}>
               <span className="flex items-center gap-1"><Led on={b.isEnabled !== false} color={bandColor(b, i)} />{i + 1}</span>
-              <small>{shortHz(b.frequency)}</small>
+              <small>{shortHz(b.frequency)}{CHANNELS.find(c => c.id === chanOf(b))?.tag ? ` · ${CHANNELS.find(c => c.id === chanOf(b))!.tag}` : ''}</small>
             </button>
           ))}
         </div>
@@ -897,6 +1105,18 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
                 value={band.q} defaultValue={1} onChange={v => updateBand(sel, { q: v })} format={v => `Q ${frNum(v, 2)}`} ticks={11}
                 hint={band.type.includes('pass') ? 'Bosse au point de coupure : plus la valeur est haute, plus la coupure résonne.' : help('Largeur', 'Petite valeur = zone large et douce, grande valeur = zone étroite et précise.')} />
             </div>
+            {advanced && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5" data-nova-param="channel">
+                <span className="hw-silk hw-silk-soft" style={{ textAlign: 'left' }}>Canal</span>
+                <div className="grid grid-cols-5 gap-1.5 flex-1 min-w-[260px]" role="radiogroup" aria-label={`Canal traité (bande ${sel + 1})`}>
+                  {CHANNELS.map(c => (
+                    <PushButton key={c.id} role="radio" active={chan === c.id} dark led={col} className="hw-push-sm" hint={c.help}
+                      ariaLabel={c.aria} valueText={chan === c.id ? 'choisi' : undefined} dataAttrs={{ 'data-nova-channel': c.id }}
+                      onClick={() => updateBand(sel, { channel: c.id })} text={c.label} />
+                  ))}
+                </div>
+              </div>
+            )}
           </HwSection>
           <HwSection title="Sortie" className="flex-[1_1_140px] min-w-0">
             <div className="flex justify-center pt-1">
@@ -906,6 +1126,33 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
                 hint="Volume après l’égaliseur, pour comparer à volume égal (en dB)." />
             </div>
           </HwSection>
+          {advanced && (
+            <HwSection title="Phase" className="flex-[0_1_260px] min-w-[220px]">
+              <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Phase de l’égaliseur" data-nova-param="phase">
+                <PushButton role="radio" active={!linear} dark led={EQ_ACCENT} className="hw-push-sm" text="Naturelle" ariaLabel="Phase naturelle"
+                  valueText={!linear ? 'choisie' : undefined} dataAttrs={{ 'data-nova-phase': 'minimum' }}
+                  hint="Phase naturelle : aucune latence, comme un égaliseur analogique (léger déphasage autour des bandes)."
+                  onClick={() => commit({ ...paramsRef.current, phase: 'minimum' })} />
+                <PushButton role="radio" active={linear} dark led={EQ_ACCENT} className="hw-push-sm" text="Linéaire" ariaLabel="Phase linéaire"
+                  disabled={linBlocked} valueText={linear ? 'choisie' : linBlocked ? 'indisponible' : undefined} dataAttrs={{ 'data-nova-phase': 'linear' }}
+                  hint={linBlocked ? linWhy : `Phase linéaire : aucun déphasage (master, bus de batterie), au prix d’une latence de ${latMs(params.linQuality)} ms, compensée automatiquement.`}
+                  onClick={() => commit({ ...paramsRef.current, phase: 'linear' })} />
+              </div>
+              {linear && (
+                <div className="grid grid-cols-2 gap-1.5 mt-1.5" role="radiogroup" aria-label="Résolution de la phase linéaire" data-nova-param="linQuality">
+                  {(['normale', 'haute'] as const).map(q => (
+                    <PushButton key={q} role="radio" active={(params.linQuality || 'normale') === q} dark led={EQ_ACCENT} className="hw-push-sm"
+                      text={q === 'normale' ? 'Normale' : 'Haute'} ariaLabel={`Résolution ${q}`} dataAttrs={{ 'data-nova-linq': q }}
+                      hint={q === 'normale' ? `Résolution normale : latence ${latMs('normale')} ms.` : `Haute résolution : grave plus précis (coupe-bas, basses), latence ${latMs('haute')} ms.`}
+                      onClick={() => commit({ ...paramsRef.current, linQuality: q })} />
+                  ))}
+                </div>
+              )}
+              <div className="hw-silk hw-silk-soft mt-2" style={{ textAlign: 'left', textTransform: 'none', letterSpacing: '0.02em' }} data-nova-eq-latency aria-live="polite">
+                {linear ? `Latence ${latMs(params.linQuality)} ms · compensée` : linBlocked ? (lite ? 'Linéaire : pas en mode léger' : 'Linéaire : master et bus') : 'Sans latence'}
+              </div>
+            </HwSection>
+          )}
         </div>
       </Faceplate>
     </HwWindow>

@@ -168,6 +168,11 @@ BATTERIE = [
     # 0 échantillon, WAV), réouvert dans NOVA (aller-retour identique, Ctrl+Z), fichier de référence d'un autre logiciel
     # (plugins absents, son manquant signalés) ; bureau sombre + clair, téléphone 390.
     ("ergo_pro", []),
+    # 22/10/2026 · lot L4 « mix et mastering pro » : EQ 12 bandes en Mid/Side et phase linéaire (latence au PDC, export =
+    # lecture, neutre + PDC = son sec au bit près), rack d'effets parallèles (branches, bandes, centre / côtés, réalignement),
+    # scènes de mix A/B/C/D (rappel exact en une annulation, A⇄B, rappel partiel), mastering d'un EP (6 titres ≤ 0,5 LU,
+    # blancs exacts, .cue + ISRC, un WAV par titre) ; bureau sombre + clair, téléphone 390.
+    ("mixpro", []),
 ]
 
 

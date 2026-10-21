@@ -68,6 +68,7 @@ inspire. La seule marque visible est le logo NOVA (`NovaLogo`, posé par `Facepl
 | `lilac` | lilas `#c9b8e6` | violet noir `#1d1230`, accent violet | Écran du Sampler mélodique |
 | `navy` | bleu marine `#1b2440` | blanc lavande `#eef2ff`, accent anis | Compresseur multibande |
 | `ice` | bleu glace `#dfe9f0` | bleu nuit `#0f1d29`, accent magenta | EQ dynamique |
+| `copper` | cuivre brossé `#3a241a` | crème `#fbeee3`, accent orange | Rack parallèle |
 
 L'encre atteint au moins 7:1 de contraste sur sa façade ; `--hw-ink-soft` au moins 4,5:1.
 Les couleurs des façades sont codées dans `hw.css`, pas en classes Tailwind : elles ne
