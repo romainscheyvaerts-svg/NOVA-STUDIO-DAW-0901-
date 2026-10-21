@@ -239,3 +239,76 @@ describe('rack parallèle : structure et réglages', () => {
     expect(`${reg.name} ${reg.description}`).not.toMatch(/Ableton|Live|Reaper|Bitwig|Studio One|Cubase|Logic|Pro Tools|Avid|FL Studio/i);
   });
 });
+
+describe('rack parallèle : automation des effets des branches (22/10/2026)', () => {
+  /** Effet factice dont le gain est un AudioParam (automationParam) ou un réglage (updateParams). */
+  const hostAp = (ctx: BaseAudioContext): RackHost => {
+    const base = fakeHost(ctx);
+    return { createPlugin: (p) => { const m = base.createPlugin(p)!; const g = (m.output as any); return { ...m, node: { ...m.node, automationParam: (k: string) => (k === 'gain' ? g.gain : null) } }; } };
+  };
+  const withChild = (lat = 0) => {
+    const p = rackDefaults();
+    p.branches[0].plugins = [
+      ...(lat ? [{ id: 'x', name: 'Égaliseur', type: 'PROEQ12', isEnabled: true, latency: 0, params: { lat } }] : []),
+      { id: 'a', name: 'Compresseur', type: 'COMPRESSOR', isEnabled: true, latency: 0, params: { gain: 1, threshold: -20 } },
+    ];
+    return p;
+  };
+
+  it('réglage d\'un effet d\'une branche (« a/gain ») transmis à l\'effet ; valeur fixe gardée par une mise à jour, revenue à restoreStatic', () => {
+    const x = noise(256, 3);
+    // Branche 1 (effet « a ») et branche 2 vide à ×0,5 chacune : sortie = x. « a/gain » = 0 : sortie = x / 2.
+    LEN = 256;
+    const { ctx } = makeCtx();
+    const made: any[] = [];
+    const host: RackHost = { createPlugin: (p) => { const m = fakeHost(ctx).createPlugin(p)!; made.push(m); return m; } };
+    const n2 = new FxRackNode(ctx, { id: 'r', name: 'Rack', type: 'FXRACK', isEnabled: true, latency: 0, params: withChild() } as any, host);
+    const src = new N('src', [x, x]); src.connect(n2.input as any);
+    n2.updateParams({ 'a/gain': 0 });
+    const g = (made[0].output as any).gain;
+    expect(g.value).toBe(0);
+    const [oL] = evalN(n2.output as any);
+    expect(maxDiff(oL, x.map(v => Math.fround(v * 0.5)) as any)).toBeLessThan(1e-7);
+    // Mise à jour de la fenêtre de l'effet (autre réglage) pendant l'automation : le gain automatisé n'est pas écrasé.
+    n2.updateParams(withChildParams(sanitizeRack(withChild()), 'rb-1', 'a', { threshold: -30 }));
+    expect(g.value).toBe(0);
+    // Fin de l'automation : la valeur fixe revient.
+    n2.restoreStatic();
+    expect(g.value).toBe(1);
+    n2.dispose();
+  });
+
+  it('AudioParam de l\'effet rendu tel quel (programmé d\'avance par le moteur) ; réglages du rack inchangés', () => {
+    LEN = 64;
+    const { ctx } = makeCtx();
+    const node = new FxRackNode(ctx, { id: 'r', name: 'Rack', type: 'FXRACK', isEnabled: true, latency: 0, params: withChild() } as any, hostAp(ctx));
+    const ap = node.automationParam('a/gain') as any;
+    expect(ap && typeof ap.setValueAtTime).toBe('function');
+    expect(node.automationParam('z/gain')).toBeNull();
+    expect(node.automationParam('a/inconnu')).toBeNull();
+    expect(node.automationParam('mix')).toBeTruthy();
+  });
+
+  it('avance d\'automation : moins la latence des effets qui le précèdent dans sa branche', () => {
+    LEN = 64;
+    const { ctx } = makeCtx();
+    const node = new FxRackNode(ctx, { id: 'r', name: 'Rack', type: 'FXRACK', isEnabled: true, latency: 0, params: withChild(100) } as any, fakeHost(ctx));
+    expect(node.latency).toBeCloseTo(100 / SR, 12);
+    expect(node.childLeadOffset('a/gain')).toBeCloseTo(100 / SR, 12);
+    expect(node.childLeadOffset('x/gain')).toBe(0);
+    expect(node.childLeadOffset('mix')).toBe(0);
+  });
+
+  it('éditeur d\'automation : réglages des effets des branches nommés « Branche 1 · Compresseur · Seuil »', async () => {
+    const { rackChildAutomatable, parseRackChildKey, rackChildKey } = await import('../engine/fxRack');
+    const { legacyAutomatable } = await import('../engine/automationParams');
+    const list = rackChildAutomatable(sanitizeRack(withChild()), legacyAutomatable);
+    expect(list.find(a => a.id === 'a/threshold')?.label).toBe('Branche 1 · Compresseur · Seuil');
+    expect(parseRackChildKey(rackChildKey('fx-1', 'b3Freq'))).toEqual({ pluginId: 'fx-1', key: 'b3Freq' });
+    expect(parseRackChildKey('mix')).toBeNull();
+    const { automationParamLabel } = await import('../utils/automationLabels');
+    const track: any = { id: 't', plugins: [{ id: 'r', name: 'Rack', type: 'FXRACK', isEnabled: true, params: withChild() }] };
+    expect(automationParamLabel('plugin::r::a/threshold', [track])).toBe('Rack · Branche 1 · Compresseur · Seuil');
+    expect(automationParamLabel('plugin::r::mix', [track])).toBe('Rack · Mélange sec / humide');
+  });
+});

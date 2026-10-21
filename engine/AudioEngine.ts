@@ -1,6 +1,7 @@
 
 import { isLiteMode } from '../utils/perfMode';
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
+import { sanitizeRack, rackChildAutomatable, parseRackChildKey, findRackChild } from './fxRack';
 import { soloSilencedIds } from '../utils/soloMute';
 import { monitorStore, monitorCoefs, monitorGain, type MonitorSnapshot } from '../utils/monitorSection';
 import { listenTaps, liveSoloSilenced, tracksForRender, type ListenTap } from '../utils/soloListen';
@@ -4040,7 +4041,7 @@ export class AudioEngine {
    * de la piste (bus latent : les clips partent aussi en avance d'autant)
    * s'y ajoute.
    */
-  private pluginLead(trackId: string, pluginId: string): number {
+  private pluginLead(trackId: string, pluginId: string, key?: string): number {
     if (this.pdcSuspended) return 0;
     const dsp = this.tracksDSP.get(trackId);
     const ids = dsp?.chainIds || [];
@@ -4051,6 +4052,9 @@ export class AudioEngine {
       const l = dsp.pluginChain.get(ids[k])?.instance?.latency;
       if (typeof l === 'number' && l > 0 && l < 0.5) lead += l;
     }
+    // Effet d'une branche du rack parallèle (« <effet>/<réglage> ») : moins les effets qui le précèdent dans sa branche.
+    const inst = dsp.pluginChain.get(pluginId)?.instance;
+    if (key && typeof inst?.childLeadOffset === 'function') { try { lead -= inst.childLeadOffset(key) || 0; } catch { /* */ } }
     return lead;
   }
 
@@ -4141,7 +4145,7 @@ export class AudioEngine {
     if (!inst || typeof inst.automationParam !== 'function') return null;
     let ap: AudioParam | null = null;
     try { ap = inst.automationParam(pp.key); } catch { ap = null; }
-    return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId) } : null;
+    return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId, pp.key) } : null;
   }
 
   /**
@@ -4184,7 +4188,7 @@ export class AudioEngine {
     const a = end !== undefined ? this.pluginAutoParam(trackId, param) : null;
     if (a) { this.programPluginWindow(a.ap, this.sortedOf(points), start, end!, when, a.lead); return; }
     const pp = parsePluginParam(param);
-    const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId) : 0), 0);
+    const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId, pp.key) : 0), 0);
     const key = `${trackId}|${param}`;
     if (this.pluginAutoSent.get(key) === v || !this.ctx) return;
     const delay = Math.max(0, (when - this.ctx.currentTime) * 1000);
@@ -4225,7 +4229,8 @@ export class AudioEngine {
         const node = p && nodes.get(p.pluginId);
         if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
         const pts = this.sortedOf(lane.points);
-        const from = startOffset + (lead.get(p.pluginId) || 0) + (rendered.get(track.id)?.down || 0);
+        const childLead = typeof node.childLeadOffset === 'function' ? (node.childLeadOffset(p.key) || 0) : 0;
+        const from = startOffset + (lead.get(p.pluginId) || 0) - childLead + (rendered.get(track.id)?.down || 0);
         // Réglage exposé en AudioParam (limiteur) : toute la voie est programmée
         // d'avance sur le paramètre, sans pause du rendu (rampes exactes, au bloc près).
         const ap: AudioParam | null = typeof node.automationParam === 'function' ? node.automationParam(p.key) : null;
@@ -5169,7 +5174,7 @@ export class AudioEngine {
   /** Réglages automatisables des effets du registre (V21 : harmoniseur, tape stop…) de la piste. */
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] {
     const track = this.liveTracks?.find(t => t.id === trackId);
-    return (track?.plugins || []).flatMap(pl => {
+    return (track?.plugins || []).flatMap((pl): { pluginId: string, pluginName: string, params: PluginParameter[] }[] => {
       if (pl.type === 'VST3') {
         // VST du PC (R9) : réglages lus par le pont (noms du plugin), valeur brute 0–1.
         const list = vstParamCatalog.get(pl.id) || [];
@@ -5180,7 +5185,18 @@ export class AudioEngine {
       // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
       const list = reg?.automatable?.length ? reg.automatable : legacyAutomatable(pl.type);
       if (!list.length) return [];
-      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params: list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit })) }];
+      const params: PluginParameter[] = list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit }));
+      // Rack parallèle : chaque réglage automatisable des effets de ses branches (« Branche 1 · Compresseur · Seuil »).
+      if (pl.type === 'FXRACK') {
+        const rack = sanitizeRack(pl.params || {});
+        const listFor = (type: string) => { const r = getRegisteredPlugin(type); return r?.automatable?.length ? r.automatable : legacyAutomatable(type); };
+        for (const a of rackChildAutomatable(rack, listFor)) {
+          const ck = parseRackChildKey(a.id);
+          const child = ck ? findRackChild(rack, ck.pluginId)?.plugin : undefined;
+          params.push({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: (child && ck ? pluginParamStaticValue(child.params, ck.key) : undefined) as any, unit: a.unit });
+        }
+      }
+      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params }];
     });
   }
   public getMasterAnalyzer() { return this.masterAnalyzer; }

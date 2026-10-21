@@ -14,7 +14,7 @@
 import type { PluginInstance } from '../types';
 import { AutomationSet, MappedParam, dbToLin } from './automationParams';
 import { retireWorkletsOf } from './workletGuard';
-import { activePlugins, levelToGain, rackAlignment, rackStructureKey, sanitizeRack, RACK_MAX_BRANCHES, type RackParams } from './fxRack';
+import { activePlugins, levelToGain, parseRackChildKey, rackAlignment, rackStructureKey, sanitizeRack, RACK_MAX_BRANCHES, type RackParams } from './fxRack';
 
 export interface RackHost {
   /** Fabrique des effets du moteur (même code en lecture et à l'export). */
@@ -256,6 +256,14 @@ export class FxRackNode {
       this.lowLatency = raw.lowLatency;
       this.children.forEach(c => { try { c.node?.updateParams?.({ lowLatency: this.lowLatency }); } catch { /* */ } });
     }
+    // Automation d'un effet d'une branche (« <effet>/<réglage> ») : transmise à l'effet, tenue jusqu'à restoreStatic.
+    for (const [k, v] of Object.entries(raw)) {
+      const ck = parseRackChildKey(k);
+      const c = ck && this.children.get(ck.pluginId);
+      if (!ck || !c) continue;
+      this.automated.add(k);
+      try { c.node?.updateParams?.({ [ck.key]: v }); } catch { /* effet en reconstruction */ }
+    }
     const hasRack = ['mode', 'branches', 'bandCount', 'x1', 'x2', 'mix', 'outGain'].some(k => k in raw);
     if (!hasRack) return;
     const next = sanitizeRack({ ...this.params, ...raw });
@@ -268,7 +276,7 @@ export class FxRackNode {
       const k = JSON.stringify(pl.params || {});
       if (k === c.paramsKey) return;
       c.paramsKey = k;
-      try { c.node?.updateParams?.({ ...pl.params, isEnabled: true, ...(this.lowLatency ? { lowLatency: true } : {}) }); } catch (e) { console.warn('[Rack] réglage refusé', pl.type, e); }
+      try { c.node?.updateParams?.({ ...this.withoutAutomated(pl.id, pl.params), isEnabled: true, ...(this.lowLatency ? { lowLatency: true } : {}) }); } catch (e) { console.warn('[Rack] réglage refusé', pl.type, e); }
     }));
     // Nouveaux effets créés tout de suite (leur latence est connue avant le recâblage) ; les effets
     // retirés restent branchés jusqu'au recâblage, sous le fondu.
@@ -320,17 +328,59 @@ export class FxRackNode {
   /** Nœud d'un effet d'une branche (fenêtre de l'effet dans le rack). */
   public childNode(pluginId: string): any { return this.children.get(pluginId)?.node ?? null; }
 
-  public automationParam(key: string): MappedParam | null {
+  /** Réglages d'un effet d'une branche sans ceux que l'automation tient (sinon la valeur fixe revenait au milieu de la courbe). */
+  private withoutAutomated(pluginId: string, params: Record<string, any> | undefined): Record<string, any> {
+    const p = { ...(params || {}) };
+    this.automated.forEach(k => { const ck = parseRackChildKey(k); if (ck && ck.pluginId === pluginId) delete p[ck.key]; });
+    return p;
+  }
+
+  public automationParam(key: string): MappedParam | AudioParam | null {
+    // Réglage d'un effet d'une branche : son AudioParam (programmé d'avance, au bloc près), s'il en a un.
+    const ck = parseRackChildKey(key);
+    if (ck) {
+      const n = this.children.get(ck.pluginId)?.node;
+      let ap: any = null;
+      try { ap = typeof n?.automationParam === 'function' ? n.automationParam(ck.key) : null; } catch { ap = null; }
+      if (ap) this.automated.add(key);
+      return ap || null;
+    }
     const mp = this.auto.get(key);
     if (mp) this.automated.add(key);
     return mp;
   }
 
+  /**
+   * Avance d'automation d'un effet d'une branche par rapport au rack (s) : latence des effets qui
+   * le précèdent dans sa branche (son entrée reçoit le son du rack d'autant plus tard). 0 sinon.
+   */
+  public childLeadOffset(key: string): number {
+    const ck = parseRackChildKey(key);
+    if (!ck) return 0;
+    for (const b of this.params.branches) {
+      const act = activePlugins(b);
+      const i = act.findIndex(p => p.id === ck.pluginId);
+      if (i < 0) continue;
+      let s = 0;
+      for (let k = 0; k < i; k++) { const c = this.children.get(act[k].id); s += c ? this.childLatencySamples(c) : 0; }
+      return s / this.ctx.sampleRate;
+    }
+    return 0;
+  }
+
   public restoreStatic() {
+    // Effets des branches automatisés par updateParams : leurs réglages fixes reviennent.
+    const kids = new Set<string>();
+    this.automated.forEach(k => { const ck = parseRackChildKey(k); if (ck) kids.add(ck.pluginId); });
     this.automated.clear();
     this.auto.restoreStatic();
     this.applyGains(true);
     this.children.forEach(c => { try { c.node?.restoreStatic?.(); } catch { /* */ } });
+    this.params.branches.forEach(b => b.plugins.forEach(pl => {
+      const c = kids.has(pl.id) ? this.children.get(pl.id) : undefined;
+      if (!c) return;
+      try { c.node?.updateParams?.({ ...pl.params, isEnabled: true, ...(this.lowLatency ? { lowLatency: true } : {}) }); } catch { /* */ }
+    }));
   }
 
   /** Départ de lecture : les effets des branches qui savent repartir d'un état connu le font. */

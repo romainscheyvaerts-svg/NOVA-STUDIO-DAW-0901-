@@ -11,6 +11,7 @@ import { isMuteParam, muteValueText } from './muteAutomation';
 import { analogParamLabel, ANALOG_SPECS } from '../engine/analogCompParams';
 import { vstParamDisplayName, vstValueText } from './vstParamCatalog';
 import { mixFxParamLabel } from '../engine/mixfx/mixFxParams';
+import { RACK_AUTOMATABLE, sanitizeRack, parseRackChildKey, findRackChild, branchLabel, rackChildName } from '../engine/fxRack';
 
 /**
  * Automation en français et en vraies unités (audit G22) : « Volume » en dB
@@ -34,6 +35,19 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
     // VST du PC (R9) : nom du réglage tel que le plugin l'affiche (« Pro-C 3 · Threshold »).
     if (pl?.type === 'VST3') return `${pluginDisplayName(pl)} · ${vstParamDisplayName(pl.id, pp.key) || pp.key}`;
     if (!pl) { const vn = vstParamDisplayName(pp.pluginId, pp.key); if (vn) return vn; }
+    // Rack parallèle : ses réglages et ceux des effets de ses branches (« Rack parallèle · Branche 1 · Compresseur · Seuil »).
+    if (pl?.type === 'FXRACK') {
+      const own = RACK_AUTOMATABLE.find(a => a.id === pp.key)?.label;
+      if (own) return `${pluginDisplayName(pl)} · ${own}`;
+      const ck = parseRackChildKey(pp.key);
+      const rack = sanitizeRack(pl.params || {});
+      const hit = ck ? findRackChild(rack, ck.pluginId) : null;
+      if (hit && ck) {
+        const t = hit.plugin.type;
+        const lab = legacyParamLabel(t, ck.key) || mixFxParamLabel(t, ck.key) || (ANALOG_SPECS[t] ? analogParamLabel(t, ck.key) : null) || v21ParamLabel(t, ck.key) || ck.key;
+        return `${pluginDisplayName(pl)} · ${branchLabel(rack, hit.index, hit.branch)} · ${rackChildName(hit.plugin)} · ${lab}`;
+      }
+    }
     const limiterLabel = pl?.type === 'LIMITER' ? LIMITER_AUTOMATABLE.find(a => a.id === pp.key)?.label || null
       : pl && ANALOG_SPECS[pl.type] ? analogParamLabel(pl.type, pp.key)
       : pl ? mixFxParamLabel(pl.type, pp.key) : null;

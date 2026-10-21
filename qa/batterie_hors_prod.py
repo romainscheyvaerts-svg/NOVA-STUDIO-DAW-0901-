@@ -191,6 +191,9 @@ BATTERIE = [
     # posée à 0,000 s entendue entière (pré-roulement du transport), depuis 0 et depuis le milieu, 44,1 et 48 kHz ;
     # lecture = export au bit près ; tête de lecture jamais avant le départ ni en avance sur le son.
     ("pdc_preroll_lecture", []),
+    # 22/10/2026 · restes : automation d'un effet placé dans une branche du rack parallèle (gain de compensation du
+    # Compresseur ×1 → ×2 = +6,02 dB à l'export, Off = rien), proposé dans l'éditeur, lecture = export au bit près (44,1 / 48 kHz).
+    ("rack_automation", []),
 ]
 
 
