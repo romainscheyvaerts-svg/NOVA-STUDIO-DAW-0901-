@@ -270,12 +270,18 @@ def desktop(b):
     R = res["bureau"]
     heights = []
 
+    # --- Avant toute prise : la playlist (en-tête vide) est déjà visible au-dessus de la piste d'enregistrement
+    g = geo(page)
+    check("avant la 1re prise : playlist visible (en-tête vide) au-dessus de la piste d'enregistrement",
+          g["zone"] and abs(g["zone"]["h"] - HEAD_H) < 1 and g["count"] == 0 and "chacune ajoute une ligne" in (g["stripText"] or ""), g)
+    shot(page, "pc_00b_playlist_vide")
+
     # --- Prise 1 : le bandeau de fin de prise propose « 📌 Garder Prise 1 »
     check("prise 1 : REC part (micro simulé)", rec_take(page, 1))
     g = geo(page)
     R["apres_prise1"] = {"zone": g["zone"], "bandeau": g["stripText"]}
     check("après la 1re prise : zone (en-tête) au-dessus de la piste armée, état vide clair",
-          g["zone"] and abs(g["zone"]["h"] - HEAD_H) < 1 and g["count"] == 0 and "Garde tes meilleures prises" in (g["stripText"] or ""), g)
+          g["zone"] and abs(g["zone"]["h"] - HEAD_H) < 1 and g["count"] == 0 and "garde tes meilleures prises" in (g["stripText"] or "").lower(), g)
     btn = page.locator('[data-testid="kept-keep-last"]').locator("visible=true")
     check("bandeau de fin de prise : bouton « 📌 Garder Prise 1 »", btn.count() == 1 and "Prise 1" in btn.first.inner_text(), btn.count())
     shot(page, "pc_01_fin_prise1_bandeau")

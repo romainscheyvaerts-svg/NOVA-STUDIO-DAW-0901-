@@ -1,11 +1,12 @@
 {
-  "version": "1.5.8",
-  "url": "downloads/NovaStudioSetup-1.5.8.exe",
-  "sha256": "96f697eadd3ac221f1c407ffa564a4d0d2dc35a98d530ab525eaa56174929086",
-  "size": 51131838,
-  "date": "2026-10-21T18:28:17+02:00",
+  "version": "1.5.9",
+  "url": "downloads/NovaStudioSetup-1.5.9.exe",
+  "sha256": "9c470ae4b54b7934b73f4e6284ee51fcdaa74c951dcd0671c48cdd8857f1d55e",
+  "size": 51133067,
+  "date": "2026-10-21T18:59:02+02:00",
   "notes": [
-    "Waves : tous tes plugins sont détectés, même à la toute première ouverture (les groupes Waves sont lus l'un après l'autre).",
-    "Un groupe Waves qui ne répond pas est relu tout de suite, au lieu d'attendre le prochain démarrage."
+    "Playlist des prises gardées visible dès l'ouverture, au-dessus de ta piste d'enregistrement : chaque prise gardée pendant le rec y ajoute une ligne.",
+    "Onglet VST : tous tes plugins s'affichent (la liste s'arrêtait à 300).",
+    "Waves : une seule ligne par plugin, avec Stéréo / Mono / Mono → stéréo en petits boutons (au lieu de 734 lignes)."
   ]
 }
