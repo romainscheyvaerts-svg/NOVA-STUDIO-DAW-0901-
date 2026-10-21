@@ -117,6 +117,8 @@ import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing } from './utils/collabTempo';
 import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
 import { syncLinkedClips, duplicateLinked, makeUnique, unlinked } from './utils/linkedClips';
+import { freezeMidiFx, midiFxKeyStore, sanitizeMidiFx, activeFx, type MidiFxSlot } from './engine/midiFx';
+import { liveMidiFx } from './engine/midiFx/live';
 import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
@@ -128,6 +130,7 @@ import { registerLayoutPart } from './utils/windowLayouts';
 import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
 const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDialog'));
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
+const MidiFxPanel = lazyWithPreload(() => import('./components/MidiFxPanel'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
 import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
@@ -4205,6 +4208,48 @@ function Studio() {
   // R2 : fenêtres « Métronome et décompte », « Tempo et mesure », tap tempo (touche T).
   const [metronomeDialogOpen, setMetronomeDialogOpen] = useState(false);
   const [tempoDialog, setTempoDialog] = useState<{ open: boolean; focusBar: number | null }>({ open: false, focusBar: null });
+  // L3 · Effets MIDI d'une piste (arpège, accord, gamme) : fenêtre ouverte sur cette piste.
+  const [midiFxTrackId, setMidiFxTrackId] = useState<string | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => { const id = (e as CustomEvent).detail?.trackId; if (typeof id === 'string') setMidiFxTrackId(id); };
+    window.addEventListener('nova:open-midi-fx', on);
+    return () => window.removeEventListener('nova:open-midi-fx', on);
+  }, []);
+  // Tonalité du projet lue par la gamme forcée et l'accord « dans la gamme ».
+  useEffect(() => {
+    const k = state.projectKey;
+    midiFxKeyStore.set(typeof k === 'number' && Number.isFinite(k) ? { root: ((k % 12) + 12) % 12, scale: (state.projectScale || 'MAJOR').toUpperCase() } : null);
+  }, [state.projectKey, state.projectScale]);
+  // Clavier en direct : les effets ACTIFS de chaque piste MIDI (rien d'autre ne tourne au repos).
+  const liveFxIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const seen = new Set<string>();
+    for (const t of state.tracks) {
+      if (t.type !== TrackType.MIDI) continue;
+      seen.add(t.id);
+      liveMidiFx.setTrackFx(t.id, t.midiFx);
+    }
+    liveFxIdsRef.current.forEach(id => { if (!seen.has(id)) liveMidiFx.setTrackFx(id, undefined); });
+    liveFxIdsRef.current = seen;
+  }, [state.tracks]);
+  const handleMidiFxChange = useCallback((trackId: string, slots: MidiFxSlot[]) => {
+    setState(produce((d: DAWState) => {
+      const t = d.tracks.find(x => x.id === trackId);
+      if (!t) return;
+      if (slots.length) t.midiFx = slots as any; else delete t.midiFx;
+    }));
+    // Réglé pendant la lecture : les notes déjà programmées avec l'ancien réglage sont relâchées.
+    if (audioEngine.getIsPlaying()) { audioEngine.releaseTrackNotes(trackId); window.setTimeout(() => audioEngine.releaseTrackNotes(trackId), 160); }
+  }, [setState]);
+  const handleMidiFxFreeze = useCallback((trackId: string) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t || !activeFx(t).length) return;
+    const n = t.clips.reduce((a, c) => a + (c.notes?.length || 0), 0);
+    setState(prev => ({ ...prev, tracks: prev.tracks.map(x => (x.id === trackId ? freezeMidiFx(x) : x)) }));
+    const after = freezeMidiFx(t).clips.reduce((a, c) => a + (c.notes?.length || 0), 0);
+    setAiNotification(`❄️ Effets MIDI figés en notes sur « ${t.name} » : ${n} → ${after} notes dans les clips, effets coupés. Ctrl+Z pour revenir.`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
   const openTempoDialog = useCallback((bar: number | null) => setTempoDialog({ open: true, focusBar: bar }), []);
   const tempoLaneShown = useTempoLaneShown();
   const [tapBpm, setTapBpm] = useState<number | null>(null);
@@ -6580,6 +6625,8 @@ function Studio() {
             if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
             if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
             if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
+            // Effets MIDI (L3) : null = aucun ; absent = ancienne version (on garde les nôtres).
+            if (ct.midiFx !== undefined) { const fx = sanitizeMidiFx(ct.midiFx); if (fx.length) t.midiFx = fx as any; else delete t.midiFx; }
             // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
             if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
             // Respirations : rôle de la piste (lead / extra / ignorée).
@@ -10629,6 +10676,11 @@ function Studio() {
       a('Beat', 'pal.varyMidi', '🔀 Prolonger ou varier le clip MIDI sélectionné (règles)', () => sonsBeatStore.open({ kind: 'vary', mode: 'varier' }), { keywords: 'prolonger extend varier recompose variation melodie inversion deplacement rythme transposition midi' }),
       // Réglages
       a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
+      // L3 : effets MIDI de la piste sélectionnée (piste MIDI), mode avancé.
+      ...(!simpleNow ? [a('Beat', 'pal.midiFx', 'Effets MIDI de la piste : arpège, accord, gamme forcée', () => {
+        const sel = stateRef.current.tracks.find(t => t.id === stateRef.current.selectedTrackId && t.type === TrackType.MIDI) || stateRef.current.tracks.find(t => t.type === TrackType.MIDI);
+        if (sel) setMidiFxTrackId(sel.id); else setAiNotification('🎹 Effets MIDI : crée d’abord une piste MIDI (synthé, instrument).');
+      }, { keywords: 'arpege arpeggiator accord chord gamme scale midi fx effets' })] : []),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
       a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
       a('Réglages', 'pal.appUpdate', 'Rechercher une mise à jour de Nova Studio', () => { requestDesktopUpdateCheck(); setIsAudioSettingsOpen(true); }, { keywords: 'mise a jour maj update nouvelle version installer appli windows automatique', disabledReason: isNovaDesktop() ? undefined : 'Seulement dans l’appli Nova Studio pour Windows (le site est toujours à jour).' }),
@@ -11324,6 +11376,12 @@ function Studio() {
             suggestedBar={timeToPosition(tempoMapStore.get(), playheadStore.get()).bar}
             focusBar={tempoDialog.focusBar}
             tempoLaneOn={tempoLaneShown} onTempoLane={on => tempoLaneStore.set(on)} />
+        </Suspense>
+      )}
+      {midiFxTrackId && state.tracks.some(t => t.id === midiFxTrackId) && (
+        <Suspense fallback={null}>
+          <MidiFxPanel track={state.tracks.find(t => t.id === midiFxTrackId)!} projectKey={state.projectKey} projectScale={state.projectScale}
+            onChange={slots => handleMidiFxChange(midiFxTrackId, slots)} onFreeze={() => handleMidiFxFreeze(midiFxTrackId)} onClose={() => setMidiFxTrackId(null)} />
         </Suspense>
       )}
       {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}

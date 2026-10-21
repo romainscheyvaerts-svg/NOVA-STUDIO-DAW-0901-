@@ -18,6 +18,24 @@ import {
   MidiRecPrefs, loadMidiRecPrefs, saveMidiRecPrefs, normalizeMidiRecPrefs, midiTimestampToContextTime, MidiTakeRecorder, LoopRange, RecNote, ClockOffset,
 } from '../utils/midiRecord';
 import { SUSTAIN, pedalDown, ccNumber } from '../utils/midiCc';
+import { liveMidiFx, type LiveIO } from '../engine/midiFx/live';
+import { midiFxKeyStore } from '../engine/midiFx';
+import { tempoMapStore } from '../utils/tempoMap';
+
+/** L3 · Effets MIDI au clavier (engine/midiFx/live) : sorties vers le moteur. */
+const liveIO: LiveIO = {
+  attack: (t, p, v, at) => audioEngine.triggerTrackAttack(t, p, v, at),
+  release: (t, p, at) => audioEngine.triggerTrackRelease(t, p, at),
+  now: () => audioEngine.ctx?.currentTime ?? 0,
+  songAt: (ctxT) => (audioEngine.getIsPlaying() ? Math.max(0, ctxT - audioEngine.getPlaybackOrigin()) : null),
+  map: () => tempoMapStore.get(),
+  key: () => midiFxKeyStore.get(),
+};
+/** Relâche une touche (à travers les effets MIDI de la piste s'il y en a). */
+const releaseKey = (trackId: string, pitch: number) => {
+  if (liveMidiFx.has(trackId)) liveMidiFx.noteOff(trackId, pitch, liveIO);
+  else audioEngine.triggerTrackRelease(trackId, pitch);
+};
 
 export type MidiSource = 'hw' | 'kb' | 'screen';
 
@@ -145,9 +163,11 @@ class MidiInputHub {
       void audioEngine.resume?.();
       // Même touche encore tenue par la pédale : on la relâche avant de la rejouer.
       const prev = this.sounding.get(pitch);
-      if (prev) audioEngine.triggerTrackRelease(prev, pitch);
+      if (prev) releaseKey(prev, pitch);
       this.pedal.get(trackId)?.delete(pitch);
-      audioEngine.triggerTrackAttack(trackId, pitch, velocity / 127);
+      // L3 : arpège / accord / gamme de la piste joués en direct (sinon la touche telle quelle).
+      if (liveMidiFx.has(trackId)) liveMidiFx.noteOn(trackId, pitch, velocity / 127, liveIO);
+      else audioEngine.triggerTrackAttack(trackId, pitch, velocity / 127);
       this.sounding.set(pitch, trackId);
     }
     midiCapture.noteOn(pitch, velocity, trackId);
@@ -160,7 +180,7 @@ class MidiInputHub {
     const trackId = this.sounding.get(pitch) ?? this.targetTrack(o.trackId);
     const held = trackId ? this.pedal.get(trackId) : undefined;
     if (trackId && held) held.add(pitch); // la pédale tient la note
-    else if (trackId) { audioEngine.triggerTrackRelease(trackId, pitch); this.sounding.delete(pitch); }
+    else if (trackId) { releaseKey(trackId, pitch); this.sounding.delete(pitch); }
     midiCapture.noteOff(pitch);
     if (this.session) this.session.rec.noteOff(pitch, ctxTime - this.session.anchor);
     this.emit({ type: 'off', pitch, source: o.source, trackId, ctxTime });
@@ -192,14 +212,15 @@ class MidiInputHub {
     const held = this.pedal.get(trackId);
     this.pedal.delete(trackId);
     held?.forEach(p => {
-      if (this.sounding.get(p) === trackId) { audioEngine.triggerTrackRelease(trackId, p); this.sounding.delete(p); }
+      if (this.sounding.get(p) === trackId) { releaseKey(trackId, p); this.sounding.delete(p); }
     });
   }
 
   /** Tout relâcher (panique, perte de focus). */
   panic() {
-    this.sounding.forEach((t, p) => audioEngine.triggerTrackRelease(t, p));
+    this.sounding.forEach((t, p) => releaseKey(t, p));
     this.sounding.clear();
+    liveMidiFx.panic(liveIO);
     this.pedal.clear();
   }
 

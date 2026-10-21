@@ -1283,6 +1283,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              {/* Son de la piste (mode instru : synthé NOVA, instrument VST du PC, 808) */}
              {toolbarExtra}
 
+             {/* L3 · Effets MIDI de la piste (arpège, accord, gamme forcée), mode avancé. */}
+             {!simple && track.type === TrackType.MIDI && (
+               <button type="button" data-testid="roll-midi-fx" className="pr-cap shrink-0" {...TOGGLE(!!track.midiFx?.some(s => s.on))}
+                 onClick={() => window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId: track.id } }))}
+                 title="Effets MIDI : arpège, accord d’une touche, gamme forcée (réglables pendant la lecture, figeables en notes)" aria-label="Effets MIDI">
+                 <i className="fas fa-wand-magic-sparkles text-[10px]"></i><span>FX MIDI{track.midiFx?.some(s => s.on) ? ` · ${track.midiFx.filter(s => s.on).length}` : ''}</span>
+               </button>
+             )}
+
              <div className="pr-sep"></div>
 
              {/* Outils (FL Studio : P, B, E, C, D) */}

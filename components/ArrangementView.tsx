@@ -963,6 +963,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (piste guide inactive au bounce).',
       onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
     });
+    // L3 · Effets MIDI de la piste (arpège, accord, gamme forcée), mode avancé.
+    if (target && target.type === TrackType.MIDI && !simple) menuItems.push({
+      label: target.midiFx?.some(s => s.on) ? `Effets MIDI (${target.midiFx.filter(s => s.on).length} actif${target.midiFx.filter(s => s.on).length > 1 ? 's' : ''})…` : 'Effets MIDI : arpège, accord, gamme…', icon: 'fa-wand-magic-sparkles',
+      title: 'Arpège, accord d’une touche, gamme forcée : joués avant l’instrument, réglables pendant la lecture, figeables en notes.',
+      onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId } })); },
+    });
     // Pro Tools : tous les clips de la piste (triple-clic au Sélecteur) et solo safe (Ctrl+clic sur S).
     if (target && target.clips.length) menuItems.push({ label: 'Sélectionner tous les clips de la piste', icon: 'fa-object-group', shortcut: 'Ctrl+Alt+A', onClick: () => { setContextMenu(null); runEditCommand('selectTrackClips', { trackId }); } });
     if (target && target.id !== 'master') menuItems.push({

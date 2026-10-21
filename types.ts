@@ -987,6 +987,13 @@ export interface Track {
    */
   novaSynth?: import('./utils/novaSynth').NovaSynthSettings;
   /**
+   * L3 · Effets MIDI en temps réel (engine/midiFx) : arpège, accord, gamme
+   * forcée, appliqués aux notes AVANT l'instrument (lecture, export, clavier).
+   * Les notes du clip ne changent pas (« Figer en notes » les écrit). Une
+   * ancienne version l'ignore et joue les notes du clip.
+   */
+  midiFx?: import('./engine/midiFx').MidiFxSlot[];
+  /**
    * R18 · Piste MIDI jouée par le sampler mélodique (ton son, chromatique,
    * ADSR, boucle, glide, mono / poly) ou, R20, par un instrument
    * multi-échantillons (piano, Rhodes, guitare, cordes, cloches, nappe).

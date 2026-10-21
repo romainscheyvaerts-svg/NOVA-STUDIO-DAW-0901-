@@ -153,6 +153,10 @@ BATTERIE = [
     # 22/10/2026 · L3 clips MIDI liés : « Dupliquer en copie liée » (menu du clip) ×8, pastilles « ∞ 8 », ↑ dans le piano roll
     # d'UNE copie = les 8 montent (Ctrl+Z / Ctrl+Y en une étape), export = motif posé 8 fois, « Rendre unique », sauvegarde + rechargement.
     ("clips_lies", []),
+    # 22/10/2026 · L3 effets MIDI en temps réel : arpège (doubles-croches à 140 BPM à ±1 ms, vitesse changée PENDANT la lecture),
+    # gamme forcée (100 % dans la gamme du projet), clavier en direct (arpège, aucun minuteur au repos), « Figer en notes »
+    # (= notes entendues, export identique), Ctrl+Z, sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
+    ("effets_midi", []),
 ]
 
 
