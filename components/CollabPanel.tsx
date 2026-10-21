@@ -26,6 +26,9 @@ export interface CollabMessage { id: string; from: string; role: CollabRole; tex
 export interface LiveAudioView {
   /** Talkback ouvert (je parle). */
   talkOn: boolean;
+  /** Ouvert par un appui court (reste ouvert jusqu'au prochain appui, utils/talkback). */
+  talkLatched?: boolean;
+  /** Appui / relâchement du bouton : court = reste ouvert, maintenu = tant qu'on tient. */
   onTalk: (on: boolean) => void;
   /** Ingé : peut diffuser son mix ; diffusion en cours. */
   canMixOut: boolean;
@@ -591,11 +594,11 @@ const CollabPanel: React.FC<Props> = (p) => {
                 onPointerDown={(e) => { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ } p.audio!.onTalk(true); }}
                 onPointerUp={() => p.audio!.onTalk(false)} onPointerCancel={() => p.audio!.onTalk(false)}
                 onLostPointerCapture={() => { if (p.audio!.talkOn) p.audio!.onTalk(false); }}
-                onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !p.audio!.talkOn) { e.preventDefault(); p.audio!.onTalk(true); } }}
-                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') p.audio!.onTalk(false); }}
+                onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); e.stopPropagation(); p.audio!.onTalk(true); } }}
+                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.stopPropagation(); p.audio!.onTalk(false); } }}
                 aria-pressed={p.audio.talkOn}
                 className={`${btn} h-12 w-full select-none touch-none ${p.audio.talkOn ? 'bg-red-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/15'}`}>
-                {p.audio.talkOn ? '🎙️ On t’entend… (relâche pour couper)' : '🎙️ Maintenir pour parler (talkback)'}
+                {p.audio.talkOn ? (p.audio.talkLatched ? '🎙️ On t’entend… (appuie encore pour couper)' : '🎙️ On t’entend… (relâche pour couper)') : '🎙️ Parler (talkback) : touche ou maintiens'}
               </button>
               {p.audio.talking.length > 0 && <p role="status" data-testid="collab-talking" className="text-[12px] font-bold text-sky-200">🔊 {p.audio.talking.join(', ')} te parle{p.audio.talking.length > 1 ? 'nt' : ''}…</p>}
               {p.audio.canMixOut && p.audio.mixSource}

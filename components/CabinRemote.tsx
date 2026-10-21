@@ -37,6 +37,8 @@ export interface CabinRemoteProps {
   regions: Marker[];
   regionMap: Record<string, string>;
   talkOn: boolean;
+  /** Ouvert par un toucher court : reste ouvert jusqu'au prochain toucher. */
+  talkLatched?: boolean;
   onTalk: (on: boolean) => void;
   talking: string[];
   onClose: () => void;
@@ -208,7 +210,7 @@ const CabinRemote: React.FC<CabinRemoteProps> = (p) => {
           onPointerUp={() => p.onTalk(false)} onPointerCancel={() => p.onTalk(false)}
           onLostPointerCapture={() => { if (p.talkOn) p.onTalk(false); }}
           className={`${big} h-14 min-w-0 flex-1 text-[16px] ${p.talkOn ? 'animate-pulse bg-red-500' : 'bg-white/10'}`}>
-          {p.talkOn ? `${eng} t'entend… (relâche pour couper)` : `🎙️ Parler à ${eng} (maintenir)`}
+          {p.talkOn ? `${eng} t'entend… (${p.talkLatched ? 'touche encore pour couper' : 'relâche pour couper'})` : `🎙️ Parler à ${eng} (touche ou maintiens)`}
         </button>
         {/* 📌 La prise te plaît : elle va dans les prises gardées de l'ingé (pour choisir à la fin). */}
         <button type="button" data-testid="cabin-keep" disabled={!b.keep.enabled} onPointerDown={down} onClick={press('keep')}

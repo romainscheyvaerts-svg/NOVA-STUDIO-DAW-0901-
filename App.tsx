@@ -219,6 +219,9 @@ import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import { CollabRtc, RtcSignal, RtcQuality } from './services/CollabRtc';
+import { localTalkback } from './services/LocalTalkback';
+import { TalkbackLatch, talkbackMicError, talkbackPlan, talkbackSettingsStore, useTalkbackSettings } from './utils/talkback';
+import { useTalkbackKey } from './hooks/useTalkbackKey';
 import { mixQualityLabel } from './utils/opusSdp';
 import { sessionPrint, trackParts } from './utils/collabFingerprint';
 import {
@@ -1068,7 +1071,7 @@ function Studio() {
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
-  const [audioSettingsFocus, setAudioSettingsFocus] = useState<'surfaces' | undefined>(undefined);
+  const [audioSettingsFocus, setAudioSettingsFocus] = useState<'surfaces' | 'talkback' | undefined>(undefined);
   // R15 : fenêtre « Mixes casque » (ouverte depuis les Réglages audio ou le menu).
   const [cueMixesOpen, setCueMixesOpen] = useState(false);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false); 
@@ -7736,19 +7739,22 @@ function Studio() {
   /** Talkback : maintenir pour parler (le micro reste ouvert, coupé entre deux appuis). */
   const talkWantedRef = useRef(false);
   const micPendingRef = useRef<Promise<MediaStream | null> | null>(null);
-  const setTalk = useCallback(async (on: boolean) => {
+  /** Faux : le micro n'a pas pu s'ouvrir (refusé, absent) — le talkback reste coupé. */
+  const setTalk = useCallback(async (on: boolean): Promise<boolean> => {
     const c = collabRef.current;
     const rtc = rtcRef.current;
-    if (!c || !rtc) return;
+    if (!c || !rtc) return false;
     talkWantedRef.current = on;
     if (on && !micStreamRef.current) {
-      // Un seul accès au micro à la fois (appuis rapprochés).
+      // Un seul accès au micro à la fois (appuis rapprochés). Demandé au premier appui seulement.
+      let micErr: unknown = null;
       micPendingRef.current = micPendingRef.current || navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-        .catch(() => null).finally(() => { micPendingRef.current = null; });
+        .catch((e) => { micErr = e; return null; }).finally(() => { micPendingRef.current = null; });
       const mic = await micPendingRef.current;
       if (!mic) {
-        setAiNotification("🎙️ Talkback : le micro n'est pas disponible (autorise-le dans le navigateur).");
-        return;
+        setAiNotification(talkbackMicError(micErr));
+        talkWantedRef.current = false;
+        return false;
       }
       if (!micStreamRef.current) {
         micStreamRef.current = mic;
@@ -7761,7 +7767,102 @@ function Studio() {
     micStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = want; });
     setTalkOn(want);
     c.client.setPresence({ talk: want });
+    return true;
   }, []);
+
+  // --- Talkback : bouton de la barre, touche (N), palette ; en collaboration (CollabRtc) ou au studio (casque) ---
+  // Comme une console : appui court = verrouillé (2e appui coupe), maintenu = tant qu'on tient (utils/talkback).
+  const { simple: talkSimple } = useSimpleMode();
+  const talkSettings = useTalkbackSettings();
+  const [localTalkOn, setLocalTalkOn] = useState(false);
+  const [talkLatched, setTalkLatched] = useState(false);
+  const talkAppliedRef = useRef(false);
+  const talkGenRef = useRef(0);
+  const talkLatchRef = useRef<TalkbackLatch | null>(null);
+  const applyLocalTalkPlan = (open: boolean) => {
+    const s = talkbackSettingsStore.get();
+    audioEngine.setTalkback(talkbackPlan({ open, recording: !!stateRef.current.isRecording, cueMixCount: (stateRef.current.cueMixes || []).length, dimDb: s.dimDb, levelDb: s.levelDb }));
+  };
+  const applyTalkOpenRef = useRef<(open: boolean) => Promise<void>>(async () => {});
+  applyTalkOpenRef.current = async (open: boolean) => {
+    const latch = talkLatchRef.current!;
+    const gen = ++talkGenRef.current;
+    if (collabRef.current) {
+      // En collaboration : le talkback EN DIRECT existant (des deux côtés).
+      if (!rtcRef.current) {
+        if (open) { setAiNotification('🎙️ Talkback : la liaison en direct avec la séance n’est pas encore prête, réessaie dans un instant.'); latch.forceClose(); }
+        return;
+      }
+      const ok = await setTalk(open);
+      if (open && !ok && gen === talkGenRef.current) latch.forceClose();
+      return;
+    }
+    if (!open) {
+      localTalkback.close();
+      applyLocalTalkPlan(false);
+      setLocalTalkOn(false);
+      return;
+    }
+    if (stateRef.current.isRecording) {
+      setAiNotification('🎙️ Talkback coupé pendant la prise : ta voix finirait dans le micro de l’artiste. Parle-lui à l’arrêt.');
+      latch.forceClose();
+      return;
+    }
+    await ensureAudioEngine();
+    const r = await localTalkback.open(talkbackSettingsStore.get().deviceId);
+    if (gen !== talkGenRef.current) { if (!talkAppliedRef.current) localTalkback.close(); return; }
+    if (r.ok === false) {
+      setAiNotification(((r as { error?: { name?: string } }).error)?.name === 'EngineNotReady' ? '🎙️ Talkback : le moteur audio n’est pas prêt. Lance la lecture une fois, puis réessaie.' : talkbackMicError((r as { error?: unknown }).error));
+      latch.forceClose();
+      return;
+    }
+    applyLocalTalkPlan(true);
+    setLocalTalkOn(true);
+  };
+  if (!talkLatchRef.current) {
+    talkLatchRef.current = new TalkbackLatch((open, latched) => {
+      setTalkLatched(latched);
+      if (open === talkAppliedRef.current) return;
+      talkAppliedRef.current = open;
+      void applyTalkOpenRef.current(open);
+    });
+  }
+  /** Le talkback a un sens ici : en collaboration (les deux rôles), ou en mode avancé (studio). */
+  const talkAvailable = !!collab || !talkSimple;
+  const talkPress = useCallback(() => talkLatchRef.current!.press('key'), []);
+  const talkRelease = useCallback(() => talkLatchRef.current!.release('key'), []);
+  useTalkbackKey(talkAvailable, talkPress, talkRelease);
+  /** Bouton (barre, panneau Collaboration, écran de l'artiste, cabine) : même comportement que la touche. */
+  const talkButton = useCallback((down: boolean) => { const l = talkLatchRef.current!; if (down) l.press('button'); else l.release('button'); }, []);
+  const talkToggle = useCallback(() => talkLatchRef.current!.toggle(), []);
+  // Entrée ou sortie de collaboration : on repart talkback coupé (jamais un micro resté ouvert d'un mode à l'autre).
+  const collabOnForTalk = !!collab;
+  useEffect(() => {
+    talkLatchRef.current?.forceClose();
+    if (collabOnForTalk) localTalkback.stop();
+  }, [collabOnForTalk]);
+  // Plus disponible (mode simple hors collaboration) : coupé.
+  useEffect(() => { if (!talkAvailable) talkLatchRef.current?.forceClose(); }, [talkAvailable]);
+  // Une prise commence : le talkback LOCAL se coupe (il ne doit jamais finir dans l'enregistrement).
+  useEffect(() => {
+    if (!state.isRecording || collab) return;
+    if (talkLatchRef.current?.open) {
+      talkLatchRef.current.forceClose();
+      setAiNotification('🎙️ Prise en cours : talkback coupé (ta voix ne doit pas finir dans le micro de l’artiste).');
+    }
+    applyLocalTalkPlan(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.isRecording]);
+  // Réglages (dim, niveau) ou mixes casque changés pendant qu'on parle : appliqués tout de suite.
+  useEffect(() => {
+    if (localTalkOn) applyLocalTalkPlan(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talkSettings.dimDb, talkSettings.levelDb, state.cueMixes, localTalkOn]);
+  // Micro du talkback changé dans les réglages : rendu, rouvert au prochain appui.
+  useEffect(() => { if (!localTalkOn) localTalkback.stop(); }, [talkSettings.deviceId]);
+  useEffect(() => () => { localTalkback.stop(); }, []);
+  /** Talkback ouvert en ce moment (collaboration ou studio). */
+  const talkbackOpen = collab ? talkOn : localTalkOn;
   /** Ingé : diffuser son mix en direct à l'artiste (comme Audiomovers). */
   const toggleMixOut = useCallback(async () => {
     const c = collabRef.current;
@@ -8297,6 +8398,8 @@ function Studio() {
       messages: () => collabMessagesRef.current.map(m => ({ from: m.from, text: m.text, mine: !!m.mine, pending: !!m.pending })),
       history: () => collabHistoryRef.current.map(h => ({ who: h.who, text: h.text, undo: !!h.undo, undone: !!h.undone })),
       audio: () => ({ rtc: rtcRef.current?.connectionStates() || {}, remote: remoteAudioRef.current, talkOn: talkOnRef.current, mixOut: mixOutOnRef.current }),
+      /** Talkback (utils/talkback) : ouvert, verrouillé, micro local. */
+      talkback: () => ({ open: !!talkLatchRef.current?.open, latched: !!talkLatchRef.current?.latched, talkOn: talkOnRef.current, local: localTalkback.isLive(), holdsMic: localTalkback.holdsMic(), route: audioEngine.getTalkbackRoute() }),
       /** Ce qui passe vraiment en WebRTC (octets, paquets, niveau) et le journal de signalisation. */
       rtcStats: () => rtcRef.current?.stats() ?? Promise.resolve({}),
       rtcTrace: () => rtcRef.current?.traceLog() ?? [],
@@ -10407,6 +10510,9 @@ function Studio() {
       a('Mix', 'pal.quickMaster', '🎚️ Masteriser un morceau (un fichier WAV / MP3, sans projet)', () => setQuickMasterOpen(true), { keywords: 'masteriser master mastering fichier wav mp3 flac référence bandlab express' }),
       a('Mix', 'pal.loudness', 'Loudness du master (LUFS, true peak)', () => loudnessPanel.set(true), { keywords: 'lufs loudness true peak mètres metre' }),
       a('Mix', 'pal.cue', 'Mixes casque (cue) des artistes', () => setCueMixesOpen(true), { keywords: 'casque cue retour headphone' }),
+      a('Transport', 'nova.talkback', talkLatchRef.current?.open ? '🎙️ Couper le talkback' : '🎙️ Talkback : parler dans le casque de l’artiste (reste ouvert, 2e appui coupe)', () => talkToggle(),
+        { keys: k('nova.talkback'), keywords: 'talkback parler artiste casque cabine voix ingé micro régie console dim communiquer', disabledReason: talkAvailable ? undefined : 'En mode avancé, ou pendant une collaboration.' }),
+      a('Réglages', 'pal.talkbackSettings', 'Réglages du talkback (micro, baisse de la musique, niveau)', () => { setAudioSettingsFocus('talkback'); setIsAudioSettingsOpen(true); }, { keywords: 'talkback micro dim baisse musique casque niveau régie' }),
       a('Mix', 'pal.plugins', 'Gestionnaire de plugins (VST)', () => setIsPluginManagerOpen(true), { pt: 'Plug-In Manager', keywords: 'vst plugins effets' }),
       // Beat
       a('Beat', 'pal.drums', 'Batterie (boîte à rythmes, pas à pas)', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
@@ -10454,6 +10560,7 @@ function Studio() {
       <div className="relative z-50">
         <PanelBoundary name="la barre de transport" compact>
         <TransportBar
+          talkback={talkAvailable ? { on: talkbackOpen, latched: talkLatched && talkbackOpen, collab: !!collab, keyHint: shortcutHint('nova.talkback'), talking: collabTalking, onButton: talkButton, onToggle: talkToggle } : null}
           dspTracks={state.tracks}
           onDspFreezeTrack={(id) => { void freezeTrackRef.current(id); }}
           dspSafety={{ isRecording: !!state.isRecording, bridgeConnected: novaBridge.isConnected(), busyTrackIds: Object.keys(collabLiveStore.get().recs || {}) }}
@@ -11273,7 +11380,7 @@ function Studio() {
           const nameOf = (k: string) => collabOnline.find(m => participantOf(m.member_key) === k)?.display_name || '?';
           const mixFrom = Object.entries(remoteAudio).find(([, v]) => v.mix)?.[0];
           return {
-            talkOn, onTalk: (on: boolean) => { void setTalk(on); },
+            talkOn, talkLatched, onTalk: talkButton,
             canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
             mixSource: collab.role === 'engineer' ? <MixSourcePicker mixOutOn={mixOutOn} /> : undefined,
             remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
@@ -11402,7 +11509,8 @@ function Studio() {
           onNextTakeFrom={setGuestTakeFrom}
           onDelete={(n) => { if (guestTrack) handleDeleteTake(guestTrack.id, n); }}
           talkOn={talkOn}
-          onTalk={(on) => { void setTalk(on); }}
+          talkLatched={talkLatched}
+          onTalk={talkButton}
           talking={collabTalking}
           messages={collabMessages}
           onSend={sendChat}
@@ -11452,7 +11560,8 @@ function Studio() {
             regions={state.markers.filter(m => m.type === 'REGION' && (m.endTime ?? 0) > m.time)}
             regionMap={state.lyricsRegions || {}}
             talkOn={talkOn}
-            onTalk={(on) => { void setTalk(on); }}
+            talkLatched={talkLatched}
+            onTalk={talkButton}
             talking={collabTalking}
             onClose={() => setCabinOpen(false)}
           />
