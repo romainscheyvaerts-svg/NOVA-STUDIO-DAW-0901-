@@ -169,6 +169,62 @@ RENDER_JS = """async ({ bpm }) => {
 }"""
 
 
+ROLL_JS = """async () => {
+  const T = await window.__novaAppModule('/utils/tempoMap.ts');
+  const m = T.tempoMapStore.get();
+  const svg = document.querySelector('[data-nova-roll-grid-tempo]');
+  const ruler = document.querySelector('[data-nova-roll-tempo]');
+  if (!svg) return { grille_carte: false, regle: ruler && ruler.dataset.novaRollTempo };
+  const zoom = +svg.dataset.novaRollZoom, start = +svg.dataset.novaRollStart;
+  const xs = svg.querySelector('[data-nova-roll-bars]').dataset.novaRollBars.split(' ').map(Number);
+  const p0 = T.timeToPosition(m, start - 1e-9), first = p0.bar + (p0.beat || p0.frac > 1e-6 ? 1 : 0);
+  let pire = 0, pireAncien = 0;
+  const bpm0 = T.tempoAt(m, start), barSec0 = 240 / bpm0;   // grille d'avant : tempo du début du clip, régulière
+  xs.forEach((x, i) => { const t = T.barToTime(m, first + i); pire = Math.max(pire, Math.abs(x - (t - start) * zoom));
+    pireAncien = Math.max(pireAncien, Math.abs(t - (first + i) * barSec0) * 1000); });
+  return { grille_carte: true, regle: ruler && ruler.dataset.novaRollTempo, traits: xs.length, pire_px: +pire.toFixed(3), zoom, start,
+           ecart_grille_ancienne_ms: +pireAncien.toFixed(1), tempo_coin: document.querySelector('[data-nova-pianoroll] .pr-ruler')?.textContent || '' };
+}"""
+
+
+def piano_roll_rampe(page, R):
+    """Piano roll ouvert sur le clip MIDI pris dans la rampe : grille, règle et aimantation suivent la carte."""
+    page.evaluate("() => { try { localStorage.setItem('nova.pianoroll.prefs', JSON.stringify({ gridId: '1/16', magnet: true })); } catch (e) {} }")
+    page.evaluate("() => window.dispatchEvent(new CustomEvent('nova:open-piano-roll', { detail: { trackId: 'piano', clipId: 'c-piano' } }))")
+    page.locator('[data-nova-pianoroll]').first.wait_for(timeout=8000)
+    page.wait_for_timeout(800)
+    g = page.evaluate(ROLL_JS)
+    R["piano_roll_rampe"] = g
+    check("piano roll dans la rampe : grille et règle calculées sur la carte de tempo", g.get("grille_carte") and g.get("regle") == "carte", g)
+    check("piano roll dans la rampe : chaque trait de mesure à ±0,01 px de l'arrangement (barToTime)", g.get("traits", 0) >= 3 and g.get("pire_px", 9) <= 0.01, g)
+    # Aimantation : clic au crayon à 40 % d'une double-croche prise au milieu de la rampe → note posée au début exact de la case.
+    snap = page.evaluate("""async () => {
+      const T = await window.__novaAppModule('/utils/tempoMap.ts');
+      const m = T.tempoMapStore.get();
+      const s = window.DAW_CONTROL.getState(); const c = s.tracks.find(t => t.id === 'piano').clips.find(x => x.id === 'c-piano');
+      const q0 = T.timeToQuarters(m, c.start) + 4 * 1 + 0.25 * 5;   // mesure suivante + 5 doubles-croches
+      const t = T.quartersToTime(m, q0 + 0.1), attendu = T.quartersToTime(m, q0);
+      const g = document.querySelector('[data-nova-roll-grid]'); const r = g.getBoundingClientRect();
+      const zoom = +document.querySelector('[data-nova-roll-grid-tempo]').dataset.novaRollZoom;
+      const x = r.left + (t - c.start) * zoom - g.scrollLeft, y = r.top + Math.min(200, r.height / 2);
+      return { x, y, attendu_rel: attendu - c.start, n: c.notes.length, ancienne: Math.floor(t / (15 / T.tempoAt(m, c.start)) + 1e-9) * (15 / T.tempoAt(m, c.start)) - c.start };
+    }""")
+    page.mouse.click(snap["x"], snap["y"]); page.wait_for_timeout(600)
+    got = page.evaluate("""(n0) => { const s = window.DAW_CONTROL.getState(); const c = s.tracks.find(t => t.id === 'piano').clips.find(x => x.id === 'c-piano');
+      return c.notes.length > n0 ? c.notes.map(n => n.start) : []; }""", snap["n"])
+    best = min((abs(x - snap["attendu_rel"]) for x in got), default=9)
+    snap["ecart_ms"] = round(best * 1000, 4)
+    snap["ecart_grille_ancienne_ms"] = round(abs(snap["ancienne"] - snap["attendu_rel"]) * 1000, 2)
+    R["piano_roll_aimantation"] = snap
+    check("piano roll dans la rampe : note posée au crayon au début exact de sa double-croche (±0,001 ms)", len(got) == snap["n"] + 1 and best * 1000 <= 0.001, snap)
+    shot(page, "pc_06b_piano_roll_rampe")
+    page.keyboard.press("Escape"); page.wait_for_timeout(500)
+    page.mouse.click(800, 450); page.wait_for_timeout(200)
+    page.keyboard.press("Control+z"); page.wait_for_timeout(700)
+    n_after = page.evaluate("() => window.DAW_CONTROL.getState().tracks.find(t => t.id === 'piano').clips[0].notes.length")
+    check("piano roll : Ctrl+Z retire la note d'essai", n_after == snap["n"], n_after)
+
+
 def desktop(b):
     R = res["bureau"]
     log = Log("tempo_musical_bureau")
@@ -250,6 +306,7 @@ def desktop(b):
     band = page.locator('[data-testid="tempo-ramp-band-0"]')
     check("piste tempo : bande de rampe affichée", band.count() == 1 and band.is_visible())
     shot(page, "pc_06_rampe_piste_tempo")
+    piano_roll_rampe(page, R)
     page.evaluate("() => window.DAW_CONTROL.setTheme('light')"); page.wait_for_timeout(600)
     shot(page, "pc_07_rampe_theme_clair")
     open_tempo(page)

@@ -12,6 +12,8 @@
  */
 import { MidiNote } from '../types';
 import { ArpPattern, ArpRate, ChordGenerator, ChordType, arpRateBeats, arpSequence, quantizePitchToScale, ScaleType } from '../services/MidiEffectsService';
+import type { TempoMap } from './tempoMap';
+import { mapCell, mapSnap } from './rollGrid';
 
 export interface ToolContext {
   bpm: number;
@@ -22,6 +24,11 @@ export interface ToolContext {
   keyScale?: string;
   /** Aléatoire reproductible (tests, aperçu stable). */
   rand?: () => number;
+  /**
+   * Carte de tempo à suivre (rampes, changements, mesures) : la quantification cale sur ses
+   * traits (utils/rollGrid), comme la grille du piano roll. Absente : grille régulière à `bpm`.
+   */
+  tempoMap?: TempoMap;
 }
 
 export type Selection = Set<string> | null | undefined;
@@ -361,6 +368,23 @@ export function quantize(notes: MidiNote[], sel: Selection, ctx: ToolContext, p:
     const idx = Math.round(abs / g);
     return idx * g + (idx % 2 !== 0 ? swingOff : 0);
   };
+  const m = ctx.tempoMap;
+  if (m) {
+    // Carte de tempo : traits exacts (rampes comprises), swing en noires sur les traits impairs.
+    const swingQ = ((2 * clamp(p.swing, 50, 75)) / 100 - 1) * (GRID_BEATS[p.grid] ?? 0.25);
+    return [...rest, ...target.map(n => {
+      const abs = origin + n.start;
+      const start = n.start + (mapSnap(m, abs, p.grid, 'round', swingQ) - abs) * s;
+      let duration = n.duration;
+      if (p.ends) {
+        const endAbs = abs + n.duration;
+        const end = n.start + n.duration + (mapSnap(m, endAbs, p.grid) - endAbs) * s;
+        const [c0, c1] = mapCell(m, origin + Math.max(0, start), p.grid);
+        duration = Math.max((c1 - c0) * 0.25, end - start);
+      }
+      return { ...n, start: Math.max(0, start), duration };
+    })].sort(byTime);
+  }
   const changed = target.map(n => {
     const abs = origin + n.start;
     const start = n.start + (snap(abs) - abs) * s;
