@@ -15,18 +15,19 @@ import ArrangementView from './components/ArrangementView';
 const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
-import { lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
+import { setUiBusyProbe } from './utils/uiFrame';
+import { lazyQuiet, lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
 import { detectHeadphones } from './utils/headphoneDetect';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
-import ChatAssistant from './components/ChatAssistant';
+const ChatAssistant = lazyQuiet(() => import('./components/ChatAssistant'));
 import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
-import CommandPalette from './components/CommandPalette';
-import AddEffectMenu from './components/AddEffectMenu';
+const CommandPalette = lazyQuiet(() => import('./components/CommandPalette'));
+const AddEffectMenu = lazyQuiet(() => import('./components/AddEffectMenu'));
 import { allPaletteActions, type PaletteAction } from './utils/commandPalette';
 import { buildChatCatalog, catalogText, summarizeStateForChat, planChatCalls, compactHistory, CHAT_LIMITS } from './utils/chatTools';
 import type { ChatRunReport } from './components/ChatAssistant';
@@ -72,7 +73,7 @@ import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent 
 import { useVstInstruments } from './hooks/useVstInstruments';
 import { useSynthPanelTrack, openSynthPanel, closeSynthPanel } from './utils/synthPanelStore';
 import type { NovaSynthSettings } from './utils/novaSynth';
-import VstInstrumentPicker from './components/VstInstrumentPicker';
+const VstInstrumentPicker = lazyQuiet(() => import('./components/VstInstrumentPicker'));
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
@@ -83,12 +84,12 @@ import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
 import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
 import { useFrozenRefresh } from './hooks/useFrozenRefresh';
-import FrozenStaleNotice from './components/FrozenStaleNotice';
+const FrozenStaleNotice = lazyQuiet(() => import('./components/FrozenStaleNotice'));
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
 import { usePreFxReplay } from './hooks/usePreFxReplay';
 import { mergeSessionEdits } from './utils/preFxMerge';
-import PreFxReplayPanel from './components/PreFxReplayPanel';
-import FrozenEditsNotice from './components/FrozenEditsNotice';
+const PreFxReplayPanel = lazyQuiet(() => import('./components/PreFxReplayPanel'));
+const FrozenEditsNotice = lazyQuiet(() => import('./components/FrozenEditsNotice'));
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazyWithPreload(() => import('./components/PianoRoll'));
@@ -158,20 +159,20 @@ import { listTakes, compTakeInZone, activeTakeInZone, CompZone } from './utils/t
 import { playheadStore } from './utils/playheadStore';
 import { playheadFrameMs } from './utils/perfMode';
 import { useLatestCallback } from './utils/useLatestCallback';
-import RecordingCoach from './components/RecordingCoach';
-import LyricsPrompter from './components/LyricsPrompter';
+const RecordingCoach = lazyQuiet(() => import('./components/RecordingCoach'));
+const LyricsPrompter = lazyQuiet(() => import('./components/LyricsPrompter'));
 import { projectTimedWords, transcriptValid, withLyricsCorrections } from './utils/voiceLyrics';
 import { hitNotice, hitWhere, REVEAL_TIME_EVENT, searchTakeWords, type RevealTimeDetail, type TakeWordHit } from './utils/voiceSearch';
 import { SELECT_CLIP_EVENT } from './hooks/useEditModes';
 import MicLevelMeter from './components/MicLevelMeter';
-import WelcomeSteps from './components/WelcomeSteps';
+const WelcomeSteps = lazyQuiet(() => import('./components/WelcomeSteps'));
 import MicPermissionHint from './components/MicPermissionHint';
 import { withMicExplanation } from './utils/micPermission';
 import { openDistribution } from './utils/distributionBus';
-import ShareClipModal from './components/ShareClipModal';
-import TakeHomeModal from './components/TakeHomeModal';
+const ShareClipModal = lazyQuiet(() => import('./components/ShareClipModal'));
+const TakeHomeModal = lazyQuiet(() => import('./components/TakeHomeModal'));
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
-import ProGateModal from './components/ProGateModal';
+const ProGateModal = lazyQuiet(() => import('./components/ProGateModal'));
 import { manageSubscription } from './components/ManageSubscription';
 import { knownSubscriber } from './utils/billingPortal';
 import { useMakeMusicAccount } from './hooks/useMakeMusicAccount';
@@ -227,9 +228,9 @@ import {
 } from './utils/collabContent';
 import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
 import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, guestCanEditContent, guestCanMix, guestOpVerdict, guestRefusalText, isLimitedGuest, sanitizeGuestRights } from './utils/guestRights';
-import GuestStudio from './components/GuestStudio';
-import CabinRemote from './components/CabinRemote';
-import SendToStudioModal from './components/SendToStudioModal';
+const GuestStudio = lazyQuiet(() => import('./components/GuestStudio'));
+const CabinRemote = lazyQuiet(() => import('./components/CabinRemote'));
+const SendToStudioModal = lazyQuiet(() => import('./components/SendToStudioModal'));
 import SessionShare, { type ShareTab } from './components/SessionShare';
 import { useCabinHost, useCabinPhone } from './hooks/useCabinRemote';
 import CommentsPanel, { CommentPins } from './components/CommentsPanel';
@@ -238,14 +239,14 @@ import { commentCounts } from './utils/timelineComments';
 import { renderMixBounce } from './services/mixBounce';
 import { collabRefusal, remoteNeedsPro } from './utils/collabAccess';
 import { exportKeyOf, mixNeedsTag, newExportKey, SHARED_PROJECT_ID } from './utils/exportRights';
-import RemoteIngePanel from './components/RemoteIngePanel';
-import LiveVstRemotePanel from './components/LiveVstRemotePanel';
+const RemoteIngePanel = lazyQuiet(() => import('./components/RemoteIngePanel'));
+const LiveVstRemotePanel = lazyQuiet(() => import('./components/LiveVstRemotePanel'));
 // Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
 import ProToolsPanel, { MixSourcePicker } from './components/ProToolsPanel';
 import { mixSource, proToolsSink, takesBatchOf, writtenMessage } from './services/ProToolsBridge';
 import { useRemoteInge } from './hooks/useRemoteInge';
 // Lien d'écoute client sans compte (chantier 12) : panneau de l'ingé + diffusion aux clients.
-import ListenLinksPanel from './components/ListenLinksPanel';
+const ListenLinksPanel = lazyQuiet(() => import('./components/ListenLinksPanel'));
 import { listenHost } from './services/ListenBroadcast';
 import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
@@ -257,7 +258,7 @@ import { fetchAudio } from './utils/audioCache';
 import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
 import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
-import BeatLoadBanner from './components/BeatLoadBanner';
+const BeatLoadBanner = lazyQuiet(() => import('./components/BeatLoadBanner'));
 import DesktopUpdateCard from './components/DesktopUpdateCard';
 import { requestDesktopUpdateCheck, useDesktopBusyProbe } from './utils/appUpdate';
 import { gainToDbText } from './utils/db';
@@ -271,7 +272,7 @@ import {
 } from './services/SessionCloud';
 // Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
 const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
-import ShortcutsHelp from './components/ShortcutsHelp';
+const ShortcutsHelp = lazyQuiet(() => import('./components/ShortcutsHelp'));
 const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
 const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
@@ -304,7 +305,7 @@ import { registerSaveBeforeLeave } from './utils/saveBeforeLeave';
 import { BufferSweeper } from './utils/bufferSweeper';
 import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
-import VocalToolsPanel from './components/VocalToolsPanel';
+const VocalToolsPanel = lazyQuiet(() => import('./components/VocalToolsPanel'));
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
 import MobileNoticeInline, { MobileStatusInline } from './components/MobileNoticeInline';
 import { messageClair } from './utils/friendlyError';
@@ -328,7 +329,7 @@ import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
 import { clearKept, clipAsTake, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
-import ImportTempoCard from './components/ImportTempoCard';
+const ImportTempoCard = lazyQuiet(() => import('./components/ImportTempoCard'));
 import { useImportTempo } from './hooks/useImportTempo';
 import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
@@ -776,9 +777,20 @@ export default function App() {
   return <Studio />;
 }
 
+/** Fenêtres et bandeaux du studio chargés à part, préchargés pendant l'accueil (voir Studio). */
+const STUDIO_LAZY = [ChatAssistant, GuestStudio, VocalToolsPanel, LyricsPrompter, ListenLinksPanel, SendToStudioModal, VstInstrumentPicker, CabinRemote, RemoteIngePanel, TakeHomeModal, LiveVstRemotePanel, PreFxReplayPanel, CommandPalette, AddEffectMenu, ShareClipModal, ProGateModal, ShortcutsHelp, FrozenEditsNotice, RecordingCoach, WelcomeSteps, ImportTempoCard, BeatLoadBanner, FrozenStaleNotice];
+
 function Studio() {
   // Landing Page state - Always show landing on startup
   const [showLanding, setShowLanding] = useState(true);
+  // Démarrage léger : ces fenêtres ne sont plus dans le paquet de l'accueil ; elles arrivent
+  // pendant que l'accueil est affiché (temps libre du navigateur), prêtes avant l'entrée au studio.
+  useEffect(() => preloadWhenIdle(STUDIO_LAZY, 300), []);
+  // Horloge des fenêtres d'effets (utils/uiFrame) : pleine cadence quand le moteur joue ou écoute.
+  useEffect(() => {
+    setUiBusyProbe(() => audioEngine.getIsPlaying() || audioEngine.armedIds().length > 0 || audioEngine.isScrubbing());
+    return () => setUiBusyProbe(null);
+  }, []);
   
   // Pending data from landing page to load after entering studio
   const [pendingInstrumental, setPendingInstrumental] = useState<any>(null);
