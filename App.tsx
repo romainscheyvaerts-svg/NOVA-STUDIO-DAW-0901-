@@ -211,6 +211,17 @@ import { openSessionPanel, openImportSession, useSessionPanel } from './utils/r2
 import AafHost from './components/AafHost';
 import DistributionHost from './components/DistributionHost';
 import { openAafExport, openAafImport } from './utils/aaf/aafBus';
+import DawProjectHost from './components/DawProjectHost';
+import PinnedTracksPane from './components/PinnedTracksPane';
+import { openTrackSearch } from './utils/trackFilter';
+import { togglePin } from './utils/trackPins';
+import { configureMacros, macroPaletteActions, openMacrosTabNext } from './utils/macros';
+import PopoutHost, { ConsoleElsewhere } from './components/PopoutHost';
+import { togglePopout, usePopout } from './utils/popoutWindow';
+import VideoTrackLane from './components/VideoTrackLane';
+import VideoHost from './components/VideoHost';
+import { openVideoExport, openVideoImport, toggleVideoViewer } from './utils/videoTrack';
+import { openDawProjectExport, openDawProjectImport } from './utils/dawproject/dawProjectBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
@@ -9859,6 +9870,10 @@ function Studio() {
 
   /** Actions de la palette Ctrl+K du rendu en cours (buildPaletteActions, plus bas) : Nova y a accès. */
   const paletteBuilderRef = useRef<() => PaletteAction[]>(() => []);
+  // Macros (écart 21) : la palette entière, une étape d'annulation par macro jouée, le message.
+  // Console sur un 2e écran (écart 17) : fenêtre détachée, même arbre React.
+  const consoleOut = usePopout('console');
+  useEffect(() => configureMacros({ actions: () => allPaletteActions(paletteBuilderRef.current()), begin: beginUndoGroup, end: endUndoGroup, notify: t => setAiNotification(t) }), [beginUndoGroup, endUndoGroup, setAiNotification]);
   /** Catalogue des commandes vu par Nova : la palette entière (actions du studio + raccourcis). */
   const chatCommands = () => {
     try { return buildChatCatalog(allPaletteActions(paletteBuilderRef.current())); } catch { return []; }
@@ -10506,6 +10521,15 @@ function Studio() {
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
       a('Fichier', 'pal.aafImport', 'Importer une séance AAF (logiciel de studio)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf logiciel studio séance session importer ingé' }),
       a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf logiciel studio séance session exporter ingé bwf' }),
+      a('Pistes', 'pal.trackSearch', 'Filtrer les pistes : nom, voix, couleur, état (grosses séances)', () => openTrackSearch(), { keywords: 'chercher filtrer filtre trouver piste pistes voix grosse séance liste' }),
+      a('Pistes', 'pal.trackPin', 'Épingler / désépingler la piste sélectionnée en haut', () => { const id = stateRef.current.selectedTrackId; if (id && id !== 'master') setAiNotification(togglePin(id) ? '📌 Piste épinglée en haut de l’arrangement' : 'Piste désépinglée'); }, { keywords: 'épingler épingle pin garder en haut visible défiler' }),
+      ...(isMobile ? [] : [
+        a('Fichier', 'pal.videoImport', 'Importer une vidéo (caler la musique ou la voix sur l’image)', () => openVideoImport(), { keywords: 'vidéo video clip film image mp4 mov importer caler synchro pub court métrage' }),
+        a('Fichier', 'pal.videoExport', 'Exporter la vidéo avec le mix (MP4)', () => openVideoExport(), { keywords: 'vidéo video clip mp4 exporter mix image' }),
+        a('Vues', 'pal.videoViewer', 'Afficher / masquer l’image de la vidéo', () => toggleVideoViewer(), { keywords: 'vidéo video image écran lecteur' }),
+      ]),
+      a('Fichier', 'pal.dawpImport', 'Ouvrir un projet DAWproject (format ouvert d’un autre logiciel de musique)', () => openDawProjectImport(), { keywords: 'dawproject daw projet format ouvert importer échange logiciel musique' }),
+      a('Fichier', 'pal.dawpExport', 'Exporter en DAWproject (format ouvert, pour un autre logiciel de musique)', () => openDawProjectExport(), { keywords: 'dawproject daw projet format ouvert exporter échange logiciel musique' }),
       a('Fichier', 'pal.distribution', '🚀 Prêt pour Spotify / Apple / TikTok ? (contrôle avant distribution)', () => openDistribution(), { keywords: 'distribution spotify apple deezer tiktok distrokid tunecore livraison sortir sortie release paquet' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
       a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
@@ -10586,9 +10610,27 @@ function Studio() {
       ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
       a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Studio pro, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
+      ...(isMobile ? [] : [a('Aide', 'pal.macros', 'Macros : enchaîner plusieurs commandes sur une touche', () => { openMacrosTabNext(); setKeymapEditorOpen(true); }, { keywords: 'macro macros enchaîner chaîner plusieurs commandes une touche automatiser action personnalisée script' })]),
+      ...macroPaletteActions(),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
+      ...(isMobile ? [] : [a('Vues', 'pal.consolePopout', consoleOut ? 'Ramener la console dans la fenêtre principale' : 'Console sur un 2e écran (fenêtre détachée)', () => { if (!togglePopout('console')) setAiNotification('La fenêtre n’a pas pu s’ouvrir : autorise les fenêtres surgissantes pour NOVA (icône dans la barre d’adresse), puis réessaie.'); }, { keywords: 'console mixer table de mixage deuxième 2e second écran moniteur fenêtre détacher détachée popout' })]),
     ];
   };
+
+  /** La console (vue Mixer) : dans la fenêtre principale ou dans sa fenêtre détachée. */
+  const renderMixer = () => (
+    <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
+                    tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
+                    onOpenPlugin={onOpenPluginUI}
+                    onDropPluginOnTrack={onDropPluginOpenUI}
+                    onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
+                    onRequestAddPlugin={onRequestAddPluginMenu}
+                    onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
+                    trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
+                    onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
+                    sendViewSlot={sendViewSlot}
+                 /></Suspense></PanelBoundary>
+  );
 
 
   return (
@@ -10720,6 +10762,8 @@ function Studio() {
           {/* Mode Desktop/Tablet - Vues classiques */}
           {!isMobile && (
             <>
+              <PinnedTracksPane visible={shownView === 'ARRANGEMENT'} tracks={state.tracks} projectId={state.exportKey || state.id} selectedTrackId={state.selectedTrackId} onSelectTrack={onSelectTrackStable} onSeek={handleSeek} />
+              <VideoTrackLane visible={shownView === 'ARRANGEMENT'} projectId={state.exportKey || state.id} tracks={state.tracks} />
               {shownView === 'ARRANGEMENT' && (
                 <PanelBoundary name="l'arrangement">
                 <StructureTracksContext.Provider value={structureTracks}>
@@ -10756,19 +10800,7 @@ function Studio() {
                 </PanelBoundary>
               )}
 
-              {shownView === 'MIXER' && (
-                 <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
-                    tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
-                    onOpenPlugin={onOpenPluginUI}
-                    onDropPluginOnTrack={onDropPluginOpenUI}
-                    onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
-                    onRequestAddPlugin={onRequestAddPluginMenu}
-                    onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
-                    trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
-                    onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
-                    sendViewSlot={sendViewSlot}
-                 /></Suspense></PanelBoundary>
-              )}
+              {shownView === 'MIXER' && (consoleOut ? <ConsoleElsewhere /> : renderMixer())}
 
               {shownView === 'AUTOMATION' && (
                  <PanelBoundary name="l'éditeur d'automation" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
@@ -10982,6 +11014,9 @@ function Studio() {
           )}
         </main>
         <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
+        <DawProjectHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
+        {!isMobile && <PopoutHost renderConsole={renderMixer} />}
+        <VideoHost getState={() => stateRef.current} getOwned={() => ownedInstruments} isPlaying={state.isPlaying} notify={setAiNotification} enabled={!isMobile} />
         <DistributionHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>

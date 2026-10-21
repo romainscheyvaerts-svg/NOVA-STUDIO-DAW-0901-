@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { applyLayout, listLayouts, renameLayout, resetLayout, saveLayout, useLayoutsVersion, layoutsStore, type WindowLayout } from '../utils/windowLayouts';
 import { shortcutHint } from '../utils/keymap';
+import { togglePopout, usePopout } from '../utils/popoutWindow';
 
 /**
  * Dispositions de fenêtres (Pro Tools : Window Configuration List, Ctrl+Alt+J).
@@ -17,6 +18,7 @@ const describe = (l: WindowLayout): string => {
   if (p.panel) bits.push(p.panel === 'tracks' ? 'liste des pistes' : String(p.panel));
   if (p.zoom?.h) bits.push(`zoom ${Math.round(p.zoom.h)} px/s, pistes ${Math.round(p.zoom.v || 120)} px`);
   if (p.tool) bits.push(`outil ${TOOL_LABEL[p.tool] || String(p.tool).toLowerCase()}`);
+  if (p.popout?.console) bits.push('console sur le 2e écran');
   return bits.join(' · ');
 };
 
@@ -25,6 +27,7 @@ const WindowLayoutsPanel: React.FC<{ onClose: () => void; notify: (m: string) =>
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const last = layoutsStore.lastRecalled();
+  const consoleOut = usePopout('console');
 
   return (
     <div className="fixed inset-0 z-[710] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="layouts-title" data-testid="layouts-panel">
@@ -37,6 +40,15 @@ const WindowLayoutsPanel: React.FC<{ onClose: () => void; notify: (m: string) =>
           Une disposition retient la vue, les panneaux ouverts et le zoom. Rappel : Ctrl+Maj+1 à 5, ou au pavé « . » N « * » comme dans les studios pro ;
           pavé « . » N « / » enregistre la vue actuelle.
         </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-nv-line bg-nv-surface p-3" data-testid="layouts-popout">
+          <i className="fas fa-desktop text-nv-accent" aria-hidden="true" />
+          <p className="min-w-0 flex-1 text-[12px] text-nv-muted"><b className="text-nv-ink">2e écran</b> : la console dans sa propre fenêtre, à glisser sur l'autre écran (arrangement ici, console là-bas). Elle est retenue avec la disposition.</p>
+          <button type="button" data-testid="layouts-popout-console"
+            onClick={() => { if (!togglePopout('console')) notify('La fenêtre n’a pas pu s’ouvrir : autorise les fenêtres surgissantes pour NOVA, puis réessaie.'); }}
+            className={`h-9 rounded-lg px-3 text-[12px] font-black ${consoleOut ? 'border border-nv-line bg-nv-well text-nv-ink' : 'bg-cyan-500 text-black'}`}>
+            {consoleOut ? 'Ramener la console ici' : 'Console sur un 2e écran'}
+          </button>
+        </div>
         <ul className="space-y-2">
           {listLayouts().map(({ slot, layout, custom }) => (
             <li key={slot} data-layout-slot={slot} className={`rounded-xl border p-3 ${last === slot ? 'border-nv-accent bg-nv-accent/10' : 'border-nv-line bg-nv-surface'}`}>

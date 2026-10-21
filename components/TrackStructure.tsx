@@ -23,6 +23,7 @@ import { canHavePlaylists, playlistsOf } from '../utils/trackPlaylists';
 import { runEditCommand } from '../utils/editCommands';
 import { PlaylistChip } from './TrackPlaylistMenu';
 import { useMonitor } from '../utils/monitorSection';
+import { isPinned, togglePin } from '../utils/trackPins';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -270,6 +271,12 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
     title: '« Make Inactive / Active » : une piste inactive ne joue rien et ne coûte rien ; son routage est gardé.',
     onClick: () => applyTracks(ts => setTracksInactive(ts, [id], !target.isInactive), target.isInactive ? `« ${target.name} » est active` : `« ${target.name} » est inactive`),
   });
+  {
+    const pinned = isPinned(id);
+    items.push({ label: pinned ? 'Désépingler la piste' : 'Épingler en haut de l’arrangement', icon: 'fa-thumbtack',
+      title: 'Une piste épinglée reste visible en haut quand on fait défiler une grosse séance (rien ne change dans le son).',
+      onClick: () => { togglePin(id, !pinned); } });
+  }
   items.push({
     label: target.isHidden ? 'Afficher la piste' : 'Masquer la piste',
     icon: target.isHidden ? 'fa-eye' : 'fa-eye-slash',

@@ -164,6 +164,10 @@ BATTERIE = [
     # 22/10/2026 · L5 écart 19 : étirement « haute qualité » dans la page (boucle de batterie stéréo calée sur le tempo,
     # 90 → 112,5 → 72 BPM) : attaques à ±2 ms, pas de pré-écho, image stéréo gardée, durée exacte (son relu dans le .zip).
     ("etirement_banc", []),
+    # 22/10/2026 · lot L6 (ergonomie pro) + échange DAWproject : export .dawproject relu en Python (noires → secondes à
+    # 0 échantillon, WAV), réouvert dans NOVA (aller-retour identique, Ctrl+Z), fichier de référence d'un autre logiciel
+    # (plugins absents, son manquant signalés) ; bureau sombre + clair, téléphone 390.
+    ("ergo_pro", []),
 ]
 
 

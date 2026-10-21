@@ -12,6 +12,7 @@ import { consumeSelectionExport, editSelectionStore } from '../utils/editSelecti
 import { simpleModeStore } from '../utils/simpleMode';
 import { MidiExportRow } from './MidiFileMenu';
 import { openAafExport } from '../utils/aaf/aafBus';
+import { openDawProjectExport } from '../utils/dawproject/dawProjectBus';
 import { openDistribution } from '../utils/distributionBus';
 import { runExport, outputBits, outputRate, type ExportSettings, type ExportFormat, type ExportSource } from '../services/ExportPipeline';
 import { exportQueue } from '../services/ExportQueue';
@@ -980,6 +981,16 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px] font-black text-white">Séance pour logiciel de studio (AAF + BWF)</span>
                 <span className="block text-[12px] text-slate-400">Une piste par piste audio, clips, gain et fondus, sons horodatés. Comprise dans l'export de ce projet (licence, export payé ou Nova Pro).</span>
+              </span>
+              <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
+            </button>
+            {/* Échange au format ouvert DAWproject (écart 14) */}
+            <button type="button" data-testid="export-dawproject" onClick={() => openDawProjectExport()}
+              className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center gap-3">
+              <span className="text-2xl leading-none" aria-hidden="true">🗂️</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-black text-white">Projet pour un autre logiciel de musique (DAWproject)</span>
+                <span className="block text-[12px] text-slate-400">Format ouvert : pistes, clips audio et MIDI, tempo, volumes, effets et automation dans un seul fichier.</span>
               </span>
               <i className="fas fa-download text-slate-500" aria-hidden="true"></i>
             </button>

@@ -84,6 +84,8 @@ export const useKnobInteraction = (
     let last = c.horizontal ? e.clientX : e.clientY;
     let norm = c.toNorm(current());
     latest.current.options.onStart?.();
+    // Fenêtre du bouton : la console peut être dans une fenêtre détachée (2e écran, utils/popoutWindow).
+    const win: Window = (e.currentTarget as HTMLElement)?.ownerDocument?.defaultView || window;
 
     const onMouseMove = (m: MouseEvent) => {
       const pos = c.horizontal ? m.clientX : m.clientY;
@@ -93,14 +95,14 @@ export const useKnobInteraction = (
       emit(c.fromNorm(norm));
     };
     const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = '';
+      win.removeEventListener('mousemove', onMouseMove);
+      win.removeEventListener('mouseup', onMouseUp);
+      win.document.body.style.cursor = '';
       latest.current.options.onEnd?.();
     };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = c.horizontal ? 'ew-resize' : 'ns-resize';
+    win.addEventListener('mousemove', onMouseMove);
+    win.addEventListener('mouseup', onMouseUp);
+    win.document.body.style.cursor = c.horizontal ? 'ew-resize' : 'ns-resize';
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reset]);
 
@@ -117,6 +119,7 @@ export const useKnobInteraction = (
     let last = c.horizontal ? e.touches[0].clientX : e.touches[0].clientY;
     let norm = c.toNorm(current());
     latest.current.options.onStart?.();
+    const win: Window = (e.currentTarget as HTMLElement)?.ownerDocument?.defaultView || window;
 
     const onTouchMove = (t: TouchEvent) => {
       if (t.touches.length === 0) return;
@@ -128,14 +131,14 @@ export const useKnobInteraction = (
       emit(c.fromNorm(norm));
     };
     const onTouchEnd = () => {
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('touchcancel', onTouchEnd);
+      win.removeEventListener('touchmove', onTouchMove);
+      win.removeEventListener('touchend', onTouchEnd);
+      win.removeEventListener('touchcancel', onTouchEnd);
       latest.current.options.onEnd?.();
     };
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-    window.addEventListener('touchcancel', onTouchEnd);
+    win.addEventListener('touchmove', onTouchMove, { passive: false });
+    win.addEventListener('touchend', onTouchEnd);
+    win.addEventListener('touchcancel', onTouchEnd);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reset]);
 

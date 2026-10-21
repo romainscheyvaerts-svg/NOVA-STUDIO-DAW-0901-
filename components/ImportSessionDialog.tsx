@@ -12,6 +12,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { applyR21, r21Bus } from '../utils/r21Bus';
 import { novaBridge } from '../services/NovaBridge';
 import { openAafImport } from '../utils/aaf/aafBus';
+import { openDawProjectImport } from '../utils/dawproject/dawProjectBus';
 
 /**
  * R21 · « Importer depuis une session » (Pro Tools : File › Import › Session
@@ -172,6 +173,10 @@ const ImportSessionDialog: React.FC<{
             <button type="button" className={card} onClick={() => { onClose(); openAafImport(); }} data-testid="import-from-aaf">
               <span className="block text-[13px] font-black text-nv-ink">🎚️ Une séance de logiciel de studio (.aaf)</span>
               <span className="block text-[11px] text-nv-muted">Dans ton logiciel de studio : Fichier › Exporter › Pistes sélectionnées en tant que nouveau AAF/OMF.</span>
+            </button>
+            <button type="button" className={card} onClick={() => { onClose(); openDawProjectImport(); }} data-testid="import-from-dawproject">
+              <span className="block text-[13px] font-black text-nv-ink">🗂️ Un projet d'un autre logiciel de musique (.dawproject)</span>
+              <span className="block text-[11px] text-nv-muted">Format ouvert : dans ton logiciel, Fichier › Exporter › DAWproject.</span>
             </button>
             <div>
               <p className="mb-1 text-[11px] font-black uppercase tracking-wider text-nv-muted">Projets récents (cet appareil)</p>
