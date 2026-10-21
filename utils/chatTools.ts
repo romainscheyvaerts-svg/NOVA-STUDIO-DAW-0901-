@@ -339,7 +339,7 @@ const PAYMENT_ACTIONS = /^(PAY|PURCHASE|BUY|CHECKOUT|UNLOCK|CHARGE)/;
 
 const CHAT_PLUGINS = new Set(['AUTOTUNE', 'PROEQ12', 'COMPRESSOR', 'VOCALSATURATOR', 'REVERB', 'DELAY', 'DOUBLER', 'STEREOSPREADER', 'DEESSER',
   'DENOISER', 'CHORUS', 'FLANGER', 'LIMITER', 'HARMONIZER', 'VOICESHIFT', 'TIMEFX', 'DJFILTER', 'LOFI', 'GATEFX', 'GATE',
-  'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'MASTERTRANSIENT']);
+  'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'MASTERTRANSIENT', 'MBCOMP', 'DYNEQ']);
 
 export const PLUGIN_LABELS: Record<string, string> = {
   COMPRESSOR: 'Compresseur', PROEQ12: 'EQ', DEESSER: 'De-esser', AUTOTUNE: 'Auto-Tune', REVERB: 'Réverbe', DELAY: 'Délai',
@@ -347,6 +347,7 @@ export const PLUGIN_LABELS: Record<string, string> = {
   FLANGER: 'Flanger', LIMITER: 'Limiteur', HARMONIZER: 'Harmoniseur', VOICESHIFT: 'Voix grave / aiguë', TIMEFX: 'Tape stop',
   DJFILTER: 'Filtre DJ', LOFI: 'Lo-fi', GATEFX: 'Gate rythmique', GATE: 'Gate', OPTO_VINTAGE: 'Opto Vintage', FET76: 'FET 76',
   LEVELER2A: 'Leveler 2A', VOXSTRIP: 'Vox Strip', MASTERTRANSIENT: 'Transitoires master',
+  MBCOMP: 'Compresseur multibande', DYNEQ: 'EQ dynamique',
 };
 
 /** Bornes des effets NOVA « historiques » (les autres viennent de leurs fiches : analogiques, V21). */

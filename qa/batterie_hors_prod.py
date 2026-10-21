@@ -133,6 +133,10 @@ BATTERIE = [
     # installation à la fermeture puis relance, « Mis à jour ✓ », appli ancienne (carte web), réglages.
     ("desktop_maj_auto", []),
     ("desktop_hors_ligne", []),
+    # 21/10/2026 · effets de mix : Compresseur multibande et EQ dynamique ajoutés par « Ajouter un effet », boutons tournés,
+    # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
+    # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
+    ("mixfx", []),
 ]
 
 

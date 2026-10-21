@@ -10,6 +10,7 @@ import { legacyParamLabel } from '../engine/automationParams';
 import { isMuteParam, muteValueText } from './muteAutomation';
 import { analogParamLabel, ANALOG_SPECS } from '../engine/analogCompParams';
 import { vstParamDisplayName, vstValueText } from './vstParamCatalog';
+import { mixFxParamLabel } from '../engine/mixfx/mixFxParams';
 
 /**
  * Automation en français et en vraies unités (audit G22) : « Volume » en dB
@@ -34,7 +35,8 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
     if (pl?.type === 'VST3') return `${pluginDisplayName(pl)} · ${vstParamDisplayName(pl.id, pp.key) || pp.key}`;
     if (!pl) { const vn = vstParamDisplayName(pp.pluginId, pp.key); if (vn) return vn; }
     const limiterLabel = pl?.type === 'LIMITER' ? LIMITER_AUTOMATABLE.find(a => a.id === pp.key)?.label || null
-      : pl && ANALOG_SPECS[pl.type] ? analogParamLabel(pl.type, pp.key) : null;
+      : pl && ANALOG_SPECS[pl.type] ? analogParamLabel(pl.type, pp.key)
+      : pl ? mixFxParamLabel(pl.type, pp.key) : null;
     // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
     const legacy = pl ? legacyParamLabel(pl.type, pp.key) : null;
     const label = limiterLabel || legacy || (pl ? v21ParamLabel(pl.type, pp.key) : Object.keys(V21_SPECS).map(t => v21ParamLabel(t, pp.key)).find(Boolean) || null);
