@@ -4,6 +4,7 @@ import { AutomationSet, MappedParam } from '../engine/automationParams';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, useHwHelp } from './hw';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 // Export constants for use in other plugins (MasterSync)
 export const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -726,7 +727,7 @@ const TuneScreen: React.FC<{ node: AutoTuneNode; enabled: boolean }> = ({ node, 
     let raf = 0;
     let shown = { ang: 999, t: '', s: '', c: '' };
     const loop = (t: number) => {
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
       const d = data.current;
       const live = t - d.at < 400 && d.detectedFreq > 50;
       const c = live ? Math.max(-100, Math.min(100, d.correctionCents || 0)) : 0;
@@ -740,8 +741,8 @@ const TuneScreen: React.FC<{ node: AutoTuneNode; enabled: boolean }> = ({ node, 
       if (ct !== shown.c && cents.current) cents.current.textContent = ct;
       shown = { ang, t: tn, s: sn, c: ct };
     };
-    raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); node?.setStatusCallback?.(() => {}); };
+    raf = requestUiFrame(loop);
+    return () => { cancelUiFrame(raf); node?.setStatusCallback?.(() => {}); };
   }, [node]);
   const ticks = [];
   for (let k = -100; k <= 100; k += 10) {

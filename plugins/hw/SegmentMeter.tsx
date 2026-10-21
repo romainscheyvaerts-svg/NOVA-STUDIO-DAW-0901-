@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { cancelUiFrame, requestUiFrame } from '../../utils/uiFrame';
 
 /**
  * Échelle de LED (réduction de gain, crête de sortie…), horizontale ou
@@ -76,10 +77,10 @@ export const SegmentMeter: React.FC<SegmentMeterProps> = ({
         const txt = fmtRef.current(st.v, st.hold);
         if (txt !== st.txt) { readout.current.textContent = txt; st.txt = txt; }
       }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [min, max, segments, tops, holdMs, fallPerSec]);
 
   const vertical = orientation === 'vertical';

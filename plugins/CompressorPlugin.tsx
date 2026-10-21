@@ -1,3 +1,4 @@
+import { MeterDemand } from '../engine/meterDemand';
 import React, { useState, useEffect } from 'react';
 import { makeCurve, loadWorkletModule, fadeInOnInsert, isOfflineContext } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
@@ -80,7 +81,7 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     // Mêmes bornes et même précision (32 bits flottants) qu'un AudioParam.
-    this.cfg = { knee: 12, attack: 0.003, release: 0.25, scHpFreq: 80, lookahead: 0, mode: 0, keyOn: 0, keyListen: 0 };
+    this.cfg = { knee: 12, attack: 0.003, release: 0.25, scHpFreq: 80, lookahead: 0, mode: 0, keyOn: 0, keyListen: 0, threshold: -18, ratio: 4 };
     const o = (options && options.processorOptions) || {};
     // Étage de sortie (couleur, anti-continu, compensation du mode) : voir tailStage().
     this.curve = o.curve ? Float32Array.from(o.curve) : null;
@@ -88,7 +89,11 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     this.dc = new Float64Array(8);
     this.setDcBlock(8);
     if (o.cfg) this.setCfg(o.cfg);
+    // Mesure de réduction envoyée seulement si quelqu'un la lit (vumètre de la piste visible,
+    // fenêtre ouverte) : 43 messages/s par instance coûtaient au fil audio ET à l'interface.
+    this.metersOn = false;
     this.port.onmessage = (e) => { const d = e.data || {}; if (d.cfg) this.setCfg(d.cfg);
+      if (typeof d.meters === 'boolean') { this.metersOn = d.meters; this.msg = 0; this.grPeak = 0; }
       if (d.curve) this.curve = Float32Array.from(d.curve);
       if (Number.isFinite(d.trim)) this.trim = Math.fround(d.trim); };
     this.SIZE = 2048; this.MASK = 2047; // > 10 ms a 192 kHz
@@ -105,7 +110,9 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     this.aQdnLog = Math.log(Math.exp(-1 / (2.5 * sampleRate)));
   }
   setCfg(c) {
-    const B = { knee: [0, 40], attack: [0.00001, 1], release: [0.005, 5], scHpFreq: [10, 2000], lookahead: [0, 0.01], mode: [0, 3], keyOn: [0, 1], keyListen: [0, 1] };
+    // threshold / ratio : version légère seulement (sinon leurs AudioParams font foi), mêmes bornes.
+    const B = { knee: [0, 40], attack: [0.00001, 1], release: [0.005, 5], scHpFreq: [10, 2000], lookahead: [0, 0.01], mode: [0, 3], keyOn: [0, 1], keyListen: [0, 1],
+      threshold: [-100, 0], ratio: [1, 100] };
     for (const k in B) {
       const v = +c[k];
       if (v === v && k in c) this.cfg[k] = Math.fround(Math.min(B[k][1], Math.max(B[k][0], v)));
@@ -237,8 +244,9 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     if (skipped > 0) this.catchUp(skipped);
     if (p.resetGen && p.resetGen[0] !== this.gen) { this.gen = p.resetGen[0]; this.reset(); }
     if (cfg.scHpFreq !== this.lastFc) this.setHighpass(cfg.scHpFreq);
-    const T = p.threshold[0];
-    const R = Math.max(1, p.ratio[0]);
+    // Version légère : seuil et ratio par message (arrondis en 32 bits comme un AudioParam).
+    const T = p.threshold ? p.threshold[0] : cfg.threshold;
+    const R = Math.max(1, p.ratio ? p.ratio[0] : cfg.ratio);
     const W = Math.max(0, cfg.knee);
     const k = 1 - 1 / R;
     const mode = Math.round(cfg.mode);
@@ -333,7 +341,7 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     const rest = this.quietRun >= this.SIZE && this.xf <= 0 && y1 === 0 && yL === 0 && ms === 0 && !useKey
       && s[2] === 0 && s[3] === 0 && s[6] === 0 && s[7] === 0 && this.dcQuiet();
     if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
-    if (++this.msg >= 8) {
+    if (this.metersOn && ++this.msg >= 8) {
       this.msg = 0;
       this.port.postMessage({ gr: -yL, peak: -grPeak });
       this.grPeak = 0;
@@ -341,7 +349,16 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
+/**
+ * Version légère : un seul AudioParam (départ de lecture). Chaque AudioParam d'un worklet coûte
+ * à chaque bloc, même immobile. Seuil et ratio par message ; la version complète est prise dès
+ * qu'une voie d'automation les demande ou qu'une clé externe est choisie (CompressorNode.ensureFull).
+ */
+class VocalCompressorLite extends VocalCompressorProcessor {
+  static get parameterDescriptors() { return [{ name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' }]; }
+}
 try { registerProcessor('vocal-compressor-processor-r', VocalCompressorProcessor); } catch (e) {}
+try { registerProcessor('vocal-compressor-processor-r-lite', VocalCompressorLite); } catch (e) {}
 `;
 
 const MODE_INDEX: Record<CompressorParams['mode'], number> = { CLEAN: 0, VCA: 1, OPTO: 2, FET: 3 };
@@ -372,11 +389,11 @@ export class CompressorNode {
   // que le mix parallele ne filtre pas la voix en peigne.
   private dryDelay: DelayNode;
 
-  // Metering
-  private inputAnalyzer: AnalyserNode;
-  private outputAnalyzer: AnalyserNode;
-  private inputData: Float32Array;
-  private outputData: Float32Array;
+  // Metering (fenêtre ouverte seulement : créés à la première lecture, voir setTaps)
+  private inputAnalyzer: AnalyserNode | null = null;
+  private outputAnalyzer: AnalyserNode | null = null;
+  private inputData: Float32Array = new Float32Array(128);
+  private outputData: Float32Array = new Float32Array(128);
   private reduction = 0;
 
   /** Pret quand le worklet est charge (le rendu hors ligne attend cette promesse). */
@@ -418,14 +435,6 @@ export class CompressorNode {
     // puis montee de 20 ms : ni clic ni bouffee non compressee a l'insertion.
     this.output.gain.value = 0;
 
-    // Metering
-    this.inputAnalyzer = ctx.createAnalyser();
-    this.inputAnalyzer.fftSize = 256;
-    this.inputData = new Float32Array(this.inputAnalyzer.frequencyBinCount);
-
-    this.outputAnalyzer = ctx.createAnalyser();
-    this.outputAnalyzer.fftSize = 256;
-    this.outputData = new Float32Array(this.outputAnalyzer.frequencyBinCount);
 
     this.makeupGainNode = ctx.createGain();
 
@@ -482,25 +491,7 @@ export class CompressorNode {
     try {
       await loadWorkletModule(this.ctx, 'vocal-compressor-r', COMP_WORKLET_CODE);
       if (this.disposed) return;
-      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor-r', {
-        numberOfInputs: 2,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-        // Réglages fixes posés à la création : un message arriverait trop tard à l'export.
-        processorOptions: { cfg: this.workletCfg(), curve: Array.from(this.curveData), trim: this.trimTarget() },
-      });
-      this.cfgKey = JSON.stringify(this.workletCfg());
-      this.sidechainInput.connect(this.worklet, 0, 1);
-      const wp = this.worklet.parameters;
-      this.auto.add('threshold', new MappedParam(this.ctx, [{ param: wp.get('threshold')! }], { min: -60, max: 0, value: -18, affine: true }));
-      this.auto.add('ratio', new MappedParam(this.ctx, [{ param: wp.get('ratio')! }], { min: 1, max: 20, value: 4, affine: true }));
-      this.worklet.port.onmessage = (e) => {
-        const d = e.data || {};
-        if (Number.isFinite(d.peak)) this.reduction = d.peak;
-        if (typeof d.rest === 'boolean') this.atRest = d.rest;
-      };
-      this.input.connect(this.worklet);
-      this.worklet.connect(this.makeupGainNode);
+      this.worklet = this.makeWorklet(this.full || this.keyActive);
     } catch (e) {
       console.warn('[Compressor] Worklet indisponible, repli sur DynamicsCompressorNode :', e);
       this.compressor = this.ctx.createDynamicsCompressor();
@@ -513,6 +504,56 @@ export class CompressorNode {
     this.applyParams(true, true);
     // Fondu d'apparition en direct seulement : à l'export, le rendu démarre sur le son.
     fadeInOnInsert(this.output.gain, this.ctx);
+  }
+
+  /**
+   * Version complète du worklet (seuil et ratio en AudioParams, clé externe) ou légère (par
+   * message, même son au bit près). Légère par défaut ; complète dès qu'une voie d'automation
+   * ou une clé la demande.
+   */
+  private full = false;
+  private metersWanted = false;
+  private makeWorklet(full: boolean): AudioWorkletNode {
+    this.full = full;
+    const cfg = this.workletCfg();
+    const w = new AudioWorkletNode(this.ctx, full ? 'vocal-compressor-processor-r' : 'vocal-compressor-processor-r-lite', {
+      numberOfInputs: full ? 2 : 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      parameterData: { resetGen: this.resetCount },
+      // Réglages fixes posés à la création : un message arriverait trop tard à l'export.
+      processorOptions: { cfg, curve: Array.from(this.curveData), trim: this.trimTarget() },
+    });
+    this.cfgKey = JSON.stringify(cfg);
+    if (full) {
+      this.sidechainInput.connect(w, 0, 1);
+      const wp = w.parameters;
+      this.auto.add('threshold', new MappedParam(this.ctx, [{ param: wp.get('threshold')! }], { min: -60, max: 0, value: -18, affine: true }));
+      this.auto.add('ratio', new MappedParam(this.ctx, [{ param: wp.get('ratio')! }], { min: 1, max: 20, value: 4, affine: true }));
+    }
+    w.port.onmessage = (e) => {
+      const d = e.data || {};
+      if (Number.isFinite(d.peak)) this.reduction = d.peak;
+      if (typeof d.rest === 'boolean') this.atRest = d.rest;
+    };
+    if (this.metersWanted) w.port.postMessage({ meters: true });
+    this.input.connect(w);
+    w.connect(this.makeupGainNode);
+    return w;
+  }
+  /**
+   * Passe à la version complète (seuil ou ratio automatisé, clé externe). Le nouveau cœur part
+   * de l'état d'une instance neuve, comme au départ de la lecture ; l'ancien est retiré dans la
+   * même tâche (aucun bloc doublé ni manquant).
+   */
+  private ensureFull() {
+    if (this.full || !this.worklet || this.disposed) return;
+    const old = this.worklet;
+    this.worklet = this.makeWorklet(true);
+    this.atRest = false;
+    retireWorkletNode(old);
+    this.applyParams(true, true);
+    if (this.lastResetAt > this.ctx.currentTime) this.resetAt(this.lastResetAt);
   }
 
   /** Cœur au repos (entrée muette, détecteurs à zéro) : la chaîne peut dormir (engine/effectSleep). */
@@ -530,9 +571,14 @@ export class CompressorNode {
   private setTaps(on: boolean) {
     if (on === this.tapsOn) return;
     this.tapsOn = on;
+    if (on && !this.inputAnalyzer) {
+      // ~300 Ko par analyseur : créés seulement quand la fenêtre lit ses vumètres.
+      this.inputAnalyzer = this.ctx.createAnalyser(); this.inputAnalyzer.fftSize = 256;
+      this.outputAnalyzer = this.ctx.createAnalyser(); this.outputAnalyzer.fftSize = 256;
+    }
     try {
-      if (on) { this.input.connect(this.inputAnalyzer); this.output.connect(this.outputAnalyzer); }
-      else { this.input.disconnect(this.inputAnalyzer); this.output.disconnect(this.outputAnalyzer); }
+      if (on) { this.input.connect(this.inputAnalyzer!); this.output.connect(this.outputAnalyzer!); }
+      else if (this.inputAnalyzer) { this.input.disconnect(this.inputAnalyzer); this.output.disconnect(this.outputAnalyzer!); }
     } catch { /* déjà dans cet état */ }
   }
   private readTaps() {
@@ -554,8 +600,10 @@ export class CompressorNode {
   }
 
   private resetCount = 0;
+  private lastResetAt = -1;
   /** Départ de la lecture à `at` (début d'un bloc) : détecteur, pré-lecture et charge repartent à neuf. */
   public resetAt(at: number) {
+    this.lastResetAt = at;
     const ap = this.worklet?.parameters.get('resetGen');
     if (!ap) return;
     try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
@@ -672,8 +720,12 @@ export class CompressorNode {
     const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
     const dyn = this.modeDynamics();
     const listen = this.keyActive && safe(Number(this.params.keyListen), 0) >= 0.5;
+    // Seuil et ratio (version légère du worklet) : bornés comme leur réglage automatisable (MappedParam).
+    const threshold = Math.max(-60, Math.min(0, Math.max(-100, Math.min(0, safe(this.params.threshold, -18)))));
+    const ratio = Math.max(1, Math.min(20, Math.max(1, Math.min(20, safe(this.params.ratio, 4)))));
     return { knee: dyn.knee, attack: dyn.attack, release: dyn.release, scHpFreq: Math.max(10, Math.min(2000, safe(this.params.scHpFreq, 80))),
-      lookahead: this.effectiveLookahead(), mode: MODE_INDEX[this.params.mode] ?? 0, keyOn: this.keyActive ? 1 : 0, keyListen: listen ? 1 : 0 };
+      lookahead: this.effectiveLookahead(), mode: MODE_INDEX[this.params.mode] ?? 0, keyOn: this.keyActive ? 1 : 0, keyListen: listen ? 1 : 0,
+      threshold, ratio };
   }
 
   /**
@@ -799,6 +851,7 @@ export class CompressorNode {
   public automationParam(key: string): MappedParam | null {
     // Mix automatisé : la voie sèche reste câblée (la courbe peut quitter 1).
     if (key === 'mix' && !this.mixAutomated) { this.mixAutomated = true; this.syncPaths(this.effectiveLookahead()); }
+    if (key === 'threshold' || key === 'ratio') this.ensureFull();
     return this.auto.get(key);
   }
 
@@ -809,6 +862,7 @@ export class CompressorNode {
   public setSidechainActive(on: boolean) {
     if (on === this.keyActive) return;
     this.keyActive = on;
+    if (on) this.ensureFull();
     this.applyParams();
   }
   public get sidechainActive() { return this.keyActive; }
@@ -816,11 +870,19 @@ export class CompressorNode {
   /** Reduction de gain la plus forte depuis la derniere lecture (dB, <= 0). */
   public getReduction(): number {
     if (this.compressor) return this.compressor.reduction;
+    this.meterDemand.read();
     return this.reduction;
   }
+  /** Mesure demandée au worklet seulement pendant qu'on la lit (coupée 1,5 s après la dernière lecture). */
+  private meterDemand = new MeterDemand(on => {
+    this.metersWanted = on;
+    if (!on) this.reduction = 0;
+    try { this.worklet?.port.postMessage({ meters: on }); } catch { /* worklet libéré */ }
+  });
 
   public getInputLevel(): number {
     this.readTaps();
+    if (!this.inputAnalyzer) return -100;
     this.inputAnalyzer.getFloatTimeDomainData(this.inputData as any);
     let max = 0;
     for (let i = 0; i < this.inputData.length; i++) {
@@ -832,6 +894,7 @@ export class CompressorNode {
 
   public getOutputLevel(): number {
     this.readTaps();
+    if (!this.outputAnalyzer) return -100;
     this.outputAnalyzer.getFloatTimeDomainData(this.outputData as any);
     let max = 0;
     for (let i = 0; i < this.outputData.length; i++) {

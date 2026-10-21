@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { V21ParamSpec, V21Preset } from '../engine/v21Params';
 import { panToText } from '../utils/db';
 import { Faceplate, HwPresets, HwWindow, Knob, type HwFinish, type KnobProps } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * Briques communes des fenêtres V21 (Harmoniseur, Voix grave / aiguë, Tape
@@ -70,10 +71,10 @@ export function useV21Meter<T extends string | number | boolean | null | undefin
         try { nv = pickRef.current(node?.getMeters?.() || {}); } catch { nv = undefined as T; }
         setV(prev => (Object.is(prev, nv) ? prev : nv));
       }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node, everyMs]);
   return v;
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useV21Params } from './v21Ui';
 import { MT_BANDS, MT_CENTERS, MT_DEFAULTS, MT_PRESETS, MT_SPECS, MT_TOGGLES, type MtSpec } from '../engine/masterTransientParams';
 import { Faceplate, HwPresets, HwSection, HwWindow, Knob, PushButton, useHwHelp, type KnobProps } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * Fenêtre de l'effet NOVA « Mastering Transient » : limiteur de mastering
@@ -31,10 +32,10 @@ function useMeters(node: any) {
     let raf = 0, last = 0;
     const loop = (t: number) => {
       if (t - last > 66) { last = t; const mm = node?.getMeters?.(); if (mm) setM(mm); }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node]);
   return m;
 }

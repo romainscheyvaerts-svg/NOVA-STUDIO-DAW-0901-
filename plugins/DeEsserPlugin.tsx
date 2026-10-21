@@ -4,7 +4,9 @@ import { termHelp } from '../utils/pluginUi';
 import { createDeesserCore } from '../engine/deesserCore';
 import { blockClockSource } from '../engine/blockClock';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { MeterDemand } from '../engine/meterDemand';
 import { Faceplate, HwWindow, Knob, SegmentMeter, ToggleSwitch } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * DE-ESSER NOVA (v3, mesuré au labo : D:\1 WORK\CONTENU\nova-labo\deesser)
@@ -100,9 +102,17 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     this.clock = { next: -1 };
     this.zero = new Float32Array(128);
     this.blocks = 0;
+    // Mesures envoyées seulement si quelqu'un les lit (vumètre de la piste visible, fenêtre ouverte).
+    this.metersOn = false;
+    // Réglages automatisables reçus par message (version légère) : arrondis en 32 bits et bornés
+    // comme le ferait leur AudioParam (même valeur au bit près que la version complète).
+    const ap32 = (p) => { for (let i = 0; i < __ap.length; i++) { const d = __ap[i], v = p[d.name];
+      if (typeof v === 'number' && v === v) p[d.name] = Math.fround(Math.max(d.min, Math.min(d.max, v))); } return p; };
+    ap32(this.params);
     this.port.onmessage = (e) => {
       const d = e.data || {};
-      if (d.params) { Object.assign(this.params, d.params); this.dirty = true; }
+      if (typeof d.meters === 'boolean') { this.metersOn = d.meters; this.blocks = 0; if (!d.meters) this.core.takeMeters(); }
+      if (d.params) { Object.assign(this.params, ap32(Object.assign({}, d.params))); this.dirty = true; }
       if (d.reset) this.core.reset();
     };
   }
@@ -129,7 +139,8 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     const iR = inp && inp[1] ? inp[1] : null;
     const key = inputs[1];
     // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence, pas le son de la piste.
-    const useKey = parameters.__keyOn[0] >= 0.5;
+    // Version légère : pas de clé (elle passe à la version complète dès qu'une clé est choisie).
+    const useKey = !!parameters.__keyOn && parameters.__keyOn[0] >= 0.5;
     const kL = useKey ? (key && key[0] ? key[0] : this.zero) : null;
     const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
     this.core.process(iL, iR, out[0], out[1] || null, n, kL, kR);
@@ -138,14 +149,24 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
       out[0].set(kL.subarray(0, n));
       if (out[1]) out[1].set(kR.subarray(0, n));
     }
-    if (++this.blocks >= 6) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
+    if (this.metersOn && ++this.blocks >= 6) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
     // Veille (engine/effectSleep) : cœur au repos signalé à chaque changement.
     const rest = !useKey && this.core.atRest();
     if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
     return true;
   }
 }
+/**
+ * Version légère : un seul AudioParam (départ de lecture). Chaque AudioParam d'un worklet coûte
+ * à chaque bloc, même immobile (mesuré : 6 paramètres = ×3 sur le coût d'un worklet vide).
+ * Réglages par message, même son au bit près ; la version complète est prise dès qu'une voie
+ * d'automation ou une clé externe en a besoin (DeEsserNode.ensureFull).
+ */
+class NovaDeesserLite extends NovaDeesserProcessor {
+  static get parameterDescriptors() { return [{ name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]; }
+}
 try { registerProcessor('nova-deesser-v4', NovaDeesserProcessor); } catch (e) {}
+try { registerProcessor('nova-deesser-v4-lite', NovaDeesserLite); } catch (e) {}
 `;
 
 export interface DeEsserMeters { grDb: number; grNowDb: number; detDb: number }
@@ -155,7 +176,9 @@ export class DeEsserNode {
 
   private resetCount = 0;
   /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
+  private lastResetAt = -1;
   public resetAt(at: number) {
+    this.lastResetAt = at;
     const ap = this.worklet ? ((this.worklet.parameters as any).get('__resetGen') as AudioParam | undefined) : undefined;
     if (!ap) return;
     try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
@@ -198,27 +221,54 @@ export class DeEsserNode {
     try {
       await loadWorkletModule(this.ctx, 'nova-deesser-v4', WORKLET_CODE);
       if (this.disposed) return;
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-deesser-v4', {
-        numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
-        channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
-        parameterData: this.apValues(),
-        // Réglages passés à la construction : un message arriverait trop tard à l'export.
-        processorOptions: { params: { ...this.params } },
-      });
-      this.worklet.port.onmessage = (e) => {
-        const d = e.data || {};
-        if (typeof d.rest === 'boolean') { this.atRest = d.rest; return; }
-        if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, grNowDb: d.grNowDb, detDb: d.detDb, at: Date.now() };
-      };
-      this.input.connect(this.worklet);
-      this.sidechainInput.connect(this.worklet, 0, 1);
+      this.worklet = this.makeWorklet(this.full || this.keyActive);
       this.applyKey();
-      this.worklet.connect(this.output);
     } catch (e) {
       console.warn('[NOVA De-esser] AudioWorklet indisponible, effet contourné :', e);
       this.failed = true;
       this.input.connect(this.output);
     }
+  }
+
+  /**
+   * Version complète du worklet (AudioParams d'automation et de clé) ou légère (réglages par
+   * message). Légère par défaut ; la complète dès qu'une voie d'automation ou une clé la demande.
+   */
+  private full = false;
+  private metersWanted = false;
+  private makeWorklet(full: boolean): AudioWorkletNode {
+    this.full = full;
+    const w = new AudioWorkletNode(this.ctx, full ? 'nova-deesser-v4' : 'nova-deesser-v4-lite', {
+      numberOfInputs: full ? 2 : 1, numberOfOutputs: 1, outputChannelCount: [2],
+      channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+      parameterData: full ? { ...this.apValues(), __resetGen: this.resetCount } : { __resetGen: this.resetCount },
+      // Réglages passés à la construction : un message arriverait trop tard à l'export.
+      processorOptions: { params: { ...this.params, ...this.apValues() } },
+    });
+    w.port.onmessage = (e) => {
+      const d = e.data || {};
+      if (typeof d.rest === 'boolean') { this.atRest = d.rest; return; }
+      if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, grNowDb: d.grNowDb, detDb: d.detDb, at: Date.now() };
+    };
+    if (this.metersWanted) w.port.postMessage({ meters: true });
+    this.input.connect(w);
+    if (full) this.sidechainInput.connect(w, 0, 1);
+    w.connect(this.output);
+    return w;
+  }
+  /**
+   * Passe à la version complète (automation d'un réglage, clé externe). Le nouveau cœur part
+   * de l'état d'une instance neuve, comme au départ de la lecture ; l'ancien worklet est retiré
+   * dans la même tâche (aucun bloc doublé ni manquant).
+   */
+  private ensureFull() {
+    if (this.full || !this.worklet || this.disposed) return;
+    const old = this.worklet;
+    this.worklet = this.makeWorklet(true);
+    this.atRest = false;
+    retireWorkletNode(old);
+    // Départ de lecture déjà programmé sur l'ancien worklet : reporté sur le nouveau.
+    if (this.lastResetAt > this.ctx.currentTime) this.resetAt(this.lastResetAt);
   }
 
   /** Cœur au repos (veille des effets, engine/effectSleep). */
@@ -250,9 +300,10 @@ export class DeEsserNode {
     const now = this.ctx.currentTime;
     const ap = this.apValues();
     for (const [k, v] of Object.entries(clean)) {
-      const prm = DEESS_AP.some(d => d.name === k) ? (this.worklet.parameters as any).get(k) as AudioParam | undefined : undefined;
+      const isAp = DEESS_AP.some(d => d.name === k);
+      const prm = isAp ? (this.worklet.parameters as any).get(k) as AudioParam | undefined : undefined;
       if (prm) { try { prm.setValueAtTime(ap[k], now); } catch { prm.value = ap[k]; } }
-      else msg[k] = v;
+      else msg[k] = isAp ? ap[k] : v;
     }
     if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
   }
@@ -260,6 +311,7 @@ export class DeEsserNode {
   /** AudioParam d'un réglage automatisable (R8) : « threshold », « relThreshold », « frequency » ; sinon null. */
   public automationParam(key: string): AudioParam | null {
     if (!this.worklet || !DEESS_AP.some(d => d.name === key)) return null;
+    this.ensureFull();
     return (this.worklet.parameters as any).get(key) ?? null;
   }
 
@@ -285,6 +337,8 @@ export class DeEsserNode {
 
   private applyKey() {
     if (!this.worklet) return;
+    if (this.keyActive) this.ensureFull();
+    if (!this.full) return;
     const prm = this.worklet.parameters as any;
     const now = this.ctx.currentTime;
     try {
@@ -298,8 +352,12 @@ export class DeEsserNode {
     return -this.getMeters().grNowDb;
   }
 
+  /** Mesure demandée au worklet seulement pendant qu'on la lit (coupée 1,5 s après la dernière lecture). */
+  private meterDemand = new MeterDemand(on => { this.metersWanted = on; try { this.worklet?.port.postMessage({ meters: on }); } catch { /* worklet libéré */ } });
+
   /** Réduction max / courante (dB, ≥ 0) et niveau détecté ; remis à zéro après 0,5 s sans nouvelles. */
   public getMeters(): DeEsserMeters {
+    this.meterDemand.read();
     if (Date.now() - this.meters.at > 500) return { grDb: 0, grNowDb: 0, detDb: -120 };
     const { at: _a, ...m } = this.meters;
     return m;
@@ -420,10 +478,10 @@ const DeEsserScreen: React.FC<{ node: DeEsserNode; params: DeEsserParams }> = ({
         lastRef.current = { gr, key };
         draw(gr);
       }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node]);
   return (
     <div className="hw-screen">

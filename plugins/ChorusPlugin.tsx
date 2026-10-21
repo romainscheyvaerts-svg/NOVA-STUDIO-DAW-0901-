@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { Faceplate, HwSection, HwWindow, Knob, PushButton, ToggleSwitch } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * PROFESSIONAL DIMENSION CHORUS v3.0
@@ -413,10 +414,10 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
       ctx.fillStyle = '#fff';
       ctx.arc(w / 2, h / 2, 3, 0, Math.PI * 2);
       ctx.fill();
-      frame = requestAnimationFrame(draw);
+      frame = requestUiFrame(draw);
     };
-    frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
+    frame = requestUiFrame(draw);
+    return () => cancelUiFrame(frame);
   }, []);
 
   const modeIdx = Math.max(0, MODES.findIndex(m => m.id === view.mode));

@@ -1,4 +1,5 @@
 
+import { isLiteMode } from '../utils/perfMode';
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
 import { soloSilencedIds } from '../utils/soloMute';
 import { Track, Clip, PluginInstance, TrackType, PluginParameter, AutomationPoint } from '../types';
@@ -104,7 +105,12 @@ interface TrackDSP {
   output: GainNode;         
   panner: StereoPannerNode; 
   gain: GainNode;           
-  analyzer: AnalyserNode;
+  /**
+   * Analyseur de la piste (après fader et pan) : créé à la première demande (affichages de prise :
+   * niveau du micro, clip en cours…) et branché EN DÉRIVATION. Avant, un par piste, en série,
+   * même jamais lu : un nœud calculé par bloc et ~300 Ko réservés (×96 pistes).
+   */
+  analyzer?: AnalyserNode;
   inputAnalyzer?: AnalyserNode;
   /** Source muette (0) branchée en permanence sur l'entrée : la chaîne d'effets reste « active » (comme à l'export). */
   keepAlive?: ConstantSourceNode;
@@ -146,6 +152,13 @@ interface TrackDSP {
    */
   outDelay?: DelayNode;
   sendDelays?: Map<string, DelayNode>;
+  /**
+   * Liens directs (sans retard) de la sortie et des envois : le retard de compensation n'est
+   * créé et inséré que s'il sert (> 0). Un DelayNode de 4 s calcule même à 0 (≈ 4 gains) et
+   * réserve ~2 Mo : 2 par piste, 200 dans une séance de 96 pistes (voir insertPdcDelay).
+   */
+  outLink?: { from: AudioNode; to: AudioNode };
+  sendLinks?: Map<string, { from: AudioNode; to: AudioNode }>;
   outputs?: string[];
   downLatency?: number;
   inputStream?: MediaStreamAudioSourceNode | null;
@@ -245,6 +258,55 @@ export class AudioEngine {
   private lastSourceEnd = new Map<string, number>();
   /** Source muette (0) partagée par toutes les pistes, voir ensureTrackDSP. */
   private sharedKeepAlive: ConstantSourceNode | null = null;
+  /**
+   * Source muette reliée aux pistes seulement quand le son compte (lecture, prise, écoute du
+   * micro, scrub) ; détachée 2 s après l'arrêt. Au repos, elle faisait calculer des zéros à
+   * TOUT le graphe (bus, master, reverbs : convolution de silence) 344 fois par seconde.
+   * Détachée, Chrome finit les queues (filtres, reverbs) puis ne calcule plus rien. Reliée
+   * avant tout départ (avant la remise à zéro des effets), comme avant.
+   */
+  private keepAliveLinked = true;
+  private keepAliveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Délai (ms) avant de détacher la source muette après l'arrêt (QA : localStorage « nova_repos_ms »). */
+  private keepAliveRestMs = (() => { try { const v = Number(localStorage.getItem('nova_repos_ms')); return Number.isFinite(v) && v > 0 ? v : 2000; } catch { return 2000; } })();
+
+  /** Relie la source muette à toutes les pistes (lecture, prise, écoute, scrub). */
+  private linkKeepAlive() {
+    if (this.keepAliveTimer) { clearTimeout(this.keepAliveTimer); this.keepAliveTimer = null; }
+    if (this.keepAliveLinked || !this.ctx) return;
+    this.keepAliveLinked = true;
+    this.tracksDSP.forEach(dsp => this.attachKeepAlive(dsp));
+    meterBank.setActive(true);
+  }
+
+  private attachKeepAlive(dsp: TrackDSP) {
+    if (!this.ctx || dsp.keepAlive) return;
+    try {
+      // Offset 0 tenu par une automation : un 0 fixe rendait des blocs « silencieux » et les
+      // filtres s'arrêtaient quand même, à un instant différent à chaque lecture (engine/keepAlive).
+      if (!this.sharedKeepAlive || this.sharedKeepAlive.context !== this.ctx) this.sharedKeepAlive = createKeepAlive(this.ctx);
+      this.sharedKeepAlive.connect(dsp.input);
+      dsp.keepAlive = this.sharedKeepAlive;
+    } catch (e) { /* contexte sans ConstantSource : ancien comportement */ }
+  }
+
+  /** Au repos (rien ne joue, rien n'est armé) : source muette détachée après `keepAliveRestMs`. */
+  private releaseKeepAliveSoon() {
+    if (this.keepAliveTimer) clearTimeout(this.keepAliveTimer);
+    this.keepAliveTimer = setTimeout(() => {
+      this.keepAliveTimer = null;
+      if (!this.ctx || !this.keepAliveLinked) return;
+      if (this.isPlaying || this.recordingTrackId || this.recSession || (this.inputRouter?.size || 0) > 0 || this.scrubber?.active) return;
+      this.keepAliveLinked = false;
+      this.tracksDSP.forEach(dsp => {
+        if (dsp.keepAlive) { try { dsp.keepAlive.disconnect(dsp.input); } catch { /* déjà détachée */ } dsp.keepAlive = undefined; }
+      });
+      meterBank.setActive(false);
+    }, this.keepAliveRestMs);
+  }
+
+  /** Source muette reliée aux pistes (QA). */
+  public isKeepAliveLinked() { return this.keepAliveLinked; }
   private sleepRoutingCache: { tracks: Track[] | null; targets: Set<string> } = { tracks: null, targets: new Set() };
   /** Pistes à jour pendant la lecture (les modifications s'entendent tout de suite). */
   private liveTracks: Track[] | null = null;
@@ -451,20 +513,27 @@ export class AudioEngine {
     // Preferences audio persistees : elles n'etaient appliquees que si le
     // panneau de reglages etait ouvert, et le peripherique d'entree n'etait
     // jamais reinjecte dans le moteur au rechargement.
+    let savedLatency: string | null = null;
     try {
       const savedInput = localStorage.getItem('nova_audio_input');
       const savedOutput = localStorage.getItem('nova_audio_output');
-      const savedLatency = localStorage.getItem('nova_audio_latency');
+      savedLatency = localStorage.getItem('nova_audio_latency');
       if (savedInput) this.currentInputDeviceId = savedInput;
       if (savedOutput) this.currentOutputDeviceId = savedOutput;
       if (savedLatency === 'low' || savedLatency === 'balanced' || savedLatency === 'high') {
         this.setLatencyMode(savedLatency);
       }
     } catch (e) { /* localStorage indisponible (navigation privee) */ }
+    // Mode léger (PC peu puissants), sauf choix de l'artiste : marge du séquenceur « équilibrée »
+    // (25 ms / 100 ms au lieu de 10 / 50 : une tâche longue de l'interface ne retarde plus un départ
+    // de clip) et tampon de sortie « balanced » (moins de craquements ; la latence de la prise est
+    // mesurée et compensée, measureRecordLatency). Le son calculé ne change pas.
+    const lite = isLiteMode() && savedLatency !== 'low' && savedLatency !== 'balanced' && savedLatency !== 'high';
+    if (lite) this.setLatencyMode('balanced');
 
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AudioContextClass({ 
-      latencyHint: 'interactive',
+      latencyHint: lite ? 'balanced' : 'interactive',
       // Contexte à la fréquence du projet (plus de 44,1 kHz codé en dur).
       sampleRate: this.desiredSampleRate
     });
@@ -605,6 +674,7 @@ export class AudioEngine {
     // Horloge du nouveau contexte repartie de 0 : les fins de sources de l'ancien n'ont plus de sens (veille).
     this.lastSourceEnd.clear();
     this.sharedKeepAlive = null;
+    this.keepAliveLinked = true;
     this.scrubbingSources.clear();
     this.reversedBufferCache.clear();
     this.clipSigs.clear();
@@ -1957,6 +2027,8 @@ export class AudioEngine {
       const spec = this.armedSpecs.get(trackId) ?? null;
       // Chaîne en veille : rebranchée avant que le micro n'arrive (retour casque avec effets).
       this.effectSleep?.wake(trackId);
+      this.linkKeepAlive();
+      if (!dsp.inputAnalyzer) dsp.inputAnalyzer = this.ctx!.createAnalyser();
       const tap = this.inputRouter!.arm(trackId, spec, dsp.input, dsp.inputAnalyzer, this.monitorGainFor());
       this.monitoringTrackId = trackId;
       void this.attachFlashback(trackId);
@@ -2301,12 +2373,35 @@ export class AudioEngine {
       const r = res.get(id);
       d.downLatency = this.pdcSuspended || !r ? 0 : r.down;
       const main = d.outputs?.[0];
-      setDelay(d.outDelay, r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0);
+      const outSec = r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0;
+      if (!d.outDelay && outSec > 0 && !this.pdcSuspended && d.outLink) d.outDelay = this.insertPdcDelay(d.outLink);
+      setDelay(d.outDelay, outSec);
+      d.sendLinks?.forEach((link, sendId) => {
+        const sec = r?.delays.get(sendId) ?? 0;
+        if (!d.sendDelays?.has(sendId) && sec > 0 && !this.pdcSuspended) {
+          if (!d.sendDelays) d.sendDelays = new Map();
+          d.sendDelays.set(sendId, this.insertPdcDelay(link));
+        }
+      });
       d.sendDelays?.forEach((node, sendId) => setDelay(node, r?.delays.get(sendId) ?? 0));
     });
     this.sidechain.applyDelays(res, setDelay, this.pdcSuspended);
     // Latences changées (effet ajouté, gel de prise…) : l'avance des gates aussi.
     this.resyncTimelineEffects();
+  }
+
+  /**
+   * Insère un retard de compensation sur un lien direct (la première fois qu'il sert) :
+   * nouveau chemin câblé puis lien direct coupé, dans la même tâche (aucun bloc doublé ni troué).
+   * Le retard part de 0 ; recomputePdc le règle aussitôt (même instant de rendu).
+   */
+  private insertPdcDelay(link: { from: AudioNode; to: AudioNode }): DelayNode {
+    const node = this.ctx!.createDelay(PDC_MAX_SECONDS);
+    node.delayTime.value = 0;
+    link.from.connect(node);
+    node.connect(link.to);
+    try { link.from.disconnect(link.to); } catch { /* déjà coupé */ }
+    return node;
   }
 
   /** Latence (s) des effets placés avant un effet à clé sur sa piste (offset de la clé, PDC). */
@@ -2402,6 +2497,7 @@ export class AudioEngine {
     }
     if (!trackId) this.armedSpecs.clear();
     if (!this.inputRouter?.size) {
+      this.releaseKeepAliveSoon();
       this.stopLatencyWatch();
       if (this.asioBridge && this.asioConnected) {
         if (this.asioBridge.protocol >= 2) this.asioBridge.setMonitorRoutes(false, []);
@@ -3004,6 +3100,8 @@ export class AudioEngine {
    */
   public startPlayback(startOffset: number, tracks: Track[], opts: { at?: number } = {}) {
     if (!this.ctx) return;
+    // Source muette reliée AVANT la remise à zéro des effets et les sources (même graphe qu'à l'export).
+    this.linkKeepAlive();
     // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
@@ -3064,6 +3162,7 @@ export class AudioEngine {
     this.stopPractice();
     // Fin de passe d'automation (modes Touch / Latch / Write) : à la position d'arrêt.
     if (wasPlaying) { try { window.dispatchEvent(new CustomEvent('nova:transport-stop', { detail: { time: this.pausedAt } })); } catch { /* hors navigateur */ } }
+    this.releaseKeepAliveSoon();
     this.autoOverrides.clear();
     this.pendingLoopWrap = null;
     if (this.schedulerTimer) {
@@ -3188,16 +3287,18 @@ export class AudioEngine {
    */
   public scrub(tracks: Track[], time: number, _velocity?: number) {
     if (this.isPlaying) return;
+    this.linkKeepAlive();
     this.scrubberOf()?.scrubTo(engineView(tracks).tracks, time);
   }
 
   /** Shuttle : défilement à vitesse constante (× temps réel, négatif = en arrière). */
   public shuttle(tracks: Track[], speed: number, from?: number) {
     if (this.isPlaying) return;
+    this.linkKeepAlive();
     this.scrubberOf()?.shuttle(engineView(tracks).tracks, speed, from ?? this.pausedAt);
   }
 
-  public stopScrubbing() { this.scrubber?.stop(); }
+  public stopScrubbing() { this.scrubber?.stop(); this.releaseKeepAliveSoon(); }
   public isScrubbing(): boolean { return !!this.scrubber?.active; }
   public getScrubPosition(): number { return this.scrubber?.position ?? this.pausedAt; }
   public getScrubStats(): ScrubStats | null { return this.scrubber ? { ...this.scrubber.stats } : null; }
@@ -4285,10 +4386,8 @@ export class AudioEngine {
       output: this.ctx.createGain(),
       gain: this.ctx.createGain(),
       panner: this.ctx.createStereoPanner(),
-      analyzer: this.ctx.createAnalyser(),
       pluginChain: new Map(),
       sends: new Map(),
-      inputAnalyzer: this.ctx.createAnalyser()
     };
 
     if (track.type === TrackType.MIDI && track.melodicSampler) {
@@ -4325,15 +4424,8 @@ export class AudioEngine {
     // −74 dBFS, mesuré aux trois fréquences), et l'état gelé du filtre ressortait à l'écoute suivante.
     // Une seule source muette pour toutes les pistes (chantier 13) : même signal (des zéros),
     // un nœud calculé par bloc au lieu d'un par piste.
-    try {
-      // Offset 0 tenu par une automation : un 0 fixe rendait des blocs « silencieux » et les
-      // filtres s'arrêtaient quand même, à un instant différent à chaque lecture (engine/keepAlive).
-      if (!this.sharedKeepAlive || this.sharedKeepAlive.context !== this.ctx) {
-        this.sharedKeepAlive = createKeepAlive(this.ctx);
-      }
-      this.sharedKeepAlive.connect(dsp.input);
-      dsp.keepAlive = this.sharedKeepAlive;
-    } catch (e) { /* contexte sans ConstantSource : ancien comportement */ }
+    // Au repos, elle n'est reliée qu'au prochain départ (linkKeepAlive).
+    if (this.keepAliveLinked) this.attachKeepAlive(dsp);
 
     this.tracksDSP.set(track.id, dsp);
     return dsp;
@@ -4561,7 +4653,7 @@ export class AudioEngine {
     try { dsp.input.disconnect(); } catch (e) {}
     try { dsp.gain.disconnect(); } catch (e) {}
     try { dsp.panner.disconnect(); } catch (e) {}
-    try { dsp.analyzer.disconnect(); } catch (e) {}
+    try { dsp.analyzer?.disconnect(); } catch (e) {}
     try { dsp.output.disconnect(); } catch (e) {}
     if (dsp.preFaderTap) { try { dsp.preFaderTap.disconnect(); } catch (e) {} }
     
@@ -4713,8 +4805,9 @@ export class AudioEngine {
     dsp.preFaderTap.connect(dsp.gain);
     this.resetMuteGain(track, dsp);
     dsp.gain.connect(dsp.panner);
-    dsp.panner.connect(dsp.analyzer);
-    dsp.analyzer.connect(dsp.output);
+    dsp.panner.connect(dsp.output);
+    // Analyseur en dérivation, seulement s'il a été demandé (getTrackAnalyzer) : même signal.
+    if (dsp.analyzer) dsp.panner.connect(dsp.analyzer);
 
     // Fade in after rebuilding the audio graph
     const targetVolume = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
@@ -4731,14 +4824,16 @@ export class AudioEngine {
       const destDSP = this.tracksDSP.get(track.outputTrackId);
       if (destDSP) { destNode = destDSP.input; destId = track.outputTrackId; }
     }
-    // PDC : sortie -> retard -> destination (retard réglé par recomputePdc).
-    if (!dsp.outDelay) dsp.outDelay = this.ctx.createDelay(PDC_MAX_SECONDS);
-    try { dsp.outDelay.disconnect(); } catch (e) {}
+    // PDC : sortie -> [retard] -> destination. Le retard n'existe que s'il a servi (> 0) :
+    // sinon lien direct, au bit près le même son (DelayNode à 0 = copie exacte, vérifié).
+    if (dsp.outDelay) { try { dsp.outDelay.disconnect(); } catch (e) {} }
+    dsp.outLink = undefined;
     const outputs: string[] = [];
     // Sortie vers un bus que personne n'écoute / une piste inactive : le son part dans le vide (Pro Tools).
     if (!coveredOut && track.outputTrackId !== VOID_OUTPUT) {
-      dsp.output.connect(dsp.outDelay);
-      dsp.outDelay.connect(destNode);
+      if (dsp.outDelay) { dsp.output.connect(dsp.outDelay); dsp.outDelay.connect(destNode); }
+      else dsp.output.connect(destNode);
+      dsp.outLink = { from: dsp.output, to: destNode };
       outputs.push(destId);
     }
     
@@ -4749,6 +4844,7 @@ export class AudioEngine {
     });
     if (!dsp.sendDelays) dsp.sendDelays = new Map();
     dsp.sendDelays.forEach(node => { try { node.disconnect(); } catch (e) {} });
+    dsp.sendLinks = new Map();
     if (!dsp.sendPanners) dsp.sendPanners = new Map();
     dsp.sendPanners.forEach(node => { try { node.disconnect(); } catch (e) {} });
     
@@ -4786,10 +4882,11 @@ export class AudioEngine {
         // Find the destination send/bus track and connect
         const destSendDSP = this.tracksDSP.get(send.id);
         if (destSendDSP) {
-          let sendDelay = dsp!.sendDelays!.get(send.id);
-          if (!sendDelay) { sendDelay = this.ctx!.createDelay(PDC_MAX_SECONDS); dsp!.sendDelays!.set(send.id, sendDelay); }
-          sendTail.connect(sendDelay);
-          sendDelay.connect(destSendDSP.input);
+          // Retard de compensation de l'envoi : seulement s'il a servi (voir outLink).
+          const sendDelay = dsp!.sendDelays!.get(send.id);
+          if (sendDelay) { sendTail.connect(sendDelay); sendDelay.connect(destSendDSP.input); }
+          else sendTail.connect(destSendDSP.input);
+          dsp!.sendLinks!.set(send.id, { from: sendTail, to: destSendDSP.input });
           outputs.push(send.id);
           // console.log(`[AudioEngine] Send connected: ${track.name} -> ${send.id} (level: ${sendLevel})`);
         } else {
@@ -4809,6 +4906,7 @@ export class AudioEngine {
     dsp.sendDelays.forEach((node, sendId) => {
       if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendDelays!.delete(sendId); }
     });
+    dsp.sendLinks.forEach((_, sendId) => { if (!currentSendIds.has(sendId)) dsp!.sendLinks!.delete(sendId); });
     dsp.sendPanners.forEach((node, sendId) => {
       if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
     });
@@ -4818,7 +4916,7 @@ export class AudioEngine {
     this.recomputePdc();
     // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
     // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
-    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.analyzer);
+    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.panner);
     // R15 : les mixes casque reprennent la prise pré-fader (le recâblage l'a débranchée).
     this.trackMix.set(track.id, { id: track.id, volume: track.volume, pan: track.pan });
     if (this.cueMixes.length) this.cueEngine?.reconnectTrack(track.id, dsp.preFaderTap || null);
@@ -5015,7 +5113,13 @@ export class AudioEngine {
   /** Où envoyer les sons de service (décompte) : le master, pour qu'ils sortent aussi en ASIO. */
   public getMonitorBus(): AudioNode | null { return this.masterOutput || this.ctx?.destination || null; }
 
-  public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.inputRouter?.has(trackId) && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
+  public getTrackAnalyzer(trackId: string) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || !this.ctx) return null;
+    if (this.inputRouter?.has(trackId) && dsp.inputAnalyzer) return dsp.inputAnalyzer;
+    if (!dsp.analyzer) { dsp.analyzer = this.ctx.createAnalyser(); dsp.panner.connect(dsp.analyzer); }
+    return dsp.analyzer;
+  }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
   /**

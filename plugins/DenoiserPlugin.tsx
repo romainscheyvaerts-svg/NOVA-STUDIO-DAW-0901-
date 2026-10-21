@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { termHelp } from '../utils/pluginUi';
 import { Faceplate, HwPresets, HwSection, HwWindow, Knob, PushButton, ToggleSwitch } from './hw';
 import { retireWorkletNode } from '../engine/workletGuard';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * DENOISER PRO - Professional Noise Gate/Expander
@@ -473,10 +474,10 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
         if (ledRef.current) ledRef.current.dataset.on = status.isOpen ? 'true' : 'false';
         if (stateRef.current) stateRef.current.textContent = status.isOpen ? 'Ouverte : ta voix passe' : 'Fermée : le bruit est coupé';
       }
-      animFrame = requestAnimationFrame(update);
+      animFrame = requestUiFrame(update);
     };
-    animFrame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(animFrame);
+    animFrame = requestUiFrame(update);
+    return () => cancelUiFrame(animFrame);
   }, [node]);
 
   const handleParamChange = (key: keyof DenoiserParams, value: number | boolean) => {

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { Faceplate, HwWindow, Knob, ToggleSwitch } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * MODULE FX_09 : STUDIO FLANGER
@@ -180,10 +181,10 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
         ctx.stroke();
         ctx.lineWidth = 2;
       }
-      frame = requestAnimationFrame(draw);
+      frame = requestUiFrame(draw);
     };
-    frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
+    frame = requestUiFrame(draw);
+    return () => cancelUiFrame(frame);
   }, []);
 
   const handleParamChange = (key: keyof FlangerParams, value: any) => {

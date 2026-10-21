@@ -1,12 +1,13 @@
 import React, { useEffect, useId, useMemo, useRef } from 'react';
 import { useHwHelp } from './help';
+import { cancelUiFrame, requestUiFrame } from '../../utils/uiFrame';
 
 /**
  * VU-mètre à aiguille sur cadran crème (SVG), zone rouge, repère de cible.
  *
  * Balistique VU (reprise de l'ancien GrVuMeter) : 2e ordre amorti critique,
  * constante 45 ms → 99 % en ~300 ms ; maximum tenu 3 s.
- * L'aiguille est animée par une boucle requestAnimationFrame qui écrit
+ * L'aiguille est animée par l'horloge d'affichage partagée (utils/uiFrame) qui écrit
  * directement dans le SVG (aucun rendu React par image : la façade ne bouge pas).
  *
  * Échelle d'un vrai VU : la position suit la tension (10^(dB/20)), 0 VU vers
@@ -70,8 +71,12 @@ export const VuMeter: React.FC<VuMeterProps> = ({ read, mode = 'gr', target, cap
       // 2e ordre critique, constante 45 ms : 99 % en ~300 ms (VU)
       if (dt > 0) {
         const tau = 0.045;
-        const a = (g - s.v) / (tau * tau) - 2 * s.d / tau;
-        s.d += a * dt; s.v += s.d * dt;
+        // Sous-pas de 10 ms au plus : même mouvement quel que soit le nombre d'images par seconde.
+        const k = Math.max(1, Math.ceil(dt / 0.01)), h = dt / k;
+        for (let i = 0; i < k; i++) {
+          const a = (g - s.v) / (tau * tau) - 2 * s.d / tau;
+          s.d += a * h; s.v += s.d * h;
+        }
         if (mode === 'gr' && s.v < 0) { s.v = 0; s.d = 0; }
       }
       if (s.v > s.hold || t - s.holdAt > 3000) { s.hold = s.v; s.holdAt = t; }
@@ -86,10 +91,10 @@ export const VuMeter: React.FC<VuMeterProps> = ({ read, mode = 'gr', target, cap
         if (lcd.current) lcd.current.textContent = mode === 'gr' ? `${s.v > 0.05 ? '−' : ''}${fr(Math.max(0, s.v))} dB` : `${fr(s.v)} VU`;
         if (lcdMax.current) lcdMax.current.textContent = mode === 'gr' ? `max ${fr(s.hold)} dB` : `max ${fr(s.hold)}`;
       }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [mode, readout]);
 
   const face = useMemo(() => {

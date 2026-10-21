@@ -5,6 +5,7 @@ import { gainDbFr } from '../utils/pluginUi';
 import { Faceplate, HwSection, HwWindow, Knob, Led, PushButton, useHwHelp } from './hw';
 import { fmtHzFr, frNum, useHwCanvas } from './hw/screens';
 import { termHelp } from '../utils/pluginUi';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /** Types de filtre en français, avec ce qu'ils font. */
 const FILTER_LABELS: Record<string, { label: string; help: string }> = {
@@ -103,7 +104,12 @@ export class ProEQ12Node {
   public output: GainNode;
   /** Analyse d'entrée, en série (garde la chaîne « active », voir l'en-tête de la classe). */
   public preAnalyzer: AnalyserNode;
-  private postAn: AnalyserNode;
+  /** Créé à la première lecture par la fenêtre (~300 Ko par analyseur, ×96 égaliseurs). */
+  private postAnNode: AnalyserNode | null = null;
+  private get postAn(): AnalyserNode {
+    if (!this.postAnNode) { this.postAnNode = this.ctx.createAnalyser(); this.postAnNode.fftSize = 4096; this.postAnNode.smoothingTimeConstant = 0.85; }
+    return this.postAnNode;
+  }
   /** Analyseur après l'égaliseur (spectre de la fenêtre) : branché à la lecture, débranché 3 s après. */
   public get postAnalyzer(): AnalyserNode { this.readPost(); return this.postAn; }
   private voices: EqBandVoice[] = [];
@@ -152,9 +158,6 @@ export class ProEQ12Node {
     this.preAnalyzer = ctx.createAnalyser();
     this.preAnalyzer.fftSize = 4096;
     this.preAnalyzer.smoothingTimeConstant = 0.85;
-    this.postAn = ctx.createAnalyser();
-    this.postAn.fftSize = 4096;
-    this.postAn.smoothingTimeConstant = 0.85;
 
     // Cablage : entree -> bandes actives en serie -> sortie (analyse du spectre en dérivation).
     for (let i = 0; i < 12; i++) this.voices.push(this.createVoice(this.params.bands[i].type));
@@ -459,7 +462,7 @@ export class ProEQ12Node {
     if (this.postTimer) { clearInterval(this.postTimer); this.postTimer = null; }
     try { this.input.disconnect(); } catch (e) {}
     try { this.preAnalyzer.disconnect(); } catch (e) {}
-    try { this.postAn.disconnect(); } catch (e) {}
+    try { this.postAnNode?.disconnect(); } catch (e) {}
     for (const v of this.voices) {
       for (const n of [v.input, v.out, v.dry, ...v.filters, ...v.gains]) {
         try { n.disconnect(); } catch (e) {}
@@ -665,7 +668,7 @@ const EqScreen: React.FC<{
 
     let raf = 0;
     const loop = (t: number) => {
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
       const r = latest.current.range;
       let dirty = false;
       if (bgRange !== r) { drawBg(r); dirty = true; }
@@ -710,8 +713,8 @@ const EqScreen: React.FC<{
       }
       c.drawImage(fg, 0, 0);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node, size]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Glisser un point (souris, doigt, stylet) ──

@@ -53,7 +53,10 @@ class NovaMeterBank extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       const d = e.data || {};
       if (typeof d.free === 'number') { this.cores[d.free] = null; this.silent[d.free] = 0; }
+      // Master : « toujours » (LUFS, goniomètre même en silence) pendant la lecture seulement.
+      if (typeof d.always === 'boolean' && this.alwaysOpt) this.always = d.always;
     };
+    this.alwaysOpt = this.always;
   }
   process(inputs) {
     for (let i = 0; i < inputs.length; i++) {
@@ -177,6 +180,7 @@ class MeterBank {
         numberOfInputs: 1, numberOfOutputs: 0,
         processorOptions: { core: { loudness: true, gonio: true, tpTaps: 16, tpGate: false }, always: true },
       });
+      if (!this.active) this.masterNode.port.postMessage({ always: false });
       this.masterNode.port.onmessage = (e) => this.onMessage(e.data, [MASTER_OUT]);
       try { this.masterSrc?.connect(this.masterNode); } catch { /* */ }
       this.taps.forEach((_, id) => this.connectTap(id));
@@ -185,6 +189,17 @@ class MeterBank {
 
   isReady() { return this.ready; }
   hasFailed() { return this.failed; }
+
+  /**
+   * Repos (moteur arrêté, rien d'armé) : le mètre master n'envoie plus de mesure dans le silence
+   * (30 messages/s pour rien). Un son qui arrive (écoute, aperçu) est toujours mesuré.
+   */
+  private active = true;
+  setActive(on: boolean) {
+    if (on === this.active) return;
+    this.active = on;
+    try { this.masterNode?.port.postMessage({ always: on }); } catch { /* worklet libéré */ }
+  }
   getTapMode(): TapMode { return this.mode; }
 
   /** Pré-fader (après les effets, avant le fader) ou post-fader (après fader et pan). */

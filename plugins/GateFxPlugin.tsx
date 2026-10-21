@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { DEFAULT_GATEFX, GATEFX_PRESETS, GATEFX_SPECS, GATE_RATES, GATE_STEPS, gateSteps } from '../engine/v21Params';
 import { V21Knob, V21Presets, V21Shell, useV21Params } from './v21Ui';
 import { HwSection, PushButton } from './hw';
+import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
 
 /**
  * Fenêtre « Gate rythmique » (V21) : un motif de 16 pas calé sur le tempo
@@ -43,10 +44,10 @@ export const NovaGateFxUI: React.FC<{ node: any; initialParams: any; onParamsCha
           cur = s;
         }
       }
-      raf = requestAnimationFrame(loop);
+      raf = requestUiFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    raf = requestUiFrame(loop);
+    return () => cancelUiFrame(raf);
   }, [node]);
 
   return (
