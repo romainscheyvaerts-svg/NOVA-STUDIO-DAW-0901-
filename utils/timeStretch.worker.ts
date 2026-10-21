@@ -7,11 +7,14 @@
  * message d'attente. Le worker reçoit les canaux bruts, rend les canaux
  * étirés, et l'AudioBuffer est reconstruit côté appelant.
  */
-import { etirerCanaux } from './timeStretch';
+import { etirerCanaux, type QualiteEtirement } from './timeStretch';
 
 export interface DemandeEtirement {
   canaux: Float32Array[];
   facteur: number;
+  /** Absent (ancienne page) : haute qualité. */
+  qualite?: QualiteEtirement;
+  sampleRate?: number;
 }
 
 export interface ReponseEtirement {
@@ -19,8 +22,8 @@ export interface ReponseEtirement {
 }
 
 self.onmessage = (e: MessageEvent<DemandeEtirement>) => {
-  const { canaux, facteur } = e.data;
-  const resultat = etirerCanaux(canaux, facteur);
+  const { canaux, facteur, qualite, sampleRate } = e.data;
+  const resultat = etirerCanaux(canaux, facteur, qualite || 'haute', sampleRate || 48000);
   // Transfert de propriété : évite une copie de plusieurs mégaoctets.
   (self as unknown as Worker).postMessage(
     { canaux: resultat } as ReponseEtirement,

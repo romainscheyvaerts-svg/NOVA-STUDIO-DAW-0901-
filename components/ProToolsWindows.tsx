@@ -27,6 +27,10 @@ const IoNamesDialog = lazyWithPreload(() => import('./IoNamesDialog'));
 const VoiceAIDialog = lazyWithPreload(() => import('./VoiceAIDialog'));
 // Lot 1 : nettoyer la voix (bruit, réverbe, niveau), partout.
 const VoiceCleanDialog = lazyWithPreload(() => import('./VoiceCleanDialog'));
+// L5 · écart 7 : éditeur spectral (la réparation de la voix passe par le traitement de clip).
+const SpectralEditor = lazyWithPreload(() => import('./SpectralEditor'));
+// L5 · écart 18 : éditer la voix par le texte.
+const TextEditDialog = lazyWithPreload(() => import('./TextEditDialog'));
 export const PRO_TOOLS_WINDOWS_PRELOAD = [PitchEditor, TrackPresetDialog, StripSilenceDialog, AudioSuiteDialog, TransposeDialog, PitchBatchDialog, AudioToMidiDialog, BounceDialog, WarpMarkers];
 import type { VoiceMode } from './VoiceAIDialog';
 import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
@@ -78,6 +82,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [warp, setWarp] = useState<NovaWindowDetail | null>(null);
   const [voice, setVoice] = useState<{ mode: VoiceMode; targets: { trackId: string; clipId: string }[] } | null>(null);
   const [voiceClean, setVoiceClean] = useState<{ targets: { trackId: string; clipId: string }[] } | null>(null);
+  const [spectral, setSpectral] = useState<{ targets: { trackId: string; clipId: string }[] } | null>(null);
+  const [textEdit, setTextEdit] = useState<{ trackId: string; clipId: string } | null>(null);
   const tracksRef = React.useRef(tracks);
   tracksRef.current = tracks;
   const say = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
@@ -173,6 +179,18 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'elastic-tce' && d.targets?.length && d.tce) void tceRender(d.targets[0].trackId, d.targets[0].clipId, d.tce);
       // R24 : voix par l'IA locale.
       else if ((d.name === 'voice-deverb' || d.name === 'voice-transcribe') && d.targets?.length) setVoice({ mode: d.name === 'voice-deverb' ? 'deverb' : 'transcribe', targets: d.targets });
+      else if (d.name === 'voice-repair') {
+        if (d.targets?.length || d.range) setSuite({ ...d, name: 'audiosuite', repair: true });
+        else say('🩹 Réparer la voix : sélectionne d’abord un clip voix (clic dessus), puis relance.');
+      }
+      else if (d.name === 'spectral-editor') {
+        if (d.targets?.length) setSpectral({ targets: d.targets.slice(0, 1) });
+        else say('🎨 Éditeur spectral : sélectionne d’abord un clip audio (clic dessus), puis relance.');
+      }
+      else if (d.name === 'voice-text-edit') {
+        if (d.targets?.length) setTextEdit(d.targets[0]);
+        else say('📝 Éditer par le texte : sélectionne d’abord un clip voix transcrit (clic dessus), puis relance.');
+      }
       else if (d.name === 'voice-clean') {
         if (d.targets?.length) setVoiceClean({ targets: d.targets.slice(0, 1) });
         else say('✨ Nettoyer la voix : sélectionne d’abord un clip voix (clic dessus), puis relance.');
@@ -286,7 +304,9 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         range={bounce?.range} tracks={tracks} setState={setState} onClose={() => setBounce(null)} /></MountWhenOpened>
       <MountWhenOpened when={ioNames}><IoNamesDialog open={ioNames} onClose={() => setIoNames(false)} /></MountWhenOpened>
       <MountWhenOpened when={!!batch}><BatchRenderDialog open={!!batch} tracks={tracks} preselected={batch?.trackIds || []} onClose={() => setBatch(null)} /></MountWhenOpened>
-      <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} initialSource={suite?.repair ? 'repair' : undefined} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!textEdit}><TextEditDialog key={textEdit ? `${textEdit.trackId}:${textEdit.clipId}` : 'none'} request={textEdit} tracks={tracks} setState={setState} onSeek={onSeek} onClose={() => setTextEdit(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!spectral}><SpectralEditor request={spectral} tracks={tracks} setState={setState} onClose={() => setSpectral(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!voice}><VoiceAIDialog request={voice} tracks={tracks} lyrics={lyrics || ''} setState={setState} onClose={() => setVoice(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!voiceClean}><VoiceCleanDialog request={voiceClean} tracks={tracks} setState={setState} onClose={() => setVoiceClean(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!transpose}><TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} /></MountWhenOpened>

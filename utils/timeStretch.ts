@@ -1,6 +1,16 @@
 /**
  * Étirement temporel (time stretch) préservant la hauteur.
  * ---------------------------------------------------------
+ * Deux moteurs (L5 · écart 19, mesurés sur le banc tests/stretchQuality) :
+ *  - « haute qualité » (par défaut pour tout NOUVEL étirement) : vocodeur de
+ *    phase verrouillé (engine/phaseVocoder), stéréo traitée d'un bloc (l'image
+ *    ne bouge pas), le son découpé à chaque attaque : chaque coup commence un
+ *    morceau, il tombe à sa place exacte et rien ne « bave » avant lui ;
+ *  - « rapide » : le WSOLA d'origine ci-dessous (léger, mais attaques décalées
+ *    de 5 à 13 ms et canaux gauche / droite étirés chacun de leur côté).
+ * Un son déjà étiré (projet enregistré) n'est jamais recalculé tout seul : seul
+ * un nouveau calage (changement de tempo, découpe) passe par le nouveau moteur.
+ *
  * Algorithme WSOLA (Waveform Similarity Overlap-Add) : on découpe le signal en
  * trames, et pour chaque trame on cherche, dans une petite fenêtre de
  * tolérance, la position dont la forme d'onde prolonge le mieux la trame
@@ -13,6 +23,9 @@
  * Qualité correcte entre 0,5x et 2x, ce qui couvre largement les écarts de
  * tempo usuels (un beat à 90 BPM ramené à 140 reste dans la plage).
  */
+
+import { pvStretch } from '../engine/phaseVocoder';
+import { detectTransients } from './transients';
 
 const TAILLE_TRAME = 2048;      // ~46 ms à 44,1 kHz
 const RECOUVREMENT = TAILLE_TRAME / 2;
@@ -117,12 +130,73 @@ const etirerCanal = (source: Float32Array, facteur: number): Float32Array => {
 export const bornerFacteur = (facteur: number): number =>
   Math.max(0.25, Math.min(4, facteur));
 
+export type QualiteEtirement = 'haute' | 'rapide';
+
+/** Écart minimal entre deux attaques qui découpent le son (s) : plus court, ce n'est qu'un roulement. */
+const ECART_ATTAQUES = 0.06;
+/** Début d'attaque recopié tel quel, puis fondu vers le son étiré (s). */
+const ATTAQUE_COPIEE = 0.004;
+/** Marge avant l'attaque repérée (s). */
+const GARDE_ATTAQUE = 0.002;
+const ATTAQUE_FONDU = 0.004;
+
+/**
+ * Haute qualité : vocodeur de phase par morceaux, un morceau par attaque.
+ * La stéréo passe dans le même calcul (rotation de phase commune).
+ */
+export const etirerCanauxHQ = (canaux: Float32Array[], facteur: number, sampleRate = 48000): Float32Array[] => {
+  const f = bornerFacteur(facteur);
+  const n = canaux[0]?.length || 0;
+  const outLen = Math.max(1, Math.round(n * f));
+  if (!n) return canaux.map(() => new Float32Array(outLen));
+  const mono = canaux.length === 1 ? canaux[0] : (() => {
+    const m = new Float32Array(n);
+    for (const c of canaux) for (let i = 0; i < n; i++) m[i] += c[i] / canaux.length;
+    return m;
+  })();
+  const ecart = Math.round(ECART_ATTAQUES * sampleRate);
+  const bornes = [0];
+  // La coupe tombe 2 ms AVANT l'attaque repérée (repérée à 30 % de sa crête) : tout le coup
+  // est dans le nouveau morceau, aucune fenêtre du morceau d'avant ne l'étale vers l'arrière.
+  const garde = Math.round(GARDE_ATTAQUE * sampleRate);
+  for (const t of detectTransients(mono, sampleRate)) {
+    const s = Math.max(0, Math.round(t * sampleRate) - garde);
+    if (s - bornes[bornes.length - 1] >= ecart && n - s >= ecart) bornes.push(s);
+  }
+  bornes.push(n);
+  const sortie = canaux.map(() => new Float32Array(outLen));
+  for (let k = 0; k + 1 < bornes.length; k++) {
+    const s0 = bornes[k], s1 = bornes[k + 1];
+    // Place de sortie : l'ATTAQUE (garde ms après la coupe) tombe pile à t·f ; la garde la précède.
+    const place = (b: number, j: number) => (j === 0 ? 0 : Math.max(0, Math.round((b + garde) * f) - garde));
+    const d0 = place(s0, k), d1 = k + 2 === bornes.length ? outLen : place(s1, k + 1);
+    if (d1 <= d0) continue;
+    const morceau = pvStretch(canaux.map(c => c.subarray(s0, s1)), d1 - d0, { sampleRate });
+    morceau.forEach((c, i) => sortie[i].set(c.subarray(0, d1 - d0), d0));
+    // L'attaque elle-même (4 ms) est recopiée telle quelle, puis fondue (4 ms) dans le son
+    // étiré : le claquement d'une caisse claire garde son grain exact.
+    if (k > 0) {
+      const a = Math.round((GARDE_ATTAQUE + ATTAQUE_COPIEE) * sampleRate), x = Math.round(ATTAQUE_FONDU * sampleRate);
+      const len = Math.min(a + x, d1 - d0, s1 - s0);
+      canaux.forEach((c, i) => {
+        for (let j = 0; j < len; j++) {
+          const g = j < a ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * (j - a)) / x); // 1 → 0
+          sortie[i][d0 + j] = g * c[s0 + j] + (1 - g) * sortie[i][d0 + j];
+        }
+      });
+    }
+  }
+  return sortie;
+};
+
 /**
  * Étire une liste de canaux bruts. Sépare le calcul de l'API Web Audio, ce qui
  * permet de l'exécuter dans un worker (aucun AudioContext n'y est disponible).
+ * `qualite` : « haute » par défaut (voir l'en-tête) ; « rapide » = WSOLA.
  */
-export const etirerCanaux = (canaux: Float32Array[], facteur: number): Float32Array[] => {
+export const etirerCanaux = (canaux: Float32Array[], facteur: number, qualite: QualiteEtirement = 'haute', sampleRate = 48000): Float32Array[] => {
   const f = bornerFacteur(facteur);
+  if (qualite === 'haute') return etirerCanauxHQ(canaux, f, sampleRate);
   return canaux.map(c => etirerCanal(c, f));
 };
 
@@ -133,7 +207,8 @@ export const etirerCanaux = (canaux: Float32Array[], facteur: number): Float32Ar
 export const etirerBuffer = (
   ctx: BaseAudioContext,
   source: AudioBuffer,
-  facteur: number
+  facteur: number,
+  qualite: QualiteEtirement = 'haute'
 ): AudioBuffer => {
   // Hors de cette plage la qualité s'effondre ; on borne plutôt que de rendre
   // un résultat inexploitable.
@@ -142,11 +217,9 @@ export const etirerBuffer = (
 
   const longueurSortie = Math.max(1, Math.round(source.length * f));
   const resultat = ctx.createBuffer(source.numberOfChannels, longueurSortie, source.sampleRate);
-
-  for (let ch = 0; ch < source.numberOfChannels; ch++) {
-    const etire = etirerCanal(source.getChannelData(ch), f);
-    resultat.getChannelData(ch).set(etire.subarray(0, longueurSortie));
-  }
+  const canaux: Float32Array[] = [];
+  for (let ch = 0; ch < source.numberOfChannels; ch++) canaux.push(source.getChannelData(ch));
+  etirerCanaux(canaux, f, qualite, source.sampleRate).forEach((c, ch) => resultat.getChannelData(ch).set(c.subarray(0, longueurSortie)));
   return resultat;
 };
 
@@ -179,7 +252,8 @@ export const bufferDepuisCanaux = (
 export const etirerBufferAsync = async (
   ctx: BaseAudioContext,
   source: AudioBuffer,
-  facteur: number
+  facteur: number,
+  qualite: QualiteEtirement = 'haute'
 ): Promise<AudioBuffer> => {
   const f = bornerFacteur(facteur);
   if (Math.abs(f - 1) < 0.001) return source;
@@ -196,12 +270,12 @@ export const etirerBufferAsync = async (
     const canauxEtires = await new Promise<Float32Array[]>((resolve, reject) => {
       worker.onmessage = (e: MessageEvent<{ canaux: Float32Array[] }>) => resolve(e.data.canaux);
       worker.onerror = reject;
-      worker.postMessage({ canaux, facteur: f }, canaux.map(c => c.buffer));
+      worker.postMessage({ canaux, facteur: f, qualite, sampleRate: source.sampleRate }, canaux.map(c => c.buffer));
     });
     worker.terminate();
     return bufferDepuisCanaux(ctx, canauxEtires, source.sampleRate);
   } catch (e) {
     console.warn('[timeStretch] Worker indisponible, calcul synchrone', e);
-    return etirerBuffer(ctx, source, f);
+    return etirerBuffer(ctx, source, f, qualite);
   }
 };

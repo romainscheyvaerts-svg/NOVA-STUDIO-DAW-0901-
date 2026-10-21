@@ -152,6 +152,18 @@ BATTERIE = [
     ("banc_grosse_seance", []),
     # Surcharge processeur (40 pistes × 3 effets) : compteur, alerte avec solutions, mode sécurité.
     ("surcharge_cpu", []),
+    # 22/10/2026 · L5 écart 7 : « Réparer la voix » (plosives, clics de bouche, bourdonnement 50 Hz, écrêtage) en
+    # traitement de clip, mesuré sur le son rendu par NOVA (vraie prise rap + défauts ajoutés), Ctrl+Z et « Revenir à
+    # l'original » au bit près ; éditeur spectral (zone tracée, −20 dB mesuré, reste identique au bit près, remplissage) ;
+    # bureau sombre 1600 et clair 1366, téléphone 390 au doigt, sombre et clair.
+    ("voix_reparation", []),
+    # 22/10/2026 · L5 écart 18 : éditer la voix par le texte (prise transcrite) : mot cliqué = plage + tête de lecture,
+    # Suppr en Slip (blanc) et en Shuffle (la suite recule), jonction < −60 dBFS sur le rendu du moteur, Ctrl+Z, silence
+    # ramené à 0,12 s, mot corrigé gardé dans le .zip, découpe par phrase ; bureau sombre, téléphone 390, bureau clair.
+    ("voix_texte", []),
+    # 22/10/2026 · L5 écart 19 : étirement « haute qualité » dans la page (boucle de batterie stéréo calée sur le tempo,
+    # 90 → 112,5 → 72 BPM) : attaques à ±2 ms, pas de pré-écho, image stéréo gardée, durée exacte (son relu dans le .zip).
+    ("etirement_banc", []),
 ]
 
 

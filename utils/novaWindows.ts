@@ -16,7 +16,11 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // R24 : voix par l'IA locale (appli Windows) : retirer la réverbe, transcrire les paroles.
   | 'voice-deverb' | 'voice-transcribe'
   // Lot 1 « Voix propre » : nettoyer la voix en un clic (site, téléphone, appli).
-  | 'voice-clean';
+  | 'voice-clean'
+  // L5 · écart 7 : réparer la voix (plosives, clics, bourdonnement, saturation), éditeur spectral.
+  | 'voice-repair' | 'spectral-editor'
+  // L5 · écart 18 : éditer la voix par le texte (transcription locale).
+  | 'voice-text-edit';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
@@ -35,6 +39,8 @@ export interface NovaWindowDetail {
   range?: { start: number; end: number; trackIds: string[] };
   /** AudioSuite / transposition : « Revenir à l'original » tout de suite (sans fenêtre). */
   revert?: boolean;
+  /** Traitement de clip ouvert sur l'onglet « Réparer la voix » (L5 · écart 7). */
+  repair?: boolean;
   /** Transposition : version simple (téléphone, mode simple : la tonalité seulement). */
   simple?: boolean;
   /** Trim TCE (R13) : nouvelle place du clip étiré (début et durée, s). */
