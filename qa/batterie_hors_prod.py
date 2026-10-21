@@ -146,6 +146,11 @@ BATTERIE = [
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
     ("mixfx", []),
+    # 22/10/2026 · lot L4 « mix et mastering pro » : EQ 12 bandes en Mid/Side et phase linéaire (latence au PDC, export =
+    # lecture, neutre + PDC = son sec au bit près), rack d'effets parallèles (branches, bandes, centre / côtés, réalignement),
+    # scènes de mix A/B/C/D (rappel exact en une annulation, A⇄B, rappel partiel), mastering d'un EP (6 titres ≤ 0,5 LU,
+    # blancs exacts, .cue + ISRC, un WAV par titre) ; bureau sombre + clair, téléphone 390.
+    ("mixpro", []),
 ]
 
 

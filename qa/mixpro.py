@@ -567,6 +567,162 @@ def scenes_bureau(theme="dark"):
     return out
 
 
+# ─────────────────────────────── Mastering d'un EP / album (écart 22) ───────────────────────────────
+ALBUM_DIR = OUT / "album_titres"
+
+
+def make_titles():
+    """6 titres d'essai (12 s, « même caractère » : rap, niveaux de départ très différents), un à 44,1 kHz."""
+    import math, random, struct, wave
+    ALBUM_DIR.mkdir(parents=True, exist_ok=True)
+    amps = [0.05, 0.12, 0.3, 0.08, 0.2, 0.4]
+    paths = []
+    for i, a in enumerate(amps):
+        sr = 44100 if i == 3 else 48000
+        n = 12 * sr
+        rnd = random.Random(10 + i)
+        f = 55 + 10 * i
+        frames = bytearray()
+        for k in range(n):
+            t = k / sr
+            beat = math.exp(-((t * 2) % 1) * 9)                       # kick 2 fois par seconde
+            v = a * (0.7 * beat * math.sin(2 * math.pi * f * t) + 0.25 * math.sin(2 * math.pi * 4 * f * t) * (0.6 + 0.4 * math.sin(2 * math.pi * 3 * t)) + 0.08 * (rnd.random() - 0.5))
+            w = a * (0.7 * beat * math.sin(2 * math.pi * f * t + 0.2) + 0.25 * math.sin(2 * math.pi * 5 * f * t) * (0.6 + 0.4 * math.sin(2 * math.pi * 2 * t)) + 0.08 * (rnd.random() - 0.5))
+            v = v if abs(v) > 1e-4 else 1e-3
+            w = w if abs(w) > 1e-4 else 1e-3
+            frames += struct.pack("<hh", int(max(-1, min(1, v)) * 32767), int(max(-1, min(1, w)) * 32767))
+        p = ALBUM_DIR / f"{i + 1:02d}_Titre {i + 1}.wav"
+        with wave.open(str(p), "wb") as wf:
+            wf.setnchannels(2); wf.setsampwidth(2); wf.setframerate(sr); wf.writeframes(bytes(frames))
+        paths.append(str(p))
+    return paths
+
+
+def wav_info(data):
+    import io, wave
+    with wave.open(io.BytesIO(data), "rb") as wf:
+        return {"sr": wf.getframerate(), "bits": wf.getsampwidth() * 8, "ch": wf.getnchannels(), "frames": wf.getnframes(), "raw": wf.readframes(wf.getnframes())}
+
+
+def trailing_zero_frames(info):
+    raw, step, n = info["raw"], info["ch"] * info["bits"] // 8, 0
+    for k in range(info["frames"] - 1, -1, -1):
+        if any(raw[k * step:(k + 1) * step]):
+            break
+        n += 1
+    return n
+
+
+def album_page(vp="pc", theme="dark"):
+    from desktop_gate import install_mocks
+    from tarifs import Billing as TarifsBilling, route_billing
+
+    class Billing(TarifsBilling):
+        def access(self, body):
+            return {"grille": "2026-10-14", "missing": [], "items": [], "login_required": False, "kits": False, "offers": None,
+                    "pro": None, "unlocked": True, "via": "admin", "reason": None}
+
+        def reply(self, body):
+            st, payload = super().reply(body)
+            return (st, {**payload, "admin": True}) if body.get("action") == "status" else (st, payload)
+
+    out = {}
+    files = make_titles()
+    log = Log(f"mixpro_album_{vp}_{theme}")
+    with sync_playwright() as p:
+        b = launch(p)
+        ctx, pg = new_page(b, vp, log)
+        pg.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); localStorage.setItem('nova_welcome_seen', '1'); }} catch (e) {{}}")
+        install_mocks(pg, "romain", {}, {})
+        route_billing(pg, Billing("admin"))
+        pg.set_default_timeout(60000)
+        pg.goto(os.environ.get("NOVA_URL", "http://127.0.0.1:3522/") + "?album", wait_until="domcontentloaded", timeout=120000)
+        root = pg.locator("[data-nova-album]")
+        root.wait_for(timeout=60000)
+        pg.wait_for_timeout(800)
+        tag = f"[{vp}/{theme}] Album"
+        pg.screenshot(path=str(OUT / f"album_{vp}_{theme}_vide.png"))
+        pg.locator("[data-album-input]").set_input_files(files)
+        pg.wait_for_function("() => document.querySelectorAll('[data-album-title]').length === 6", timeout=120000)
+        pg.wait_for_timeout(500)
+        out["titres"] = pg.locator("[data-album-title]").count()
+        check(f"{tag} : 6 titres déposés en une fois (dont un à 44,1 kHz), dans l'ordre des fichiers", out["titres"] == 6,
+              [pg.locator(f"[data-album-name='{i}']").input_value() for i in range(1, 7)])
+        if vp != "pc":
+            pg.screenshot(path=str(OUT / f"album_{vp}_{theme}_liste.png"), full_page=True)
+            ov = pg.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 1")
+            small = pg.evaluate("""() => [...document.querySelectorAll('[data-nova-album] button')].filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 32 || r.width < 32); }).length""")
+            check(f"{tag} (téléphone) : liste des titres sans débordement horizontal", not ov, {"debordement": ov, "boutons_petits": small})
+            ctx.close(); b.close(); return out
+        # ISRC : un invalide (refusé, export bloqué), puis corrigé ; deux valides.
+        pg.locator("[data-album-isrc='1']").fill("FR-Z03-26-00001")
+        pg.locator("[data-album-isrc='2']").fill("ABC")
+        pg.wait_for_timeout(200)
+        bad = pg.locator("[data-album-title='2'] [role=alert]").count()
+        pg.locator("[data-album-isrc='2']").fill("FRZ032600002")
+        check(f"{tag} : ISRC invalide signalé puis accepté une fois corrigé", bad == 1 and pg.locator("[data-album-title='2'] [role=alert]").count() == 0, {"alerte": bad})
+        # Ordre : le titre 6 monte en 5e position.
+        pg.get_by_role("button", name=re.compile("^Monter Titre 6$")).click(); pg.wait_for_timeout(200)
+        order = [pg.locator(f"[data-album-name='{i}']").input_value() for i in range(1, 7)]
+        check(f"{tag} : réordonner (titre 6 monté d'un cran)", order[4] == "Titre 6" and order[5] == "Titre 5", order)
+        # Enchaînements : fondu 2 s entre 1 et 2, blanc de 3 s entre 2 et 3.
+        pg.locator("[data-album-transition='1'] select").select_option("x:2")
+        pg.locator("[data-album-transition='2'] select").select_option("g:3")
+        pg.locator("[data-album-artist]").fill("Nina")
+        pg.locator("[data-album-name-disque]").fill("Premier EP")
+        t0m = time.time()
+        pg.locator("[data-album-master]").click()
+        pg.wait_for_selector("[data-album-spread]", timeout=900000)
+        out["mastering_s"] = round(time.time() - t0m)
+        spread = float(pg.locator("[data-album-spread]").get_attribute("data-album-spread"))
+        lufs = [pg.locator(f"[data-album-lufs='{i}']").inner_text() for i in range(1, 7)]
+        out["ecart_lu"] = spread
+        out["lufs"] = lufs
+        pg.screenshot(path=str(OUT / f"album_{vp}_{theme}_masterise.png"), full_page=True)
+        check(f"{tag} : 6 titres masterisés (même style, même cible) : écart de LUFS intégré ≤ 0,5 LU", spread <= 0.5, {"ecart": spread, "lufs": lufs, "secondes": out["mastering_s"]})
+        # Enchaînement écouté (bouton actif, sans erreur).
+        pg.locator("[data-album-play-transition='1']").click(); pg.wait_for_timeout(600)
+        playing = "fa-stop" in (pg.locator("[data-album-play-transition='1'] i").get_attribute("class") or "")
+        pg.locator("[data-album-play-transition='1']").click()
+        check(f"{tag} : « Écouter l'enchaînement » joue la transition 1 → 2", playing, {})
+        # Export : un fichier par titre.
+        with pg.expect_download(timeout=300000) as dl:
+            pg.locator("[data-album-export-zip]").click()
+        zp = OUT / "album_titres.zip"
+        dl.value.save_as(str(zp))
+        z = zipfile.ZipFile(zp)
+        names = sorted(z.namelist())
+        wavs = [n for n in names if n.endswith(".wav")]
+        cue = next((z.read(n).decode("utf-8") for n in names if n.endswith(".cue")), "")
+        meta = json.loads(next((z.read(n) for n in names if n.endswith(".json")), b"{}"))
+        infos = [wav_info(z.read(n)) for n in wavs]
+        out["zip"] = {"fichiers": [n.split("/")[-1] for n in names], "wav": [{k: v for k, v in i.items() if k != "raw"} for i in infos]}
+        gap = trailing_zero_frames(infos[1]) if len(infos) > 1 else None
+        out["blanc_titre2_echantillons"] = gap
+        check(f"{tag} : .zip = 6 WAV 24 bits « 01 - … » + minutage .cue + fiche JSON", len(wavs) == 6 and all(i["bits"] == 24 and i["sr"] == 48000 for i in infos)
+              and wavs[0].split("/")[-1].startswith("01 - ") and bool(cue) and bool(meta.get("titres")), out["zip"]["fichiers"])
+        check(f"{tag} : blanc de 3 s exact à l'échantillon à la fin du fichier du titre 2 (144 000 zéros)", gap == 144000, gap)
+        check(f"{tag} : feuille .cue : 6 TRACK, ISRC des titres 1 et 2, INDEX 01", cue.count("TRACK ") == 6 and "ISRC FRZ032600001" in cue and "ISRC FRZ032600002" in cue and cue.count("INDEX 01") == 6, cue[:400])
+        check(f"{tag} : fiche JSON : ordre, ISRC, écart ≤ 0,5 LU", [t["titre"] for t in meta["titres"]][4] == "Titre 6" and meta["titres"][0]["isrc"] == "FRZ032600001"
+              and meta.get("ecart_lufs_entre_titres") is not None and meta["ecart_lufs_entre_titres"] <= 0.5, {"ecart": meta.get("ecart_lufs_entre_titres")})
+        # Album d'un seul tenant : longueur = somme des fichiers.
+        with pg.expect_download(timeout=300000) as dl2:
+            pg.locator("[data-album-export-wav]").click()
+        zp2 = OUT / "album_seul_tenant.zip"
+        dl2.value.save_as(str(zp2))
+        z2 = zipfile.ZipFile(zp2)
+        w2 = [n for n in z2.namelist() if n.endswith(".wav")]
+        full = wav_info(z2.read(w2[0])) if w2 else {"frames": -1}
+        check(f"{tag} : album d'un seul tenant (.wav + .cue) = les 6 fichiers bout à bout (même nombre d'échantillons)",
+              full["frames"] == sum(i["frames"] for i in infos) and any(n.endswith(".cue") for n in z2.namelist()), {"album": full["frames"], "somme": sum(i["frames"] for i in infos)})
+        msg = pg.locator("[data-album-export-msg]").inner_text() if pg.locator("[data-album-export-msg]").count() else ""
+        out["message"] = msg
+        out["erreurs_page"] = [x["text"][:200] for x in log.errors()][:6]
+        check(f"{tag} : aucune erreur de page", not [x for x in log.errors() if re.search(r"album|Album|quickMaster", x["text"])], out["erreurs_page"])
+        ctx.close(); b.close()
+    return out
+
+
 t0 = time.time()
 if want("eq"):
     res["eq_sombre"] = eq_bureau("dark")
@@ -579,6 +735,9 @@ if want("rack"):
 if want("scenes"):
     res["scenes_sombre"] = scenes_bureau("dark")
     res["scenes_clair"] = scenes_bureau("light")
+if want("album"):
+    res["album_sombre"] = album_page("pc", "dark")
+    res["album_telephone_clair"] = album_page("tel390", "light")
 res["secondes"] = round(time.time() - t0)
 res["verifs"] = checks
 res["ok"] = all(c["ok"] for c in checks)
