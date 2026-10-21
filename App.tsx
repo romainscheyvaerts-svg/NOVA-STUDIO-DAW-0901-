@@ -116,6 +116,7 @@ import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, 
 import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing } from './utils/collabTempo';
 import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
+import { syncLinkedClips, duplicateLinked, makeUnique, unlinked } from './utils/linkedClips';
 import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
@@ -664,6 +665,13 @@ const useUndoRedo = (initialState: DAWState) => {
           && !curr.present.isRecording && !newState.isRecording) {
         const g = enforceClipLocks(curr.present.tracks, newState.tracks);
         if (g.refused.length) { newState = { ...newState, tracks: g.tracks }; clipLockNotices.report(g.refused); }
+      }
+      // L3 · Copies liées (utils/linkedClips) : les notes retouchées dans une copie passent dans toutes
+      // les autres, dans la MÊME mise à jour (une seule étape d'annulation ; opérations reçues comprises).
+      if (newState.tracks !== curr.present.tracks) {
+        const evs = newState.tempoEvents || [];
+        const synced = syncLinkedClips(curr.present.tracks, newState.tracks, evs.length ? buildTempoMap(newState.bpm, newState.timeSignature, evs) : null);
+        if (synced !== newState.tracks) newState = { ...newState, tracks: synced };
       }
 
       // L'historique ne retient que les modifications reelles du projet.
@@ -1995,7 +2003,7 @@ function Studio() {
             const source = clipboardClipRef.current;
             if (!source) return;
             const start = Math.max(0, payload?.time ?? 0);
-            newClips.push({ ...source, id: `clip-paste-${Date.now()}`, start });
+            newClips.push({ ...unlinked(source), id: `clip-paste-${Date.now()}`, start });
             break;
         }
         case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
@@ -2010,7 +2018,11 @@ function Studio() {
         case 'MUTE': if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted }; break;
         // payload.start permet de deposer la copie a un endroit precis
         // (Alt+glisser laisse une copie a la position d'origine).
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
+        // Copie indépendante (sans lien) : « Dupliquer en copie liée » est à part (DUPLICATE_LINKED).
+        case 'DUPLICATE': if(idx > -1) newClips.push({ ...unlinked(newClips[idx]), id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
+        // L3 · Copie liée d'un motif MIDI (utils/linkedClips), posée juste après (ou à payload.start).
+        case 'DUPLICATE_LINKED': if (idx > -1) newClips = duplicateLinked(newClips, clipId, { start: payload?.start }).clips; break;
+        case 'MAKE_UNIQUE': if (idx > -1) newClips[idx] = makeUnique(newClips[idx]); break;
         case 'RENAME': if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name }; break;
         case 'SPLIT': 
             if(idx > -1) {

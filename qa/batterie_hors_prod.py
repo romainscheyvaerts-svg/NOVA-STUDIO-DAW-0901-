@@ -150,6 +150,9 @@ BATTERIE = [
     # tick ; export = projet écrit directement à 140), Ctrl+Z en une étape, « garder les clips audio à leur place », rampe
     # 120 → 100 (clics à ±1 ms, bande de la piste tempo), sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
     ("tempo_musical", []),
+    # 22/10/2026 · L3 clips MIDI liés : « Dupliquer en copie liée » (menu du clip) ×8, pastilles « ∞ 8 », ↑ dans le piano roll
+    # d'UNE copie = les 8 montent (Ctrl+Z / Ctrl+Y en une étape), export = motif posé 8 fois, « Rendre unique », sauvegarde + rechargement.
+    ("clips_lies", []),
 ]
 
 

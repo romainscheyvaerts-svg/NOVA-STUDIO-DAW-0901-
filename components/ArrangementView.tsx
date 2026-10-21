@@ -33,6 +33,7 @@ import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
+import { linkCounts, isLinked } from '../utils/linkedClips';
 import { gainToDbText } from '../utils/db';
 import { PunchSettings } from '../types';
 import { hasPunchZone, movePunchPoint } from '../utils/punch';
@@ -597,6 +598,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
   const { simple } = useSimpleMode();
+  // L3 · Copies liées : nombre de copies par motif (pastille « ∞ N », menu « Rendre unique »).
+  const linkCountMap = useMemo(() => linkCounts(tracks), [tracks]);
   const visibleTracks = useMemo(() => {
     // Structure Pro Tools : pistes masquées et pistes de dossiers repliés hors de l'écran (utils/trackStructure).
     const shown = shownTrackIds(tracks);
@@ -1987,6 +1990,21 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillText(clip.name, x + 9, y + 14, w - 18);
     }
 
+    // L3 · Copie liée (utils/linkedClips) : pastille « ∞ N » (N copies du même motif), en haut à droite.
+    const links = clip.linkId ? linkCountMap.get(clip.linkId) || 0 : 0;
+    if (links > 1 && w > (clip.lock ? 64 : 44)) {
+        const label = `∞ ${links}`;
+        ctx.save();
+        ctx.font = '700 10px Inter';
+        const lw = ctx.measureText(label).width + 8;
+        const bx = x + w - (clip.lock ? 23 : 4) - lw, by = y + 3;
+        ctx.fillStyle = 'rgba(34,211,238,0.92)';
+        ctx.beginPath(); ctx.roundRect(bx, by, lw, 15, 3); ctx.fill();
+        ctx.fillStyle = '#04141a';
+        ctx.fillText(label, bx + 4, by + 11);
+        ctx.restore();
+    }
+
     // Verrou (utils/clipLock) : cadenas (édition) ou punaise (position), en haut à droite.
     if (clip.lock && w > 22) {
         const bx = x + w - 19, by = y + 3;
@@ -2508,6 +2526,13 @@ useEffect(() => {
       // Les deux outils voix les plus utilisés (audio) ; pour un clip MIDI, le piano roll.
       ...(audioOnly ? [justesse, respirations] : []),
       ...(isMidiClip && onEditMidi ? [{ label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(cm.trackId, cm.clip.id); close(); }}] : []),
+      // L3 · Copies liées d'un motif (utils/linkedClips) : mode avancé.
+      ...(isMidiClip && !simple ? [{ label: 'Dupliquer en copie liée', icon: 'fa-link',
+        title: 'La copie suit le motif : modifier une note dans une copie la modifie dans toutes.',
+        onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'DUPLICATE_LINKED'); close(); }} as ContextMenuItem] : []),
+      ...(isMidiClip && isLinked(cm.clip, linkCountMap) ? [{ label: `Rendre unique (détacher de ses ${(linkCountMap.get(cm.clip.linkId!) || 1) - 1} autre${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''} copie${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''})`, icon: 'fa-link-slash',
+        title: 'Ce clip garde ses notes mais ne suit plus les autres copies.',
+        onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'MAKE_UNIQUE'); close(); }} as ContextMenuItem] : []),
       'separator',
     ];
 

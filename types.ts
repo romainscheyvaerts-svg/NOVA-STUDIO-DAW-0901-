@@ -470,6 +470,13 @@ export interface Clip {
    * fois. Une ancienne version l'ignore.
    */
   tempoEpoch?: string;
+  /**
+   * L3 · Copie liée d'un motif MIDI (utils/linkedClips) : les clips qui portent
+   * le même identifiant ont les mêmes notes ; en modifier un modifie les autres.
+   * Chaque copie garde ses notes (une ancienne version joue chaque copie telle
+   * quelle). Absent : clip indépendant.
+   */
+  linkId?: string;
 }
 
 /** R24 : un mot transcrit (temps en secondes du son du clip). */

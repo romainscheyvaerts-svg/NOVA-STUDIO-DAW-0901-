@@ -11,6 +11,7 @@ import { midiBus } from '../utils/midiBus';
 import ChordRollOverlay from './ChordRollOverlay';
 import { useTempoMap } from './TempoLane';
 import { tempoAt } from '../utils/tempoMap';
+import { linkCounts, makeUnique } from '../utils/linkedClips';
 import { NoteRecorder, defaultKeyLabel, KEY_TO_SEMITONE, computerKeyboardStore } from '../utils/computerKeyboard';
 import { useComputerKeyboard } from './MidiInputHost';
 import { midiInput } from '../services/MidiInput';
@@ -201,6 +202,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const tempoMap = useTempoMap();
   const bpm = Math.abs(tempoMap.segments[0].bpm - projectBpm) < 1e-6 ? tempoAt(tempoMap, clip?.start ?? 0) : projectBpm;
   const beatSec = 60 / bpm;
+  const linkedCount = useMemo(() => (clip?.linkId ? linkCounts(allTracks || [track]).get(clip.linkId) || 0 : 0), [clip?.linkId, allTracks, track]);
   const barSec = beatSec * 4;
   const clipStart = clip?.start || 0;
 
@@ -1254,6 +1256,16 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                     <p className="text-[9px] text-slate-500 font-mono max-w-[120px] truncate">{clip.name}</p>
                 </div>
              </div>
+
+             {/* L3 · Copie liée (utils/linkedClips) : ce qu'on modifie ici change aussi les autres copies. */}
+             {linkedCount > 1 && (
+               <button type="button" data-testid="roll-linked" className="pr-cap shrink-0" style={{ color: '#22d3ee' }}
+                 onClick={() => onUpdateTrack({ ...track, clips: track.clips.map(c => (c.id === clip.id ? makeUnique(c) : c)) })}
+                 title={`Copie liée : ${linkedCount} copies de ce motif. Chaque note modifiée ici change aussi les ${linkedCount - 1} autres. Clic : rendre cette copie unique (Ctrl+Z pour revenir).`}
+                 aria-label={`Copie liée, ${linkedCount} copies. Rendre unique`}>
+                 <span className="font-black">∞ {linkedCount}</span><span className="hidden min-[1200px]:inline">copies liées · Rendre unique</span>
+               </button>
+             )}
 
              {onTogglePlay && (
                <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Lecture'} title="Écouter / pause (barre d'espace)"
