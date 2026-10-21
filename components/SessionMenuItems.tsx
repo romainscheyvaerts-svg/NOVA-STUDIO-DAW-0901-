@@ -1,6 +1,7 @@
 import React from 'react';
 import { openImportSession, openSessionPanel } from '../utils/r21Bus';
 import { openAafImport } from '../utils/aaf/aafBus';
+import { openDawProjectImport } from '../utils/dawproject/dawProjectBus';
 
 /**
  * R21 · Entrées du menu ☰ (téléphone, tablette, petites largeurs) : notes,
@@ -29,6 +30,9 @@ const SessionMenuItems: React.FC<{ onDone: () => void; phone?: boolean }> = ({ o
         </button>
         <button type="button" data-testid="menu-aaf-import" className={item} onClick={() => { openAafImport(); onDone(); }}>
           <i className="w-5 text-center text-slate-300 fas fa-file-audio"></i><span>Importer une séance AAF</span>
+        </button>
+        <button type="button" data-testid="menu-dawp-import" className={item} onClick={() => { openDawProjectImport(); onDone(); }}>
+          <i className="w-5 text-center text-slate-300 fas fa-folder-open"></i><span>Ouvrir un projet DAWproject</span>
         </button>
       </>
     )}

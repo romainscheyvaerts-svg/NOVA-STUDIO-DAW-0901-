@@ -210,6 +210,8 @@ import { openSessionPanel, openImportSession, useSessionPanel } from './utils/r2
 import AafHost from './components/AafHost';
 import DistributionHost from './components/DistributionHost';
 import { openAafExport, openAafImport } from './utils/aaf/aafBus';
+import DawProjectHost from './components/DawProjectHost';
+import { openDawProjectExport, openDawProjectImport } from './utils/dawproject/dawProjectBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
@@ -10489,6 +10491,8 @@ function Studio() {
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
       a('Fichier', 'pal.aafImport', 'Importer une séance AAF (logiciel de studio)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf logiciel studio séance session importer ingé' }),
       a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf logiciel studio séance session exporter ingé bwf' }),
+      a('Fichier', 'pal.dawpImport', 'Ouvrir un projet DAWproject (format ouvert d’un autre logiciel de musique)', () => openDawProjectImport(), { keywords: 'dawproject daw projet format ouvert importer échange logiciel musique' }),
+      a('Fichier', 'pal.dawpExport', 'Exporter en DAWproject (format ouvert, pour un autre logiciel de musique)', () => openDawProjectExport(), { keywords: 'dawproject daw projet format ouvert exporter échange logiciel musique' }),
       a('Fichier', 'pal.distribution', '🚀 Prêt pour Spotify / Apple / TikTok ? (contrôle avant distribution)', () => openDistribution(), { keywords: 'distribution spotify apple deezer tiktok distrokid tunecore livraison sortir sortie release paquet' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
       a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
@@ -10961,6 +10965,7 @@ function Studio() {
           )}
         </main>
         <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
+        <DawProjectHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         <DistributionHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>

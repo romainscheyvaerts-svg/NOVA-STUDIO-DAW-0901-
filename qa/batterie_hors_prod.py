@@ -146,6 +146,10 @@ BATTERIE = [
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
     ("mixfx", []),
+    # 22/10/2026 · lot L6 (ergonomie pro) + échange DAWproject : export .dawproject relu en Python (noires → secondes à
+    # 0 échantillon, WAV), réouvert dans NOVA (aller-retour identique, Ctrl+Z), fichier de référence d'un autre logiciel
+    # (plugins absents, son manquant signalés) ; bureau sombre + clair, téléphone 390.
+    ("ergo_pro", []),
 ]
 
 
