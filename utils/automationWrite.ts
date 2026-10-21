@@ -69,9 +69,19 @@ export const isAutomationPlayed = (mode: AutomationMode): boolean => mode !== 'o
 export const isWriteMode = (mode: AutomationMode): boolean =>
   mode === 'touch' || mode === 'latch' || mode === 'write' || mode === 'trim';
 
-/** Voies réellement rejouées (lecture ET export) : aucune en mode Off. */
-export const playedLanes = (track: Pick<Track, 'automationLanes'> & { automationMode?: string }): AutomationLane[] =>
-  isAutomationPlayed(automationModeOf(track)) ? (track.automationLanes || []) : [];
+/**
+ * L3 · Modulateurs (utils/modulators) : branchés ici, au même endroit que
+ * l'automation (lecture ET export). Enregistrés par le module des modulateurs.
+ */
+type LaneModulator = (track: Pick<Track, 'automationLanes'> & { modulators?: unknown[] }, lanes: AutomationLane[]) => AutomationLane[];
+let laneModulator: LaneModulator | null = null;
+export const setLaneModulator = (fn: LaneModulator | null) => { laneModulator = fn; };
+
+/** Voies réellement rejouées (lecture ET export) : aucune en mode Off (les modulateurs, eux, jouent toujours). */
+export const playedLanes = (track: Pick<Track, 'automationLanes'> & { automationMode?: string; modulators?: unknown[] }): AutomationLane[] => {
+  const lanes = isAutomationPlayed(automationModeOf(track)) ? (track.automationLanes || []) : [];
+  return laneModulator && track.modulators?.length ? laneModulator(track, lanes) : lanes;
+};
 
 // --- Courbes ------------------------------------------------------------------------
 

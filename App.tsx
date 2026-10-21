@@ -119,6 +119,7 @@ import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId 
 import { syncLinkedClips, duplicateLinked, makeUnique, unlinked } from './utils/linkedClips';
 import { freezeMidiFx, midiFxKeyStore, sanitizeMidiFx, activeFx, type MidiFxSlot } from './engine/midiFx';
 import { liveMidiFx } from './engine/midiFx/live';
+import { modulationSpanStore, sanitizeModulators, type Modulator } from './utils/modulators';
 import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
@@ -131,6 +132,7 @@ import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './co
 const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDialog'));
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 const MidiFxPanel = lazyWithPreload(() => import('./components/MidiFxPanel'));
+const ModulatorsPanel = lazyWithPreload(() => import('./components/ModulatorsPanel'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
 import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
@@ -4232,6 +4234,26 @@ function Studio() {
     liveFxIdsRef.current.forEach(id => { if (!seen.has(id)) liveMidiFx.setTrackFx(id, undefined); });
     liveFxIdsRef.current = seen;
   }, [state.tracks]);
+  // L3 · Modulateurs (LFO) d'une piste : fenêtre ouverte sur cette piste.
+  const [modTrackId, setModTrackId] = useState<string | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => { const id = (e as CustomEvent).detail?.trackId; if (typeof id === 'string') setModTrackId(id); };
+    window.addEventListener('nova:open-modulators', on);
+    return () => window.removeEventListener('nova:open-modulators', on);
+  }, []);
+  // Courbes des modulateurs calculées jusqu'à la fin du projet (+ 1 min), par paliers d'une minute.
+  useEffect(() => {
+    let end = 0;
+    for (const t of state.tracks) for (const c of t.clips) end = Math.max(end, c.start + c.duration);
+    modulationSpanStore.set(Math.ceil((Math.max(end, state.loopEnd || 0, 60) + 60) / 60) * 60);
+  }, [state.tracks, state.loopEnd]);
+  const handleModulatorsChange = useCallback((trackId: string, mods: Modulator[]) => {
+    setState(produce((d: DAWState) => {
+      const t = d.tracks.find(x => x.id === trackId);
+      if (!t) return;
+      if (mods.length) t.modulators = mods as any; else delete t.modulators;
+    }));
+  }, [setState]);
   const handleMidiFxChange = useCallback((trackId: string, slots: MidiFxSlot[]) => {
     setState(produce((d: DAWState) => {
       const t = d.tracks.find(x => x.id === trackId);
@@ -6627,6 +6649,8 @@ function Studio() {
             if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
             // Effets MIDI (L3) : null = aucun ; absent = ancienne version (on garde les nôtres).
             if (ct.midiFx !== undefined) { const fx = sanitizeMidiFx(ct.midiFx); if (fx.length) t.midiFx = fx as any; else delete t.midiFx; }
+            // Modulateurs (L3) : null = aucun ; absent = ancienne version (on garde les nôtres).
+            if (ct.modulators !== undefined) { const ms = sanitizeModulators(ct.modulators); if (ms.length) t.modulators = ms as any; else delete t.modulators; }
             // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
             if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
             // Respirations : rôle de la piste (lead / extra / ignorée).
@@ -10681,6 +10705,10 @@ function Studio() {
         const sel = stateRef.current.tracks.find(t => t.id === stateRef.current.selectedTrackId && t.type === TrackType.MIDI) || stateRef.current.tracks.find(t => t.type === TrackType.MIDI);
         if (sel) setMidiFxTrackId(sel.id); else setAiNotification('🎹 Effets MIDI : crée d’abord une piste MIDI (synthé, instrument).');
       }, { keywords: 'arpege arpeggiator accord chord gamme scale midi fx effets' })] : []),
+      ...(!simpleNow ? [a('Mix', 'pal.modulators', 'Modulateurs (LFO) de la piste sélectionnée', () => {
+        const id = stateRef.current.selectedTrackId || stateRef.current.tracks.find(t => t.id !== 'master')?.id;
+        if (id) setModTrackId(id);
+      }, { keywords: 'lfo modulateur modulation tremolo trémolo filtre wobble pan auto' })] : []),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
       a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
       a('Réglages', 'pal.appUpdate', 'Rechercher une mise à jour de Nova Studio', () => { requestDesktopUpdateCheck(); setIsAudioSettingsOpen(true); }, { keywords: 'mise a jour maj update nouvelle version installer appli windows automatique', disabledReason: isNovaDesktop() ? undefined : 'Seulement dans l’appli Nova Studio pour Windows (le site est toujours à jour).' }),
@@ -11376,6 +11404,12 @@ function Studio() {
             suggestedBar={timeToPosition(tempoMapStore.get(), playheadStore.get()).bar}
             focusBar={tempoDialog.focusBar}
             tempoLaneOn={tempoLaneShown} onTempoLane={on => tempoLaneStore.set(on)} />
+        </Suspense>
+      )}
+      {modTrackId && state.tracks.some(t => t.id === modTrackId) && (
+        <Suspense fallback={null}>
+          <ModulatorsPanel track={state.tracks.find(t => t.id === modTrackId)!} allTracks={state.tracks}
+            onChange={mods => handleModulatorsChange(modTrackId, mods)} onClose={() => setModTrackId(null)} />
         </Suspense>
       )}
       {midiFxTrackId && state.tracks.some(t => t.id === midiFxTrackId) && (

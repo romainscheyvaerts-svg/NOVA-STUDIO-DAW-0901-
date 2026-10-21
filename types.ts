@@ -994,6 +994,13 @@ export interface Track {
    */
   midiFx?: import('./engine/midiFx').MidiFxSlot[];
   /**
+   * L3 · Modulateurs (utils/modulators) : LFO calés sur le tempo qui pilotent
+   * un réglage ayant une voie d'automation (volume, pan, envoi, réglage d'un
+   * effet). S'ajoutent à l'automation, en lecture comme à l'export. Une
+   * ancienne version les ignore (réglage fixe ou automation seule).
+   */
+  modulators?: import('./utils/modulators').Modulator[];
+  /**
    * R18 · Piste MIDI jouée par le sampler mélodique (ton son, chromatique,
    * ADSR, boucle, glide, mono / poly) ou, R20, par un instrument
    * multi-échantillons (piano, Rhodes, guitare, cordes, cloches, nappe).

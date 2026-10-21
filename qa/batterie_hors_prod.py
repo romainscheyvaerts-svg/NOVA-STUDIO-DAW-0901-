@@ -157,6 +157,9 @@ BATTERIE = [
     # gamme forcée (100 % dans la gamme du projet), clavier en direct (arpège, aucun minuteur au repos), « Figer en notes »
     # (= notes entendues, export identique), Ctrl+Z, sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
     ("effets_midi", []),
+    # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
+    # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
+    ("modulateurs", []),
 ]
 
 

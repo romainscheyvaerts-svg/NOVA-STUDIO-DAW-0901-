@@ -46,6 +46,15 @@ import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
 import { clipsWithMidiFx } from './midiFx';
+// L3 · Modulateurs (LFO) : branchés sur playedLanes, au même endroit que l'automation.
+import '../utils/modulators';
+
+/** Premier indice dont le temps est ≥ t (points triés) : voies longues (modulateurs) parcourues sans tout relire. */
+const firstPointAtOrAfter = (pts: AutomationPoint[], t: number): number => {
+  let lo = 0, hi = pts.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (pts[mid].time < t) lo = mid + 1; else hi = mid; }
+  return lo;
+};
 import { absorbedSlides } from '../utils/pianoRollPro';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { InputRouter, InputTap } from './InputRouter';
@@ -4011,8 +4020,10 @@ export class AudioEngine {
   private programPluginWindow(ap: AudioParam, pts: AutomationPoint[], start: number, end: number, when: number, lead: number) {
     const base = when - start;
     try {
-      for (let k = 0; k < pts.length; k++) {
+      // Voie longue (modulateur) : on part du premier point de la fenêtre.
+      for (let k = pts.length > 256 ? firstPointAtOrAfter(pts, start + lead) : 0; k < pts.length; k++) {
         const tp = pts[k].time - lead;
+        if (tp >= end && pts.length > 256) break;
         if (tp < start || tp >= end) continue;
         const at = base + tp;
         ap.setValueAtTime(pts[k].value, at);
@@ -4149,7 +4160,11 @@ export class AudioEngine {
               return;
             }
 
-            lane.points.forEach((point, index) => {
+            // Voie longue (modulateur, points triés) : seulement les points de la fenêtre.
+            const long = lane.points.length > 256;
+            const from = long ? firstPointAtOrAfter(lane.points, start) : 0;
+            (long ? lane.points.slice(from, firstPointAtOrAfter(lane.points, end) + 1) : lane.points).forEach((point, i) => {
+                const index = from + i;
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     

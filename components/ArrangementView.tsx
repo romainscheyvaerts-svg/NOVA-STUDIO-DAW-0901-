@@ -969,6 +969,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       title: 'Arpège, accord d’une touche, gamme forcée : joués avant l’instrument, réglables pendant la lecture, figeables en notes.',
       onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId } })); },
     });
+    // L3 · Modulateurs (LFO calés sur le tempo), mode avancé.
+    if (target && !simple) menuItems.push({
+      label: target.modulators?.some(m => m.on) ? `Modulateurs (${target.modulators.filter(m => m.on).length} LFO)…` : 'Modulateurs (LFO)…', icon: 'fa-wave-square',
+      title: 'Un LFO calé sur le tempo fait bouger un réglage tout seul (trémolo, panoramique qui tourne, filtre qui s’ouvre).',
+      onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-modulators', { detail: { trackId } })); },
+    });
     // Pro Tools : tous les clips de la piste (triple-clic au Sélecteur) et solo safe (Ctrl+clic sur S).
     if (target && target.clips.length) menuItems.push({ label: 'Sélectionner tous les clips de la piste', icon: 'fa-object-group', shortcut: 'Ctrl+Alt+A', onClick: () => { setContextMenu(null); runEditCommand('selectTrackClips', { trackId }); } });
     if (target && target.id !== 'master') menuItems.push({
