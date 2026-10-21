@@ -153,15 +153,35 @@ export function lastTakeNumber(track: Pick<Track, 'clips' | 'takeMeta'>): number
 /** Prise d'un clip (glisser dans la zone, bouton du clip). null : ce n'est pas une prise. */
 export const takeOfClip = (c: Pick<Clip, 'takeNumber' | 'name'> | null | undefined): number | null => (c ? takeNumberOf(c) : null);
 
+/** Titre de la zone (le mot des studios : la playlist des prises qu'on garde). */
+export const KEPT_TITLE = 'Playlist · prises gardées';
+
+/** Piste d'enregistrement d'un template, reconnue à son nom (REC, Voix lead, Lead…). */
+const REC_NAME = /^\s*(rec|voix lead|lead|voix|vocal|vox lead)\b/i;
+
 /**
- * Hauteur de la zone au-dessus de la piste (px), 0 sans zone. La zone s'ouvre
- * dès qu'une prise est gardée ; une piste armée qui a déjà des prises montre
- * l'en-tête seul (le « 📌 Garder » de fin de prise et l'état vide).
+ * Pistes qui montrent la playlist même vide : les pistes armées ; sans piste armée,
+ * la piste d'enregistrement du projet (« track-rec-main », sinon la 1re piste audio
+ * nommée REC / Voix lead…). Ainsi, dès l'ouverture d'un template, on voit où les
+ * prises gardées vont s'ajouter.
  */
-export function keptZoneHeight(o: { kept: number; open: boolean; armedWithTakes: boolean; headH?: number; laneH: number }): number {
+export function keptZoneTargets(tracks: Pick<Track, 'id' | 'name' | 'type' | 'isTrackArmed'>[]): Set<string> {
+  const armed = tracks.filter(t => t.isTrackArmed);
+  if (armed.length) return new Set(armed.map(t => t.id));
+  const audio = tracks.filter(t => String(t.type) === 'AUDIO');
+  const rec = audio.find(t => t.id === 'track-rec-main') || audio.find(t => REC_NAME.test(t.name || ''));
+  return new Set(rec ? [rec.id] : []);
+}
+
+/**
+ * Hauteur de la zone au-dessus de la piste (px), 0 sans zone. Elle grandit d'une
+ * ligne par prise gardée ; une piste d'enregistrement (keptZoneTargets) montre
+ * l'en-tête même sans prise (le « 📌 Garder » de fin de prise et l'état vide).
+ */
+export function keptZoneHeight(o: { kept: number; open: boolean; target: boolean; headH?: number; laneH: number }): number {
   const head = o.headH ?? KEPT_HEAD_H;
   if (o.kept > 0) return head + (o.open ? o.kept * o.laneH : 0);
-  return o.armedWithTakes ? head : 0;
+  return o.target ? head : 0;
 }
 
 /** Bout d'une autre prise plus court que ça, collé à la prise mise sur la piste : retiré (s). */

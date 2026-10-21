@@ -7,6 +7,7 @@ import { useBridgeState } from '../hooks/useNovaBridge';
 import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
 import { AutotuneVstSettings } from './AutotuneVstPanel';
+import { groupVstPlugins, variantLabel } from '../utils/vstGroups';
 
 /** Exécutable du pont (asset de release GitHub, comme le pont ASIO). */
 export const VST_BRIDGE_DOWNLOAD_URL = '/downloads/NovaVSTBridge.exe';
@@ -145,6 +146,8 @@ const VstBrowserTab: React.FC<{
       .filter(p => showInstruments || p.category !== 'Instrument')
       .filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q));
   }, [plugins, searchTerm, showInstruments]);
+  // Une ligne par plugin (les variantes Waves mono / stéréo… regroupées), toute la liste affichée.
+  const rows = useMemo(() => groupVstPlugins(filtered), [filtered]);
 
   if (!connected) return <div className="p-4"><BridgeConnectPanel /></div>;
 
@@ -184,9 +187,12 @@ const VstBrowserTab: React.FC<{
           Instruments
         </label>
       </div>
-      {filtered.slice(0, 300).map(p => (
+      {rows.length > 0 && (
+        <p data-testid="vst-count" className="text-[10px] text-slate-500">{rows.length} plugin{rows.length > 1 ? 's' : ''}{searchTerm.trim() ? ' trouvés' : ''}</p>
+      )}
+      {rows.map(({ key, name, main: p, variants }) => (
         <div
-          key={p.id}
+          key={key}
           draggable
           onDragStart={(e) => handleDragStart(e, p)}
           onClick={() => add(p)}
@@ -194,14 +200,28 @@ const VstBrowserTab: React.FC<{
           role="button"
           tabIndex={0}
           data-vst-plugin={p.name}
+          style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 58px' }}
           className="w-full p-3 bg-white/[0.02] border border-white/5 rounded-lg flex items-center space-x-3 transition-all cursor-pointer active:cursor-grabbing hover:bg-white/[0.04]"
         >
           <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xs shrink-0"><i className="fas fa-plug"></i></div>
           <div className="min-w-0">
-            <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
+            <div className="text-xs font-bold text-white truncate">{name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
-            <div className="text-[9px] text-slate-500 truncate">{isUnreadShell(p) ? (lecture ? 'Groupe Waves : lecture en cours…' : 'Groupe Waves pas encore lu (clique pour savoir pourquoi)') : null}{isUnreadShell(p) ? null : (p.vendor || 'VST3')}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{isUnreadShell(p) ? (lecture ? 'Groupe Waves : lecture en cours…' : 'Groupe Waves pas encore lu (clique pour savoir pourquoi)') : null}{isUnreadShell(p) ? null : (p.vendor || 'VST3')}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{!variants.length && p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
+            {variants.length > 1 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {variants.map(v => (
+                  <button key={v.id} type="button" draggable data-vst-variant={v.name}
+                    onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, v); }}
+                    onClick={(e) => { e.stopPropagation(); add(v); }}
+                    title={`Ajouter ${v.name} sur la piste choisie`}
+                    className={`rounded px-1.5 py-0.5 text-[9.5px] font-bold border transition-colors ${v === p ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-100' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                    {variantLabel(v, name)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ))}

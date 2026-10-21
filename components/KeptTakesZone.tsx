@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { Track } from '../types';
-import { KEPT_COLORS, KEPT_HEAD_H, KEPT_MAX_STARS, KeptLane, nextStars } from '../utils/keptTakes';
+import { KEPT_COLORS, KEPT_HEAD_H, KEPT_MAX_STARS, KEPT_TITLE, KeptLane, nextStars } from '../utils/keptTakes';
 import { fmtTime } from '../utils/takes';
 import { TAKE_LANE_H, TakeLanesApi } from './PlaylistLanes';
 
@@ -75,7 +75,7 @@ export const KeptZoneHeaders: React.FC<HeadersProps> = ({ track, lanes, open, ap
               title={count ? `${open ? 'Replier' : 'Déplier'} les prises gardées de « ${track.name} »` : 'Garde tes meilleures prises ici pour choisir à la fin'}
               className="min-w-0 flex-1 flex items-center gap-1.5 text-left disabled:cursor-default">
               <span aria-hidden className="text-[12px]">📌</span>
-              <span className="truncate text-[11px] font-black text-amber-200">Prises gardées{count ? ` (${count})` : ''}</span>
+              <span className="truncate text-[11px] font-black text-amber-200">{KEPT_TITLE}{count ? ` (${count})` : ''}</span>
               {count > 0 && <i className={`fas ${open ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px] text-amber-200/80`} />}
             </button>
             {count > 0 && (
@@ -175,7 +175,7 @@ export const KeptZoneStrip: React.FC<StripProps> = ({ track, count, candidate, i
   if (dropHot) text = '📌 Lâche ici pour garder cette prise de côté';
   else if (dragging) text = '📌 Glisse la prise ici pour la garder de côté';
   else if (isRecording) text = '🔴 Prise en cours… tu pourras la garder juste après.';
-  else if (!count) text = 'Garde tes meilleures prises ici pour choisir à la fin';
+  else if (!count) text = 'Pendant le rec, garde tes meilleures prises : chacune ajoute une ligne ici (📌 Garder ou Ctrl+Alt+P)';
   else if (candidate) text = `🎤 Dernière prise : ${candidate.name}`;
   else text = 'Écoute ▶, note ★, puis ⤓ Piste pour la prise entière — ou balaie un passage d’une ligne pour ton comp';
   return (
@@ -226,7 +226,7 @@ export const KeptTakesCard: React.FC<CardProps> = ({ track, lanes, open, api, ca
         <button type="button" data-testid="kept-toggle" disabled={!count} aria-expanded={count ? open : undefined} onClick={() => api.onToggle(track.id)}
           className="min-w-0 flex-1 flex items-center gap-2 text-left min-h-10">
           <span aria-hidden>📌</span>
-          <span className="min-w-0 truncate text-[13px] font-black text-amber-200">Prises gardées{count ? ` (${count})` : ''} · {track.name}</span>
+          <span className="min-w-0 truncate text-[13px] font-black text-amber-200">{KEPT_TITLE}{count ? ` (${count})` : ''} · {track.name}</span>
           {count > 0 && <i className={`fas ${open ? 'fa-chevron-up' : 'fa-chevron-down'} text-[10px] text-amber-200/80`} />}
         </button>
         {candidate && !isRecording && (

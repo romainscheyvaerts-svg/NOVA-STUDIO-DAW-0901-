@@ -18,7 +18,7 @@ import { breathGainAt, breathSig } from '../utils/breathEnvelope';
 import { envelopeGainAt, gainPointsSig } from '../utils/clipGain';
 import { MobileClipGain } from './ClipGainTools';
 import { KeptTakesCard, KeptZoneApi } from './KeptTakesZone';
-import { keptLanes, lastTakeNumber } from '../utils/keptTakes';
+import { keptLanes, keptZoneTargets, lastTakeNumber } from '../utils/keptTakes';
 import { listLanes } from '../utils/playlists';
 import { duplicateClip } from '../utils/mobileDuplicate';
 
@@ -193,9 +193,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const kept = useMemo(() => {
     if (!keptZone) return null;
     const withLanes = visibleTracks.map(t => ({ t, lanes: keptLanes(t, listLanes(t)), last: lastTakeNumber(t) }));
+    const targets = keptZoneTargets(visibleTracks);
     const pick = withLanes.find(x => x.t.isTrackArmed && x.last !== null)
       || withLanes.find(x => x.t.id === selectedTrackId && x.lanes.length)
-      || withLanes.find(x => x.lanes.length);
+      || withLanes.find(x => x.lanes.length)
+      || withLanes.find(x => targets.has(x.t.id)); // playlist vide : visible sur la piste d'enregistrement
     if (!pick) return null;
     const candidate = pick.last !== null && !pick.lanes.some(l => l.n === pick.last)
       ? { n: pick.last, name: listLanes(pick.t).find(l => l.n === pick.last)?.name || `Prise ${pick.last}` } : null;

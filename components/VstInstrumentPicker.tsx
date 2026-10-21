@@ -60,7 +60,7 @@ const VstInstrumentPicker: React.FC<{
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return plugins.filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q)).slice(0, 200);
+    return plugins.filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q));
   }, [plugins, query]);
 
   // Plugins pas lus car ils demandent une activation : peut-être des instruments.

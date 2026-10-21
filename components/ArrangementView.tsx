@@ -56,7 +56,7 @@ import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, TakeLane } from '../utils/playlists';
 import { KeptZoneApi, KeptZoneHeaders, KeptZoneStrip } from './KeptTakesZone';
-import { KEPT_HEAD_H, KeptLane, keptLanes, keptZoneHeight, lastTakeNumber } from '../utils/keptTakes';
+import { KEPT_HEAD_H, KeptLane, keptLanes, keptZoneHeight, keptZoneTargets, lastTakeNumber } from '../utils/keptTakes';
 import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 import { canvasTheme } from '../utils/canvasTheme';
@@ -622,8 +622,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     return m;
   }, [lanesByTrack, visibleTracks]);
   const keptOpenOf = (t: Track): boolean => !keptZone?.closed[t.id];
+  const keptTargets = useMemo(() => keptZoneTargets(visibleTracks), [visibleTracks]);
   /** Hauteur de la zone des prises gardées au-dessus de la piste (0 : pas de zone). */
-  const aboveH = (t: Track): number => (keptZone ? keptZoneHeight({ kept: keptByTrack.get(t.id)?.length || 0, open: keptOpenOf(t), armedWithTakes: !!t.isTrackArmed && lanesByTrack.has(t.id), laneH: TAKE_LANE_H }) : 0);
+  const aboveH = (t: Track): number => (keptZone ? keptZoneHeight({ kept: keptByTrack.get(t.id)?.length || 0, open: keptOpenOf(t), target: keptTargets.has(t.id), laneH: TAKE_LANE_H }) : 0);
   /** Hauteur totale d'une piste : zone des prises gardées + ligne de clips + automation + couloirs. */
   const rowH = (t: Track): number => aboveH(t) + zoomV + extraH(t);
   /** Piste dont la zone des prises gardées contient ce point (y du contenu), sinon null. */

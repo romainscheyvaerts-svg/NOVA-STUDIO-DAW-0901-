@@ -6,7 +6,7 @@ vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, c
 
 import { contentOf } from '../services/Collab';
 import {
-  clearKept, colorKept, isKept, keepAside, keptCount, keptLanes, keptMetas, keptZoneHeight, KEPT_HEAD_H, lastTakeNumber,
+  clearKept, colorKept, isKept, keepAside, keptCount, keptLanes, keptMetas, keptZoneHeight, keptZoneTargets, KEPT_HEAD_H, lastTakeNumber,
   dropSlivers, nextStars, putKeptOnTrack, rateKept, sanitizeKept, starsLabel, takeOfClip, unkeep,
 } from '../utils/keptTakes';
 import { compSwipe, readComp } from '../utils/comping';
@@ -45,10 +45,10 @@ describe('📌 garder, renommer, noter, colorer', () => {
     t.takeMeta = keepAside(t.takeMeta, 4, 20);
     t.takeMeta = keepAside(t.takeMeta, 1, 30);
     expect(keptLanes(t).map(l => l.n)).toEqual([2, 4, 1]);
-    expect(keptZoneHeight({ kept: 3, open: true, armedWithTakes: true, laneH: 44 })).toBe(KEPT_HEAD_H + 3 * 44);
-    expect(keptZoneHeight({ kept: 3, open: false, armedWithTakes: true, laneH: 44 })).toBe(KEPT_HEAD_H);
-    expect(keptZoneHeight({ kept: 0, open: true, armedWithTakes: true, laneH: 44 })).toBe(KEPT_HEAD_H);
-    expect(keptZoneHeight({ kept: 0, open: true, armedWithTakes: false, laneH: 44 })).toBe(0);
+    expect(keptZoneHeight({ kept: 3, open: true, target: true, laneH: 44 })).toBe(KEPT_HEAD_H + 3 * 44);
+    expect(keptZoneHeight({ kept: 3, open: false, target: true, laneH: 44 })).toBe(KEPT_HEAD_H);
+    expect(keptZoneHeight({ kept: 0, open: true, target: true, laneH: 44 })).toBe(KEPT_HEAD_H);
+    expect(keptZoneHeight({ kept: 0, open: true, target: false, laneH: 44 })).toBe(0);
     // Garder deux fois la même : rien ne change (pas de ligne en double).
     const again = keepAside(t.takeMeta, 4, 99);
     expect(again).toBe(t.takeMeta);
@@ -221,5 +221,16 @@ describe('📌 annulation, sauvegarde, collaboration, playlists', () => {
     const back = switchPlaylist(t2, 'pl-main');
     expect(keptLanes(back).map(l => l.n)).toEqual([2]);
     expect(id).toBeTruthy();
+  });
+});
+
+describe('playlist visible dès l’ouverture du template', () => {
+  const tr = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, type: 'AUDIO', isTrackArmed: false, ...extra }) as any;
+  it('piste armée, sinon la piste d’enregistrement du template', () => {
+    expect([...keptZoneTargets([tr('a', 'Beat'), tr('b', 'Voix lead'), tr('c', 'Voix double')])]).toEqual(['b']);
+    expect([...keptZoneTargets([tr('a', 'INSTRU'), tr('p', 'PLAYLIST'), tr('r', 'REC')])]).toEqual(['r']);
+    expect([...keptZoneTargets([tr('a', 'Voix lead'), tr('x', 'Backs', { isTrackArmed: true })])]).toEqual(['x']);
+    expect([...keptZoneTargets([tr('a', 'Voix'), tr('track-rec-main', 'Ma voix')])]).toEqual(['track-rec-main']);
+    expect([...keptZoneTargets([tr('a', 'Beat'), tr('b', 'Basse', { type: 'MIDI' })])]).toEqual([]);
   });
 });
