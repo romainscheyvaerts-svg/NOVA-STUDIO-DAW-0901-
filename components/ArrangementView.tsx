@@ -2663,6 +2663,14 @@ useEffect(() => {
           onClick: () => { openNovaWindow('voice-deverb', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } },
         { label: many.length > 1 ? `Transcrire les paroles (${many.length} clips)…` : 'Transcrire les paroles…', icon: 'fa-closed-captioning', title: tx.title, disabled: tx.disabled,
           onClick: () => { openNovaWindow('voice-transcribe', { targets: many }); close(); } });
+      // L5 · écart 7 : réparation et éditeur spectral (mode avancé).
+      if (!simple) voice.push(
+        { label: 'Réparer la voix (plosives, clics, ronflement, saturation)…', icon: 'fa-band-aid',
+          title: 'Plosives, clics de bouche, bourdonnement secteur 50/60 Hz, crêtes écrêtées : calculé sur ton appareil ; l’original est gardé',
+          onClick: () => { openNovaWindow('voice-repair', { targets: many.length > 1 ? many : [{ trackId: cm.trackId, clipId: c.id }] }); close(); } },
+        { label: 'Éditeur spectral…', icon: 'fa-chart-area',
+          title: 'Voir le spectre du clip et effacer un bruit précis (toux, sonnerie, chaise) en traçant une zone',
+          onClick: () => { openNovaWindow('spectral-editor', { targets: [{ trackId: cm.trackId, clipId: c.id }] }); close(); } });
       if (c.transcript) voice.push({ label: c.transcript.show ? 'Masquer le texte du clip' : 'Afficher le texte au-dessus du clip', icon: 'fa-font',
         title: 'Les paroles transcrites s’affichent sur le clip, à leur place dans le temps',
         onClick: () => { const pch = setTranscriptShown(c, !c.transcript?.show); if (pch) onEditClip?.(cm.trackId, c.id, 'UPDATE_PROPS', pch); close(); } });

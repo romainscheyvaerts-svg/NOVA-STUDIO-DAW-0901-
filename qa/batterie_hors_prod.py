@@ -146,6 +146,11 @@ BATTERIE = [
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).
     ("mixfx", []),
+    # 22/10/2026 · L5 écart 7 : « Réparer la voix » (plosives, clics de bouche, bourdonnement 50 Hz, écrêtage) en
+    # traitement de clip, mesuré sur le son rendu par NOVA (vraie prise rap + défauts ajoutés), Ctrl+Z et « Revenir à
+    # l'original » au bit près ; éditeur spectral (zone tracée, −20 dB mesuré, reste identique au bit près, remplissage) ;
+    # bureau sombre 1600 et clair 1366, téléphone 390 au doigt, sombre et clair.
+    ("voix_reparation", []),
 ]
 
 

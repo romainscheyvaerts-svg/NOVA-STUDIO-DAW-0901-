@@ -550,8 +550,10 @@ export interface AudioSuiteInfo {
   sourceOffset?: number;
   processedOffset?: number;
   /** Effets appliqués, dans l'ordre (« AI_DEVERB » : réverbe de la pièce retirée par l'IA du PC, R24 ;
-   *  « AI_VOICE_CLEAN » : voix nettoyée en un clic, bruit / réverbe / niveau, lot 1). */
-  steps: { type: PluginType | 'AI_DEVERB' | 'AI_VOICE_CLEAN'; name: string; preset?: string; at: number }[];
+   *  « AI_VOICE_CLEAN » : voix nettoyée en un clic, bruit / réverbe / niveau, lot 1 ;
+   *  « VOICE_REPAIR » : plosives, clics, bourdonnement, écrêtage, et « SPECTRAL_EDIT » :
+   *  zones retouchées dans l'éditeur spectral, L5 · écart 7). */
+  steps: { type: PluginType | 'AI_DEVERB' | 'AI_VOICE_CLEAN' | 'VOICE_REPAIR' | 'SPECTRAL_EDIT'; name: string; preset?: string; at: number }[];
   /** Nom et calage du clip d'origine. */
   sourceName?: string;
   sourceWarp?: WarpSettings;
