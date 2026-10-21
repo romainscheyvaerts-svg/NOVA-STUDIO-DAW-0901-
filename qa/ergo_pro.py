@@ -131,7 +131,17 @@ def st(page, expr="s => s"):
 COVER_JS = """(sel) => [...document.querySelectorAll(sel)].filter(b => b.offsetParent !== null).map(b => {
   const r = b.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2;
   const hit = document.elementFromPoint(x, y);
-  const inView = x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight;
+  let inView = x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight;
+  // Bouton défilé hors de sa zone (ou sous la barre collante de cette zone) : pas « recouvert ».
+  for (let p = b.parentElement; p && inView; p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    if (/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1) {
+      const pr = p.getBoundingClientRect();
+      if (y < pr.top || y > pr.bottom) inView = false;
+      else if (hit && p.contains(hit)) { for (let h = hit; h && h !== p; h = h.parentElement) if (getComputedStyle(h).position === 'sticky') { inView = false; break; } }
+      break;
+    }
+  }
   return { label: (b.getAttribute('aria-label') || b.innerText || '').trim().slice(0, 40), ok: !inView || (!!hit && (hit === b || b.contains(hit))),
            over: hit && hit !== b && !b.contains(hit) ? (hit.getAttribute('aria-label') || hit.className || hit.tagName).toString().slice(0, 80) : null };
 })"""
@@ -476,7 +486,125 @@ def epingler(b):
         ctx.close()
 
 
-SECTIONS = {"dawproject": dawproject, "epingler": epingler}
+# ── Macros ──────────────────────────────────────────────────────────────────────────────
+MACRO_STEPS = [("nouvelle piste audio", "pal.audioTrack"), ("nouveau bus", "pal.bus"), ("retour réverbe", "pal.reverbReturn"),
+               ("retour écho", "pal.delayReturn"), ("nouvelle piste audio", "pal.audioTrack")]
+
+
+def macros(b):
+    R = res.setdefault("macros", {})
+    zp = OUT / "macros_projet.zip"
+    write_project(zp, make_state("Macros QA", [track("t0", "Lead", [aclip("c0", "Prise", 1, 4, "audio/son.wav")])]), {"audio/son.wav": wav([tone(SR * 5, 330)])})
+    for vp, theme in (("pc1366", "dark"), ("pc1366", "light"), ("tab", "dark")):
+        log = Log(f"ergo_macros_{vp}_{theme}")
+        ctx, page = new_page(b, vp, log=log, touch=False)
+        page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
+        open_project(page, zp, f"macro_{vp}_{theme}_00")
+        tag = f"{vp} {theme}"
+        main_run = vp == "pc1366" and theme == "dark"
+        if main_run:
+            # Deux commandes lancées dans la palette : elles serviront à « Reprendre mes dernières commandes ».
+            palette(page, "liste des pistes", "pal.trackList"); page.wait_for_timeout(300); page.keyboard.press("Escape")
+            palette(page, "groupes de pistes", "pal.groups"); page.wait_for_timeout(300); page.keyboard.press("Escape")
+        palette(page, "macros enchaîner", "pal.macros")
+        page.locator("[data-testid=macros-panel]").wait_for(timeout=8000)
+        check(f"{tag} : la palette ouvre l'éditeur de raccourcis sur l'onglet Macros", page.locator("[data-testid=keymap-tab-macros][aria-selected=true]").count() == 1)
+        page.locator("[data-testid=macros-new]").click()
+        page.locator("[data-testid=macro-name]").fill("Préparer la séance")
+        if main_run:
+            page.locator("[data-testid=macro-from-recent]").click()
+            n_recent = page.locator("[data-testid=macro-steps] li").count()
+            check("« Reprendre mes dernières commandes de la palette » ajoute les commandes lancées", n_recent >= 2, n_recent)
+            for _ in range(n_recent):
+                page.locator("[data-testid=macro-steps] li button[aria-label=Retirer]").first.click()
+        for q, want in MACRO_STEPS:
+            page.locator("[data-testid=macro-search]").fill(q)
+            page.locator(f"[data-testid=macro-search-results] [data-step-id='{want}']").first.click()
+        steps = page.locator("[data-testid=macro-steps] li").count()
+        check(f"{tag} : 5 commandes dans la macro", steps == 5, steps)
+        page.locator("[data-testid=macro-key]").click()
+        page.locator("[data-testid=macro-capture]").wait_for(timeout=3000)
+        page.keyboard.press("Control+z")
+        warn = page.locator("[data-testid=macros-message]").inner_text()
+        check(f"{tag} : Ctrl+Z refusé comme touche de macro (déjà pris), raison donnée", "sert déjà" in warn and "Annuler" in warn, warn)
+        page.locator("[data-testid=macro-key]").click()
+        page.locator("[data-testid=macro-capture]").wait_for(timeout=3000)
+        page.keyboard.press("Control+Alt+Shift+M")
+        key_txt = page.locator("[data-testid=macro-key]").inner_text()
+        check(f"{tag} : touche Ctrl+Alt+Maj+M posée", "M" in key_txt and "Ctrl" in key_txt, key_txt)
+        shot(page, f"macro_{vp}_{theme}_01_editeur")
+        cov = page.evaluate(COVER_JS, "[data-testid=keymap-editor] button")
+        check(f"{tag} : éditeur de macros : aucun bouton recouvert", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]][:5])
+        fit = page.evaluate(FITS_JS, "[data-testid=keymap-editor] > div")
+        check(f"{tag} : la fenêtre tient dans l'écran", fit and fit["inside"] and not fit["hscroll"], fit)
+        page.locator("[data-testid=macro-save]").click()
+        msg = page.locator("[data-testid=macros-message]").inner_text()
+        check(f"{tag} : macro enregistrée (message clair)", "enregistrée" in msg and "5 commandes" in msg, msg)
+        shot(page, f"macro_{vp}_{theme}_02_liste")
+        page.locator("[data-testid=keymap-editor] button[aria-label=Fermer]").first.click()
+        page.wait_for_timeout(300)
+        n0 = st(page, "s => s.tracks.length")
+        page.mouse.click(700, 500)
+        page.keyboard.press("Control+Alt+Shift+M")
+        page.wait_for_function("() => window.__novaLastMacro", timeout=8000)
+        page.wait_for_timeout(600)
+        last = page.evaluate("() => window.__novaLastMacro")
+        n1 = st(page, "s => s.tracks.length")
+        check(f"{tag} : la touche joue les 5 commandes (5 pistes créées en {round(last['ms'])} ms)", last["ok"] and len(last["ran"]) == 5 and n1 >= n0 + 5, {"avant": n0, "apres": n1, "run": last})
+        R[f"ms_{tag}"] = round(last["ms"], 1)
+        mid_main = last["id"]
+        shot(page, f"macro_{vp}_{theme}_03_jouee")
+        page.keyboard.press("Control+z"); page.wait_for_timeout(600)
+        n2 = st(page, "s => s.tracks.length")
+        check(f"{tag} : UN seul Ctrl+Z annule toute la macro", n2 == n0, {"avant": n0, "apres_macro": n1, "apres_ctrl_z": n2})
+        if main_run:
+            # Macro d'édition « légère » (5 commandes de la table) : durée mesurée.
+            # Commandes indépendantes (express) : repère, mesure suivante, repère, muet de la piste, mesure suivante.
+            light = ["nova.marker", "nova.barNext", "nova.marker", "pt.muteSelected", "nova.barNext"]
+            mid = page.evaluate("""async (steps) => { const M = await window.__novaAppModule('/utils/macros.ts');
+              return M.saveMacro({ id: 'qa-leger', name: 'Édition rapide', steps, keys: 'ctrl+alt+shift+l', express: true }).id; }""", light)
+            sig0 = st(page, "s => JSON.stringify([s.markers.length, s.tracks.map(t => [t.isMuted, t.clips.map(c => [c.fadeIn, c.fadeOut])])])")
+            page.mouse.click(700, 500)
+            page.evaluate("() => { window.__novaLastMacro = null; }")
+            page.keyboard.press("Control+Alt+Shift+L")
+            page.wait_for_function("() => window.__novaLastMacro && window.__novaLastMacro.id === 'qa-leger'", timeout=8000)
+            lr = page.evaluate("() => window.__novaLastMacro")
+            page.wait_for_timeout(400)
+            sig1 = st(page, "s => JSON.stringify([s.markers.length, s.tracks.map(t => [t.isMuted, t.clips.map(c => [c.fadeIn, c.fadeOut])])])")
+            R["leger_ms"] = round(lr["ms"], 1)
+            R["leger_run_ms"] = round(lr["runMs"], 1)
+            check(f"macro express de 5 commandes jouée en moins de 100 ms ({round(lr['runMs'])} ms, écran à jour à {round(lr['ms'])} ms)", lr["ok"] and len(lr["ran"]) == 5 and lr["runMs"] < 100 and sig1 != sig0, {"run": lr, "avant": sig0, "apres": sig1})
+            page.keyboard.press("Control+z"); page.wait_for_timeout(500)
+            sig2 = st(page, "s => JSON.stringify([s.markers.length, s.tracks.map(t => [t.isMuted, t.clips.map(c => [c.fadeIn, c.fadeOut])])])")
+            check("macro d'édition : un seul Ctrl+Z revient à l'état d'avant", sig2 == sig0, [sig0, sig1, sig2])
+            page.evaluate("async () => (await window.__novaAppModule('/utils/macros.ts')).deleteMacro('qa-leger')")
+            palette(page, "macro préparer", "macro:" + mid_main)
+            page.wait_for_timeout(800)
+            check("la macro est aussi dans la palette Ctrl+K (« ▶ Macro : … »)", st(page, "s => s.tracks.length") >= n0 + 5)
+            page.keyboard.press("Control+z"); page.wait_for_timeout(500)
+            # Export puis import du fichier .novamacros.
+            palette(page, "macros enchaîner", "pal.macros")
+            page.locator("[data-testid=macros-panel]").wait_for(timeout=8000)
+            with page.expect_download(timeout=30000) as dl:
+                page.locator("[data-testid=macros-export]").click()
+            mf = OUT / "macros.novamacros"
+            dl.value.save_as(str(mf))
+            data = json.loads(mf.read_text(encoding="utf-8"))
+            check("export .novamacros : 1 macro, 5 commandes, touche", data.get("format") == "novamacros" and len(data["macros"]) == 1 and len(data["macros"][0]["steps"]) == 5 and data["macros"][0]["keys"] == "ctrl+alt+shift+m", data)
+            page.once("dialog", lambda d: d.accept())
+            page.locator("[data-testid=macros-list] button", has_text="Supprimer").first.click()
+            page.wait_for_timeout(300)
+            page.set_input_files("[data-testid=macros-import-file]", str(mf))
+            page.wait_for_timeout(500)
+            imp = page.locator("[data-testid=macros-message]").inner_text()
+            check("import .novamacros : la macro revient", "1 macro importée" in imp and page.locator("[data-testid=macros-list] [data-macro]").count() == 1, imp)
+        errs = log.errors()
+        check(f"{tag} : aucune erreur dans la console", not errs, errs[:5])
+        save_log(log)
+        ctx.close()
+
+
+SECTIONS = {"dawproject": dawproject, "epingler": epingler, "macros": macros}
 
 if __name__ == "__main__":
     wanted = [a for a in sys.argv[1:] if a in SECTIONS] or list(SECTIONS)

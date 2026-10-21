@@ -1,10 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { Suspense, useMemo, useRef, useState } from 'react';
 import { KEYMAP, SHORTCUT_CATEGORIES, chordFromEvent, chordLabel, searchShortcuts, type ShortcutCategory, type ShortcutDef } from '../utils/keymap';
 import {
   KEYMAP_PRESETS, conflictsFor, exportNovakeys, importNovakeys, keymapConflicts, keymapStore, presetById, useKeymap, useKeymapSettings,
   type KeymapPresetId,
 } from '../utils/keymapStore';
 import { saveBlob } from '../utils/saveBlob';
+import { takeMacrosTabNext } from '../utils/macros';
 
 /**
  * Éditeur de raccourcis (R17) — Pro Tools 2026 « Keyboard Shortcuts », en mieux :
@@ -16,13 +17,16 @@ import { saveBlob } from '../utils/saveBlob';
  */
 
 type Filter = 'all' | 'custom' | 'conflicts' | 'unbound';
+/** Macros (écart 21) : onglet chargé à la demande. */
+const MacrosPanel = React.lazy(() => import('./MacrosPanel'));
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS', 'Fn']);
 const CONTEXT_LABEL: Record<string, string> = { global: 'arrangement', focus: 'Keyboard Focus', pianoroll: 'piano roll', midi: 'clavier MIDI' };
 
 interface Capture { id: string; replaceIndex?: number }
 interface Pending { id: string; chord: string; replaceIndex?: number; others: ShortcutDef[] }
 
-const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const KeymapEditor: React.FC<{ onClose: () => void; initialTab?: 'keys' | 'macros' }> = ({ onClose, initialTab = 'keys' }) => {
+  const [tab, setTab] = useState<'keys' | 'macros'>(() => (takeMacrosTabNext() ? 'macros' : initialTab));
   const keymap = useKeymap();
   const settings = useKeymapSettings();
   const [query, setQuery] = useState('');
@@ -116,11 +120,20 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {/* En-tête : jeu de raccourcis */}
         <div className="flex flex-wrap items-center gap-2 border-b border-nv-line p-4">
           <h2 id="keymap-title" className="mr-auto text-lg font-black">⌨️ Personnaliser les raccourcis</h2>
-          <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${conflicts.length ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`} data-testid="keymap-conflict-count">
+          <div className="flex rounded-lg border border-nv-line bg-nv-well p-0.5" role="tablist" aria-label="Raccourcis ou macros">
+            <button type="button" role="tab" aria-selected={tab === 'keys'} onClick={() => setTab('keys')} data-testid="keymap-tab-keys"
+              className={`h-8 rounded-md px-3 text-[12px] font-bold ${tab === 'keys' ? 'bg-nv-panel text-nv-ink shadow' : 'text-nv-muted hover:text-nv-ink'}`}>Raccourcis</button>
+            <button type="button" role="tab" aria-selected={tab === 'macros'} onClick={() => setTab('macros')} data-testid="keymap-tab-macros"
+              className={`h-8 rounded-md px-3 text-[12px] font-bold ${tab === 'macros' ? 'bg-nv-panel text-nv-ink shadow' : 'text-nv-muted hover:text-nv-ink'}`}>Macros</button>
+          </div>
+          {tab === 'keys' && <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${conflicts.length ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`} data-testid="keymap-conflict-count">
             {conflicts.length ? `⚠ ${conflicts.length} conflit${conflicts.length > 1 ? 's' : ''}` : '✓ aucun conflit'}
-          </span>
+          </span>}
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-nv-well text-nv-muted hover:text-nv-ink">✕</button>
         </div>
+        {tab === 'macros' ? (
+          <Suspense fallback={<p className="p-6 text-center text-[13px] text-nv-muted">Chargement…</p>}><MacrosPanel /></Suspense>
+        ) : (<>
 
         <div className="grid gap-3 border-b border-nv-line p-4 lg:grid-cols-[1fr_auto]">
           <div className="min-w-0">
@@ -265,6 +278,7 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             onClick={() => { if (!customCount || window.confirm(`Remettre les ${customCount} raccourci${customCount > 1 ? 's' : ''} personnalisé${customCount > 1 ? 's' : ''} comme dans « ${presetById(settings.preset).name} » ?`)) { keymapStore.resetAll(); flash('ok', `✓ Raccourcis remis comme dans « ${presetById(settings.preset).name} ».`); } }}
             className="h-9 rounded-lg border border-nv-line bg-nv-well px-3 text-[12px] font-bold">↺ Remettre par défaut</button>
         </div>
+        </>)}
       </div>
     </div>
   );

@@ -214,6 +214,7 @@ import DawProjectHost from './components/DawProjectHost';
 import PinnedTracksPane from './components/PinnedTracksPane';
 import { openTrackSearch } from './utils/trackFilter';
 import { togglePin } from './utils/trackPins';
+import { configureMacros, macroPaletteActions, openMacrosTabNext } from './utils/macros';
 import { openDawProjectExport, openDawProjectImport } from './utils/dawproject/dawProjectBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
@@ -9847,6 +9848,8 @@ function Studio() {
 
   /** Actions de la palette Ctrl+K du rendu en cours (buildPaletteActions, plus bas) : Nova y a accès. */
   const paletteBuilderRef = useRef<() => PaletteAction[]>(() => []);
+  // Macros (écart 21) : la palette entière, une étape d'annulation par macro jouée, le message.
+  useEffect(() => configureMacros({ actions: () => allPaletteActions(paletteBuilderRef.current()), begin: beginUndoGroup, end: endUndoGroup, notify: t => setAiNotification(t) }), [beginUndoGroup, endUndoGroup, setAiNotification]);
   /** Catalogue des commandes vu par Nova : la palette entière (actions du studio + raccourcis). */
   const chatCommands = () => {
     try { return buildChatCatalog(allPaletteActions(paletteBuilderRef.current())); } catch { return []; }
@@ -10574,6 +10577,8 @@ function Studio() {
       ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
       a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Studio pro, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
+      ...(isMobile ? [] : [a('Aide', 'pal.macros', 'Macros : enchaîner plusieurs commandes sur une touche', () => { openMacrosTabNext(); setKeymapEditorOpen(true); }, { keywords: 'macro macros enchaîner chaîner plusieurs commandes une touche automatiser action personnalisée script' })]),
+      ...macroPaletteActions(),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
     ];
   };
