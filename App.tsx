@@ -215,6 +215,8 @@ import PinnedTracksPane from './components/PinnedTracksPane';
 import { openTrackSearch } from './utils/trackFilter';
 import { togglePin } from './utils/trackPins';
 import { configureMacros, macroPaletteActions, openMacrosTabNext } from './utils/macros';
+import PopoutHost, { ConsoleElsewhere } from './components/PopoutHost';
+import { togglePopout, usePopout } from './utils/popoutWindow';
 import { openDawProjectExport, openDawProjectImport } from './utils/dawproject/dawProjectBus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
@@ -9849,6 +9851,8 @@ function Studio() {
   /** Actions de la palette Ctrl+K du rendu en cours (buildPaletteActions, plus bas) : Nova y a accès. */
   const paletteBuilderRef = useRef<() => PaletteAction[]>(() => []);
   // Macros (écart 21) : la palette entière, une étape d'annulation par macro jouée, le message.
+  // Console sur un 2e écran (écart 17) : fenêtre détachée, même arbre React.
+  const consoleOut = usePopout('console');
   useEffect(() => configureMacros({ actions: () => allPaletteActions(paletteBuilderRef.current()), begin: beginUndoGroup, end: endUndoGroup, notify: t => setAiNotification(t) }), [beginUndoGroup, endUndoGroup, setAiNotification]);
   /** Catalogue des commandes vu par Nova : la palette entière (actions du studio + raccourcis). */
   const chatCommands = () => {
@@ -10580,8 +10584,24 @@ function Studio() {
       ...(isMobile ? [] : [a('Aide', 'pal.macros', 'Macros : enchaîner plusieurs commandes sur une touche', () => { openMacrosTabNext(); setKeymapEditorOpen(true); }, { keywords: 'macro macros enchaîner chaîner plusieurs commandes une touche automatiser action personnalisée script' })]),
       ...macroPaletteActions(),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
+      ...(isMobile ? [] : [a('Vues', 'pal.consolePopout', consoleOut ? 'Ramener la console dans la fenêtre principale' : 'Console sur un 2e écran (fenêtre détachée)', () => { if (!togglePopout('console')) setAiNotification('La fenêtre n’a pas pu s’ouvrir : autorise les fenêtres surgissantes pour NOVA (icône dans la barre d’adresse), puis réessaie.'); }, { keywords: 'console mixer table de mixage deuxième 2e second écran moniteur fenêtre détacher détachée popout' })]),
     ];
   };
+
+  /** La console (vue Mixer) : dans la fenêtre principale ou dans sa fenêtre détachée. */
+  const renderMixer = () => (
+    <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
+                    tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
+                    onOpenPlugin={onOpenPluginUI}
+                    onDropPluginOnTrack={onDropPluginOpenUI}
+                    onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
+                    onRequestAddPlugin={onRequestAddPluginMenu}
+                    onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
+                    trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
+                    onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
+                    sendViewSlot={sendViewSlot}
+                 /></Suspense></PanelBoundary>
+  );
 
 
   return (
@@ -10750,19 +10770,7 @@ function Studio() {
                 </PanelBoundary>
               )}
 
-              {shownView === 'MIXER' && (
-                 <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
-                    tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
-                    onOpenPlugin={onOpenPluginUI}
-                    onDropPluginOnTrack={onDropPluginOpenUI}
-                    onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
-                    onRequestAddPlugin={onRequestAddPluginMenu}
-                    onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
-                    trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
-                    onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
-                    sendViewSlot={sendViewSlot}
-                 /></Suspense></PanelBoundary>
-              )}
+              {shownView === 'MIXER' && (consoleOut ? <ConsoleElsewhere /> : renderMixer())}
 
               {shownView === 'AUTOMATION' && (
                  <PanelBoundary name="l'éditeur d'automation" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
@@ -10977,6 +10985,7 @@ function Studio() {
         </main>
         <AafHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         <DawProjectHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
+        {!isMobile && <PopoutHost renderConsole={renderMixer} />}
         <DistributionHost getState={() => stateRef.current} getOwned={() => ownedInstruments} />
         {r21.importOpen && (
           <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>

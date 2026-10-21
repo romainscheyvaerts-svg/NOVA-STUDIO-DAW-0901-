@@ -604,7 +604,125 @@ def macros(b):
         ctx.close()
 
 
-SECTIONS = {"dawproject": dawproject, "epingler": epingler, "macros": macros}
+# ── Console sur un 2e écran ─────────────────────────────────────────────────────────────
+METER_JS = """async () => { const cv = [...document.querySelectorAll('[data-testid=popout-console] canvas')].filter(c => c.width > 0 && c.height > 0);
+  const sig = () => cv.map(c => { try { return c.toDataURL().length + ':' + c.toDataURL().slice(-40); } catch (e) { return ''; } }).join('|');
+  let last = sig(), changes = 0; const t0 = performance.now();
+  while (performance.now() - t0 < 1000) { await new Promise(r => setTimeout(r, 15)); const s = sig(); if (s !== last) { changes++; last = s; } }
+  return { canvases: cv.length, changes }; }"""
+
+
+def shot_cdp(page, name):
+    """Capture d'une fenêtre détachée (about:blank) : sans attendre ses polices (Page.captureScreenshot)."""
+    import base64
+    cdp = page.context.new_cdp_session(page)
+    data = cdp.send("Page.captureScreenshot", {"format": "png"})["data"]
+    (OUT / f"{name}.png").write_bytes(base64.b64decode(data))
+    cdp.detach()
+
+
+def deuxieme_ecran(b):
+    R = res.setdefault("deuxieme_ecran", {})
+    zp = OUT / "console_projet.zip"
+    write_project(zp, make_state("Console QA", [track("lead", "Lead", [aclip("c0", "Prise", 0, 12, "audio/son.wav")], color="#a78bfa"),
+                                                track("beat", "Beat", [aclip("c1", "Beat", 0, 12, "audio/beat.wav")], color="#34d399")]),
+                  {"audio/son.wav": wav([tone(SR * 12, 330, amp=0.5)]), "audio/beat.wav": wav([tone(SR * 12, 110, amp=0.5), tone(SR * 12, 111, amp=0.5)])})
+    for theme in ("dark", "light"):
+        log = Log(f"ergo_console_{theme}")
+        ctx, page = new_page(b, "pc1366", log=log, touch=False)
+        page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
+        open_project(page, zp, f"console_{theme}_00")
+        with ctx.expect_page(timeout=15000) as pop_info:
+            palette(page, "console 2e écran", "pal.consolePopout")
+        pop = pop_info.value
+        pop.wait_for_selector("[data-testid=popout-console]", timeout=15000)
+        pop.wait_for_selector("[role=slider][aria-label='Volume Lead']", timeout=20000)
+        pop.wait_for_timeout(800)
+        check(f"{theme} : la console s'ouvre dans une 2e fenêtre (portail, même studio)", pop.locator("[role=slider][aria-label='Volume Lead']").count() == 1
+              and pop.evaluate("() => document.title") == "Console · NOVA", pop.evaluate("() => document.title"))
+        th = pop.evaluate("() => [document.documentElement.className, getComputedStyle(document.body).backgroundColor]")
+        main_th = page.evaluate("() => document.documentElement.className")
+        check(f"{theme} : la fenêtre détachée suit le thème et les styles du studio", th[0] == main_th, [th, main_th])
+        if theme == "dark":
+            # Mixer dans la fenêtre principale : remplacé par « La console est sur l'autre écran ».
+            page.evaluate("() => window.DAW_CONTROL.setView('MIXER')"); page.wait_for_timeout(500)
+            check("fenêtre principale en vue Mixer : « La console est sur l'autre écran »", page.locator("[data-testid=console-elsewhere]").count() == 1)
+            shot(page, "console_dark_01_principale_mixer")
+            page.evaluate("() => window.DAW_CONTROL.setView('ARRANGEMENT')"); page.wait_for_timeout(400)
+            # Fader déplacé dans la fenêtre détachée : l'état du studio suit.
+            v0 = st(page, "s => s.tracks.find(t => t.id === 'lead').volume")
+            f = pop.locator("[role=slider][aria-label='Volume Lead']").bounding_box()
+            pop.mouse.move(f["x"] + f["width"] / 2, f["y"] + f["height"] * 0.5)
+            pop.mouse.down(); pop.mouse.move(f["x"] + f["width"] / 2, f["y"] + f["height"] * 0.5 - 60, steps=6); pop.mouse.up()
+            pop.wait_for_timeout(300)
+            v1 = st(page, "s => s.tracks.find(t => t.id === 'lead').volume")
+            check("fader glissé dans la 2e fenêtre : volume du studio changé", v1 != v0, [v0, v1])
+            # Automation : piste en « latch », lecture, fader bougé → points écrits.
+            page.evaluate("() => { const t = window.DAW_CONTROL.getState().tracks.find(x => x.id === 'lead'); window.DAW_CONTROL.updateTrack({ ...t, automationMode: 'latch' }); }")
+            page.wait_for_timeout(300)
+            page.evaluate("() => window.DAW_CONTROL.togglePlay()")
+            pop.wait_for_timeout(900)
+            met = pop.evaluate(METER_JS)
+            R["vumetres"] = met
+            check(f"vumètres de la 2e fenêtre animés pendant la lecture (~30 images/s : {met['changes']} images en 1 s)", met["canvases"] >= 2 and met["changes"] >= 20, met)
+            f = pop.locator("[role=slider][aria-label='Volume Lead']").bounding_box()
+            pop.mouse.move(f["x"] + f["width"] / 2, f["y"] + f["height"] * 0.45)
+            pop.mouse.down()
+            for k in range(8):
+                pop.mouse.move(f["x"] + f["width"] / 2, f["y"] + f["height"] * (0.45 - 0.03 * k)); pop.wait_for_timeout(80)
+            pop.mouse.up()
+            pop.wait_for_timeout(400)
+            page.evaluate("() => window.DAW_CONTROL.stop()")
+            page.wait_for_timeout(600)
+            pts = st(page, "s => { const l = (s.tracks.find(t => t.id === 'lead').automationLanes || []).find(l => l.parameterName === 'volume'); return l ? l.points.length : 0; }")
+            check("fader bougé pendant la lecture dans la 2e fenêtre : automation de volume écrite", pts >= 2, pts)
+            shot(pop, "console_dark_02_fenetre_detachee")
+            # Touche dans la 2e fenêtre : Espace lance la lecture du studio.
+            pop.keyboard.press("Space"); page.wait_for_timeout(500)
+            playing = st(page, "s => s.isPlaying")
+            page.evaluate("() => window.DAW_CONTROL.stop()")
+            check("Espace dans la 2e fenêtre : lecture du studio", playing is True, playing)
+        else:
+            shot(pop, "console_light_02_fenetre_detachee")
+        cov = pop.evaluate(COVER_JS, "[data-testid=popout-console] > div:first-child button")
+        check(f"{theme} : barre de la 2e fenêtre : rien de recouvert", cov and all(c["ok"] for c in cov), cov)
+        # Fermer la 2e fenêtre : la console revient dans la fenêtre principale.
+        pop.evaluate("() => { window.resizeTo && window.resizeTo(1500, 820); }")
+        pop.close()
+        page.wait_for_timeout(1200)
+        is_open = page.evaluate("async () => (await window.__novaAppModule('/utils/popoutWindow.ts')).popoutStore.isOpen('console')")
+        page.evaluate("() => window.DAW_CONTROL.setView('MIXER')"); page.wait_for_timeout(800)
+        back = page.locator("[role=slider][aria-label='Volume Lead']").count()
+        check(f"{theme} : fermer la 2e fenêtre ramène la console dans la fenêtre principale", not is_open and back == 1 and page.locator("[data-testid=console-elsewhere]").count() == 0, [is_open, back])
+        shot(page, f"console_{theme}_03_retour")
+        geo = page.evaluate("() => JSON.parse(localStorage.getItem('nova_popout_geometry_v1') || '{}')")
+        check(f"{theme} : place et taille de la fenêtre retenues pour la réouverture", bool(geo.get("console")) and geo["console"]["w"] >= 320, geo)
+        if theme == "dark":
+            # Disposition de fenêtres : enregistrée avec la console détachée, rappelée → la fenêtre se rouvre.
+            page.evaluate("() => window.DAW_CONTROL.setView('ARRANGEMENT')")
+            with ctx.expect_page(timeout=15000) as p2:
+                palette(page, "dispositions de fenêtres", "layout.list")
+                page.locator("[data-testid=layouts-popout-console]").click()
+            pop2 = p2.value
+            pop2.wait_for_selector("[data-testid=popout-console]", timeout=15000)
+            page.once("dialog", lambda d: d.accept())
+            page.locator("[data-testid=layout-save-4]").click(); page.wait_for_timeout(300)
+            shot(page, "console_dark_04_dispositions")
+            page.locator("[data-testid=layouts-panel] button[aria-label=Fermer]").click()
+            pop2.close(); page.wait_for_timeout(800)
+            with ctx.expect_page(timeout=15000) as p3:
+                page.keyboard.press("Control+Shift+4")
+            pop3 = p3.value
+            pop3.wait_for_selector("[data-testid=popout-console]", timeout=15000)
+            check("disposition 4 rappelée (Ctrl+Maj+4) : la console se rouvre sur le 2e écran", pop3.locator("[role=slider][aria-label='Volume Lead']").count() == 1)
+            pop3.close()
+        errs = [e for e in log.errors()]
+        check(f"{theme} : aucune erreur dans la console", not errs, errs[:5])
+        save_log(log)
+        ctx.close()
+
+
+SECTIONS = {"dawproject": dawproject, "epingler": epingler, "macros": macros, "deuxieme_ecran": deuxieme_ecran}
 
 if __name__ == "__main__":
     wanted = [a for a in sys.argv[1:] if a in SECTIONS] or list(SECTIONS)

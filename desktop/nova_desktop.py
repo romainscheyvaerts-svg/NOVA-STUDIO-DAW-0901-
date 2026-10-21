@@ -941,6 +941,11 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
         # ── liens externes -> navigateur par défaut ──────────────────────
         def on_new_window(self, sender, args):
             uri = str(args.Uri)
+            # Fenêtre détachée du studio (console sur un 2e écran, utils/popoutWindow.ts) :
+            # popout.html, page vide du DAW qu'il remplit lui-même ; la vue web l'ouvre dans sa fenêtre.
+            if uri in ("", "about:blank") or (stays_in_app(uri) and urlparse(uri).path.endswith("/popout.html")):
+                args.Handled = False
+                return
             args.Handled = True
             if uri.startswith(("http://", "https://", "mailto:")):
                 webbrowser.open(uri)
