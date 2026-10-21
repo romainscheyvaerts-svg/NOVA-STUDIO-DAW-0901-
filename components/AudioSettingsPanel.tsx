@@ -11,6 +11,7 @@ import SimpleModeToggle from './SimpleModeToggle';
 import StorageProtectionCard from './StorageProtectionCard';
 import DesktopUpdateSettings from './DesktopUpdateSettings';
 import PerfModeSetting from './PerfModeSetting';
+import { MonitorVolume, SoloListenChoice } from './MonitorSection';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
 import { rateLabel } from '../utils/projectRate';
 
@@ -814,6 +815,16 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusS
 
                 <LatencyCompensation />
                 {!simple && <MultitrackSettings />}
+
+                {/* ÉCOUTE ET SOLO (utils/monitorSection) : réglages du poste, jamais dans l'export */}
+                {!simple && <div className="space-y-3" data-testid="settings-listen">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-400/10 px-2 py-0.5 rounded">Écoute et solo</span>
+                        <span className="text-[10px] text-slate-500">Ce que tu entends seulement : un fichier exporté ne change jamais.</span>
+                    </div>
+                    <SoloListenChoice />
+                    <MonitorVolume />
+                </div>}
 
                 {/* TEST TONE */}
                 {!simple && <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex items-center justify-between">

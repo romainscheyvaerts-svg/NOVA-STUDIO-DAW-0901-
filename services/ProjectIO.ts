@@ -13,6 +13,7 @@ import { samplerBufferKey } from '../utils/melodicSampler';
 import { salvageJson, repairProject } from '../utils/projectRepair';
 import { projectRateOf } from '../utils/projectRate';
 import { packPlaylists, unpackPlaylists } from '../utils/trackPlaylists';
+import { isUserIrKey } from '../utils/userIr';
 
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
 export const REPAIR_REPORT = '__repairReport';
@@ -182,6 +183,19 @@ export class ProjectIO {
             if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(msBuf)); }
             sTrack.melodicSampler.audioRef = `audio/${filename}`;
         }
+
+        // Réponses impulsionnelles importées des réverbes (utils/userIr) : un WAV chacune, toujours
+        // gardées (c'est le son de l'utilisateur, pas celui d'un beat sous licence).
+        (track.plugins || []).forEach((pl, pIndex) => {
+            const key = (pl.params as any)?.irUser;
+            if (!isUserIrKey(key)) return;
+            const buf = audioBufferRegistry.get(key);
+            if (!buf) return;
+            const filename = `${key.replace(/[^a-zA-Z0-9_-]/g, '-')}.wav`;
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+            const sp = sTrack.plugins?.[pIndex];
+            if (sp && sp.params) sp.params.irAudioRef = `audio/${filename}`;
+        });
 
         // RENDU GELÉ (effets VST3 du PC rendus dans l'audio) : il permet de
         // continuer le projet sur un téléphone. Jamais pour le beat (licence).
@@ -492,6 +506,20 @@ export class ProjectIO {
                 const f = zip.file(ref);
                 if (f && ms.sampleId) audioBufferRegistry.register(await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer")), samplerBufferKey(ms.sampleId));
             } catch { /* son illisible : le sampler reste muet */ }
+        }
+
+        // Réponses impulsionnelles importées des réverbes (utils/userIr) : clé unique, sans préfixe.
+        for (const pl of ((track as any).plugins || []) as any[]) {
+            const pp = pl?.params;
+            if (!pp || typeof pp.irAudioRef !== 'string') continue;
+            const ref = pp.irAudioRef as string;
+            delete pp.irAudioRef;
+            if (!isUserIrKey(pp.irUser) || audioBufferRegistry.has(pp.irUser)) continue;
+            try {
+                const f = zip.file(ref);
+                if (f) audioBufferRegistry.register(await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer")), pp.irUser);
+                else report.push(`Réponse de réverbe « ${pp.irName || 'importée'} » absente de l'archive : la réverbe calculée la remplace.`);
+            } catch { report.push(`Réponse de réverbe « ${pp.irName || 'importée'} » illisible : la réverbe calculée la remplace.`); }
         }
 
         // Samples perso des pads de batterie (V16).

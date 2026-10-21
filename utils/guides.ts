@@ -694,6 +694,25 @@ export const GUIDES: Guide[] = [
     doIt: () => [cmd('pal.videoTake', 'Ouvrir « Filmer la prise »')],
   },
   {
+    id: 'ecoute-mono', emoji: '🎧', title: 'Vérifier ton mix en mono et écouter en solo AFL / PFL',
+    keywords: 'mono compatibilite phase cotes side dim couper ecoute volume afl pfl solo control room monitoring telephone enceinte',
+    summary: 'La section « Écoute » change ce que tu entends (mono, côtés, Dim, solo AFL / PFL), jamais l’export.',
+    steps: [
+      { text: 'Passe en mode avancé.', action: 'pal.simple', target: '[data-bar-item="vues"]', when: 'simple' },
+      { text: 'Ouvre « Écoute » en haut (icône casque).', phone: 'Touche ☰ : rubrique « Écoute ».', target: [tid('open-monitor'), tid('menu-monitor'), PHONE_MENU], hint: 'Sur un petit écran : menu ☰ › Écoute.', manual: true },
+      { text: 'Touche « Mono » (Alt+M). Un son qui baisse ou disparaît trahit un souci de phase ou de largeur.', action: 'mon.mono', target: tid('monitor-matrix-mono') },
+      { text: 'Mode de solo AFL ou PFL : le solo s’écoute seul, sans couper le mix.', target: tid('solo-listen-afl'), manual: true },
+      { text: '« Dim » (Ctrl+Alt+D) baisse l’écoute de 20 dB ; les pastilles en haut rappellent ce qui est actif.', action: 'mon.dim', target: tid('monitor-dim') },
+    ],
+    result: 'Un mix vérifié en mono et des solos d’écoute, avec un export identique à ce qu’il était.',
+    pitfalls: [
+      'La somme mono est à −6 dB : un son centré garde son niveau, seul un défaut de phase s’entend.',
+      'En AFL, soloer une voix ne fait pas entendre sa réverbe : solo aussi le retour.',
+      'Une pastille MONO, DIM ou ÉCOUTE COUPÉE reste en haut tant que c’est actif : un clic la retire.',
+    ],
+    prereqs: [],
+  },
+  {
     id: 'studio', emoji: '🏢', title: 'Envoyer ton projet au studio Make Music',
     keywords: 'studio make music envoyer reserver reservation inge mixage pro mastering session enregistrer au studio bruxelles',
     summary: 'Le projet, les stems et tes notes partent au studio avec ta demande.',

@@ -4,6 +4,10 @@ import { Faceplate, HwSection, HwWindow, Knob, PushButton, SegmentMeter, useHwHe
 import { HwPresetSelect, hwCtx, useHwCanvas } from './hw/screens';
 import { termHelp } from '../utils/pluginUi';
 import { EnvelopeDucker, SMOOTH, setParamSmooth, TimelineLfo } from './vocalDspUtils';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { decodeAtRate, resampleBuffer } from '../utils/hqAudio';
+import { currentRate } from '../utils/projectRate';
+import { isIrFileName, isUserIrKey, newUserIrId, shapeIr, USER_IR_ACCEPT, USER_IR_DEFAULT_FADE, USER_IR_MAX_SEC, userIrKey } from '../utils/userIr';
 
 /**
  * PROFESSIONAL REVERB ENGINE v5.0
@@ -58,6 +62,42 @@ export interface ReverbParams {
    * filtres, largeur et mix restent actifs.
    */
   irUrl?: string;
+  /**
+   * Réponse impulsionnelle IMPORTÉE par l'utilisateur (son fichier WAV / AIFF) :
+   * clé du registre audio (`userir:<id>`, utils/userIr). Passe avant irUrl.
+   * Durée, taille, diffusion, amorti, mode, réflexions, modulation et graves
+   * sont alors sans effet ; pré-délai, coupe-bas / coupe-haut, largeur et
+   * mélange restent actifs.
+   */
+  irUser?: string;
+  /** Nom du fichier importé (affichage). */
+  irName?: string;
+  /** Longueur gardée de la réponse importée (s) ; 0 / absente = entière. */
+  irLength?: number;
+  /** Fondu de fin de la réponse importée (s). */
+  irFade?: number;
+}
+
+/**
+ * Réponses importées mises en forme (rognées, fondues, calibrées) à la fréquence
+ * du contexte, partagées par la lecture, l'export et le gel : le même fichier
+ * donne EXACTEMENT la même réponse partout. Les 6 dernières suffisent.
+ */
+const userIrReady = new Map<string, AudioBuffer>();
+const userIrPending = new Map<string, Promise<AudioBuffer | null>>();
+const USER_IR_KEEP = 6;
+function keepUserIr(sig: string, b: AudioBuffer) {
+  userIrReady.delete(sig);
+  userIrReady.set(sig, b);
+  while (userIrReady.size > USER_IR_KEEP) userIrReady.delete(userIrReady.keys().next().value as string);
+}
+function makeShaped(src: AudioBuffer, sr: number, lengthSec: number, fadeSec: number): AudioBuffer {
+  const chs: Float32Array[] = [];
+  for (let c = 0; c < src.numberOfChannels; c++) chs.push(src.getChannelData(c));
+  const out = shapeIr(chs, sr, { lengthSec, fadeSec });
+  const b = new AudioBuffer({ length: out[0].length, numberOfChannels: 2, sampleRate: sr });
+  out.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+  return b;
 }
 
 // Empreintes capturées, décodées une fois par fréquence d'échantillonnage.
@@ -456,10 +496,61 @@ export class ReverbNode {
   /** Promesse résolue quand l'empreinte capturée est chargée (export hors ligne). */
   public ready?: Promise<void>;
 
+  /** Réponse importée : empreinte de mise en forme (fréquence, fichier, longueur, fondu). */
+  private userIrSig(): string {
+    const p = this.params;
+    return `${this.ctx.sampleRate}|${p.irUser}|${Math.round(Math.max(0, safeNum(p.irLength as number, 0)) * 1000)}|${Math.round(clamp(safeNum(p.irFade as number, USER_IR_DEFAULT_FADE), 0, 4) * 1000)}`;
+  }
+  /** Réponse importée prête (null : pas de réponse importée, ou pas encore là). */
+  private userIrBuffer(): AudioBuffer | null {
+    return isUserIrKey(this.params.irUser) ? userIrReady.get(this.userIrSig()) || null : null;
+  }
+  private irWaitKey = '';
+  private irWaitOff: (() => void) | null = null;
+  /** Ligne de modulation mise à 0 (réponse importée). */
+  private modDelayZero = false;
+
+  /**
+   * Met en forme la réponse importée (fréquence du contexte, longueur, fondu).
+   * Son pas encore arrivé (collaboration, ouverture en cours) : la réverbe
+   * calculée sonne en attendant et la réponse se met en place dès que le son
+   * est enregistré. Même fréquence : tout de suite (l'export démarre juste après).
+   */
+  private ensureUserIr() {
+    const p = this.params;
+    if (!isUserIrKey(p.irUser)) { this.irWaitOff?.(); this.irWaitOff = null; this.irWaitKey = ''; return; }
+    const sig = this.userIrSig();
+    if (userIrReady.has(sig)) return;
+    const src = audioBufferRegistry.get(p.irUser);
+    if (!src) {
+      if (this.irWaitKey !== p.irUser) {
+        this.irWaitOff?.();
+        this.irWaitKey = p.irUser;
+        this.irWaitOff = audioBufferRegistry.whenRegistered(p.irUser, () => {
+          this.irWaitOff = null; this.irWaitKey = '';
+          this.irKey = ''; this.regenerateImpulse(true);
+        });
+      }
+      return;
+    }
+    const sr = this.ctx.sampleRate;
+    const len = Math.max(0, safeNum(p.irLength as number, 0));
+    const fade = clamp(safeNum(p.irFade as number, USER_IR_DEFAULT_FADE), 0, 4);
+    if (src.sampleRate === sr) { keepUserIr(sig, makeShaped(src, sr, len, fade)); return; }
+    let pending = userIrPending.get(sig);
+    if (!pending) {
+      pending = resampleBuffer(src, sr).then(b => { const out = makeShaped(b, sr, len, fade); keepUserIr(sig, out); return out; })
+        .catch(e => { console.warn('[Reverb] réponse importée illisible, réverbe calculée à la place', e); return null; })
+        .finally(() => { userIrPending.delete(sig); });
+      userIrPending.set(sig, pending);
+    }
+    this.ready = pending.then(() => { if (this.userIrSig() === sig) { this.irKey = ''; this.regenerateImpulse(true); } });
+  }
+
   /** Charge l'empreinte capturée puis la met en place. */
   private ensureCapturedIr() {
     const url = this.params.irUrl;
-    if (!url) return;
+    if (!url || isUserIrKey(this.params.irUser)) return;
     const key = `${this.ctx.sampleRate}|${url}`;
     if (loadedIrs.has(key)) return;
     this.ready = loadCapturedIr(this.ctx, url).then(buf => {
@@ -470,6 +561,7 @@ export class ReverbNode {
 
   private irSignature() {
     const p = this.params;
+    if (this.userIrBuffer()) return `user|${this.userIrSig()}`;
     if (p.irUrl) return `ir|${p.irUrl}|${loadedIrs.has(`${this.ctx.sampleRate}|${p.irUrl}`) ? 1 : 0}`;
     return [
       Math.round(clamp(safeNum(p.decay, 2.5), 0.1, 15) * 50),
@@ -482,6 +574,7 @@ export class ReverbNode {
 
   /** Charge une nouvelle reponse si les reglages qui la definissent ont change. */
   private regenerateImpulse(immediate = false) {
+    this.ensureUserIr();
     this.ensureCapturedIr();
     const key = this.irSignature();
     if (key === this.irKey) return;
@@ -498,7 +591,8 @@ export class ReverbNode {
     const ir = this.impulse();
     // Empreinte capturée : son niveau est calibré dans le fichier, le convolveur
     // ne doit pas le renormaliser (il le ramène sinon à un niveau arbitraire).
-    const captured = !!this.params.irUrl && loadedIrs.get(`${this.ctx.sampleRate}|${this.params.irUrl}`) === ir;
+    // (Réponse importée : niveau calibré par utils/userIr.shapeIr, pas de renormalisation non plus.)
+    const captured = (!!this.params.irUrl && loadedIrs.get(`${this.ctx.sampleRate}|${this.params.irUrl}`) === ir) || ir === this.userIrBuffer();
     const t = this.ctx.currentTime;
     if (this.releaseTimer) { clearTimeout(this.releaseTimer); this.releaseTimer = null; }
     if (this.silentSoFar || (!this.convA.buffer && !this.convB.buffer)) {
@@ -546,6 +640,8 @@ export class ReverbNode {
   /** Réponse à charger : empreinte capturée, ou réponse calculée (gardée en cache). */
   private impulse(): AudioBuffer {
     const p = this.params;
+    const user = this.userIrBuffer();
+    if (user) return user;
     if (p.irUrl && loadedIrs.has(`${this.ctx.sampleRate}|${p.irUrl}`)) return this.buildImpulse();
     const key = [this.ctx.sampleRate, safeNum(p.decay, 2.5), safeNum(p.size, 0.7), safeNum(p.damping, 0.5), safeNum(p.diffusion, 0.8), p.mode].join('|');
     const hit = builtIrs.get(key);
@@ -629,11 +725,16 @@ export class ReverbNode {
     this.auto.get('preDelay')?.setStatic(Math.round(clamp(safeNum(p.preDelay, 0.025), 0, 0.45) * this.ctx.sampleRate) / this.ctx.sampleRate, { force, tau: T });  // à l'échantillon : copie exacte
     this.setP(this.lowCutFilter.frequency, clamp(safeNum(p.lowCut, 160), 20, 2000), T);
     this.setP(this.highCutFilter.frequency, clamp(safeNum(p.highCut, 10000), 500, 20000), T);
-    this.setP(this.bassBoostFilter.gain, clamp(safeNum(p.bassBoost, 0), 0, 1) * 12, T);
+    // Réponse importée : elle sonne telle quelle (ni graves ajoutés, ni réflexions, ni modulation).
+    const userIr = isUserIrKey(p.irUser);
+    this.setP(this.bassBoostFilter.gain, userIr ? 0 : clamp(safeNum(p.bassBoost, 0), 0, 1) * 12, T);
 
     // Modulation : ~0 a 3 ms de balayage, quelques cents au plus
     const rate = clamp(safeNum(p.modRate, 0.5), 0.05, 5);
-    const depth = clamp(safeNum(p.modDepth, 0.1), 0, 1);
+    const depth = userIr ? 0 : clamp(safeNum(p.modDepth, 0.1), 0, 1);
+    // Ligne de modulation (5 ms au repos) : sans modulation, une réponse importée garde SON timing exact.
+    // (Posé seulement quand ça change : une réverbe calculée garde son réglage d'origine, intouché.)
+    if (userIr !== this.modDelayZero) { this.modDelayZero = userIr; this.setP(this.modDelay.delayTime, userIr ? 0 : 0.005, T); }
     // Fréquence fixe (pas de glissement) : la phase reste une fonction exacte de la position.
     this.modLFO.setFrequency(rate);
     this.setP(this.modDepthGain.gain, depth * 0.0015, 0.05);
@@ -651,14 +752,14 @@ export class ReverbNode {
 
     const wetOn = !!p.isEnabled && (this.mixAutomated || clamp(safeNum(p.mix, 0.3), 0, 1) > 0);
     this.setLink('wet', wetOn);
-    this.setLink('er', wetOn && clamp(safeNum(p.erLevel, 0.3), 0, 1) > 0);
+    this.setLink('er', wetOn && !userIr && clamp(safeNum(p.erLevel, 0.3), 0, 1) > 0);
     this.setLink('mod', wetOn && depth > 0);
 
     if (p.isEnabled) {
       const mix = clamp(safeNum(p.mix, 0.3), 0, 1);
       // Use equal-power crossfade for smoother mix (automatisable : posé seulement s'il a changé)
       this.auto.get('mix')?.setStatic(mix, { force, tau: T, immediate: this.ctx.currentTime <= this.createdAt });
-      this.setP(this.erMix.gain, clamp(safeNum(p.erLevel, 0.3), 0, 1), T);
+      this.setP(this.erMix.gain, userIr ? 0 : clamp(safeNum(p.erLevel, 0.3), 0, 1), T);
     } else {
       this.auto.get('mix')?.setStatic(0, { force, tau: T });
     }
@@ -669,7 +770,7 @@ export class ReverbNode {
     const mp = this.auto.get(key);
     if (mp && key === 'mix' && !this.mixAutomated) {
       this.mixAutomated = true;
-      if (this.params.isEnabled) { this.setLink('wet', true); this.setLink('er', clamp(safeNum(this.params.erLevel, 0.3), 0, 1) > 0); }
+      if (this.params.isEnabled) { this.setLink('wet', true); this.setLink('er', !isUserIrKey(this.params.irUser) && clamp(safeNum(this.params.erLevel, 0.3), 0, 1) > 0); }
     }
     return mp;
   }
@@ -755,6 +856,7 @@ export class ReverbNode {
   public dispose() {
     try {
       if (this.irTimer) { clearTimeout(this.irTimer); this.irTimer = null; }
+      this.irWaitOff?.(); this.irWaitOff = null;
       if (this.releaseTimer) { clearTimeout(this.releaseTimer); this.releaseTimer = null; }
       for (const l of Object.values(this.links)) if (l.timer) { clearTimeout(l.timer); l.timer = null; }
       this.modLFO.stop();
@@ -828,6 +930,40 @@ const ReverbScreen: React.FC<{ p: ReverbParams }> = ({ p }) => {
     const top = 26, bottom = h - 18;
     const decay = clamp(safeNum(p.decay, 2), 0.1, 15);
     const pre = clamp(safeNum(p.preDelay, 0.025), 0, 0.2);
+    // Réponse importée : on dessine SA forme (enveloppe crête par colonne, en dB), la partie gardée et le fondu.
+    const userBuf = isUserIrKey(p.irUser) ? audioBufferRegistry.get(p.irUser!) : undefined;
+    if (userBuf) {
+      const dur = userBuf.duration;
+      const keep = p.irLength && p.irLength > 0 ? Math.min(p.irLength, dur) : dur;
+      const fade = Math.min(keep, clamp(safeNum(p.irFade as number, USER_IR_DEFAULT_FADE), 0, 4));
+      const T = Math.max(0.2, pre + dur * 1.05);
+      const xOf = (t: number) => (t / T) * w;
+      const sr = userBuf.sampleRate;
+      const chs = Array.from({ length: Math.min(2, userBuf.numberOfChannels) }, (_, i) => userBuf.getChannelData(i));
+      let peak = 1e-9;
+      for (const d of chs) for (let i = 0; i < d.length; i += 4) peak = Math.max(peak, Math.abs(d[i]));
+      c.fillStyle = 'rgba(244,63,94,0.08)'; c.fillRect(0, top - 6, xOf(pre), bottom - top + 6);
+      for (let x = 0; x < w; x++) {
+        const t0 = (x / w) * T - pre, t1 = ((x + 1) / w) * T - pre;
+        if (t1 <= 0 || t0 >= dur) continue;
+        const a = Math.max(0, Math.floor(t0 * sr)), b = Math.min(chs[0].length, Math.ceil(t1 * sr));
+        let m = 0;
+        for (const d of chs) for (let i = a; i < b; i++) m = Math.max(m, Math.abs(d[i]));
+        if (m <= 0) continue;
+        const db = 20 * Math.log10(m / peak);
+        const hh = Math.max(0, (db + 60) / 60) * (bottom - top);
+        const t = (t0 + t1) / 2;
+        const kept = t <= keep;
+        const g = kept && t > keep - fade && fade > 0 ? 0.5 * (1 + Math.cos(Math.PI * (t - (keep - fade)) / fade)) : 1;
+        c.fillStyle = kept ? `rgba(252,211,77,${0.35 + 0.6 * g})` : 'rgba(148,163,184,0.25)';
+        c.fillRect(x, bottom - hh, 1, hh);
+      }
+      const xk = xOf(pre + keep);
+      c.strokeStyle = '#fcd34d'; c.lineWidth = 1.5; c.setLineDash([4, 3]);
+      c.beginPath(); c.moveTo(xk, top - 6); c.lineTo(xk, bottom); c.stroke(); c.setLineDash([]);
+      c.strokeStyle = 'rgba(255,255,255,0.16)'; c.beginPath(); c.moveTo(0, bottom + 0.5); c.lineTo(w, bottom + 0.5); c.stroke();
+      return;
+    }
     const sizeV = clamp(safeNum(p.size, 0.7), 0, 1);
     const mode = (MODE_SHAPES[p.mode] ? p.mode : 'HALL') as ReverbMode;
     const shape = MODE_SHAPES[mode];
@@ -892,14 +1028,104 @@ const ReverbScreen: React.FC<{ p: ReverbParams }> = ({ p }) => {
       const hh = erl * 0.8 * (bottom - top);
       c.globalAlpha = 0.85; c.fillRect(x - 1, bottom - hh, 2, hh); c.globalAlpha = 1;
     }
-  }, [p.decay, p.preDelay, p.size, p.damping, p.diffusion, p.erLevel, p.mode, p.freeze, size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [p.decay, p.preDelay, p.size, p.damping, p.diffusion, p.erLevel, p.mode, p.freeze, p.irUser, p.irLength, p.irFade, size]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div ref={wrapRef} className="relative h-full w-full" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave}>
       <canvas ref={canvasRef} className="hw-screen-canvas" aria-label="Réponse de la salle : pré-délai, premières réflexions et queue de la réverbe" />
-      <span className="hw-screen-label" style={{ left: 8, top: 6 }}>Durée <b>{rvSec(clamp(safeNum(p.decay, 2), 0.1, 15))}</b> · pré-délai <b>{rvMs(p.preDelay)}</b></span>
+      {isUserIrKey(p.irUser)
+        ? <span className="hw-screen-label" data-testid="reverb-ir-screen" style={{ left: 8, top: 6, color: '#fcd34d' }}>Réponse importée · gardée <b>{rvSec(p.irLength && p.irLength > 0 ? p.irLength : (audioBufferRegistry.get(p.irUser!)?.duration || 0))}</b> · pré-délai <b>{rvMs(p.preDelay)}</b></span>
+        : <span className="hw-screen-label" style={{ left: 8, top: 6 }}>Durée <b>{rvSec(clamp(safeNum(p.decay, 2), 0.1, 15))}</b> · pré-délai <b>{rvMs(p.preDelay)}</b></span>}
       {p.freeze && <span className="hw-screen-label" style={{ right: 8, top: 6, color: '#7dd3fc' }}>Figée : la queue tient tant que « Figer » est enfoncé</span>}
-      {!p.freeze && p.irUrl && <span className="hw-screen-label" style={{ right: 8, top: 6 }}>Empreinte capturée : durée, taille, diffusion et algorithme sans effet</span>}
+      {!p.freeze && !isUserIrKey(p.irUser) && p.irUrl && <span className="hw-screen-label" style={{ right: 8, top: 6 }}>Empreinte capturée : durée, taille, diffusion et algorithme sans effet</span>}
     </div>
+  );
+};
+
+/**
+ * Réponse impulsionnelle importée : le fichier WAV / AIFF de l'utilisateur
+ * (bouton ou glisser-déposer). Décodé à la fréquence du projet, gardé dans le
+ * registre audio (sauvegardé avec le projet, envoyé en collaboration), rogné à
+ * USER_IR_MAX_SEC. Longueur et fondu de fin réglables ; « Retirer » revient à la
+ * réverbe calculée.
+ */
+const UserIrSection: React.FC<{ v: ReverbParams; apply: (p: Partial<ReverbParams>) => void }> = ({ v, apply }) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const on = isUserIrKey(v.irUser);
+  const src = on ? audioBufferRegistry.get(v.irUser!) : undefined;
+  const dur = src ? src.duration : 0;
+  const len = on ? (v.irLength && v.irLength > 0 ? Math.min(v.irLength, dur || v.irLength) : dur) : 0;
+
+  const load = async (file: File | undefined | null) => {
+    setErr(null);
+    if (!file) return;
+    if (!isIrFileName(file.name) && !/^audio\//.test(file.type)) { setErr('Choisis un fichier WAV ou AIFF (réponse impulsionnelle).'); return; }
+    if (file.size > 80 * 1024 * 1024) { setErr('Fichier trop lourd (80 Mo au plus) : une réponse impulsionnelle dure quelques secondes.'); return; }
+    setBusy(true);
+    try {
+      const rate = currentRate();
+      const data = await file.arrayBuffer();
+      const decoded = await decodeAtRate(data, rate, d => new OfflineAudioContext(2, 1, rate).decodeAudioData(d));
+      if (!decoded || decoded.length < 8) throw new Error('vide');
+      // Au-delà de USER_IR_MAX_SEC, rien ne sert : le projet ne garde que cette partie.
+      const keepN = Math.min(decoded.length, Math.round(USER_IR_MAX_SEC * decoded.sampleRate));
+      let buf = decoded;
+      if (keepN < decoded.length) {
+        buf = new AudioBuffer({ length: keepN, numberOfChannels: Math.min(2, decoded.numberOfChannels), sampleRate: decoded.sampleRate });
+        for (let c = 0; c < buf.numberOfChannels; c++) buf.copyToChannel(decoded.getChannelData(c).subarray(0, keepN) as Float32Array<ArrayBuffer>, c);
+      }
+      const key = userIrKey(newUserIrId());
+      audioBufferRegistry.register(buf, key);
+      apply({ irUser: key, irName: file.name.replace(/\.[^.]+$/, '').slice(0, 60), irLength: 0, irFade: USER_IR_DEFAULT_FADE, freeze: false });
+    } catch (e) {
+      console.warn('[Reverb] import de réponse', e);
+      setErr('Ce fichier ne se lit pas comme un son : exporte ta réponse en WAV (16, 24 ou 32 bits) puis réessaie.');
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  return (
+    <HwSection title="Réponse importée (convolution)" className="mt-3"
+      aside={on ? <PushButton active={false} onClick={() => apply({ irUser: undefined, irName: undefined, irLength: undefined, irFade: undefined })} text="Retirer" led="#f87171" dark className="hw-push-sm"
+        ariaLabel="Retirer la réponse importée" hint="Revenir à la réverbe calculée (algorithme, durée, taille…)." dataAttrs={{ 'data-testid': 'reverb-ir-remove' }} /> : undefined}>
+      <div
+        data-testid="reverb-ir-drop"
+        onDragOver={e => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) { e.preventDefault(); e.stopPropagation(); setOver(true); } }}
+        onDragLeave={() => setOver(false)}
+        onDrop={e => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); e.stopPropagation(); setOver(false); void load(e.dataTransfer.files[0]); }}
+        className={`flex flex-wrap items-center gap-3 rounded-lg border border-dashed px-3 py-2 ${over ? 'border-amber-300 bg-amber-300/10' : 'border-white/15'}`}>
+        <input ref={inputRef} type="file" accept={USER_IR_ACCEPT} className="hidden" data-testid="reverb-ir-input" aria-label="Fichier de réponse impulsionnelle"
+          onChange={e => void load(e.target.files?.[0])} />
+        <PushButton active={on} onClick={() => inputRef.current?.click()} text={busy ? 'Lecture…' : on ? 'Changer…' : 'Charger une réponse…'} led="#fcd34d" dark className="hw-push-sm"
+          ariaLabel="Charger une réponse impulsionnelle (WAV ou AIFF)" dataAttrs={{ 'data-testid': 'reverb-ir-load' }}
+          hint="Ton propre fichier WAV / AIFF de réponse impulsionnelle (salle, plaque, cabine que tu as enregistrée ou dont tu as les droits). Tu peux aussi le glisser ici. Il est gardé avec le projet." />
+        {on ? (
+          <>
+            <span className="min-w-0 max-w-[220px] truncate text-[11px] font-semibold text-amber-200" data-testid="reverb-ir-name" title={v.irName || ''}>
+              {v.irName || 'Réponse importée'}{dur ? ` · ${rvSec(dur)}` : src ? '' : ' · en attente du son…'}
+            </span>
+            {dur > 0 && (
+              <Knob paramId="irLength" label="Longueur" size="S" cap="silver" arc="#fcd34d" ticks={11} min={Math.min(0.05, dur)} max={dur} defaultValue={dur} step={0.01} curve="log"
+                value={len} format={rvSec} onChange={x => apply({ irLength: x >= dur - 0.005 ? 0 : x })}
+                hint="Garde le début de la réponse et coupe la fin de la queue (plus courte = plus sèche, moins de calcul). Double-clic : entière." />
+            )}
+            {dur > 0 && (
+              <Knob paramId="irFade" label="Fondu" size="S" cap="silver" arc="#fcd34d" ticks={11} min={0} max={Math.min(2, Math.max(0.01, len))} defaultValue={USER_IR_DEFAULT_FADE} step={0.005}
+                value={clamp(safeNum(v.irFade as number, USER_IR_DEFAULT_FADE), 0, 2)} format={rvSec} onChange={x => apply({ irFade: x })}
+                hint="Fondu de sortie à la fin de la partie gardée : la queue s'éteint au lieu d'être coupée net." />
+            )}
+            <span className="w-full text-[10px] leading-snug text-slate-400">La réponse sonne telle quelle : algorithme, durée, taille, diffusion, amorti, graves, réflexions et modulation sont sans effet. Pré-délai, coupe-bas / coupe-haut, largeur et mélange restent actifs.</span>
+          </>
+        ) : (
+          <span className="text-[11px] text-slate-400">Glisse ici ton fichier WAV / AIFF, ou choisis-le. Aucune réponse de tiers n'est fournie.</span>
+        )}
+        {err && <span role="alert" className="w-full text-[11px] text-red-300" data-testid="reverb-ir-error">{err}</span>}
+      </div>
+    </HwSection>
   );
 };
 
@@ -952,6 +1178,8 @@ export const ProfessionalReverbUI: React.FC<{
           </div>
         </HwSection>
 
+        <UserIrSection v={v} apply={apply} />
+
         <div className="mt-3 flex items-stretch gap-2.5">
           <div className="hw-screen flex-1 min-w-0">
             <div className="hw-screen-glass" style={{ height: 150 }}><ReverbScreen p={v} /></div>
@@ -967,7 +1195,7 @@ export const ProfessionalReverbUI: React.FC<{
         <div className="mt-3 flex flex-wrap items-start justify-around gap-x-2 gap-y-2">
           {K('decay', { label: 'Durée', size: 'L', min: 0.1, max: 15, def: 2, curve: 'log', step: 0.01, format: rvSec,
             scale: [{ v: 0.1, label: '0,1' }, { v: 1, label: '1' }, { v: 5, label: '5' }, { v: 15, label: '15 s' }],
-            hint: help('Durée', v.irUrl ? 'Sans effet avec une empreinte capturée.' : 'Temps que met la réverbe à s’éteindre (−60 dB).') })}
+            hint: help('Durée', isUserIrKey(v.irUser) ? 'Sans effet avec une réponse importée : règle plutôt sa longueur.' : v.irUrl ? 'Sans effet avec une empreinte capturée.' : 'Temps que met la réverbe à s’éteindre (−60 dB).') })}
           {K('preDelay', { label: 'Pré-délai', min: 0, max: 0.2, def: 0.025, step: 0.001, format: rvMs, hint: help('Pré-délai', 'Petit temps avant la réverbe : garde la voix nette devant.') })}
           {K('size', { label: 'Taille', min: 0, max: 1, def: 0.7, step: 0.01, format: pct, hint: help('Taille', 'Petite pièce (gauche) ou grand espace (droite).') })}
           {K('diffusion', { label: 'Diffusion', min: 0, max: 1, def: 0.8, step: 0.01, format: pct, hint: 'Densité des échos : bas = granuleux, haut = lisse.' })}

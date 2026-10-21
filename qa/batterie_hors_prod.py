@@ -84,6 +84,10 @@ BATTERIE = [
     # prises gardées, sauvegarde + rechargement ; bureau 1600 × 900 et téléphone 390 × 844, sombre et clair.
     ("prises_gardees", []),
     ("playlist_glisser", []),
+    # 21/10/2026 : 🎧 outils d'écoute d'un ingé de mix : mono (−6 dB), côtés, Dim −20 dB, coupure, volume d'écoute
+    # (mesurés sur la sortie d'écoute ET le master), solo AFL / PFL (bus, VCA), export identique au bit près, Ø à
+    # l'export, réverbe à réponse impulsionnelle IMPORTÉE (WAV fabriqué), sauvegarde + rechargement ; bureau et téléphone.
+    ("mix_ecoute", []),
     # Lot 2b BandLab (14/10/2026) : caméra pendant la prise (fausse caméra de Chrome, flash + clic au même instant), vidéo de la
     # performance (mix + image, MP4 mesuré par ffprobe / ffmpeg : écart ≤ 1 image), stockage plein, prise audio identique ; bureau et téléphone.
     ("video_prise", []),

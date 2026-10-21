@@ -3,6 +3,7 @@ import type { Track } from '../types';
 import { runEditCommand } from '../utils/editCommands';
 import { countLabel, soloMuteStatus } from '../utils/soloMute';
 import { useSoloMode } from '../utils/soloModes';
+import { useMonitor } from '../utils/monitorSection';
 
 /**
  * Indicateurs globaux de solo et de muet (Pro Tools 2023.6 : « Solo / Mute
@@ -13,6 +14,8 @@ import { useSoloMode } from '../utils/soloModes';
 const SoloMuteIndicators: React.FC<{ tracks: Track[]; vertical?: boolean; className?: string }> = ({ tracks, vertical, className = '' }) => {
   const st = soloMuteStatus(tracks);
   const mode = useSoloMode();
+  // Solo d'écoute AFL / PFL : le badge le rappelle (le mix et l'export ne changent pas).
+  const listen = useMonitor().listen;
   if (!st.soloed.length && !st.muted.length) return null;
   const names = (l: Track[]) => l.slice(0, 6).map(t => t.name).join(', ') + (l.length > 6 ? '…' : '');
   const chip = 'nova-hit-tactile inline-flex items-center gap-1 h-6 [@media(pointer:coarse)]:h-8 px-2 rounded-md text-[10px] font-black border transition-colors whitespace-nowrap';
@@ -20,10 +23,10 @@ const SoloMuteIndicators: React.FC<{ tracks: Track[]; vertical?: boolean; classN
     <div className={`flex ${vertical ? 'flex-col items-stretch' : 'items-center'} gap-1 ${className}`} data-testid="solo-mute-indicators" role="group" aria-label="Solos et mutes en cours">
       {st.soloed.length > 0 && (
         <button type="button" data-testid="clear-solos" onClick={(e) => { e.stopPropagation(); runEditCommand('soloAll', { on: false }); }}
-          title={`En solo : ${names(st.soloed)}. Appuie pour effacer tous les solos (Alt+Maj+S, ou Alt+clic sur un S).${mode === 'xor' ? ' Mode X-OR : un nouveau solo annule les précédents.' : ''}`}
+          title={`En solo : ${names(st.soloed)}. Appuie pour effacer tous les solos (Alt+Maj+S, ou Alt+clic sur un S).${mode === 'xor' ? ' Mode X-OR : un nouveau solo annule les précédents.' : ''}${listen !== 'sip' ? ` Écoute ${listen.toUpperCase()} : seules ces pistes s'entendent, le mix et l'export ne changent pas.` : ''}`}
           aria-label={`Effacer les solos : ${countLabel(st.soloed.length, 'piste', 'pistes')} en solo`}
           className={`${chip} bg-amber-400 text-black border-amber-300 hover:bg-amber-300`}>
-          S<span className="tabular-nums">{st.soloed.length}</span>{mode === 'xor' && <span data-testid="solo-xor-badge" className="rounded bg-black/20 px-1 text-[8px]">X-OR</span>}<i className="fas fa-times text-[8px] opacity-70" aria-hidden="true" />
+          S<span className="tabular-nums">{st.soloed.length}</span>{mode === 'xor' && <span data-testid="solo-xor-badge" className="rounded bg-black/20 px-1 text-[8px]">X-OR</span>}{listen !== 'sip' && <span data-testid="solo-listen-badge" className="rounded bg-black/20 px-1 text-[8px]">{listen.toUpperCase()}</span>}<i className="fas fa-times text-[8px] opacity-70" aria-hidden="true" />
         </button>
       )}
       {st.muted.length > 0 && (

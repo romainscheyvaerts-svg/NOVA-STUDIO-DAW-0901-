@@ -10,7 +10,28 @@
 class AudioBufferRegistry {
     private buffers: Map<string, AudioBuffer> = new Map();
     private objectUrls: Map<string, string> = new Map();
-    
+    /** Attentes d'un son précis (réverbe dont la réponse importée arrive après ses réglages : collaboration, ouverture). */
+    private waiters: Map<string, Set<() => void>> = new Map();
+
+    /**
+     * Prévient UNE fois quand le son `id` est enregistré (tout de suite s'il l'est
+     * déjà). Renvoie de quoi annuler l'attente.
+     */
+    whenRegistered(id: string, cb: () => void): () => void {
+        if (this.buffers.has(id)) { cb(); return () => {}; }
+        let set = this.waiters.get(id);
+        if (!set) { set = new Set(); this.waiters.set(id, set); }
+        set.add(cb);
+        return () => { const s = this.waiters.get(id); if (s) { s.delete(cb); if (!s.size) this.waiters.delete(id); } };
+    }
+
+    private notify(id: string) {
+        const set = this.waiters.get(id);
+        if (!set) return;
+        this.waiters.delete(id);
+        set.forEach(cb => { try { cb(); } catch (e) { console.warn('[BufferRegistry] attente', id, e); } });
+    }
+
     /**
      * Enregistre un AudioBuffer et retourne son ID
      */
@@ -18,6 +39,7 @@ class AudioBufferRegistry {
         const id = clipId || `buffer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         this.buffers.set(id, buffer);
         console.log(`[BufferRegistry] Registered buffer: ${id} (${buffer.duration.toFixed(2)}s)`);
+        this.notify(id);
         return id;
     }
 

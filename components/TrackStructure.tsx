@@ -22,6 +22,7 @@ import { isAraInsert } from '../utils/araInsert';
 import { canHavePlaylists, playlistsOf } from '../utils/trackPlaylists';
 import { runEditCommand } from '../utils/editCommands';
 import { PlaylistChip } from './TrackPlaylistMenu';
+import { useMonitor } from '../utils/monitorSection';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -540,6 +541,8 @@ export const SendViewPicker: React.FC<{ slot: number | null }> = ({ slot }) => (
 
 /** Tranche VCA : fader (dB relatifs appliqués aux membres), Muet, Solo, membres. */
 export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) => {
+  // Mode de solo (utils/monitorSection) : le solo du VCA devient une écoute AFL / PFL.
+  const listenMode = useMonitor().listen;
   const members = vcaMembers(vca, all);
   // R12 : un VCA prend ses membres par groupe (Pro Tools : VCA assigné à un groupe de mix).
   const { groups } = useEditGroups();
@@ -577,7 +580,7 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
       <div className="text-center text-[11px] font-mono tabular-nums text-violet-200">{db <= -59.9 ? '-∞' : `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`}</div>
       <div className="flex gap-1.5">
         <button type="button" onClick={() => set({ isMuted: !vca.isMuted })} aria-pressed={!!vca.isMuted} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black ${vca.isMuted ? 'bg-amber-500 text-black' : 'bg-white/[0.06] text-slate-400'}`} title="Muet du VCA : coupe tous les membres">Muet</button>
-        <button type="button" onClick={() => set({ isSolo: !vca.isSolo })} aria-pressed={!!vca.isSolo} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black ${vca.isSolo ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400'}`} title="Solo du VCA : met tous les membres en solo">Solo</button>
+        <button type="button" onClick={() => set({ isSolo: !vca.isSolo })} aria-pressed={!!vca.isSolo} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black ${vca.isSolo ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400'}`} title={listenMode !== 'sip' ? `Écoute ${listenMode.toUpperCase()} du VCA : ses membres s'entendent seuls, sans couper le mix ni changer l'export` : 'Solo du VCA : met tous les membres en solo'}>{listenMode !== 'sip' ? listenMode.toUpperCase() : 'Solo'}</button>
       </div>
       <div className="h-10 rounded-lg bg-violet-500/10 flex items-center px-2 text-[9px] font-black uppercase text-violet-200 truncate">{vca.name}</div>
       {pick && (
