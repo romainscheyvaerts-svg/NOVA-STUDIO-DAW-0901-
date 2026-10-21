@@ -1,13 +1,11 @@
 {
-  "version": "1.5.7",
-  "url": "downloads/NovaStudioSetup-1.5.7.exe",
-  "sha256": "fb16295c4783d6b7a6b3fa768edb17b1c1e66f2ab6349fabbcf1d34e7846d904",
-  "size": 51131264,
-  "date": "2026-10-20T23:55:20+02:00",
+  "version": "1.5.8",
+  "url": "downloads/NovaStudioSetup-1.5.8.exe",
+  "sha256": "96f697eadd3ac221f1c407ffa564a4d0d2dc35a98d530ab525eaa56174929086",
+  "size": 51131838,
+  "date": "2026-10-21T18:28:17+02:00",
   "notes": [
-    "Plus léger sur les PC peu puissants : presque rien ne tourne quand le studio est à l'arrêt.",
-    "« Mode léger » (Réglages audio) : activé tout seul sur les petits PC, moins d'effets visuels, le son n'est pas touché.",
-    "Ouvrir un plugin VST ouvre directement sa fenêtre.",
-    "Waves : plus de groupes vides dans la liste des plugins."
+    "Waves : tous tes plugins sont détectés, même à la toute première ouverture (les groupes Waves sont lus l'un après l'autre).",
+    "Un groupe Waves qui ne répond pas est relu tout de suite, au lieu d'attendre le prochain démarrage."
   ]
 }
