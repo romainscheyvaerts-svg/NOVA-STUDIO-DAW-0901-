@@ -5,6 +5,7 @@ import { freezeSignature } from '../utils/freeze';
 import { instrumentStore } from '../utils/instrumentStore';
 import { novaBridge, BridgePlugin, InstrumentNote, InstrumentController } from './NovaBridge';
 import { playableNotes, ccNumber, PB, AT } from '../utils/midiCc';
+import { clipsWithMidiFx } from '../engine/midiFx';
 
 /**
  * Instruments VST3 du PC sur les pistes MIDI (mode instru).
@@ -49,7 +50,8 @@ const midiClipsOf = (t: Track): Clip[] => (t.clips || []).filter(c => c.type ===
 
 /** Notes à rendre (temps absolu), limitées à leur clip ; clips muets : silencieux. */
 export function instrumentNotes(t: Track): { notes: InstrumentNote[]; clipIds: string[]; end: number } {
-  const clips = midiClipsOf(t);
+  // L3 : effets MIDI de la piste (arpège, accord, gamme) rendus avec les notes.
+  const clips = clipsWithMidiFx(t, midiClipsOf(t));
   const notes: InstrumentNote[] = [];
   let end = 0;
   for (const c of clips) {

@@ -464,6 +464,19 @@ export interface Clip {
    * (utils/voiceLyrics). Une ancienne version ignore ce champ.
    */
   transcript?: ClipTranscript;
+  /**
+   * L3 · Dernier changement de tempo qui a déplacé ce clip (utils/tempoFollow) :
+   * en collaboration, un clip déjà déplacé pour ce changement ne bouge pas deux
+   * fois. Une ancienne version l'ignore.
+   */
+  tempoEpoch?: string;
+  /**
+   * L3 · Copie liée d'un motif MIDI (utils/linkedClips) : les clips qui portent
+   * le même identifiant ont les mêmes notes ; en modifier un modifie les autres.
+   * Chaque copie garde ses notes (une ancienne version joue chaque copie telle
+   * quelle). Absent : clip indépendant.
+   */
+  linkId?: string;
 }
 
 /** R24 : un mot transcrit (temps en secondes du son du clip). */
@@ -976,6 +989,20 @@ export interface Track {
    */
   novaSynth?: import('./utils/novaSynth').NovaSynthSettings;
   /**
+   * L3 · Effets MIDI en temps réel (engine/midiFx) : arpège, accord, gamme
+   * forcée, appliqués aux notes AVANT l'instrument (lecture, export, clavier).
+   * Les notes du clip ne changent pas (« Figer en notes » les écrit). Une
+   * ancienne version l'ignore et joue les notes du clip.
+   */
+  midiFx?: import('./engine/midiFx').MidiFxSlot[];
+  /**
+   * L3 · Modulateurs (utils/modulators) : LFO calés sur le tempo qui pilotent
+   * un réglage ayant une voie d'automation (volume, pan, envoi, réglage d'un
+   * effet). S'ajoutent à l'automation, en lecture comme à l'export. Une
+   * ancienne version les ignore (réglage fixe ou automation seule).
+   */
+  modulators?: import('./utils/modulators').Modulator[];
+  /**
    * R18 · Piste MIDI jouée par le sampler mélodique (ton son, chromatique,
    * ADSR, boucle, glide, mono / poly) ou, R20, par un instrument
    * multi-échantillons (piano, Rhodes, guitare, cordes, cloches, nappe).
@@ -1262,6 +1289,13 @@ export interface DAWState {
   timeSignature: TimeSignature;  // NEW
   /** Changements de tempo et de mesure (piste tempo, R2). utils/tempoMap. */
   tempoEvents?: import('./utils/tempoMap').TempoEvent[];
+  /**
+   * L3 · Changement de tempo et clips audio NON calés (utils/tempoFollow) :
+   * « follow » = leur début suit la mesure, « keep » = ils gardent leur place
+   * (beat importé). Absent : automatique (gardés s'il y a un beat importé non
+   * calé). MIDI, clips calés, automation et repères suivent toujours.
+   */
+  tempoAudioMode?: import('./utils/tempoFollow').TempoAudioMode;
   projectKey?: number; 
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */

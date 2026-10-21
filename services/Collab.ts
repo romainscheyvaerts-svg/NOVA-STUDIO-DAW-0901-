@@ -768,6 +768,10 @@ export const contentOf = (t: Track) => ({
   guide: t.isGuide ? { level: t.guideLevel ?? null } : null,
   // Synthé NOVA : null = ancien synthé (les versions précédentes ignorent ce champ).
   ...(t.type === 'MIDI' ? { novaSynth: t.novaSynth ?? null } : {}),
+  // Effets MIDI (L3 : arpège, accord, gamme) : null = aucun. Une ancienne version ignore ce champ.
+  ...(t.type === 'MIDI' ? { midiFx: t.midiFx?.length ? t.midiFx : null } : {}),
+  // Modulateurs (L3 : LFO sur un réglage) : null = aucun. Une ancienne version ignore ce champ.
+  modulators: t.modulators?.length ? t.modulators : null,
   // Sampler mélodique / instrument (R18, R20) : null = synthé. Champ absent d'une ancienne version.
   ...(t.type === 'MIDI' && t.melodicSampler ? { melodicSampler: t.melodicSampler } : t.type === 'MIDI' ? { melodicSampler: null } : {}),
   drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),

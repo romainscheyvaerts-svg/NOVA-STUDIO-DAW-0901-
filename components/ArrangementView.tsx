@@ -33,6 +33,7 @@ import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
+import { linkCounts, isLinked } from '../utils/linkedClips';
 import { gainToDbText } from '../utils/db';
 import { PunchSettings } from '../types';
 import { hasPunchZone, movePunchPoint } from '../utils/punch';
@@ -597,6 +598,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
   const { simple } = useSimpleMode();
+  // L3 · Copies liées : nombre de copies par motif (pastille « ∞ N », menu « Rendre unique »).
+  const linkCountMap = useMemo(() => linkCounts(tracks), [tracks]);
   const visibleTracks = useMemo(() => {
     // Structure Pro Tools : pistes masquées et pistes de dossiers repliés hors de l'écran (utils/trackStructure).
     const shown = shownTrackIds(tracks);
@@ -959,6 +962,18 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       icon: 'fa-headphones',
       title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (piste guide inactive au bounce).',
       onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
+    });
+    // L3 · Effets MIDI de la piste (arpège, accord, gamme forcée), mode avancé.
+    if (target && target.type === TrackType.MIDI && !simple) menuItems.push({
+      label: target.midiFx?.some(s => s.on) ? `Effets MIDI (${target.midiFx.filter(s => s.on).length} actif${target.midiFx.filter(s => s.on).length > 1 ? 's' : ''})…` : 'Effets MIDI : arpège, accord, gamme…', icon: 'fa-wand-magic-sparkles',
+      title: 'Arpège, accord d’une touche, gamme forcée : joués avant l’instrument, réglables pendant la lecture, figeables en notes.',
+      onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId } })); },
+    });
+    // L3 · Modulateurs (LFO calés sur le tempo), mode avancé.
+    if (target && !simple) menuItems.push({
+      label: target.modulators?.some(m => m.on) ? `Modulateurs (${target.modulators.filter(m => m.on).length} LFO)…` : 'Modulateurs (LFO)…', icon: 'fa-wave-square',
+      title: 'Un LFO calé sur le tempo fait bouger un réglage tout seul (trémolo, panoramique qui tourne, filtre qui s’ouvre).',
+      onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-modulators', { detail: { trackId } })); },
     });
     // Pro Tools : tous les clips de la piste (triple-clic au Sélecteur) et solo safe (Ctrl+clic sur S).
     if (target && target.clips.length) menuItems.push({ label: 'Sélectionner tous les clips de la piste', icon: 'fa-object-group', shortcut: 'Ctrl+Alt+A', onClick: () => { setContextMenu(null); runEditCommand('selectTrackClips', { trackId }); } });
@@ -1987,6 +2002,21 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillText(clip.name, x + 9, y + 14, w - 18);
     }
 
+    // L3 · Copie liée (utils/linkedClips) : pastille « ∞ N » (N copies du même motif), en haut à droite.
+    const links = clip.linkId ? linkCountMap.get(clip.linkId) || 0 : 0;
+    if (links > 1 && w > (clip.lock ? 64 : 44)) {
+        const label = `∞ ${links}`;
+        ctx.save();
+        ctx.font = '700 10px Inter';
+        const lw = ctx.measureText(label).width + 8;
+        const bx = x + w - (clip.lock ? 23 : 4) - lw, by = y + 3;
+        ctx.fillStyle = 'rgba(34,211,238,0.92)';
+        ctx.beginPath(); ctx.roundRect(bx, by, lw, 15, 3); ctx.fill();
+        ctx.fillStyle = '#04141a';
+        ctx.fillText(label, bx + 4, by + 11);
+        ctx.restore();
+    }
+
     // Verrou (utils/clipLock) : cadenas (édition) ou punaise (position), en haut à droite.
     if (clip.lock && w > 22) {
         const bx = x + w - 19, by = y + 3;
@@ -2508,6 +2538,13 @@ useEffect(() => {
       // Les deux outils voix les plus utilisés (audio) ; pour un clip MIDI, le piano roll.
       ...(audioOnly ? [justesse, respirations] : []),
       ...(isMidiClip && onEditMidi ? [{ label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(cm.trackId, cm.clip.id); close(); }}] : []),
+      // L3 · Copies liées d'un motif (utils/linkedClips) : mode avancé.
+      ...(isMidiClip && !simple ? [{ label: 'Dupliquer en copie liée', icon: 'fa-link',
+        title: 'La copie suit le motif : modifier une note dans une copie la modifie dans toutes.',
+        onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'DUPLICATE_LINKED'); close(); }} as ContextMenuItem] : []),
+      ...(isMidiClip && isLinked(cm.clip, linkCountMap) ? [{ label: `Rendre unique (détacher de ses ${(linkCountMap.get(cm.clip.linkId!) || 1) - 1} autre${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''} copie${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''})`, icon: 'fa-link-slash',
+        title: 'Ce clip garde ses notes mais ne suit plus les autres copies.',
+        onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'MAKE_UNIQUE'); close(); }} as ContextMenuItem] : []),
       'separator',
     ];
 

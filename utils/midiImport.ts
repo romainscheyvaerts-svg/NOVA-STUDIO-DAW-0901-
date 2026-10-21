@@ -18,7 +18,7 @@
  * autres instruments : notes normales), relus en notes glissées.
  */
 import { Clip, MidiNote, Track, TrackType } from '../types';
-import { quartersAt, segmentAtTime, type TempoMap } from './tempoMap';
+import { quartersAt, segmentAtTime, hasRamps, rampSteps, type TempoMap } from './tempoMap';
 import {
   DEFAULT_PPQ, DRUM_CHANNEL, MidiFileData, MidiFileNote, MidiFileTrack, initialBpm, secondsToTicks, ticksToSeconds,
 } from './midiFile';
@@ -259,10 +259,27 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
 }
 
 function tempoEventsOf(map: TempoMap, origin: number, q0: number, ppq: number) {
+  if (hasRamps(map)) return rampTempoEventsOf(map, q0, ppq);
   const seg0 = segmentAtTime(map, origin);
   const out = [{ tick: 0, usPerQuarter: Math.round(60_000_000 / seg0.bpm), bpm: seg0.bpm }];
   for (const s of map.segments) if (s.time > origin && s.bpm !== out[out.length - 1].bpm) out.push({ tick: Math.round((quartersAt(map, s.time) - q0) * ppq), usPerQuarter: Math.round(60_000_000 / s.bpm), bpm: s.bpm });
   return out;
+}
+
+/** Rampes (L3) : un palier par double-croche, au tempo qui garde la durée exacte (utils/tempoMap rampSteps). */
+function rampTempoEventsOf(map: TempoMap, q0: number, ppq: number) {
+  const steps = map.segments.flatMap(s => rampSteps(s, 0.25));
+  const out: { tick: number; usPerQuarter: number; bpm: number }[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const st = steps[i];
+    const nextQ = i + 1 < steps.length ? steps[i + 1].q : Infinity;
+    if (nextQ <= q0 + 1e-9) continue;
+    const tick = Math.max(0, Math.round((st.q - q0) * ppq));
+    if (out.length && out[out.length - 1].tick === tick) out.pop();
+    if (out.length && Math.abs(out[out.length - 1].bpm - st.bpm) < 1e-9) continue;
+    out.push({ tick, usPerQuarter: Math.round(60_000_000 / st.bpm), bpm: st.bpm });
+  }
+  return out.length ? out : [{ tick: 0, usPerQuarter: Math.round(60_000_000 / map.segments[0].bpm), bpm: map.segments[0].bpm }];
 }
 
 function meterEventsOf(map: TempoMap, origin: number, q0: number, ppq: number) {

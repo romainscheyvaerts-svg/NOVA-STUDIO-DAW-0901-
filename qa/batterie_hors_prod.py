@@ -173,6 +173,20 @@ BATTERIE = [
     # scènes de mix A/B/C/D (rappel exact en une annulation, A⇄B, rappel partiel), mastering d'un EP (6 titres ≤ 0,5 LU,
     # blancs exacts, .cue + ISRC, un WAV par titre) ; bureau sombre + clair, téléphone 390.
     ("mixpro", []),
+    # 22/10/2026 · L3 temps musical : tempo 90 → 140 par la fenêtre Tempo (notes, clips, repère, boucle : même mesure | temps |
+    # tick ; export = projet écrit directement à 140), Ctrl+Z en une étape, « garder les clips audio à leur place », rampe
+    # 120 → 100 (clics à ±1 ms, bande de la piste tempo), sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
+    ("tempo_musical", []),
+    # 22/10/2026 · L3 clips MIDI liés : « Dupliquer en copie liée » (menu du clip) ×8, pastilles « ∞ 8 », ↑ dans le piano roll
+    # d'UNE copie = les 8 montent (Ctrl+Z / Ctrl+Y en une étape), export = motif posé 8 fois, « Rendre unique », sauvegarde + rechargement.
+    ("clips_lies", []),
+    # 22/10/2026 · L3 effets MIDI en temps réel : arpège (doubles-croches à 140 BPM à ±1 ms, vitesse changée PENDANT la lecture),
+    # gamme forcée (100 % dans la gamme du projet), clavier en direct (arpège, aucun minuteur au repos), « Figer en notes »
+    # (= notes entendues, export identique), Ctrl+Z, sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
+    ("effets_midi", []),
+    # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
+    # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
+    ("modulateurs", []),
 ]
 
 

@@ -46,6 +46,16 @@ import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
+import { clipsWithMidiFx } from './midiFx';
+// L3 · Modulateurs (LFO) : branchés sur playedLanes, au même endroit que l'automation.
+import '../utils/modulators';
+
+/** Premier indice dont le temps est ≥ t (points triés) : voies longues (modulateurs) parcourues sans tout relire. */
+const firstPointAtOrAfter = (pts: AutomationPoint[], t: number): number => {
+  let lo = 0, hi = pts.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (pts[mid].time < t) lo = mid + 1; else hi = mid; }
+  return lo;
+};
 import { absorbedSlides } from '../utils/pianoRollPro';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { InputRouter, InputTap } from './InputRouter';
@@ -1981,7 +1991,8 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       if (!rt.synth && !rt.sampler && !rt.drumRack && !rt.melodicSampler) return;
       // Piste gelee : seules les notes ajoutees apres le rendu sont rejouees.
-      for (const clip of (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []))) {
+      // L3 : effets MIDI de la piste (mêmes notes qu'en lecture).
+      for (const clip of clipsWithMidiFx(track, isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []))) {
         if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
 
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
@@ -2031,7 +2042,7 @@ export class AudioEngine {
     for (const track of tracks) {
       const rt = rendered.get(track.id)!;
       if (!rt.bass808 || !track.bass808) continue;
-      const clips = isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []);
+      const clips = clipsWithMidiFx(track, isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []));
       rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)));
     }
 
@@ -3580,7 +3591,8 @@ export class AudioEngine {
         if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
         // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
-        const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
+        // L3 : effets MIDI de la piste (arpège, accord, gamme) appliqués ici, comme à l'export.
+        const midiClips = clipsWithMidiFx(track, isTrackFrozen(track) ? uncoveredClips(track) : track.clips);
 
         // Compensation de latence (PDC) : un instrument suivi d'effets à latence
         // (VST, bus, envois) joue ses notes d'autant plus tôt, comme l'audio.
@@ -3741,6 +3753,17 @@ export class AudioEngine {
       else if (dsp.synth) dsp.synth.triggerRelease(pitch, now);
       else if (dsp.melodicSampler) dsp.melodicSampler.triggerRelease(pitch, now);
       else if (dsp.sampler) dsp.sampler.triggerRelease(pitch, now);
+  }
+
+  /** L3 · Relâche tout ce que joue l'instrument d'une piste (effets MIDI changés pendant la lecture). */
+  public releaseTrackNotes(trackId: string) {
+      if (!this.ctx) return;
+      const dsp = this.tracksDSP.get(trackId);
+      if (!dsp) return;
+      const now = this.ctx.currentTime;
+      try { dsp.synth?.releaseAll(); } catch { /* */ }
+      try { dsp.melodicSampler?.stopAll(now + 0.01); } catch { /* */ }
+      try { dsp.sampler?.stopAll(); } catch { /* */ }
   }
 
   public previewMidiNote(trackId: string, pitch: number, duration: number = 0.5) {
@@ -4118,8 +4141,10 @@ export class AudioEngine {
   private programPluginWindow(ap: AudioParam, pts: AutomationPoint[], start: number, end: number, when: number, lead: number) {
     const base = when - start;
     try {
-      for (let k = 0; k < pts.length; k++) {
+      // Voie longue (modulateur) : on part du premier point de la fenêtre.
+      for (let k = pts.length > 256 ? firstPointAtOrAfter(pts, start + lead) : 0; k < pts.length; k++) {
         const tp = pts[k].time - lead;
+        if (tp >= end && pts.length > 256) break;
         if (tp < start || tp >= end) continue;
         const at = base + tp;
         ap.setValueAtTime(pts[k].value, at);
@@ -4256,7 +4281,11 @@ export class AudioEngine {
               return;
             }
 
-            lane.points.forEach((point, index) => {
+            // Voie longue (modulateur, points triés) : seulement les points de la fenêtre.
+            const long = lane.points.length > 256;
+            const from = long ? firstPointAtOrAfter(lane.points, start) : 0;
+            (long ? lane.points.slice(from, firstPointAtOrAfter(lane.points, end) + 1) : lane.points).forEach((point, i) => {
+                const index = from + i;
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     

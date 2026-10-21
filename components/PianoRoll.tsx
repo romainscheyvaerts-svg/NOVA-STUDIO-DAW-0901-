@@ -11,6 +11,7 @@ import { midiBus } from '../utils/midiBus';
 import ChordRollOverlay from './ChordRollOverlay';
 import { useTempoMap } from './TempoLane';
 import { tempoAt } from '../utils/tempoMap';
+import { linkCounts, makeUnique } from '../utils/linkedClips';
 import { NoteRecorder, defaultKeyLabel, KEY_TO_SEMITONE, computerKeyboardStore } from '../utils/computerKeyboard';
 import { useComputerKeyboard } from './MidiInputHost';
 import { midiInput } from '../services/MidiInput';
@@ -201,6 +202,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const tempoMap = useTempoMap();
   const bpm = Math.abs(tempoMap.segments[0].bpm - projectBpm) < 1e-6 ? tempoAt(tempoMap, clip?.start ?? 0) : projectBpm;
   const beatSec = 60 / bpm;
+  const linkedCount = useMemo(() => (clip?.linkId ? linkCounts(allTracks || [track]).get(clip.linkId) || 0 : 0), [clip?.linkId, allTracks, track]);
   const barSec = beatSec * 4;
   const clipStart = clip?.start || 0;
 
@@ -1255,6 +1257,16 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                 </div>
              </div>
 
+             {/* L3 · Copie liée (utils/linkedClips) : ce qu'on modifie ici change aussi les autres copies. */}
+             {linkedCount > 1 && (
+               <button type="button" data-testid="roll-linked" className="pr-cap shrink-0" style={{ color: '#22d3ee' }}
+                 onClick={() => onUpdateTrack({ ...track, clips: track.clips.map(c => (c.id === clip.id ? makeUnique(c) : c)) })}
+                 title={`Copie liée : ${linkedCount} copies de ce motif. Chaque note modifiée ici change aussi les ${linkedCount - 1} autres. Clic : rendre cette copie unique (Ctrl+Z pour revenir).`}
+                 aria-label={`Copie liée, ${linkedCount} copies. Rendre unique`}>
+                 <span className="font-black">∞ {linkedCount}</span><span className="hidden min-[1200px]:inline">copies liées · Rendre unique</span>
+               </button>
+             )}
+
              {onTogglePlay && (
                <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Lecture'} title="Écouter / pause (barre d'espace)"
                  className={`shrink-0 w-10 h-10 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-full flex items-center justify-center ${isPlaying ? 'bg-cyan-400 text-black' : 'bg-white text-black'}`}>
@@ -1270,6 +1282,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
              {/* Son de la piste (mode instru : synthé NOVA, instrument VST du PC, 808) */}
              {toolbarExtra}
+
+             {/* L3 · Effets MIDI de la piste (arpège, accord, gamme forcée), mode avancé. */}
+             {!simple && track.type === TrackType.MIDI && (
+               <button type="button" data-testid="roll-midi-fx" className="pr-cap shrink-0" {...TOGGLE(!!track.midiFx?.some(s => s.on))}
+                 onClick={() => window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId: track.id } }))}
+                 title="Effets MIDI : arpège, accord d’une touche, gamme forcée (réglables pendant la lecture, figeables en notes)" aria-label="Effets MIDI">
+                 <i className="fas fa-wand-magic-sparkles text-[10px]"></i><span>FX MIDI{track.midiFx?.some(s => s.on) ? ` · ${track.midiFx.filter(s => s.on).length}` : ''}</span>
+               </button>
+             )}
 
              <div className="pr-sep"></div>
 
