@@ -150,6 +150,27 @@ export function lastTakeNumber(track: Pick<Track, 'clips' | 'takeMeta'>): number
   return best === null || maxN > best ? maxN : best;
 }
 
+/** Clip qu'on peut glisser dans la playlist : un clip audio (pas MIDI, pas une tranche de gel). */
+export const canKeepClip = (c: Pick<Clip, 'type' | 'notes' | 'isFreezeSlice'> | null | undefined): boolean =>
+  !!c && String(c.type) !== 'MIDI' && !c.notes && !c.isFreezeSlice;
+
+/**
+ * Clip glissé dans la playlist : sa prise. Un clip qui n'est pas encore une prise
+ * (importé, traité, collé…) en devient une, au numéro suivant, pour avoir sa ligne
+ * (le son ne change pas : il reste là où il est sur la piste). null : pas un clip audio.
+ */
+export function clipAsTake(track: Pick<Track, 'clips' | 'takeMeta'>, clipId: string): { clips: Clip[]; n: number } | null {
+  const clip = (track.clips || []).find(c => c.id === clipId);
+  if (!clip || !canKeepClip(clip)) return null;
+  const own = takeNumberOf(clip);
+  if (own !== null) return { clips: track.clips, n: own };
+  let max = 0;
+  for (const c of track.clips || []) max = Math.max(max, takeNumberOf(c) || 0);
+  for (const m of track.takeMeta || []) if (m && typeof m.n === 'number') max = Math.max(max, m.n);
+  const n = max + 1;
+  return { clips: track.clips.map(c => (c.id === clipId ? { ...c, takeNumber: n } : c)), n };
+}
+
 /** Prise d'un clip (glisser dans la zone, bouton du clip). null : ce n'est pas une prise. */
 export const takeOfClip = (c: Pick<Clip, 'takeNumber' | 'name'> | null | undefined): number | null => (c ? takeNumberOf(c) : null);
 

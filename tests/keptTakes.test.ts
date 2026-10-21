@@ -6,7 +6,7 @@ vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, c
 
 import { contentOf } from '../services/Collab';
 import {
-  clearKept, colorKept, isKept, keepAside, keptCount, keptLanes, keptMetas, keptZoneHeight, keptZoneTargets, KEPT_HEAD_H, lastTakeNumber,
+  clearKept, clipAsTake, colorKept, isKept, keepAside, keptCount, keptLanes, keptMetas, keptZoneHeight, keptZoneTargets, KEPT_HEAD_H, lastTakeNumber,
   dropSlivers, nextStars, putKeptOnTrack, rateKept, sanitizeKept, starsLabel, takeOfClip, unkeep,
 } from '../utils/keptTakes';
 import { compSwipe, readComp } from '../utils/comping';
@@ -232,5 +232,20 @@ describe('playlist visible dès l’ouverture du template', () => {
     expect([...keptZoneTargets([tr('a', 'Voix lead'), tr('x', 'Backs', { isTrackArmed: true })])]).toEqual(['x']);
     expect([...keptZoneTargets([tr('a', 'Voix'), tr('track-rec-main', 'Ma voix')])]).toEqual(['track-rec-main']);
     expect([...keptZoneTargets([tr('a', 'Beat'), tr('b', 'Basse', { type: 'MIDI' })])]).toEqual([]);
+  });
+});
+
+describe('glisser un clip vers le haut dans la playlist', () => {
+  const clip = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, start: 0, duration: 4, offset: 0, fadeIn: 0, fadeOut: 0, color: '#fff', type: 'AUDIO', ...extra }) as any;
+  it('un clip qui n’est pas une prise en devient une (numéro suivant), une prise garde le sien', () => {
+    const track = { clips: [clip('Prise 2', { takeNumber: 2 }), clip('Voix importée')], takeMeta: [{ n: 3 }] } as any;
+    const r = clipAsTake(track, 'Voix importée')!;
+    expect(r.n).toBe(4);
+    expect(r.clips.find((c: any) => c.id === 'Voix importée').takeNumber).toBe(4);
+    expect(clipAsTake(track, 'Prise 2')).toEqual({ clips: track.clips, n: 2 });
+    expect(clipAsTake({ clips: [clip('m', { type: 'MIDI', notes: [] })] } as any, 'm')).toBeNull();
+    expect(clipAsTake(track, 'absent')).toBeNull();
+    const kept = { clips: r.clips, takeMeta: keepAside(track.takeMeta, r.n, 10) } as any;
+    expect(keptCount(kept)).toBe(1);
   });
 });

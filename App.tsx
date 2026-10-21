@@ -326,7 +326,7 @@ import { droppedPassNote, patchMeta, nextTakeNumber, listLanes, duplicateTake, r
 import { compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
-import { clearKept, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
+import { clearKept, clipAsTake, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 import ImportTempoCard from './components/ImportTempoCard';
 import { useImportTempo } from './hooks/useImportTempo';
@@ -4807,6 +4807,32 @@ function Studio() {
     breakHistory();
     setAiNotification(`⤓ ${takeName(t, n)} mise sur la piste : c'est elle que tu entends maintenant${res.size > 1 ? ` (${res.size} pistes, prises du même passage)` : ''}. Les autres restent gardées — Ctrl+Z pour revenir.`);
   }, [setState, breakHistory, takeAudition]);
+  /** 📌 Clip glissé vers le haut dans la playlist : sa ligne s'ajoute (un clip qui n'est pas une prise en devient une). */
+  const handleKeepClip = useCallback((trackId: string, clipId: string): boolean => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return false;
+    const r = clipAsTake(t, clipId);
+    if (!r) { setAiNotification('📌 Seuls les clips audio vont dans la playlist.'); return false; }
+    if (isKept({ ...t, clips: r.clips }, r.n)) { setKeptClosed(prev => ({ ...prev, [trackId]: false })); setAiNotification(`📌 ${takeName(t, r.n)} est déjà dans la playlist.`); return true; }
+    const clip = t.clips.find(c => c.id === clipId);
+    const fresh = r.clips !== t.clips;
+    let takeMeta = keepAside(t.takeMeta as TakeMeta[] | undefined, r.n, Date.now());
+    if (fresh && clip?.name) takeMeta = renameTake(takeMeta, r.n, clip.name);
+    const next = { ...t, clips: r.clips, takeMeta };
+    const why = collabTrackGuardRef.current(t, next);
+    if (why) { setAiNotification(why); return false; }
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) { d.clips = r.clips as any; d.takeMeta = takeMeta; }
+    }));
+    breakHistory();
+    setKeptClosed(prev => ({ ...prev, [trackId]: false }));
+    const count = keptCount(t) + 1;
+    setAiNotification(`📌 ${fresh && clip?.name ? clip.name : takeName(t, r.n)} ajoutée à la playlist (${count} ligne${count > 1 ? 's' : ''}). Ctrl+Z pour annuler.`);
+    track('kept_take', { count, drag: true });
+    return true;
+  }, [setState, breakHistory]);
   const handleToggleKeptZone = useCallback((trackId: string, open?: boolean) => {
     setKeptClosed(prev => ({ ...prev, [trackId]: open === undefined ? !prev[trackId] : !open }));
   }, []);
@@ -4827,8 +4853,8 @@ function Studio() {
   const keptZoneApi = useMemo<KeptZoneApi>(() => ({
     closed: keptClosed,
     onToggle: handleToggleKeptZone, onKeep: handleKeepAside, onUnkeep: handleUnkeep, onClear: handleClearKept,
-    onRate: handleRateKept, onColor: handleColorKept, onPut: handlePutKeptOnTrack,
-  }), [keptClosed, handleToggleKeptZone, handleKeepAside, handleUnkeep, handleClearKept, handleRateKept, handleColorKept, handlePutKeptOnTrack]);
+    onRate: handleRateKept, onColor: handleColorKept, onPut: handlePutKeptOnTrack, onKeepClip: handleKeepClip,
+  }), [keptClosed, handleToggleKeptZone, handleKeepAside, handleUnkeep, handleClearKept, handleRateKept, handleColorKept, handlePutKeptOnTrack, handleKeepClip]);
 
   // ===== « Meilleure prise » par l'IA locale (V22) : note chaque prise, propose un comp.
   const [autoCompProposal, setAutoCompProposal] = useState<AutoCompProposal | null>(null);

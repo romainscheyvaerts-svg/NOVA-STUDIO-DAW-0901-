@@ -7,6 +7,10 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.10
+- Playlist : glisse simplement un clip vers le haut, dans la playlist au-dessus de ta piste : il y ajoute une ligne, la playlist grandit à chaque clip.
+- Ça marche avec tous les clips audio, pas seulement les prises enregistrées dans Nova.
+
 ## 1.5.9
 - Playlist des prises gardées visible dès l'ouverture, au-dessus de ta piste d'enregistrement : chaque prise gardée pendant le rec y ajoute une ligne.
 - Onglet VST : tous tes plugins s'affichent (la liste s'arrêtait à 300).

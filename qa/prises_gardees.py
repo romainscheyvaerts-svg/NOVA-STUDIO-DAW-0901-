@@ -281,7 +281,7 @@ def desktop(b):
     g = geo(page)
     R["apres_prise1"] = {"zone": g["zone"], "bandeau": g["stripText"]}
     check("après la 1re prise : zone (en-tête) au-dessus de la piste armée, état vide clair",
-          g["zone"] and abs(g["zone"]["h"] - HEAD_H) < 1 and g["count"] == 0 and "garde tes meilleures prises" in (g["stripText"] or "").lower(), g)
+          g["zone"] and abs(g["zone"]["h"] - HEAD_H) < 1 and g["count"] == 0 and "tes meilleures prises" in (g["stripText"] or "").lower(), g)
     btn = page.locator('[data-testid="kept-keep-last"]').locator("visible=true")
     check("bandeau de fin de prise : bouton « 📌 Garder Prise 1 »", btn.count() == 1 and "Prise 1" in btn.first.inner_text(), btn.count())
     shot(page, "pc_01_fin_prise1_bandeau")

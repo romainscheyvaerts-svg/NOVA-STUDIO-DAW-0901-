@@ -56,7 +56,7 @@ import { REVEAL_TIME_EVENT, type RevealTimeDetail } from '../utils/voiceSearch';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, TakeLane } from '../utils/playlists';
 import { KeptZoneApi, KeptZoneHeaders, KeptZoneStrip } from './KeptTakesZone';
-import { KEPT_HEAD_H, KeptLane, keptLanes, keptZoneHeight, keptZoneTargets, lastTakeNumber } from '../utils/keptTakes';
+import { canKeepClip, KEPT_HEAD_H, KeptLane, keptLanes, keptZoneHeight, keptZoneTargets, lastTakeNumber } from '../utils/keptTakes';
 import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 import { canvasTheme } from '../utils/canvasTheme';
@@ -1600,8 +1600,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const newStart = moveClipStart({ settings: editModeStore.get(), invert: inv, bpm, origStart: initialClipState.start,
             rawStart: initialClipState.start + dt, syncOffset: syncOffsetOf(initialClipState) });
 
-        // 📌 Glissé dans la zone des prises gardées de SA piste : la prise y va, le clip reste en place.
-        if (keptZone && takeNumberOf(activeClip.clip) !== null && !(multiDragRef.current && multiDragRef.current.length > 1)) {
+        // 📌 Glissé vers le haut dans la playlist de SA piste : le clip y ajoute sa ligne, il reste en place.
+        if (keptZone && canKeepClip(activeClip.clip) && !(multiDragRef.current && multiDragRef.current.length > 1)) {
             const zone = keptZoneAt(y);
             if (zone === activeClip.trackId) {
                 if (keptDropRef.current !== zone) { keptDropRef.current = zone; setKeptDropHot(zone); }
@@ -1721,8 +1721,8 @@ const handleMouseUp = () => {
     const keptDrop = keptDropRef.current;
     if (keptDrop) {
         keptDropRef.current = null; setKeptDropHot(null);
-        const n = activeClip ? takeNumberOf(activeClip.clip) : null;
-        if (dragAction === 'MOVE' && keptZone && n !== null) setTimeout(() => keptZone.onKeep(keptDrop, n), 0);
+        const clipId = activeClip && canKeepClip(activeClip.clip) ? activeClip.clip.id : null;
+        if (dragAction === 'MOVE' && keptZone && clipId) setTimeout(() => keptZone.onKeepClip(keptDrop, clipId), 0);
     }
     if (dragAction === 'AUDIO_SCRUB') {
         if (audioScrubRef.current?.shuttle) scrubControl.stopShuttle(); else scrubControl.end();
@@ -3025,7 +3025,7 @@ useEffect(() => {
               const last = lastTakeNumber(t);
               const candidate = last !== null && !kept.some(l => l.n === last)
                 ? { n: last, name: (lanesByTrack.get(t.id) || []).find(l => l.n === last)?.name || `Prise ${last}` } : null;
-              const dragging = dragAction === 'MOVE' && !!activeClip && activeClip.trackId === t.id && takeNumberOf(activeClip.clip) !== null;
+              const dragging = dragAction === 'MOVE' && !!activeClip && activeClip.trackId === t.id && canKeepClip(activeClip.clip);
               return (
                 <div key={t.id} style={{ position: 'absolute', left: 0, right: 0, top, height: a, pointerEvents: dragAction ? 'none' : undefined }}>
                   <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: KEPT_HEAD_H, pointerEvents: 'none' }}>

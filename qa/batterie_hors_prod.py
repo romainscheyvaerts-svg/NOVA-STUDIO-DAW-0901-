@@ -83,6 +83,7 @@ BATTERIE = [
     # de fin de prise, Ctrl+Alt+P, clip glissé), écoute, « Mettre sur la piste », comp depuis une ligne, export sans les
     # prises gardées, sauvegarde + rechargement ; bureau 1600 × 900 et téléphone 390 × 844, sombre et clair.
     ("prises_gardees", []),
+    ("playlist_glisser", []),
     # Lot 2b BandLab (14/10/2026) : caméra pendant la prise (fausse caméra de Chrome, flash + clic au même instant), vidéo de la
     # performance (mix + image, MP4 mesuré par ffprobe / ffmpeg : écart ≤ 1 image), stockage plein, prise audio identique ; bureau et téléphone.
     ("video_prise", []),

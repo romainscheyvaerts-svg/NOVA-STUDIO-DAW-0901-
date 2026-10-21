@@ -29,6 +29,8 @@ export interface KeptZoneApi {
   onColor: (trackId: string, n: number, color: string | null) => void;
   /** Mettre sur la piste (la prise entière remplace ce qu'on entend). */
   onPut: (trackId: string, n: number) => void;
+  /** Clip glissé vers le haut dans la playlist : il y ajoute sa ligne (il devient une prise s'il n'en est pas une). */
+  onKeepClip: (trackId: string, clipId: string) => boolean;
 }
 
 /** Dernière prise de la piste, si elle n'est pas encore gardée (bandeau de fin de prise). */
@@ -172,10 +174,10 @@ interface StripProps {
 /** En-tête de la zone côté timeline : état vide, bandeau de fin de prise, aide au comp. */
 export const KeptZoneStrip: React.FC<StripProps> = ({ track, count, candidate, isRecording, api, dropHot, dragging }) => {
   let text: string;
-  if (dropHot) text = '📌 Lâche ici pour garder cette prise de côté';
-  else if (dragging) text = '📌 Glisse la prise ici pour la garder de côté';
+  if (dropHot) text = '📌 Lâche ici : une ligne de plus dans la playlist';
+  else if (dragging) text = '📌 Glisse le clip ici (vers le haut) pour l’ajouter à la playlist';
   else if (isRecording) text = '🔴 Prise en cours… tu pourras la garder juste après.';
-  else if (!count) text = 'Pendant le rec, garde tes meilleures prises : chacune ajoute une ligne ici (📌 Garder ou Ctrl+Alt+P)';
+  else if (!count) text = 'Glisse une prise vers le haut ici pour garder tes meilleures prises : chacune ajoute une ligne';
   else if (candidate) text = `🎤 Dernière prise : ${candidate.name}`;
   else text = 'Écoute ▶, note ★, puis ⤓ Piste pour la prise entière — ou balaie un passage d’une ligne pour ton comp';
   return (
