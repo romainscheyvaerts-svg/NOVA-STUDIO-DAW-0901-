@@ -4,6 +4,7 @@ import type { CollabStatusView } from '../utils/collabStatus';
 import type { PeerView } from '../utils/collabPeers';
 import { PEER_STATE_TONE } from '../utils/collabPeers';
 import MicLevelMeter from './MicLevelMeter';
+import { isShortcut } from '../utils/keymap';
 
 /**
  * « Artiste invité » : l'écran de l'artiste qui rejoint la séance de l'ingé
@@ -76,6 +77,8 @@ export interface GuestStudioProps {
   onDelete: (n: number) => void;
   // Parler à l'ingé
   talkOn: boolean;
+  /** Ouvert par un toucher court : reste ouvert jusqu'au prochain toucher. */
+  talkLatched?: boolean;
   onTalk: (on: boolean) => void;
   talking: string[];
   messages: CollabMessage[];
@@ -122,6 +125,8 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (GUEST_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) return;
+      // Talkback (N par défaut, utils/talkback) : parler à l'ingé au clavier reste permis.
+      if (isShortcut(e, 'nova.talkback')) return;
       e.stopImmediatePropagation();
     };
     window.addEventListener('keydown', onKey, true);
@@ -426,11 +431,11 @@ const GuestStudio: React.FC<GuestStudioProps> = (p) => {
             onPointerDown={(e) => { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ } p.onTalk(true); }}
             onPointerUp={() => p.onTalk(false)} onPointerCancel={() => p.onTalk(false)}
             onLostPointerCapture={() => { if (p.talkOn) p.onTalk(false); }}
-            onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !p.talkOn) { e.preventDefault(); e.stopPropagation(); p.onTalk(true); } }}
-            onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') p.onTalk(false); }}
+            onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); e.stopPropagation(); p.onTalk(true); } }}
+            onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.stopPropagation(); p.onTalk(false); } }}
             className={`${big} select-none touch-none leading-tight ${p.talkOn ? 'animate-pulse bg-red-500' : 'bg-white/10'}`}>
             {p.talkOn ? `${eng} t'entend…` : `🎙️ Parler à ${eng}`}
-            <span className="block text-[11px] font-semibold text-slate-300">{p.talkOn ? 'relâche pour couper' : 'maintenir'}</span>
+            <span className="block text-[11px] font-semibold text-slate-300">{p.talkOn ? (p.talkLatched ? 'touche encore pour couper' : 'relâche pour couper') : 'touche ou maintiens'}</span>
           </button>
         </div>
       </footer>

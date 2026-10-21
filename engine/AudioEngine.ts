@@ -351,6 +351,15 @@ export class AudioEngine {
   private lastViewTracks: Track[] = [];
   private monitorUnsub: (() => void) | null = null;
   private appliedListenMode: MonitorSnapshot['listen'] = monitorStore.get().listen;
+  /**
+   * Talkback local (utils/talkback) : `mainDim` baisse la musique de la sortie d'écoute
+   * pendant que l'ingé parle ; `talkIn` reçoit la voix du micro talkback et part vers les
+   * mixes casque (ou la sortie d'écoute s'il n'y en a pas). Jamais vers le master.
+   */
+  private mainDim: GainNode | null = null;
+  private talkIn: GainNode | null = null;
+  private talkRoute: 'cue' | 'main' | null = null;
+  private talkPlan: { talkGain: number; musicGain: number } = { talkGain: 0, musicGain: 1 };
   private asioInputChannels = 2;
   private asioOutputChannels = 2;
   private asioBlockSize = 256;
@@ -538,14 +547,21 @@ export class AudioEngine {
     // R15 : sortie principale = le master, ou un mix casque écouté à sa place.
     this.mainSel = this.ctx.createGain();
     this.mainOut = this.ctx.createGain();
+    // Talkback local : la musique de l'écoute passe par mainDim (baissée quand l'ingé parle).
+    this.mainDim = this.ctx.createGain();
     this.masterAnalyzer.connect(this.mainSel);
-    this.mainSel.connect(this.mainOut);
+    this.mainSel.connect(this.mainDim);
+    this.mainDim.connect(this.mainOut);
     this.cueEngine = new CueMixEngine(this.ctx);
     this.cueEngine.listenOut.connect(this.mainOut);
     // Section d'écoute (mono / côtés, Dim, coupure, volume, bus AFL / PFL) : après
     // les mètres du master, donc hors de l'export et des mesures du mix.
     this.buildMonitorSection();
     this.monOut!.connect(this.browserOutput);
+    this.talkIn = this.ctx.createGain();
+    this.talkIn.gain.value = 0;
+    this.talkRoute = null;
+    this.applyTalkback();
     this.browserOutput.connect(this.ctx.destination);
     
     this.masterAnalyzer.connect(this.masterSplitter);
@@ -619,12 +635,15 @@ export class AudioEngine {
     this.collabMixDest = null;
     this.scrubber = null;
     for (const n of [this.previewGain, this.previewAnalyzer, this.masterOutput, this.masterLimiter, this.masterAnalyzer, this.masterSplitter,
-      this.masterAnalyzerL, this.masterAnalyzerR, this.browserOutput, this.mainSel, this.mainOut, this.monitorGain]) {
+      this.masterAnalyzerL, this.masterAnalyzerR, this.browserOutput, this.mainSel, this.mainOut, this.monitorGain, this.mainDim, this.talkIn]) {
       try { n?.disconnect(); } catch { /* */ }
     }
     this.disposeMonitorSection();
     this.previewGain = this.previewAnalyzer = null;
     this.masterOutput = this.browserOutput = this.mainSel = this.mainOut = this.monitorGain = null;
+    // Talkback : le micro (services/LocalTalkback) se rebranche sur le nouveau contexte au prochain appui.
+    this.mainDim = this.talkIn = null; this.talkRoute = null;
+    try { window.dispatchEvent(new Event('nova:talkback-reset')); } catch { /* hors navigateur */ }
     this.masterLimiter = null; this.masterAnalyzer = null; this.masterSplitter = null;
     this.masterAnalyzerL = this.masterAnalyzerR = null;
     this.activeSources.clear();
@@ -5587,6 +5606,46 @@ export class AudioEngine {
     if (this.cueListen && !this.cueMixes.some(m => m.id === this.cueListen)) this.setCueListen(null);
     if (this.asioOutputProcessor) this.rebuildAsioOutput();
     this.syncDirectMonitor();
+    // Talkback : vers les mixes casque dès qu'il y en a un, sinon vers la sortie d'écoute.
+    this.applyTalkback();
+  }
+
+  // ─── Talkback local (utils/talkback, services/LocalTalkback) ─────────────────
+
+  /** Entrée du talkback local (la voix du micro talkback s'y branche). Null tant que le moteur n'est pas prêt. */
+  public getTalkbackInput(): AudioNode | null { return this.talkIn; }
+
+  /** Où part la voix du talkback : 'cue' (mixes casque) ou 'main' (sortie d'écoute, sans mix casque). */
+  public getTalkbackRoute(): 'cue' | 'main' { return this.cueMixes.length ? 'cue' : 'main'; }
+
+  /** Dernier plan appliqué (voix, musique) : diagnostic et tests. */
+  public getTalkbackPlan(): { talkGain: number; musicGain: number } { return { ...this.talkPlan }; }
+
+  /**
+   * Voix du talkback (gain, 0 = coupée) et musique de l'écoute et des casques (1 = normale,
+   * dim pendant que l'ingé parle). La voix ne va JAMAIS vers le master : seulement les
+   * sorties des mixes casque (engine/CueMixEngine) ou la sortie d'écoute (après le master),
+   * donc ni dans l'export (rendu à part), ni dans les prises (entrée micro), ni dans le mix
+   * diffusé en collaboration (pris sur le master).
+   */
+  public setTalkback(plan: { talkGain: number; musicGain: number }) {
+    this.talkPlan = { talkGain: Math.max(0, plan.talkGain), musicGain: Math.max(0, Math.min(1, plan.musicGain)) };
+    this.applyTalkback();
+  }
+
+  private applyTalkback() {
+    if (!this.ctx || !this.talkIn || !this.mainOut) return;
+    const want: 'cue' | 'main' = this.cueMixes.length && this.cueEngine ? 'cue' : 'main';
+    if (want !== this.talkRoute) {
+      try { this.talkIn.disconnect(); } catch { /* pas branché */ }
+      this.talkIn.connect(want === 'cue' ? this.cueEngine!.talkIn : this.mainOut);
+      this.talkRoute = want;
+    }
+    const t = this.ctx.currentTime;
+    // Rampes courtes (15 ms) : ni clic à l'ouverture, ni voix coupée en plein mot.
+    this.talkIn.gain.setTargetAtTime(this.talkPlan.talkGain, t, 0.015);
+    this.mainDim?.gain.setTargetAtTime(this.talkPlan.musicGain, t, 0.015);
+    this.cueEngine?.setDim(this.talkPlan.musicGain);
   }
 
   /** Écouter un mix casque sur la sortie principale (null = le master). */

@@ -12,6 +12,7 @@ import StorageProtectionCard from './StorageProtectionCard';
 import DesktopUpdateSettings from './DesktopUpdateSettings';
 import PerfModeSetting from './PerfModeSetting';
 import { MonitorVolume, SoloListenChoice } from './MonitorSection';
+import TalkbackSettings from './TalkbackSettings';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
 import { rateLabel } from '../utils/projectRate';
 
@@ -141,7 +142,7 @@ const LatencyCompensation: React.FC = () => {
 interface AudioSettingsPanelProps {
   onClose: () => void;
   /** Ouvre la fenêtre sur une section (Préférences › Surfaces de contrôle), même en mode simple. */
-  focusSection?: 'surfaces';
+  focusSection?: 'surfaces' | 'talkback';
 }
 
 interface AudioDevice {
@@ -152,8 +153,9 @@ interface AudioDevice {
 
 const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusSection }) => {
   useEffect(() => {
-    if (focusSection !== 'surfaces') return;
-    const t = setTimeout(() => document.getElementById('nova-surfaces-controle')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+    if (focusSection !== 'surfaces' && focusSection !== 'talkback') return;
+    const id = focusSection === 'talkback' ? 'nova-talkback-reglages' : 'nova-surfaces-controle';
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
     return () => clearTimeout(t);
   }, [focusSection]);
   // Mode simple : choix du micro / de la sortie et calage de latence seulement.
@@ -815,6 +817,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose, focusS
 
                 <LatencyCompensation />
                 {!simple && <MultitrackSettings />}
+                {(!simple || focusSection === 'talkback') && <TalkbackSettings />}
 
                 {/* ÉCOUTE ET SOLO (utils/monitorSection) : réglages du poste, jamais dans l'export */}
                 {!simple && <div className="space-y-3" data-testid="settings-listen">

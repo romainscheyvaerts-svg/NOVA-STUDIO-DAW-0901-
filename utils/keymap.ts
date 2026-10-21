@@ -113,6 +113,8 @@ export const KEYMAP: ShortcutDef[] = [
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
   nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
   nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Aucun (Live : Capture MIDI, Ctrl+Maj+C)', category: 'Transport' }),
+  // Talkback (utils/talkback, App.tsx) : N, libre partout (préréglages, Keyboard Focus, clavier MIDI), jamais dans un champ texte.
+  nova({ id: 'nova.talkback', keys: ['n'], label: 'Talkback : appui court = reste ouvert (2e appui coupe), maintenu = tu parles tant que tu tiens (casque de l’artiste ; en collaboration, en direct)', pt: 'Bouton Talkback d’une console de studio', category: 'Transport' }),
 
   // --- Ajoutés façon Pro Tools (toujours actifs) ----------------------------------
   g({ id: 'pt.split', keys: ['ctrl+e'], label: 'Séparer le clip à la tête de lecture', pt: 'Ctrl+E (Separate Clip at Selection)', category: 'Édition', command: 'split' }),

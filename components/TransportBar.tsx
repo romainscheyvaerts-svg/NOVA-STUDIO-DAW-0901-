@@ -29,6 +29,27 @@ import type { Track } from '../types';
 import type { SafetyContext } from '../utils/dspLoad';
 import { fitBar, barItem } from '../utils/barFit';
 import ManageSubscription, { useAccountBilling } from './ManageSubscription';
+import { talkbackTitle, talkingLabel } from '../utils/talkback';
+
+/** Talkback (utils/talkback) : bouton de console, piloté aussi par la touche (N par défaut). */
+export interface TransportTalkback {
+  /** Ouvert : ta voix part (casque de l'artiste, ou en direct en collaboration). */
+  on: boolean;
+  /** Ouvert par un appui court : reste ouvert jusqu'au prochain appui. */
+  latched: boolean;
+  /** Séance de collaboration en cours (bouton visible même en mode simple). */
+  collab: boolean;
+  /** Raccourci actif (« N »), pour l'infobulle. */
+  keyHint: string;
+  /** Qui te parle en ce moment (talkback reçu en collaboration). */
+  talking: string[];
+  /** Pourquoi il ne s'ouvre pas (« Coupé pendant la prise », « Micro indisponible »), quelques secondes. */
+  blocked?: string | null;
+  /** Appui / relâchement (souris, doigt) : appui court = verrouillé, maintenu = tant qu'on tient. */
+  onButton: (down: boolean) => void;
+  /** Clavier sur le bouton (Entrée) : ouvre verrouillé / coupe. */
+  onToggle: () => void;
+}
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -131,6 +152,8 @@ interface TransportProps {
   dspTracks?: Track[];
   onDspFreezeTrack?: (trackId: string) => void;
   dspSafety?: SafetyContext;
+  /** Talkback : visible en mode avancé, et en mode simple seulement pendant une collaboration. */
+  talkback?: TransportTalkback | null;
 }
 
 /** Voyant de surcharge : s'allume 4 s quand le moteur prend du retard. */
@@ -250,7 +273,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
   onImportAudio,
-  dspTracks, onDspFreezeTrack, dspSafety,
+  dspTracks, onDspFreezeTrack, dspSafety, talkback,
   children
 }) => {
   const tsNum = timeSignature?.numerator || 4;
@@ -916,6 +939,34 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-amber-500/40 text-amber-300 hover:bg-amber-500/15">
               <i className="fas fa-history" aria-hidden="true"></i><span {...barItem('libelle-capturer', 9)} className="ml-1">CAPTURER</span>
             </button>
+          )}
+          {talkback && (!simple || talkback.collab) && (
+            <button type="button" data-testid="transport-talkback" aria-pressed={talkback.on} data-latched={talkback.latched ? '1' : '0'}
+              aria-label={talkback.on ? (talkback.latched ? 'Talkback ouvert (appuie encore pour couper)' : 'Talkback ouvert (relâche pour couper)') : 'Talkback'}
+              title={talkbackTitle(talkback.keyHint, talkback.collab)}
+              onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ } talkback.onButton(true); }}
+              onPointerUp={() => talkback.onButton(false)} onPointerCancel={() => talkback.onButton(false)}
+              onLostPointerCapture={() => talkback.onButton(false)}
+              // Clavier (Tab puis Entrée) : bascule. Les clics souris passent par les appuis ci-dessus (detail > 0).
+              onClick={(e) => { if (e.detail === 0) talkback.onToggle(); }}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`nova-hit-tactile ${talkback.collab ? 'flex' : 'hidden md:flex'} h-10 min-w-10 px-2 rounded-xl items-center justify-center gap-1.5 border select-none touch-none transition-all ${talkback.on ? 'bg-red-600 border-red-300 text-white nova-halo-rouge nova-pouls' : 'border-white/10 text-slate-300 hover:text-white hover:bg-white/10'}`}
+              style={talkback.on ? { backgroundColor: '#dc2626' } : { backgroundColor: 'var(--bg-item)' }}>
+              <i className={`fas ${talkback.on ? 'fa-microphone' : 'fa-comment-dots'} text-xs`} aria-hidden="true"></i>
+              <span {...barItem('libelle-talkback', 5)} className="hidden lg:inline font-black uppercase text-[9px] tracking-wider">Talk</span>
+            </button>
+          )}
+          {talkback && talkback.blocked && (!simple || talkback.collab) && (
+            <span role="status" data-testid="talkback-blocked" title={`Talkback : ${talkback.blocked}`}
+              className="shrink min-w-0 max-w-[10rem] truncate h-8 px-2 rounded-lg flex items-center text-[11px] font-black bg-amber-400 text-black">
+              🎙️ {talkback.blocked}
+            </span>
+          )}
+          {talkback && talkback.talking.length > 0 && (
+            <span role="status" data-testid="talkback-talking" title={talkingLabel(talkback.talking)}
+              className="shrink min-w-0 max-w-[9rem] md:max-w-[12rem] truncate h-8 px-2 rounded-lg flex items-center text-[11px] font-black bg-sky-400 text-black">
+              {talkingLabel(talkback.talking)}
+            </span>
           )}
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'transparent' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">{punch?.quickPunch && !simple ? 'QP' : 'Rec'}</span></button>
         </div>

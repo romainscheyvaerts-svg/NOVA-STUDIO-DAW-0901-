@@ -6,6 +6,7 @@ import { novaBridge } from '../services/NovaBridge';
 import { getVocalRole } from './vocalRoles';
 import { numberedTracks } from './chatTools';
 import { parseBeatCommand } from './beatChat';
+import { shortcutHint } from './keymap';
 
 /**
  * Commandes de Nova comprises SANS l'IA : exécution immédiate, même hors
@@ -312,6 +313,10 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   if (/\bharmo/.test(msg) && /\b(fais|faire|prepare|on fait|passe|enregistre)\b/.test(msg)) return say('🎶 Je prépare la piste des harmonies.', { action: 'PREPARE_PART', payload: { part: 'harmony' } });
   if (/\bad.?libs?\b/.test(msg) && /\b(fais|faire|prepare|on fait|passe|enregistre)\b/.test(msg)) return say('🔥 Je prépare la piste des ad-libs.', { action: 'PREPARE_PART', payload: { part: 'adlib' } });
   if (/\b(ecoute|analyse|verifie|check)\b.*\bmix\b|\bmon mix\b/.test(msg)) return say("🎧 J'écoute ton mix…", { action: 'ANALYZE_MIX', payload: {} });
+
+  // --- Talkback (utils/talkback) : même commande que la palette (ouvre verrouillé, ou coupe) ---
+  if (/\btalk ?back\b/.test(msg) || (/\b(parler|parle)\b/.test(msg) && /\b(casque|cabine)\b/.test(msg) && /\b(artiste|rappeur|chanteu\w*|cabine)\b/.test(msg)))
+    return say(`🎙️ Talkback ouvert ou coupé. Au clavier : ${shortcutHint('nova.talkback') || 'N'} (appui court = reste ouvert, maintenu = tant que tu tiens) ; ta voix va dans le casque de l'artiste, jamais dans le mix ni l'export.`, { action: 'RUN_COMMAND', payload: { id: 'nova.talkback' } } as AIAction);
 
   // --- Tempo / métronome / boucle ---
   const bpm = msg.match(/\b(bpm|tempo)\D{0,6}(\d{2,3})\b|\b(\d{2,3}) ?bpm\b/);

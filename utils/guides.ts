@@ -576,6 +576,27 @@ export const GUIDES: Guide[] = [
     doIt: () => [cmd('pal.audio', 'Ouvrir les réglages audio')],
   },
   {
+    id: 'talkback', emoji: '💬', title: 'Parler à l’artiste dans son casque (talkback)',
+    keywords: 'talkback talk back parler artiste casque cabine regie console micro inge dim baisser musique touche raccourci communiquer collaboration direct',
+    summary: 'Le bouton talkback d’une console : ta voix dans le casque de l’artiste, au clavier ou à la souris, et en direct en collaboration.',
+    steps: [
+      { text: 'Choisis le micro du talkback et la baisse de la musique (Réglages audio › Talkback).', action: 'pal.talkbackSettings',
+        target: ['[aria-label="Réglages audio"]', tid('menu-audio')], done: { visible: tid('talkback-settings') }, unless: 'inCollab' },
+      { text: 'Appui court sur N (ou « Talk » dans la barre) : ça reste ouvert, un 2e appui coupe.', action: 'nova.talkback', target: tid('transport-talkback') },
+      { text: 'Ou maintiens N : tu parles tant que tu tiens, relâcher coupe.', target: tid('transport-talkback'), manual: true },
+      { text: 'En collaboration, la même touche parle en direct ; « 🎙️ Nina te parle » s’affiche quand on te répond.', target: tid('transport-talkback'), manual: true, when: 'inCollab' },
+    ],
+    result: 'L’artiste t’entend dans son casque, la musique baisse pendant que tu parles ; rien n’arrive dans le mix, l’export ni les prises.',
+    pitfalls: [
+      'Pendant une prise, le talkback est coupé (ta voix finirait dans le micro de l’artiste).',
+      'Sans mix casque, ta voix part sur la sortie d’écoute : écoute au casque, pas sur les enceintes (larsen).',
+      'La touche N se change dans « Personnaliser les raccourcis » (Ctrl+Alt+K) ; elle ne marche pas pendant la saisie d’un texte.',
+      'Mode simple : le bouton n’apparaît que pendant une collaboration.',
+    ],
+    prereqs: ['micro', 'casque'],
+    doIt: () => [cmd('nova.talkback', 'Ouvrir ou couper le talkback')],
+  },
+  {
     id: 'vst', emoji: '🧩', title: 'Utiliser tes plugins VST',
     keywords: 'vst vst3 plugin plugins waves fabfilter antares effets du pc pont bridge windows',
     summary: 'Dans l’appli Windows, le pont VST charge tes plugins sur tes pistes.',

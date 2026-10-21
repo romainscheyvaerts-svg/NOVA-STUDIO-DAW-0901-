@@ -9,12 +9,17 @@
  *
  * Sorties : `outputOf(mixId)` (2 canaux) pour le pont ; `listenOut` = le mix
  * écouté sur la sortie principale (carte à une seule paire, ou navigateur).
+ *
+ * Talkback local (utils/talkback) : chaque mix = musique → `dim` (baissée pendant que
+ * l'ingé parle) → `out`, où la voix du talkback (`talkIn`) s'ajoute. Elle n'est donc
+ * que dans les sorties casque : ni dans le master, ni dans l'export, ni dans l'écoute
+ * d'un mix sur la sortie principale (prise AVANT la voix : pas de larsen dans la régie).
  */
 import type { CueMix, Track } from '../types';
 import { cueLevelOf } from '../utils/cueMix';
 
 interface Send { tap: AudioNode | null; gain: GainNode; pan: StereoPannerNode }
-interface Bus { mix: CueMix; sum: GainNode; master: GainNode; click: GainNode; sends: Map<string, Send> }
+interface Bus { mix: CueMix; sum: GainNode; master: GainNode; dim: GainNode; out: GainNode; click: GainNode; sends: Map<string, Send> }
 
 export class CueMixEngine {
   private buses = new Map<string, Bus>();
@@ -23,16 +28,29 @@ export class CueMixEngine {
   public readonly listenOut: GainNode;
   /** Entrée du clic (le métronome s'y branche) : réparti dans chaque mix à son niveau. */
   public readonly clickIn: GainNode;
+  /** Entrée du talkback local : ajoutée à la SORTIE de chaque mix (après le dim). */
+  public readonly talkIn: GainNode;
+  /** Gain de la musique des mixes (1, ou le dim pendant le talkback). */
+  private dimGain = 1;
 
   constructor(private ctx: AudioContext) {
     this.listenOut = ctx.createGain();
     this.listenOut.channelCount = 2;
     this.listenOut.channelCountMode = 'explicit';
     this.clickIn = ctx.createGain();
+    this.talkIn = ctx.createGain();
   }
 
   ids() { return [...this.buses.keys()]; }
-  outputOf(mixId: string): AudioNode | null { return this.buses.get(mixId)?.master || null; }
+  outputOf(mixId: string): AudioNode | null { return this.buses.get(mixId)?.out || null; }
+
+  /** Dim du talkback : gain de la musique de tous les mixes (1 = normal). */
+  setDim(gain: number) {
+    this.dimGain = Math.max(0, Math.min(1, gain));
+    const t = this.ctx.currentTime;
+    this.buses.forEach(b => b.dim.gain.setTargetAtTime(this.dimGain, t, 0.015));
+  }
+  getDim() { return this.dimGain; }
   getListen() { return this.listenId; }
 
   /**
@@ -97,9 +115,10 @@ export class CueMixEngine {
 
   private applyListen() {
     if (this.listenId && !this.buses.has(this.listenId)) this.listenId = null;
+    // Écoute prise après le dim et AVANT la voix du talkback (sinon l'ingé s'entend dans la régie : larsen).
     this.buses.forEach((b, id) => {
-      try { b.master.disconnect(this.listenOut); } catch { /* */ }
-      if (id === this.listenId) b.master.connect(this.listenOut);
+      try { b.dim.disconnect(this.listenOut); } catch { /* */ }
+      if (id === this.listenId) b.dim.connect(this.listenOut);
     });
   }
 
@@ -107,12 +126,19 @@ export class CueMixEngine {
     const sum = this.ctx.createGain();
     sum.channelCount = 2; sum.channelCountMode = 'explicit';
     const master = this.ctx.createGain();
+    const dim = this.ctx.createGain();
+    dim.gain.value = this.dimGain;
+    const out = this.ctx.createGain();
+    out.channelCount = 2; out.channelCountMode = 'explicit';
     const click = this.ctx.createGain();
     click.gain.value = mix.click || 0;
     sum.connect(master);
+    master.connect(dim);
+    dim.connect(out);
+    this.talkIn.connect(out);
     click.connect(sum);
     this.clickIn.connect(click);
-    const b: Bus = { mix, sum, master, click, sends: new Map() };
+    const b: Bus = { mix, sum, master, dim, out, click, sends: new Map() };
     this.buses.set(mix.id, b);
     return b;
   }
@@ -127,7 +153,8 @@ export class CueMixEngine {
     if (!b) return;
     b.sends.forEach(s => this.dropSend(s));
     try { this.clickIn.disconnect(b.click); } catch { /* */ }
-    [b.sum, b.master, b.click].forEach(n => { try { n.disconnect(); } catch { /* */ } });
+    try { this.talkIn.disconnect(b.out); } catch { /* */ }
+    [b.sum, b.master, b.dim, b.out, b.click].forEach(n => { try { n.disconnect(); } catch { /* */ } });
     this.buses.delete(id);
     if (this.listenId === id) this.listenId = null;
   }
