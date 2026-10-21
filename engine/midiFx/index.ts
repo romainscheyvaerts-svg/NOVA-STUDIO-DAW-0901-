@@ -212,6 +212,7 @@ export function applyMidiFx(notes: MidiNote[], slots: MidiFxSlot[], ctx: FxConte
 // --- Branchement moteur (lecture, export, rendu d'instrument) -----------------------------
 
 const clipCache = new WeakMap<Clip, { slots: MidiFxSlot[]; map: TempoMap; key: ProjectKey | null; out: Clip }>();
+const arrCache = new WeakMap<Clip[], { slots: MidiFxSlot[]; map: TempoMap; key: ProjectKey | null; out: Clip[] }>();
 
 /**
  * Clips d'une piste tels que l'instrument les entend : mêmes objets si la piste
@@ -221,7 +222,10 @@ const clipCache = new WeakMap<Clip, { slots: MidiFxSlot[]; map: TempoMap; key: P
 export function clipsWithMidiFx(track: Pick<Track, 'midiFx' | 'type'>, clips: Clip[], map: TempoMap = tempoMapStore.get(), key: ProjectKey | null = midiFxKeyStore.get()): Clip[] {
   const slots = track.midiFx;
   if (!slots || !slots.some(s => s.on)) return clips;
-  return clips.map(c => {
+  // Même liste de clips, mêmes réglages : même tableau (les caches du moteur, 808 comprise, restent valables).
+  const arr = arrCache.get(clips);
+  if (arr && arr.slots === slots && arr.map === map && arr.key === key) return arr.out;
+  const out = clips.map(c => {
     if (!Array.isArray(c.notes) || !c.notes.length) return c;
     const hit = clipCache.get(c);
     if (hit && hit.slots === slots && hit.map === map && hit.key === key) return hit.out;
@@ -229,6 +233,8 @@ export function clipsWithMidiFx(track: Pick<Track, 'midiFx' | 'type'>, clips: Cl
     clipCache.set(c, { slots, map, key, out });
     return out;
   });
+  arrCache.set(clips, { slots, map, key, out });
+  return out;
 }
 
 /** « Figer en notes » : les notes entendues écrites dans les clips, effets coupés (une étape d'annulation). */
