@@ -8274,7 +8274,12 @@ function Studio() {
   const collabPeerViews = useMemo(() => {
     if (!collab) return [];
     const map = new Map<string, PeerInfo>();
-    seenPeersRef.current.forEach((v, k) => map.set(k, { key: k, name: v.name, role: v.role, online: false, seenAt: v.seenAt }));
+    seenPeersRef.current.forEach((v, k) => {
+      // Soi-même vu avant un rechargement (ancienne clé, opérations rejouées) : pas un 2e participant
+      // « hors ligne » à son propre nom (vu en vrai le 21/10).
+      if (k !== collab.key && v.name === collab.name && v.role === collab.role) return;
+      map.set(k, { key: k, name: v.name, role: v.role, online: false, seenAt: v.seenAt });
+    });
     collabOnline.forEach(m => {
       const k = participantOf(m.member_key);
       const prev = map.get(k);
