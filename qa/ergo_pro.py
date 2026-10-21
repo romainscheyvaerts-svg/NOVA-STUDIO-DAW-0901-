@@ -145,10 +145,15 @@ def palette(page, query, want):
     page.keyboard.press("Escape"); page.mouse.click(5, 300)
     page.keyboard.press("Control+k")
     page.locator("[data-testid=command-palette]").wait_for(timeout=4000)
+    page.wait_for_function("() => document.activeElement && document.activeElement.closest('[data-testid=command-palette]')", timeout=4000)
     page.keyboard.type(query, delay=10)
     page.wait_for_timeout(250)
     opt = page.locator(f"[data-testid=command-palette] [data-palette-id='{want}']").first
-    first = page.locator("[data-testid=command-palette] [role=option]").first.get_attribute("data-palette-id")
+    try:
+        first = page.locator("[data-testid=command-palette] [role=option]").first.get_attribute("data-palette-id", timeout=5000)
+    except Exception:
+        shot(page, f"palette_vide_{re.sub(r'[^a-z]+', '_', query)}")
+        raise
     res.setdefault("palette", {})[query] = {"premier": first, "voulu": want}
     if first == want:
         page.keyboard.press("Enter")
@@ -369,7 +374,109 @@ def dawproject(b):
         ctx.close()
 
 
-SECTIONS = {"dawproject": dawproject}
+# ── Épingler et filtrer (grosses séances) ──────────────────────────────────────────────────
+def big_project(path: Path):
+    kinds = [("Lead", "#a78bfa"), ("Back", "#a78bfa"), ("Adlib", "#a78bfa"), ("Kick", "#f97316"), ("Snare", "#f97316"), ("Hats", "#f97316"), ("Basse", "#34d399"), ("Pad", "#34d399")]
+    tracks = []
+    for i in range(48):
+        n, c = kinds[i % len(kinds)]
+        tracks.append(track(f"t{i}", f"{n} {i // len(kinds) + 1}", [aclip(f"c{i}", f"{n} clip", 1 + (i % 6) * 2.5, 4, "audio/son.wav", color=c)], color=c))
+    write_project(path, make_state("Grosse seance QA", tracks), {"audio/son.wav": wav([tone(SR * 5, 330)])})
+
+
+PANE_JS = """() => { const p = document.querySelector('[data-testid=pinned-tracks]'); if (!p) return null; const r = p.getBoundingClientRect();
+  const rows = [...p.querySelectorAll('[data-testid^=pinned-row-]')].map(x => x.dataset.testid.slice(11));
+  const clip = p.querySelector('[data-pinned-clip]'); const lane = p.querySelector('[data-testid^=pinned-lane-]');
+  const sc = document.querySelector('main [data-follow]');
+  return { y: Math.round(r.y), h: Math.round(r.height), bottom: Math.round(r.bottom), vh: innerHeight, rows, count: +p.dataset.pinnedCount,
+           clipX: clip ? clip.getBoundingClientRect().x : null, laneX: lane ? lane.getBoundingClientRect().x : null,
+           scrollTop: sc ? sc.scrollTop : null, scrollLeft: sc ? sc.scrollLeft : null }; }"""
+
+PROJECT_SIG = "s => JSON.stringify(s.tracks.map(t => [t.id, t.isHidden || false, t.isMuted, t.isSolo, t.volume, t.pan, t.clips.length]))"
+
+
+def epingler(b):
+    R = res.setdefault("epingler", {})
+    zp = OUT / "grosse_seance.zip"
+    big_project(zp)
+    for vp, theme in (("pc1366", "dark"), ("pc1366", "light"), ("tab", "dark")):
+        log = Log(f"ergo_epingler_{vp}_{theme}")
+        ctx, page = new_page(b, vp, log=log, touch=False)
+        page.add_init_script(f"try {{ localStorage.setItem('nova_theme', '{theme}'); }} catch (e) {{}}")
+        open_project(page, zp, f"pin_{vp}_{theme}_00")
+        tag = f"{vp} {theme}"
+        before = st(page, PROJECT_SIG)
+        palette(page, "filtrer pistes", "pal.trackSearch")
+        page.locator("[data-testid=track-list-panel]").wait_for(timeout=8000)
+        page.wait_for_timeout(400)
+        focused = page.evaluate("() => document.activeElement && document.activeElement.dataset.testid")
+        check(f"{tag} : la palette ouvre la liste des pistes, curseur dans la recherche", focused == "tracklist-search", focused)
+        t0 = time.time()
+        page.locator("[data-testid=tracklist-kind-voix]").click()
+        page.locator("[data-testid=tracklist-count]").wait_for(timeout=3000)
+        ms = round((time.time() - t0) * 1000)
+        cnt = page.locator("[data-testid=tracklist-count]").inner_text()
+        check(f"{tag} : filtre « Voix » : 18 pistes sur 48 ({ms} ms au clic, affichage compris)", cnt.startswith("18 pistes sur 48") and ms < 1000, [cnt, ms])
+        R[f"filtre_voix_ms_{tag}"] = ms
+        page.locator("[data-testid=tracklist-search]").fill("lead")
+        page.wait_for_timeout(200)
+        cnt2 = page.locator("[data-testid=tracklist-count]").inner_text()
+        check(f"{tag} : « Voix » + « lead » : 6 pistes", cnt2.startswith("6 pistes"), cnt2)
+        shot(page, f"pin_{vp}_{theme}_01_filtre")
+        cov = page.evaluate(COVER_JS, "[data-testid=track-list-panel] button")
+        check(f"{tag} : liste des pistes : aucun bouton recouvert", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]][:5])
+        page.locator("[data-testid=tracklist-pin-t0]").click()
+        page.locator("[data-testid=tracklist-pin-t16]").click()
+        page.wait_for_timeout(400)
+        g = page.evaluate(PANE_JS)
+        check(f"{tag} : 2 pistes épinglées dans le bandeau au-dessus de l'arrangement", g and g["rows"] == ["t0", "t16"], g)
+        if theme == "dark" and vp == "pc1366":
+            page.locator("[data-testid=tracklist-show-only]").click(); page.wait_for_timeout(500)
+            hidden = st(page, "s => s.tracks.filter(t => t.isHidden).length")
+            check("« N'afficher que celles-ci » : 42 pistes masquées (elles jouent toujours)", hidden == 42, hidden)
+            page.locator("[data-testid=track-list-panel] button[aria-label=Fermer]").click()
+            page.mouse.click(700, 600); page.keyboard.press("Control+z"); page.wait_for_timeout(500)
+            check("Ctrl+Z : tout est réaffiché", st(page, "s => s.tracks.filter(t => t.isHidden).length") == 0)
+        else:
+            page.locator("[data-testid=track-list-panel] button[aria-label=Fermer]").click()
+        page.wait_for_timeout(300)
+        # Défiler l'arrangement tout en bas : le bandeau reste en haut, calé sur le zoom.
+        page.evaluate("() => { const sc = document.querySelector('main [data-follow]'); sc.scrollTop = sc.scrollHeight; }")
+        page.wait_for_timeout(500)
+        g1 = page.evaluate(PANE_JS)
+        z = page.evaluate("async () => { const W = await window.__novaAppModule('/utils/windowLayouts.ts'); return W.readLayoutPart('zoom'); }")
+        check(f"{tag} : défilé tout en bas, les pistes épinglées restent visibles en haut", g1 and g1["scrollTop"] > 200 and g1["rows"] == ["t0", "t16"] and g1["bottom"] < g1["vh"] * 0.6, g1)
+        want = g1["laneX"] + 1 * z["h"] - g1["scrollLeft"]
+        check(f"{tag} : clip épinglé calé sur le zoom de l'arrangement (±1 px)", abs(g1["clipX"] - want) <= 1, {"clipX": g1["clipX"], "attendu": want, "zoom": z})
+        page.evaluate("() => { const sc = document.querySelector('main [data-follow]'); sc.scrollLeft = 120; }")
+        page.wait_for_timeout(500)
+        g2 = page.evaluate(PANE_JS)
+        check(f"{tag} : défilement horizontal suivi par le bandeau", abs((g1["clipX"] - g2["clipX"]) - (g2["scrollLeft"] - g1["scrollLeft"])) <= 1, [g1, g2])
+        shot(page, f"pin_{vp}_{theme}_02_defile")
+        cov = page.evaluate(COVER_JS, "[data-testid=pinned-tracks] button")
+        check(f"{tag} : bandeau : aucun bouton recouvert", cov and all(c["ok"] for c in cov), [c for c in cov if not c["ok"]][:5])
+        after = st(page, PROJECT_SIG)
+        check(f"{tag} : épingler ne change rien au projet (son, export)", after == before)
+        if vp == "pc1366" and theme == "dark":
+            page.locator("[data-testid=pinned-mute-t0]").click(); page.wait_for_timeout(300)
+            check("bandeau : M coupe la piste épinglée", st(page, "s => s.tracks.find(t => t.id === 't0').isMuted") is True)
+            page.locator("[data-testid=pinned-mute-t0]").click()
+            page.locator("[data-testid=pinned-unpin-t16]").click(); page.wait_for_timeout(300)
+            check("bandeau : 📌 désépingle", page.evaluate(PANE_JS)["rows"] == ["t0"])
+            pins_js = "async () => (await window.__novaAppModule('/utils/trackPins.ts')).pinnedIds()"
+            sel = st(page, "s => s.selectedTrackId")
+            p0 = page.evaluate(pins_js)
+            palette(page, "épingler piste sélectionnée", "pal.trackPin")
+            page.wait_for_timeout(300)
+            p1 = page.evaluate(pins_js)
+            check("palette : « Épingler / désépingler la piste sélectionnée » bascule son épingle", (sel in p0) != (sel in p1), [sel, p0, p1])
+        errs = log.errors()
+        check(f"{tag} : aucune erreur dans la console", not errs, errs[:5])
+        save_log(log)
+        ctx.close()
+
+
+SECTIONS = {"dawproject": dawproject, "epingler": epingler}
 
 if __name__ == "__main__":
     wanted = [a for a in sys.argv[1:] if a in SECTIONS] or list(SECTIONS)

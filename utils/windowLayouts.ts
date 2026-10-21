@@ -120,3 +120,10 @@ export const useLayoutsVersion = () => useSyncExternalStore(layoutsStore.subscri
 
 /** Pour les tests. */
 export const __resetLayoutsForTests = () => { stored = {}; parts.clear(); lastRecalled = null; version = 0; };
+
+/** Valeur actuelle d'un morceau d'interface (ex. « zoom » de l'arrangement : { h, v, scroll }), sinon undefined. */
+export function readLayoutPart(name: string): any {
+  const p = parts.get(name);
+  if (!p) return undefined;
+  try { return p.get(); } catch { return undefined; }
+}
