@@ -155,6 +155,9 @@ BATTERIE = [
     # Suppr en Slip (blanc) et en Shuffle (la suite recule), jonction < −60 dBFS sur le rendu du moteur, Ctrl+Z, silence
     # ramené à 0,12 s, mot corrigé gardé dans le .zip, découpe par phrase ; bureau sombre, téléphone 390, bureau clair.
     ("voix_texte", []),
+    # 22/10/2026 · L5 écart 19 : étirement « haute qualité » dans la page (boucle de batterie stéréo calée sur le tempo,
+    # 90 → 112,5 → 72 BPM) : attaques à ±2 ms, pas de pré-écho, image stéréo gardée, durée exacte (son relu dans le .zip).
+    ("etirement_banc", []),
 ]
 
 
