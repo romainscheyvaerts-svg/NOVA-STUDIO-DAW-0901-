@@ -1,14 +1,14 @@
 {
-  "version": "1.5.11",
-  "url": "downloads/NovaStudioSetup-1.5.11.exe",
-  "sha256": "5be2c9681dbb341a785bea48bc25e7bf915e765eb25d272be0cd3674eaa77dc2",
-  "size": 51167643,
-  "date": "2026-10-21T23:11:23+02:00",
+  "version": "1.5.12",
+  "url": "downloads/NovaStudioSetup-1.5.12.exe",
+  "sha256": "203e521d3dc7fa96a0821bd8186c183903d3b00a34900716ccf40029c08d0e55",
+  "size": 51250728,
+  "date": "2026-10-22T01:14:40+02:00",
   "notes": [
-    "Talkback : touche N (appui court = reste ouvert, maintenu = tant que tu tiens), bouton « Talk » à côté de REC, en collaboration comme dans le casque de l'artiste au studio.",
-    "Nouveaux effets de mix : compresseur multibande et EQ dynamique (calme une résonance seulement quand elle ressort).",
-    "Écoute de l'ingé : mono, côtés, Dim −20 dB, volume d'écoute, solo AFL / PFL ; reverb avec ta propre réponse impulsionnelle (WAV).",
-    "Grosses séances plus fluides : l'interface ne rame plus pendant la lecture, deux fois moins de mémoire, trois fois moins de charge à l'arrêt.",
-    "Collaboration : le direct se rebranche tout seul après une coupure ou quand tu reviens sur l'onglet."
+    "Tempo : le changer garde tes notes, clips et automation sur la grille ; rampes d'accélération ; option « garder les clips audio à leur place ».",
+    "MIDI vivant : arpège, accords et gamme forcée en direct, clips liés (modifier un motif modifie ses copies), LFO calés sur le tempo.",
+    "Mix pro : EQ centre/côtés et phase linéaire, racks d'effets parallèles, scènes de mix A/B/C/D, masteriser un EP ou un album.",
+    "Voix : réparer (plosives, clics de bouche, bourdonnement, saturation), éditeur spectral, éditer la voix par le texte, étirement haute qualité.",
+    "Pro : échange DAWproject, pistes épinglées et filtrées, macros, console sur un 2e écran, vidéo calée à l'image."
   ]
 }
