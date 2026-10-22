@@ -2166,11 +2166,13 @@ export class AudioEngine {
     // Maj+clic (ou armement exclusif) : la piste seule.
     if (alone) for (const id of this.armedIds()) if (id !== trackId) this.disarmTrack(id);
     let dsp = this.tracksDSP.get(trackId);
-    let attempts = 0;
-    while (!dsp && attempts < 10) {
+    // Piste créée à l'instant (« Piste voix » puis R) : sa chaîne arrive au rendu suivant. Avant : 150 ms au
+    // plus, puis « Piste indisponible » ; sur un PC chargé (mesuré dans la batterie QA, 2 scénarios en
+    // parallèle), l'armement échouait. On attend jusqu'à 3 s ; dès que la chaîne est là, on arme.
+    const armDeadline = Date.now() + 3000;
+    while (!dsp && Date.now() < armDeadline) {
       await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
       dsp = this.tracksDSP.get(trackId);
-      attempts++;
     }
     if (!dsp) {
       console.error("[AudioEngine] ARM FAILED - No DSP for track:", trackId);
