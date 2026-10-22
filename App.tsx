@@ -353,6 +353,7 @@ import { compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
 import { clearKept, clipAsTake, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
+import { autoRecordTarget } from './utils/recordTarget';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 const ImportTempoCard = lazyQuiet(() => import('./components/ImportTempoCard'));
 import { useImportTempo } from './hooks/useImportTempo';
@@ -2871,9 +2872,8 @@ function Studio() {
       const ctRaw = collabRecTargetRef.current?.(st.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
-      const sel = st.tracks.find(t => t.id === st.selectedTrackId);
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
+        : autoRecordTarget(st.tracks, st.selectedTrackId);
       if (!target) { setNoArmedTrackError(true); setTimeout(() => setNoArmedTrackError(false), 2000); return; }
       if (!(await armForRecording(target.id))) return;
       if (ct?.note) setAiNotification(ct.note);
@@ -2961,11 +2961,10 @@ function Studio() {
       const ctRaw = collabRecTargetRef.current?.(currentState.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
-      const selected = currentState.tracks.find(t => t.id === currentState.selectedTrackId);
+      // Piste voix sélectionnée, sinon la piste REC du projet (utils/recordTarget) : jamais une
+      // piste inactive, masquée, ni celle du beat.
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(selected)
-        ? selected
-        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
+        : autoRecordTarget(currentState.tracks, currentState.selectedTrackId);
       if (!target) {
         setNoArmedTrackError(true);
         setTimeout(() => setNoArmedTrackError(false), 2000);
