@@ -1686,6 +1686,23 @@ function Studio() {
     }
   };
 
+  // Studio ouvert : le moteur audio est préparé tout de suite (contexte, master, pistes recâblées,
+  // modules du fil audio, écrivain de prises), pas au premier ▶. Mesuré (qa/moteur_web.py, toucher) :
+  // au téléphone le 1er toucher sur Lecture mettait 240 à 340 ms à faire du son (création du moteur
+  // dans le geste) ; ensuite ~30 ms. L'ouverture du studio suit un geste (Nouveau projet, un beat…) :
+  // le contexte démarre ; sinon il attend le premier toucher (AudioEngine.hookAutoResume).
+  const ensureAudioEngineRef = useRef(ensureAudioEngine);
+  ensureAudioEngineRef.current = ensureAudioEngine;
+  useEffect(() => {
+    if (showLanding) return;
+    let live = true;
+    const t = window.setTimeout(() => {
+      if (!live) return;
+      void ensureAudioEngineRef.current().then(() => { if (live) audioEngine.prewarm(); }).catch(() => { /* au premier ▶ */ });
+    }, 0);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [showLanding]);
+
   // ─── Fréquence d'échantillonnage du projet (utils/projectRate, utils/hqAudio) ──────
   // Le moteur suit TOUJOURS la fréquence de l'état : réglage de session, opération de
   // collaboration (champ « sampleRate »), Ctrl+Z / Ctrl+Y. Contexte recréé, sons convertis
@@ -6430,6 +6447,9 @@ function Studio() {
       annotate: (patch: Parameters<NonNullable<TakeJournalLike['annotate']>>[0]) => base?.annotate?.(patch),
       finish: async () => { try { cutter.flush(); } catch { /* */ } await base?.finish(); },
       discard: async () => { ltCancel(w); await base?.discard(); },
+      // Morceaux durables écrits par l'écrivain de prises (engine/takeWriter) ; le direct, lui, reçoit toujours push().
+      ...(base?.takeId ? { takeId: base.takeId } : {}),
+      ...(base?.external ? { external: () => base.external!() } : {}),
     };
   };
   /** STOP : la fin de chaque prise part après son dernier morceau (passage gardé, somme de contrôle). */

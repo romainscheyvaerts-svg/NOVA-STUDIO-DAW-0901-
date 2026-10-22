@@ -114,6 +114,8 @@ import { GrPart, readGainReduction } from './meters/gainReduction';
 import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../utils/projectRate';
 import { installHQDecode } from '../utils/hqAudio';
 import { createOutputDeviceWatch } from './outputDeviceWatch';
+import { takeWriter, type TakeTarget } from './takeWriter';
+import { measureRoundTrip as probeRoundTrip, type RoundTrip } from './latencyProbe';
 import { AudioClockWatch, type ClockIssue } from './audioClockWatch';
 
 interface TrackDSP {
@@ -240,6 +242,10 @@ export interface TakeJournalLike {
   annotate?(patch: { lead?: number; bridge?: BridgeTakeRef }): void;
   finish(): Promise<void>;
   discard(): Promise<void>;
+  /** Identifiant de la prise dans la base de récupération (morceaux écrits par l'écrivain de prises). */
+  readonly takeId?: string;
+  /** Les morceaux sont écrits par l'écrivain de prises (Worker) : le journal ne garde que la description. */
+  external?(): void;
 }
 
 interface ScheduledSource {
@@ -746,6 +752,18 @@ export class AudioEngine {
     this.tryAutoConnectASIO();
   }
 
+  /**
+   * Préparation à l'ouverture du studio : module de l'enregistreur chargé dans le fil audio,
+   * écrivain de prises lancé (Worker inactif tant qu'il n'y a pas de prise). Le 1er REC et le 1er ▶
+   * n'attendent plus rien.
+   */
+  public prewarm() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (ctx.audioWorklet) void ensureRecorderModule(ctx).catch(() => { /* chargé à la prise */ });
+    try { takeWriter(); } catch { /* */ }
+  }
+
   /** Fréquence voulue pour le contexte (celle du projet ouvert). */
   public getProjectSampleRate(): number { return this.ctx?.sampleRate || this.desiredSampleRate; }
 
@@ -1151,7 +1169,7 @@ export class AudioEngine {
    * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
    * C'est de cette durée qu'une prise arrive en retard sur la grille.
    */
-  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' } {
+  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' | 'mesuree' } {
     if (!this.ctx) return { total: 0, mode: 'navigateur' };
     const sr = this.ctx.sampleRate;
     if (!stream && this.isUsingASIOInput() && this.asioStreamActive) {
@@ -1161,6 +1179,10 @@ export class AudioEngine {
       const total = (this.latency || 0) + this.asioQueueSec + 512 / sr + fill + 0.002;
       return { total: Math.min(0.5, total), mode: 'asio' };
     }
+    // Latence MESURÉE par la boucle (measureRoundTrip) pour ce micro, cette sortie, cette fréquence :
+    // c'est le retard réel d'une prise, il remplace l'estimation ci-dessous.
+    const cal = this.calibratedLatency();
+    if (cal !== null) return { total: cal, mode: 'mesuree' };
     const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
     let inp = 0.01;
     try {
@@ -1168,6 +1190,64 @@ export class AudioEngine {
       if (s && typeof s.latency === 'number' && s.latency > 0) inp = s.latency;
     } catch { /* défaut 10 ms */ }
     return { total: Math.min(0.5, out + inp), mode: 'navigateur' };
+  }
+
+  // ─── Latence aller-retour MESURÉE (boucle sortie → entrée, engine/latencyProbe) ──────────────
+  private static readonly RT_KEY = 'nova_rt_latency';
+  private rtKey(): string {
+    const sr = this.ctx?.sampleRate || this.desiredSampleRate;
+    return `${this.currentInputDeviceId || 'default'}|${this.currentOutputDeviceId || 'default'}|${sr}`;
+  }
+  private rtTable(): Record<string, { s: number; at: number }> {
+    try { return JSON.parse(localStorage.getItem(AudioEngine.RT_KEY) || '{}') || {}; } catch { return {}; }
+  }
+  /** Latence mesurée pour le micro, la sortie et la fréquence actuels (s), ou null. */
+  public calibratedLatency(): number | null {
+    if (this.asioStreamActive && this.isUsingASIOInput()) return null;
+    const v = this.rtTable()[this.rtKey()];
+    return v && Number.isFinite(v.s) && v.s > 0 && v.s < 0.5 ? v.s : null;
+  }
+  /** Oublie la mesure (retour à l'estimation). */
+  public clearCalibratedLatency() {
+    const t = this.rtTable(); delete t[this.rtKey()];
+    try { localStorage.setItem(AudioEngine.RT_KEY, JSON.stringify(t)); } catch { /* */ }
+  }
+  /**
+   * Mesure la latence aller-retour réelle : trois courts « tic » partent dans la sortie du
+   * navigateur, le micro les capte (micro près de l'enceinte, ou câble sortie → entrée). Le
+   * résultat (même horloge que les prises) est gardé pour ce micro + cette sortie + cette
+   * fréquence et retiré aux prises suivantes ; le réglage fin repart de 0.
+   */
+  public async measureRoundTrip(): Promise<RoundTrip> {
+    if (!this.ctx) await this.init();
+    const ctx = this.ctx!;
+    if (ctx.state !== 'running') { try { await ctx.resume(); } catch { /* */ } }
+    if (this.asioStreamActive && this.isUsingASIOInput()) return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: 'En ASIO, la carte son mesure elle-même sa latence.' };
+    if (this.recordingTrackId || this.recSession) return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: 'Pendant une prise, la mesure attend la fin.' };
+    let src: AudioNode | null = this.monitorSource;
+    let own: MediaStream | null = null;
+    if (!src) {
+      // Même micro et mêmes réglages que les prises (sans traitement de la voix).
+      const base: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') base.deviceId = { exact: this.currentInputDeviceId };
+      try { own = await navigator.mediaDevices.getUserMedia({ audio: base }); } catch (e: any) {
+        return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: e?.name === 'NotAllowedError' ? 'Micro bloqué par le navigateur.' : 'Micro inaccessible.' };
+      }
+      src = ctx.createMediaStreamSource(own);
+    }
+    try {
+      const r = await probeRoundTrip(ctx, src, this.browserOutput || ctx.destination);
+      if (r.ok) {
+        const t = this.rtTable(); t[this.rtKey()] = { s: r.seconds, at: Date.now() };
+        try { localStorage.setItem(AudioEngine.RT_KEY, JSON.stringify(t)); } catch { /* */ }
+        this.setRecordOffsetMs(0);
+        this.lastLatency = r.seconds;
+        try { window.dispatchEvent(new CustomEvent('nova:latency', { detail: { ms: Math.round(r.ms), mode: 'mesuree', offsetMs: 0 } })); } catch { /* */ }
+      }
+      return r;
+    } finally {
+      if (own) { try { src!.disconnect(); } catch { /* */ } this.stopInputStream(own); }
+    }
   }
 
   /** Mesure régulière (chaque seconde) tant qu'une piste est armée. */
@@ -2716,7 +2796,6 @@ export class AudioEngine {
         await ensureRecorderModule(this.ctx);
         const input = this.inputRouter!.recorderInput(ids);
         if (input) {
-          const session = new NovaRecorderSession(this.ctx, input.node, { channels: input.channels });
           const group = input.layout.length > 1 ? newTakeGroupId() : undefined;
           const common = this.measureRecordLatency().total + this.recOffsetMs / 1000;
           const offs = channelOffsets();
@@ -2732,6 +2811,14 @@ export class AudioEngine {
               if (j) this.recJournals.set(l.trackId, j);
             } catch { /* le journal ne doit jamais empêcher la prise */ }
           }
+          // Prises écrites par le moteur (comme le moteur natif) : les échantillons vont du fil audio
+          // à l'écrivain de prises (Worker), qui les écrit dans la base de récupération au fil de
+          // l'eau, sans passer par le fil de l'interface (engine/takeWriter).
+          const writer = takeWriter();
+          const targets: TakeTarget[] = [];
+          if (writer) for (const l of input.layout) { const j = this.recJournals.get(l.trackId); if (j?.takeId && j.external) targets.push({ takeId: j.takeId, first: l.first, width: l.width }); }
+          const session = new NovaRecorderSession(this.ctx, input.node, { channels: input.channels, writer, targets });
+          if (session.transport !== 'post') for (const l of input.layout) { const j = this.recJournals.get(l.trackId); if (j?.takeId && targets.some(t => t.takeId === j.takeId)) { try { j.external!(); } catch { /* */ } } }
           this.recLeadDone = false;
           if (this.recJournals.size || this.canBridgeTake()) {
             session.onChunks = cs => {
@@ -2952,6 +3039,10 @@ export class AudioEngine {
     return { channels: wav.channels.map(c => c.subarray(pl.from)), sampleRate: sr, start: pl.start, path: got.path };
   }
 
+  /** Dernière prise : chemin des échantillons (anneau partagé, port direct, page), images écrites, perdues. */
+  private lastTakeHealth: { at: number; transport: 'ring' | 'port' | 'post'; frames: number; durable: number | null; lost: number; allocs: number; error: string | null; sampleRate: number } | null = null;
+  public getLastTakeHealth() { return this.lastTakeHealth; }
+
   /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
   public async stopRecording(): Promise<{ clip: Clip, trackId: string } | null> {
     const all = await this.stopRecordingAll();
@@ -3054,6 +3145,9 @@ export class AudioEngine {
 
     const { channels, firstFrame } = await session.stop(src);
     try { input?.dispose(); } catch { /* */ }
+    // Santé de la prise (Réglages audio, QA) : chemin des échantillons, images écrites durablement, perdues.
+    const wr = session.writerReport;
+    this.lastTakeHealth = { at: Date.now(), transport: session.transport, frames: channels?.[0]?.length || 0, durable: wr?.durable ?? null, lost: wr?.lost ?? 0, allocs: wr?.allocs ?? 0, error: wr?.error || session.writerWarning || null, sampleRate: ctx.sampleRate };
     const journals = this.recJournals;
     this.recJournals = new Map();
     const len = channels?.[0]?.length || 0;
@@ -3129,6 +3223,11 @@ export class AudioEngine {
       });
     });
     if (bridged.note && out.length) out[0].note = bridged.note;
+    // Anneau plein (écrivain de prises figé plus de 8 s) : des images manquent, l'ingé est prévenu.
+    if (wr && wr.lost > 0 && out.length) {
+      const msg = `${(wr.lost / sr).toFixed(2).replace('.', ',')} s de son perdues pendant la prise (ordinateur surchargé) : réécoute-la.`;
+      out[0].note = out[0].note ? `${out[0].note} — ${msg}` : msg;
+    }
     this.lastTakeDebug = debug ? { at: Date.now(), bridgeTake: bt?.id ?? null, anchorFrame: bt?.anchorFrame ?? null, firstFrame, lead, sr, tracks: dbg, note: bridged.note ?? null } : null;
     return out;
   }

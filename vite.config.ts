@@ -89,11 +89,15 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        // Moteur audio (engine/takeRing) : page isolée (SharedArrayBuffer entre le fil audio et
+        // l'écrivain de prises), comme en ligne (vercel.json). NOVA_SANS_ISOLATION=1 : sans (mesures A/B).
+        headers: process.env.NOVA_SANS_ISOLATION === '1' ? {} : { 'Document-Isolation-Policy': 'isolate-and-credentialless' },
         // F11 : reconstruire l'installateur Windows (desktop/dist) faisait tomber le
         // serveur de dev (EPERM sur les fichiers temporaires de l'installateur).
         // Idem pour la construction des hôtes natifs (CMake : EBUSY sur ses exécutables de test).
         watch: { ignored: ['**/desktop/dist/**', '**/public/downloads/**', '**/desktop/node_modules/**', '**/native-host/build/**', '**/nova-ara-host/build/**', '**/nova-vst-host/build/**'] },
       },
+      preview: { headers: process.env.NOVA_SANS_ISOLATION === '1' ? {} : { 'Document-Isolation-Policy': 'isolate-and-credentialless' } },
       plugins: [react(), devApiPlugin(), {
         // Date de construction dans la page : l'application Windows ne se met à
         // jour que vers une version plus récente que celle qu'elle embarque.

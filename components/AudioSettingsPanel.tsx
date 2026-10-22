@@ -109,20 +109,38 @@ const LatencyCompensation: React.FC = () => {
     return ms ? { ms, mode: audioEngine.isUsingASIOInput() ? 'asio' : 'navigateur' } : null;
   });
   const [offset, setOffset] = useState(() => audioEngine.getRecordOffsetMs());
+  const [measured, setMeasured] = useState<number | null>(() => audioEngine.calibratedLatency());
+  const [probe, setProbe] = useState<{ busy: boolean; msg: string | null }>({ busy: false, msg: null });
   useEffect(() => {
-    const on = (e: Event) => setLat((e as CustomEvent).detail);
+    const on = (e: Event) => { setLat((e as CustomEvent).detail); setMeasured(audioEngine.calibratedLatency()); setOffset(audioEngine.getRecordOffsetMs()); };
     window.addEventListener('nova:latency', on);
     return () => window.removeEventListener('nova:latency', on);
   }, []);
+  // Mesure par la boucle (engine/latencyProbe) : la vraie latence de CE micro + CETTE sortie.
+  const runProbe = async () => {
+    setProbe({ busy: true, msg: null });
+    const r = await audioEngine.measureRoundTrip().catch(e => ({ ok: false, ms: 0, error: String(e?.message || e) } as any));
+    setMeasured(audioEngine.calibratedLatency());
+    setOffset(audioEngine.getRecordOffsetMs());
+    setProbe({ busy: false, msg: r.ok ? `✅ Mesurée : ${String(r.ms).replace('.', ',')} ms. Tes prises seront recalées de cette durée.` : `⚠️ ${r.error || 'Mesure impossible.'}` });
+  };
   return (
     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Compensation de latence</span>
-        <span className="text-[11px] font-mono text-white">{lat ? `${lat.ms} ms` : 'arme une piste'}{lat ? ` · ${lat.mode === 'asio' ? 'ASIO' : 'navigateur'}` : ''}</span>
+        <span className="text-[11px] font-mono text-white">{measured !== null ? `${Math.round(measured * 1000)} ms · mesurée` : lat ? `${lat.ms} ms · ${lat.mode === 'asio' ? 'ASIO' : lat.mode === 'mesuree' ? 'mesurée' : 'estimée'}` : 'arme une piste'}</span>
       </div>
       <p className="text-[11px] text-slate-400 leading-relaxed">
         Tout système numérique a une latence. Nova la mesure chaque seconde quand une piste est armée et, à la fin de chaque prise, replace automatiquement ta voix là où elle aurait dû être. {lat && lat.mode !== 'asio' && lat.ms > 110 ? 'Latence élevée : casque Bluetooth ? Utilise un casque filaire, ou la carte son en ASIO.' : ''}
       </p>
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={runProbe} disabled={probe.busy} data-testid="mesurer-latence"
+          className="h-9 px-3 rounded-xl border border-emerald-400/40 text-[12px] font-bold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50">
+          {probe.busy ? 'Mesure…' : 'Mesurer la latence'}
+        </button>
+        <span className="text-[10px] text-slate-500 leading-snug">Micro près de l'enceinte (ou sortie reliée à l'entrée) : 3 petits « tic ».</span>
+      </div>
+      {probe.msg && <p className="text-[11px] text-slate-300" role="status">{probe.msg}</p>}
       <label className="block">
         <span className="flex justify-between text-[11px] text-slate-300">
           <span>Réglage fin (si la voix sonne encore en avance / en retard)</span>

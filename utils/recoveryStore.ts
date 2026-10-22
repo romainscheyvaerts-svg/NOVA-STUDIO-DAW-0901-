@@ -25,11 +25,8 @@ import { currentRate } from './projectRate';
  * stockage en mémoire, le navigateur utilise IndexedDB.
  */
 
-export const AUDIO = 'audio';
-export const VERSIONS = 'versions';
-export const TAKES = 'takes';
-export const TAKE_CHUNKS = 'takeChunks';
-const STORES = [AUDIO, VERSIONS, TAKES, TAKE_CHUNKS] as const;
+import { AUDIO, VERSIONS, TAKES, TAKE_CHUNKS, STORES, DB_NAME, DB_VERSION } from './recoveryDb';
+export { AUDIO, VERSIONS, TAKES, TAKE_CHUNKS, STORES, DB_NAME, DB_VERSION };
 export type StoreName = typeof STORES[number];
 
 export interface RecoveryBackend {
@@ -161,8 +158,7 @@ export function previousSessionCrashed(): OpenSessionFlag | null {
 
 // --------------------------------------------------------------------------- stockage IndexedDB
 
-const DB_NAME = 'nova-recovery';
-const DB_VERSION = 1;
+// Base IndexedDB : utils/recoveryDb (aussi ouverte par l'écrivain de prises, engine/takeWriter.worker.ts).
 
 export function idbBackend(): RecoveryBackend {
   let dbp: Promise<IDBDatabase> | null = null;
@@ -511,15 +507,31 @@ export class TakeJournal {
   annotate(patch: Partial<Pick<TakeMetaRecord, 'lead' | 'bridge'>>) {
     if (this.closed) return;
     Object.assign(this.meta, patch);
+    if (this.ext) {
+      // Morceaux écrits par l'écrivain de prises : la description est réécrite tout de suite.
+      const meta = { ...this.meta };
+      this.writing = this.writing.then(() => this.db.put(TAKES, this.meta.takeId, meta, { durable: true })).catch(() => { this.failed = true; });
+      return;
+    }
     this.metaDirty = true;
   }
+
+  /**
+   * Les morceaux de cette prise sont écrits ailleurs, hors du fil de l'interface (engine/takeWriter :
+   * le Worker qui reçoit les échantillons du fil audio écrit TAKE_CHUNKS [takeId, n°] lui-même).
+   * Le journal garde la description (TAKES) ; push() ne stocke plus rien (le direct de la
+   * collaboration, branché en amont, reçoit toujours les morceaux).
+   */
+  external() { this.ext = true; this.pending = []; this.pendingLen = 0; }
+  private ext = false;
+  get isExternal() { return this.ext; }
 
   /** Description à réécrire (avance notée) ; le nombre d'échantillons, lui, se relit dans les morceaux. */
   private metaDirty = false;
 
   /** Morceau capté (mono). Écrit dès qu'une demi-seconde s'est accumulée. */
   push(chunk: Float32Array) {
-    if (this.closed || this.failed || !chunk.length) return;
+    if (this.closed || this.failed || !chunk.length || this.ext) return;
     this.pending.push(chunk);
     this.pendingLen += chunk.length;
     if (this.pendingLen >= this.flushSamples) this.flush();
