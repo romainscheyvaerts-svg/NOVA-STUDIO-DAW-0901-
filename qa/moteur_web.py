@@ -216,6 +216,8 @@ def t_latence(p, res, calibrer):
     res["latence"] = r
     print("latence :", json.dumps(r, ensure_ascii=False, default=str), flush=True)
     ok("latence : prise de la boucle relevée (clics retrouvés)", not r.get("erreur") and r.get("trouves", 0) >= 10, r)
+    if calibrer and (r.get("mesure") or {}).get("ok"):
+        ok("latence : latence mesurée par la boucle, prise calée à ±1 échantillon", abs(r.get("ecart_median_ech") or 99) <= 1, r)
     b.close()
 
 
@@ -311,6 +313,7 @@ def t_crash(p, res, avant=10.0, fige=4.0, tue_apres=2.0):
     res["crash"] = out
     print("crash :", json.dumps(out, ensure_ascii=False), flush=True)
     ok("crash : une prise est retrouvée après la mort du navigateur", rec > 0, out)
+    ok("crash : moins de 0,5 s perdue (interface figée au moment du crash)", out["perdu_s"] <= 0.5, out)
 
 
 # ---------------------------------------------------------------- charge (CPU ×4, arrière-plan)
@@ -462,6 +465,7 @@ def t_demarrage(p_unused, res, n):
     res["demarrage"] = summ
     print("démarrage :", json.dumps(summ, ensure_ascii=False, default=str)[:1500], flush=True)
     ok(f"démarrage : {n} navigateurs en parallèle relevés", len(starts) == n, summ)
+    ok("démarrage : la lecture repart seule après une panne de la sortie", pannes and summ["pannes_resolues"] == len(pannes), summ)
 
 
 # ---------------------------------------------------------------- toucher → son (téléphone)
@@ -532,6 +536,7 @@ def t_toucher(p, res, passes=3):
     res["toucher"] = out
     print("toucher :", json.dumps(out, ensure_ascii=False), flush=True)
     ok("toucher : la lecture démarre au toucher (téléphone 390)", len(vals1) == passes and len(vals2) == passes, out)
+    ok("toucher : 1er toucher sur Lecture → son rendu en moins de 50 ms (studio ouvert)", bool(vals1) and out["premier_toucher_median_ms"] < 50, out)
 
 
 def main():
