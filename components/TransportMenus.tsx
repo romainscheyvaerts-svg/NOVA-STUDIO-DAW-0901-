@@ -103,30 +103,28 @@ interface ViewProps {
 
 export const ViewMenu: React.FC<ViewProps> = ({ currentView, onChangeView, isSidebarOpen, onToggleSidebar, displayMode }) => {
   const chords = useChordLaneShown();
-  const cur = VIEWS.find(v => v.id === currentView) || VIEWS[0];
+  // Pistes / Console : la vue de chaque instant reste en deux boutons (Ctrl+= bascule) ; « Auto » n'apparaît
+  // dans la barre que quand elle est affichée. Le reste (automation, navigateur, accords, thème, affichage) : « ▾ ».
+  const seg = (on: boolean) => `px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${on ? 'text-black' : 'text-slate-500 hover:text-white'}`;
+  const segStyle = (on: boolean): React.CSSProperties => ({ backgroundColor: on ? 'var(--accent-neon)' : 'transparent', color: on ? '#000' : 'var(--text-secondary)' });
+  const shown = VIEWS.filter(v => v.id !== 'AUTOMATION' || currentView === 'AUTOMATION');
   return (
+    <div {...barItem('vues', 26)} className="hidden md:flex items-center gap-0.5 rounded-xl p-1" style={{ backgroundColor: 'var(--bg-item)' }}>
+      {shown.map(v => (
+        <button key={v.id} type="button" onClick={() => onChangeView(v.id)} aria-pressed={currentView === v.id}
+          title={v.key ? `${v.label} (${v.key})` : v.label} className={seg(currentView === v.id)} style={segStyle(currentView === v.id)}>{v.label}</button>
+      ))}
     <ToolbarMenu testId="view-menu" menuLabel="Vue" width={300} alignRight
-      ariaLabel={`Vue : ${cur.label}`}
-      title="Vue : pistes, console (Ctrl+=), automation ; navigateur, piste d'accords, thème, mode d'affichage"
-      triggerProps={barItem('vues', 26)}
-      triggerClassName="hidden md:flex h-9 px-2.5 rounded-xl items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all text-slate-200 hover:text-white"
-      triggerStyle={{ backgroundColor: 'var(--bg-item)' }}
-      label={<>
-        <i className={`fas ${cur.icon} text-[10px]`} aria-hidden="true" style={{ color: 'var(--accent-text)' }} />
-        <span>{cur.label}</span>
-        <i className="fas fa-chevron-down text-[8px] opacity-70" aria-hidden="true" />
-      </>}>
+      ariaLabel="Vue : automation, navigateur, piste d'accords, thème, affichage"
+      title="Vue : automation, navigateur, piste d'accords, thème, mode d'affichage"
+      triggerClassName="h-7 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10"
+      label={<i className="fas fa-chevron-down text-[9px]" aria-hidden="true" />}>
       {(close) => (<>
         <MenuSection title="Vue" first>
-          <div className="grid grid-cols-3 gap-1">
-            {VIEWS.map(v => (
-              <button key={v.id} type="button" onClick={() => { onChangeView(v.id); close(); }} aria-pressed={currentView === v.id}
-                title={v.key ? `${v.label} (${v.key})` : v.label}
-                className={`min-h-11 rounded-lg flex flex-col items-center justify-center gap-1 text-[11px] font-bold ${currentView === v.id ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300 hover:bg-white/10'}`}>
-                <i className={`fas ${v.icon} text-[11px]`} aria-hidden="true" />{v.label}
-              </button>
-            ))}
-          </div>
+          <button type="button" onClick={() => { onChangeView(currentView === 'AUTOMATION' ? 'ARRANGEMENT' : 'AUTOMATION'); close(); }} aria-pressed={currentView === 'AUTOMATION'}
+            title="Éditeur d'automation (toutes les courbes)" className={menuRowClass(currentView === 'AUTOMATION')}>
+            <i className="fas fa-project-diagram w-5 text-center text-[11px]" aria-hidden="true" /><span>Automation</span><MenuSwitch on={currentView === 'AUTOMATION'} />
+          </button>
         </MenuSection>
         <MenuSection title="Afficher">
           {onToggleSidebar && (
@@ -150,5 +148,6 @@ export const ViewMenu: React.FC<ViewProps> = ({ currentView, onChangeView, isSid
         )}
       </>)}
     </ToolbarMenu>
+    </div>
   );
 };

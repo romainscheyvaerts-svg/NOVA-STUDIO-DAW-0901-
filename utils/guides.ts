@@ -688,7 +688,7 @@ export const GUIDES: Guide[] = [
     summary: 'Sirènes, gammes, diction, flow en rythme, et l’accordeur.',
     steps: [
       { text: 'Ouvre « Voix et flow ».', phone: 'Touche ☰ › « Plus d’outils » › « Échauffement voix et flow ».', action: 'pal.warmup',
-        target: [tid('open-warmup'), tid('transport-options'), tid('menu-warmup'), MENU_PLUS, PHONE_MENU], done: { visible: tid('warmup-start-program') } },
+        target: [tid('open-warmup'), '[data-bar-item="options"]', tid('menu-warmup'), MENU_PLUS, PHONE_MENU], done: { visible: tid('warmup-start-program') } },
       { text: '« Démarrer l’échauffement » et suis le programme (onglet Accordeur pour la justesse).', target: tid('warmup-start-program') },
     ],
     result: 'Voix chaude, diction et flow prêts pour la prise.',
@@ -720,7 +720,7 @@ export const GUIDES: Guide[] = [
     summary: 'La section « Écoute » change ce que tu entends (mono, côtés, Dim, solo AFL / PFL), jamais l’export.',
     steps: [
       { text: 'Passe en mode avancé.', action: 'pal.simple', target: '[data-bar-item="vues"]', when: 'simple' },
-      { text: 'Ouvre « Options » en haut, rubrique « Écoute ».', phone: 'Touche ☰ : rubrique « Écoute ».', target: [tid('transport-options'), tid('menu-monitor'), PHONE_MENU], hint: 'Sur un petit écran : menu ☰ › Écoute.', manual: true },
+      { text: 'Ouvre « Options » en haut, rubrique « Écoute ».', phone: 'Touche ☰ : rubrique « Écoute ».', target: ['[data-bar-item="options"]', tid('menu-monitor'), PHONE_MENU], hint: 'Sur un petit écran : menu ☰ › Écoute.', manual: true },
       { text: 'Touche « Mono » (Alt+M). Un son qui baisse ou disparaît trahit un souci de phase ou de largeur.', action: 'mon.mono', target: tid('monitor-matrix-mono') },
       { text: 'Mode de solo AFL ou PFL : le solo s’écoute seul, sans couper le mix.', target: tid('solo-listen-afl'), manual: true },
       { text: '« Dim » (Ctrl+Alt+D) baisse l’écoute de 20 dB ; les pastilles en haut rappellent ce qui est actif.', action: 'mon.dim', target: tid('monitor-dim') },

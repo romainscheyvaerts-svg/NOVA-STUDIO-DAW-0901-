@@ -119,7 +119,7 @@ const MasterVisualizer: React.FC = () => {
     >
        <canvas ref={canvasRef} className="w-full h-full" />
        <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-black/20 pointer-events-none" />
-       <div className="absolute top-0.5 right-1 text-[6px] font-mono text-cyan-500/50 group-hover:text-cyan-400 transition-colors">
+       <div className="absolute top-0.5 right-1 text-[6px] font-mono text-cyan-500/50 [[data-theme=light]_&]:text-cyan-900 group-hover:text-cyan-400 transition-colors">
           {mode}
        </div>
     </div>

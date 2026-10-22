@@ -93,12 +93,6 @@ def tool_on(pg, testid=None, label=None):
     return on
 
 
-def open_session_menu(pg):
-    """« Liste des pistes » est dans « Session ▾ » du bandeau du bas (barre allégée)."""
-    if not pg.locator('[data-testid="dock-track-list"]').count() and pg.locator('[data-testid="dock-session-menu"]').count():
-        pg.locator('[data-testid="dock-session-menu"]').first.click(); pg.wait_for_timeout(300)
-
-
 # --- Enregistrement du master (AudioWorklet) + mesures -------------------------------
 REC_INIT = r"""
 async () => {
@@ -397,9 +391,12 @@ def run_pc(b):
         ok("PC · dispositions livrées : Mix (Ctrl+Maj+3) puis Enregistrement (Ctrl+Maj+1)", v_mix == "MIXER" and v_rec == "ARRANGEMENT", {"mix": v_mix, "rec": v_rec})
         blur(pg); pg.keyboard.press("NumpadDecimal"); pg.keyboard.press("Numpad2"); pg.keyboard.press("NumpadMultiply"); pg.wait_for_timeout(900)
         edit_zoom = lane_geom(pg)[1]
-        open_session_menu(pg)
-        tracks_panel = pg.locator('[data-testid="dock-track-list"]').first.get_attribute("aria-pressed")
-        pg.keyboard.press("Escape"); pg.wait_for_timeout(200)
+        # Barre allégée : « Liste des pistes » est dans « Session ▾ », dont le bouton dit le panneau ouvert.
+        if pg.locator('[data-testid="dock-track-list"]').count():
+            tracks_panel = pg.locator('[data-testid="dock-track-list"]').first.get_attribute("aria-pressed")
+        else:
+            lab = pg.locator('[data-testid="dock-session-menu"]').first.get_attribute("aria-label") or ""
+            tracks_panel = "true" if "Pistes ouvert" in lab else "false"
         ok("PC · pavé . 2 * = disposition Édition (zoom 120, liste des pistes)", abs(edit_zoom - 120) < 1 and tracks_panel == "true", {"zoom": edit_zoom, "liste": tracks_panel})
         shot(pg, "r17_10_disposition_edition")
         set_zoom(pg, 222)
