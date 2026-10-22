@@ -11,6 +11,7 @@ import { Faceplate, HwSection, HwWindow, Knob, Led, PushButton, useHwHelp } from
 import { fmtHzFr, frNum, useHwCanvas } from './hw/screens';
 import { termHelp } from '../utils/pluginUi';
 import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
+import { BUTTERWORTH_Q, EQ_Q_VERSION, eqBandDb, eqNativeQ, eqParamsV2, eqPassMinus3Hz, isPassType, isShelfType } from '../engine/eqQ';
 
 /** Types de filtre en français, avec ce qu'ils font. */
 const FILTER_LABELS: Record<string, { label: string; help: string }> = {
@@ -52,6 +53,12 @@ export interface ProEQ12Params {
   phase?: 'minimum' | 'linear';
   /** Résolution de la phase linéaire : « normale » (~43 ms) ou « haute » (grave plus précis, ~171 ms). */
   linQuality?: 'normale' | 'haute';
+  /**
+   * Convention du Q des bandes (engine/eqQ.ts) : 2 = Q linéaire (coupe-bas / haut : Q 0,71 =
+   * −3 dB pile à la fréquence) et largeur des cloches compensée. Absent = ancien projet, traduit
+   * à l'ouverture (eqParamsV2).
+   */
+  qVersion?: number;
 }
 
 const MIN_FREQ = 20;
@@ -149,7 +156,7 @@ export class ProEQ12Node {
 
     // Default params if not provided
     const defaultBands: ProEQBand[] = [
-      { id: 0, type: 'highpass', frequency: 80, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
+      { id: 0, type: 'highpass', frequency: 80, gain: 0, q: BUTTERWORTH_Q, isEnabled: true, isSolo: false },
       { id: 1, type: 'peaking', frequency: 150, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
       { id: 2, type: 'peaking', frequency: 300, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
       { id: 3, type: 'peaking', frequency: 500, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
@@ -160,12 +167,14 @@ export class ProEQ12Node {
       { id: 8, type: 'peaking', frequency: 8000, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
       { id: 9, type: 'peaking', frequency: 10000, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
       { id: 10, type: 'peaking', frequency: 12000, gain: 0, q: 1.0, isEnabled: true, isSolo: false },
-      { id: 11, type: 'lowpass', frequency: 18000, gain: 0, q: 1.0, isEnabled: true, isSolo: false }
+      { id: 11, type: 'lowpass', frequency: 18000, gain: 0, q: BUTTERWORTH_Q, isEnabled: true, isSolo: false }
     ];
 
-    this.params = initialParams && Array.isArray(initialParams.bands) && initialParams.bands.length > 0
-      ? { ...initialParams, bands: this.normalizeBands(initialParams.bands, defaultBands) }
-      : { isEnabled: true, masterGain: 1.0, bands: defaultBands };
+    // Ancien projet (Q des coupe-bas en dB, cloches sans compensation) : traduit une fois (engine/eqQ.ts).
+    const init = initialParams ? eqParamsV2(initialParams, ctx.sampleRate) : initialParams;
+    this.params = init && Array.isArray(init.bands) && init.bands.length > 0
+      ? { ...init, qVersion: EQ_Q_VERSION, bands: this.normalizeBands(init.bands, defaultBands) }
+      : { isEnabled: true, masterGain: 1.0, qVersion: EQ_Q_VERSION, bands: defaultBands };
 
     this.input = ctx.createGain();
     this.output = ctx.createGain();
@@ -194,7 +203,11 @@ export class ProEQ12Node {
       const b = this.params.bands[i];
       const t = this.targets[i];
       const tg = (k: 'frequency' | 'Q' | 'gain', key: string) => {
-        const arr: ParamTarget[] = v.filters.map(f => ({ param: f[k] }));
+        // Q : le filtre du navigateur reçoit sa propre unité (dB pour un coupe-bas / haut, largeur
+        // compensée pour une cloche, engine/eqQ.ts) ; le cœur pro reçoit le Q affiché.
+        const arr: ParamTarget[] = v.filters.map(f => (k === 'Q'
+          ? { param: f.Q, map: (q: number) => eqNativeQ(f.type, q, this.targets[i]?.freq ?? this.params.bands[i]?.frequency ?? 1000, nyq * 2) }
+          : { param: f[k] }));
         const wp = pro?.param(key);
         if (wp) arr.push({ param: wp });
         return arr;
@@ -203,7 +216,7 @@ export class ProEQ12Node {
       const q0 = t ? t.q : Number.isFinite(b?.q) ? b.q : 1;
       this.auto.add(`b${i + 1}Freq`, new MappedParam(ctx, tg('frequency', `b${i + 1}Freq`), { min: 10, max: Math.min(22000, nyq * 0.99), value: f0, affine: true }));
       this.auto.add(`b${i + 1}Gain`, new MappedParam(ctx, tg('gain', `b${i + 1}Gain`), { min: -40, max: 40, value: t ? t.gain : 0, affine: true }));
-      this.auto.add(`b${i + 1}Q`, new MappedParam(ctx, tg('Q', `b${i + 1}Q`), { min: 0.0001, max: 1000, value: q0, affine: true }));
+      this.auto.add(`b${i + 1}Q`, new MappedParam(ctx, tg('Q', `b${i + 1}Q`), { min: 0.0001, max: 1000, value: q0, affine: false }));
     });
   }
 
@@ -472,6 +485,10 @@ export class ProEQ12Node {
       // Bande strictement transparente : cloche / étagère à 0 dB (ou coupée), filtre coupé.
       // Gain automatisé (R8) : la bande active reste calculée, la courbe peut quitter 0 dB.
       const neutral = gainType ? (!active || (Math.abs(fGain) < 1e-6 && !this.automated.has(kG))) : !active;
+      // Le Q posé sur le filtre du navigateur dépend aussi du type et de la fréquence (engine/eqQ.ts) :
+      // reposé quand l'un d'eux change.
+      const prevT = this.targets[i];
+      const qDirty = !prevT || prevT.freq !== freq || type !== v.type;
       this.targets[i] = { freq, q, gain: fGain, wet, dry: 1 - wet, neutral };
 
       if (!v.inChain) {
@@ -508,7 +525,7 @@ export class ProEQ12Node {
       }
       // Fréquence, Q et gain : posés seulement s'ils ont changé (une voie d'automation garde la main).
       this.auto.get(kF)!.setStatic(freq, st(0.03));
-      this.auto.get(kQ)!.setStatic(q, st(0.03));
+      this.auto.get(kQ)!.setStatic(q, { ...st(0.03), force: force || (qDirty && !this.automated.has(kQ)) });
       // Cloche / etagere coupee = gain 0 dB : filtre neutre, sans fondu.
       this.auto.get(kG)!.setStatic(fGain, st(0.03));
       if (1 - wet > 0) this.wireInput(v, 2, true);
@@ -565,7 +582,9 @@ export class ProEQ12Node {
   }
 
   public updateParams(p: Partial<ProEQ12Params> & Record<string, any>) {
-    const next = { ...this.params, ...p };
+    // Bandes d'un ancien projet (sans qVersion) : traduites comme à l'ouverture (engine/eqQ.ts).
+    if (p && Array.isArray(p.bands) && p.qVersion !== EQ_Q_VERSION) p = eqParamsV2(p as any, this.ctx.sampleRate);
+    const next = { ...this.params, ...p, qVersion: EQ_Q_VERSION };
     if (p.bands) next.bands = this.normalizeBands(p.bands, this.params.bands);
     // Réglage d'automation à plat (« b3Freq ») : rangé dans sa bande.
     for (const [k, v] of Object.entries(p || {})) {
@@ -629,7 +648,8 @@ const fmtGain = (g: number) => `${g > 0.05 ? '+' : g < -0.05 ? '−' : ''}${frNu
 const shortHz = (hz: number) => (hz >= 1000 ? `${(hz / 1000).toLocaleString('fr-FR', { maximumFractionDigits: hz >= 10000 ? 0 : 1 })}k` : String(Math.round(hz)));
 const DEFAULT_EQ: ProEQ12Params = {
   isEnabled: true, masterGain: 1,
-  bands: DEFAULT_FREQS.map((f, i) => ({ id: i, type: (i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking') as ProEQFilterType, frequency: f, gain: 0, q: 1, isEnabled: true, isSolo: false })),
+  qVersion: EQ_Q_VERSION,
+  bands: DEFAULT_FREQS.map((f, i) => ({ id: i, type: (i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking') as ProEQFilterType, frequency: f, gain: 0, q: i === 0 || i === 11 ? BUTTERWORTH_Q : 1, isEnabled: true, isSolo: false })),
 };
 
 /** Forme du filtre (petite icône sur les boutons de type). */
@@ -665,37 +685,8 @@ const FilterIcon: React.FC<{ type: ProEQFilterType }> = ({ type }) => (
  * biquad du Web Audio (affichage de la bande choisie, en couleur).
  */
 function bandResponseDb(b: ProEQBand, f: number, sr: number): number {
-  const f0 = Math.max(10, Math.min(sr * 0.495, b.frequency || 1000));
-  const w0 = (2 * Math.PI * f0) / sr, cw = Math.cos(w0), sw = Math.sin(w0);
-  const Q = Math.max(0.0001, b.q || 1);
-  const A = Math.pow(10, (b.gain || 0) / 40);
-  let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
-  switch (b.type) {
-    case 'lowpass': case 'highpass': {
-      const al = sw / (2 * Math.pow(10, Q / 20));
-      const lp = b.type === 'lowpass';
-      b0 = lp ? (1 - cw) / 2 : (1 + cw) / 2; b1 = lp ? 1 - cw : -(1 + cw); b2 = b0;
-      a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; break;
-    }
-    case 'notch': { const al = sw / (2 * Q); b0 = 1; b1 = -2 * cw; b2 = 1; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; break; }
-    case 'lowshelf': case 'highshelf': {
-      const al = (sw / 2) * Math.SQRT2, sA = 2 * Math.sqrt(A) * al;
-      if (b.type === 'lowshelf') {
-        b0 = A * ((A + 1) - (A - 1) * cw + sA); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - sA);
-        a0 = (A + 1) + (A - 1) * cw + sA; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - sA;
-      } else {
-        b0 = A * ((A + 1) + (A - 1) * cw + sA); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - sA);
-        a0 = (A + 1) - (A - 1) * cw + sA; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - sA;
-      }
-      break;
-    }
-    default: { const al = sw / (2 * Q); b0 = 1 + al * A; b1 = -2 * cw; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cw; a2 = 1 - al / A; }
-  }
-  const w = (2 * Math.PI * f) / sr;
-  const c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
-  const nr = b0 + b1 * c1 + b2 * c2, ni = -(b1 * s1 + b2 * s2);
-  const dr = a0 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
-  return 10 * Math.log10((nr * nr + ni * ni) / (dr * dr + di * di) + 1e-30);
+  // Mêmes formules et même convention de Q que le moteur (engine/eqQ.ts) : la courbe dessinée est celle entendue.
+  return eqBandDb(b, f, sr);
 }
 
 const fToX = (f: number, w: number) => (Math.log10(Math.max(MIN_FREQ, f) / MIN_FREQ) / Math.log10(MAX_FREQ / MIN_FREQ)) * w;
@@ -1013,8 +1004,10 @@ export const ProEQ12UI: React.FC<{
   const { simple } = useSimpleMode();
   const [lite, setLite] = useState(() => isLiteMode());
   useEffect(() => { const f = () => setLite(isLiteMode()); window.addEventListener('nova:perf-mode', f); return () => window.removeEventListener('nova:perf-mode', f); }, []);
+  // Ancien projet : Q traduits comme dans le moteur (même fréquence d'échantillonnage), la fenêtre affiche le vrai Q.
   const [params, setParams] = useState<ProEQ12Params>(() => (initialParams && Array.isArray(initialParams.bands) && initialParams.bands.length
-    ? initialParams : { ...DEFAULT_EQ, ...(initialParams || {}), bands: DEFAULT_EQ.bands.map(b => ({ ...b })) }));
+    ? { ...eqParamsV2(initialParams, node?.sampleRate || 48000), qVersion: EQ_Q_VERSION }
+    : { ...DEFAULT_EQ, ...(initialParams || {}), qVersion: EQ_Q_VERSION, bands: DEFAULT_EQ.bands.map(b => ({ ...b })) }));
   const paramsRef = useRef(params);
   const [sel, setSel] = useState(0);
   const [range, setRange] = useState(12);
@@ -1037,6 +1030,8 @@ export const ProEQ12UI: React.FC<{
   const band = params.bands[sel] || params.bands[0];
   const col = bandColor(band, sel);
   const gainless = noGain(band.type);
+  const passBand = isPassType(band.type);
+  const shelfBand = isShelfType(band.type);
   const help = (label: string, h: string) => [h, termHelp(label)].filter(Boolean).join(' · ');
   const master = Number.isFinite(params.masterGain) ? params.masterGain : 1;
   // Mode avancé : canal de chaque bande (Mid / Side, gauche / droite) et phase linéaire.
@@ -1087,7 +1082,9 @@ export const ProEQ12UI: React.FC<{
               {TYPE_ORDER.map(t => (
                 <PushButton key={t} role="radio" active={band.type === t} dark led={col} className="hw-push-icon" hint={FILTER_LABELS[t].help}
                   ariaLabel={FILTER_LABELS[t].label} valueText={band.type === t ? 'choisi' : undefined}
-                  onClick={() => updateBand(sel, { type: t, gain: (t.includes('pass') || t === 'notch') ? 0 : band.gain })}>
+                  onClick={() => updateBand(sel, { type: t, gain: (t.includes('pass') || t === 'notch') ? 0 : band.gain,
+                    // Vers un coupe-bas / haut : coupe nette (Butterworth, −3 dB à la fréquence) ; en le quittant : Q 1.
+                    q: isPassType(t) && !isPassType(band.type) ? BUTTERWORTH_Q : !isPassType(t) && isPassType(band.type) ? 1 : band.q })}>
                   <FilterIcon type={t} /><span>{FILTER_LABELS[t].label}</span>
                 </PushButton>
               ))}
@@ -1101,10 +1098,18 @@ export const ProEQ12UI: React.FC<{
                 defaultValue={0} disabled={gainless} onChange={v => updateBand(sel, { gain: v })} format={v => (gainless ? '—' : fmtGain(v))}
                 scale={[{ v: -30, label: '−30' }, { v: 0, label: '0' }, { v: 30, label: '+30' }]}
                 hint={gainless ? 'Sans effet pour ce type de filtre (coupe-bas, coupe-haut, encoche).' : help('Gain', 'Monte (+) ou baisse (−) la zone de la bande.')} />
-              <Knob key={`q${sel}`} paramId="q" label={band.type.includes('pass') ? 'Résonance' : 'Largeur'} size="M" cap="black" arc={col} min={0.1} max={10} curve="log" step={0.01}
-                value={band.q} defaultValue={1} onChange={v => updateBand(sel, { q: v })} format={v => `Q ${frNum(v, 2)}`} ticks={11}
-                hint={band.type.includes('pass') ? 'Bosse au point de coupure : plus la valeur est haute, plus la coupure résonne.' : help('Largeur', 'Petite valeur = zone large et douce, grande valeur = zone étroite et précise.')} />
+              <Knob key={`q${sel}`} paramId="q" label={passBand ? 'Résonance' : 'Largeur'} size="M" cap="black" arc={col} min={0.1} max={10} curve="log" step={0.01}
+                value={shelfBand ? 1 : band.q} defaultValue={passBand ? BUTTERWORTH_Q : 1} disabled={shelfBand} onChange={v => updateBand(sel, { q: v })}
+                format={v => (shelfBand ? 'fixe' : `Q ${frNum(v, 2)}`)} ticks={11}
+                hint={passBand ? 'Q 0,71 (réglage d’usine) = coupe nette sans bosse, −3 dB pile à la fréquence. Plus haut, la coupure résonne : Q 1 = 0 dB, Q 2 = +6 dB à la fréquence.'
+                  : shelfBand ? 'Étagère à pente fixe (la plus raide sans bosse) : sa largeur ne se règle pas. À la fréquence affichée, la moitié du gain.'
+                  : help('Largeur', 'Petite valeur = zone large et douce, grande valeur = zone étroite et précise. Q = largeur entre les points à mi-gain (encoche : à −3 dB).')} />
             </div>
+            {passBand && Math.abs(band.q - BUTTERWORTH_Q) > 0.005 && (
+              <div className="hw-silk hw-silk-soft mt-1" style={{ textAlign: 'center', textTransform: 'none', letterSpacing: '0.02em' }} data-nova-eq-minus3 aria-live="polite">
+                Résonance : −3 dB à {fmtHzFr(eqPassMinus3Hz(band.type, band.frequency, band.q, sr))} (Q 0,71 = pile à {fmtHzFr(band.frequency)})
+              </div>
+            )}
             {advanced && (
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5" data-nova-param="channel">
                 <span className="hw-silk hw-silk-soft" style={{ textAlign: 'left' }}>Canal</span>
@@ -1143,7 +1148,7 @@ export const ProEQ12UI: React.FC<{
                   {(['normale', 'haute'] as const).map(q => (
                     <PushButton key={q} role="radio" active={(params.linQuality || 'normale') === q} dark led={EQ_ACCENT} className="hw-push-sm"
                       text={q === 'normale' ? 'Normale' : 'Haute'} ariaLabel={`Résolution ${q}`} dataAttrs={{ 'data-nova-linq': q }}
-                      hint={q === 'normale' ? `Résolution normale : latence ${latMs('normale')} ms.` : `Haute résolution : grave plus précis (coupe-bas, basses), latence ${latMs('haute')} ms.`}
+                      hint={q === 'normale' ? `Résolution normale : latence ${latMs('normale')} ms. Courbe exacte au-dessus de 200 Hz ; dessous, une cloche étroite peut s’écarter jusqu’à 0,6 dB de l’écran (mesuré).` : `Haute résolution : courbe exacte jusque dans le grave (écart mesuré < 0,01 dB), latence ${latMs('haute')} ms.`}
                       onClick={() => commit({ ...paramsRef.current, linQuality: q })} />
                   ))}
                 </div>

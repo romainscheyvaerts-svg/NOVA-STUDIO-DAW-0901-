@@ -16,6 +16,7 @@
  * Les mêmes filtres servent au « Master express » (utils/quickMaster.ts), qui
  * les applique en JavaScript pur (applyEq) sur le fichier.
  */
+import { eqBandCoefs } from '../engine/eqQ';
 
 /** Centres ISO des tiers d'octave, de 50 Hz à 16 kHz (26 bandes). */
 export const THIRD_OCTAVE_CENTERS = [50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000];
@@ -148,7 +149,17 @@ export type EqType = 'highpass' | 'lowshelf' | 'peaking' | 'highshelf';
 export interface EqBand { type: EqType; freq: number; q: number; gainDb: number }
 export interface Biquad { b0: number; b1: number; b2: number; a1: number; a2: number }
 
+/**
+ * Coefficients d'une bande, MÊMES formules et même convention de Q que l'égaliseur 12 bandes
+ * (engine/eqQ.ts, v2) : le modèle qui choisit les corrections est exactement ce qu'on entend.
+ */
 export function biquadCoeffs(band: EqBand, sampleRate: number): Biquad {
+  const [c0, c1, c2, c3, c4] = eqBandCoefs(band.type, clamp(band.freq, 1, sampleRate / 2 - 1), band.gainDb, band.q, sampleRate);
+  return { b0: c0, b1: c1, b2: c2, a1: c3, a2: c4 };
+}
+
+/** Ancien modèle (Q des coupe-bas en dB, cloches sans compensation) : gardé pour mémoire, non utilisé. */
+export function biquadCoeffsLegacy(band: EqBand, sampleRate: number): Biquad {
   const f = clamp(band.freq, 1, sampleRate / 2 - 1);
   const w0 = 2 * Math.PI * f / sampleRate, cw = Math.cos(w0), sw = Math.sin(w0);
   const A = Math.pow(10, band.gainDb / 40);
@@ -388,13 +399,14 @@ export function curveFromAnchors(anchors: [number, number][]): number[] {
  * passe-haut à 22 Hz comme Master Nova, puis les 6 bandes, le reste coupé.
  */
 export function proEq12ParamsFor(bands: EqBand[]): Record<string, any> {
-  const out: any[] = [{ id: 0, type: 'highpass', frequency: 22, gain: 0, q: 0.7, isEnabled: true, isSolo: false }];
+  // Q en convention v2 (engine/eqQ.ts) : coupe-bas Butterworth, −3 dB pile à 22 Hz.
+  const out: any[] = [{ id: 0, type: 'highpass', frequency: 22, gain: 0, q: Math.SQRT1_2, isEnabled: true, isSolo: false }];
   bands.slice(0, 6).forEach((b, i) => out.push({ id: i + 1, type: b.type, frequency: b.freq, gain: b.gainDb, q: b.q, isEnabled: true, isSolo: false }));
   while (out.length < 12) {
     const i = out.length;
-    out.push({ id: i, type: i === 11 ? 'lowpass' : 'peaking', frequency: [6000, 8000, 10000, 12000, 18000][i - 7] || 18000, gain: 0, q: 1, isEnabled: false, isSolo: false });
+    out.push({ id: i, type: i === 11 ? 'lowpass' : 'peaking', frequency: [6000, 8000, 10000, 12000, 18000][i - 7] || 18000, gain: 0, q: i === 11 ? Math.SQRT1_2 : 1, isEnabled: false, isSolo: false });
   }
-  return { isEnabled: true, masterGain: 1, bands: out };
+  return { isEnabled: true, masterGain: 1, qVersion: 2, bands: out };
 }
 
 /** Phrase lisible d'une bande (« +2,1 dB vers 220 Hz »). */

@@ -503,9 +503,10 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
      const defaultFreqs = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
      const defaultBands = Array.from({ length: 12 }, (_, i) => ({
       id: i, type: (i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking') as any, 
-      frequency: defaultFreqs[i], gain: 0, q: 1.0, isEnabled: true, isSolo: false
+      // Coupe-bas / coupe-haut : Q 0,71 (Butterworth) = −3 dB pile à la fréquence (convention v2, engine/eqQ.ts).
+      frequency: defaultFreqs[i], gain: 0, q: i === 0 || i === 11 ? Math.SQRT1_2 : 1.0, isEnabled: true, isSolo: false
      }));
-     params = { isEnabled: true, masterGain: 1.0, bands: defaultBands };
+     params = { isEnabled: true, masterGain: 1.0, qVersion: 2, bands: defaultBands };
   }
   
   if (type === 'MELODIC_SAMPLER') {

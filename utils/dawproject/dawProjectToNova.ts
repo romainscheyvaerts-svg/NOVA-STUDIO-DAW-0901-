@@ -120,13 +120,14 @@ export function dawProjectToNova(s: DawSession, audioOf: (path: string) => Media
           map('Threshold', 'threshold');
           continue;
         case 'Equalizer': {
-          const bands = Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: EQ_FREQS[i], gain: 0, q: 1, isEnabled: i !== 0 && i !== 11 ? true : false, isSolo: false }));
+          const bands = Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: EQ_FREQS[i], gain: 0, q: i === 0 || i === 11 ? Math.SQRT1_2 : 1, isEnabled: i !== 0 && i !== 11 ? true : false, isSolo: false }));
           d.bands.slice(0, 12).forEach((b, i) => {
             bands[i] = { id: i, type: EQ_FROM[b.type] || 'peaking', frequency: b.freq, gain: b.gain, q: b.q, isEnabled: b.enabled, isSolo: false };
             if (b.ids.freq) paramLane.set(b.ids.freq, `plugin::${id}::b${i + 1}Freq`); if (b.ids.gain) paramLane.set(b.ids.gain, `plugin::${id}::b${i + 1}Gain`); if (b.ids.q) paramLane.set(b.ids.q, `plugin::${id}::b${i + 1}Q`);
           });
           if (d.bands.length > 12) lines.push(`⚠️ EQ de « ${t.name} » : ${d.bands.length} bandes, les 12 premières sont reprises.`);
-          out.push({ ...base, name: 'EQ 12 bandes', type: 'PROEQ12', params: { isEnabled: d.enabled, masterGain: dbToLin(pv(d, 'OutputGain', 0) + pv(d, 'InputGain', 0)), bands } });
+          // Q du format = Q linéaire, comme la convention v2 de l'égaliseur (engine/eqQ.ts) : repris tel quel.
+          out.push({ ...base, name: 'EQ 12 bandes', type: 'PROEQ12', params: { isEnabled: d.enabled, masterGain: dbToLin(pv(d, 'OutputGain', 0) + pv(d, 'InputGain', 0)), qVersion: 2, bands } });
           continue;
         }
         default: {
