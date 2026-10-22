@@ -184,6 +184,11 @@ BATTERIE = [
     # gamme forcée (100 % dans la gamme du projet), clavier en direct (arpège, aucun minuteur au repos), « Figer en notes »
     # (= notes entendues, export identique), Ctrl+Z, sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
     ("effets_midi", []),
+    # 22/10/2026 · L3 écart 16, musiciens de séance : batteur Trap ajouté par le menu de la piste (une région par section,
+    # kick / clap à ±1 ms à 140 BPM, intro plus calme que le refrain), basse 808 (100 % des fondamentales aux changements,
+    # 100 % des notes dans l'accord ou la gamme), accord changé → la basse suit, Ctrl+Z en une étape, curseurs par région,
+    # export = notes figées (≤ 1e-6), tempo 140 → 150 (positions musicales gardées), sauvegarde + rechargement ; téléphone 390.
+    ("seance", []),
     # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
     # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
     ("modulateurs", []),

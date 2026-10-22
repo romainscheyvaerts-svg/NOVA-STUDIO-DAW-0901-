@@ -477,6 +477,14 @@ export interface Clip {
    * quelle). Absent : clip indépendant.
    */
   linkId?: string;
+  /**
+   * L3 · Région « musicien de séance » (utils/sessionPlayer, écart 16) : batteur,
+   * bassiste ou claviers qui suivent la piste d'accords et la grille. `notes`
+   * contient TOUJOURS le résultat (lecture, export, collaboration et anciennes
+   * versions jouent ces notes) ; ces réglages servent à le recalculer quand les
+   * accords, le tempo ou un réglage changent. Absent : clip MIDI ordinaire.
+   */
+  seance?: import('./utils/sessionPlayer').SeanceSettings;
 }
 
 /** R24 : un mot transcrit (temps en secondes du son du clip). */

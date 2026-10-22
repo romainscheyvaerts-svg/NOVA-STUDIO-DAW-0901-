@@ -119,6 +119,7 @@ import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing, tempoHistoryMove, undoKeepsAudio } from './utils/collabTempo';
 import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
 import { syncLinkedClips, duplicateLinked, makeUnique, unlinked } from './utils/linkedClips';
+import { addSessionPlayer, defaultSeanceStyle, freezeSeance, refreshSessionPlayers, splitSeanceBySections, updateSeance, type SeanceCreateOptions, type SeanceSettings } from './utils/sessionPlayer';
 import { freezeMidiFx, midiFxKeyStore, sanitizeMidiFx, activeFx, type MidiFxSlot } from './engine/midiFx';
 import { liveMidiFx } from './engine/midiFx/live';
 import { modulationSpanStore, sanitizeModulators, type Modulator } from './utils/modulators';
@@ -135,6 +136,7 @@ const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDial
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 const MidiFxPanel = lazyWithPreload(() => import('./components/MidiFxPanel'));
 const ModulatorsPanel = lazyWithPreload(() => import('./components/ModulatorsPanel'));
+const SessionPlayerPanel = lazyWithPreload(() => import('./components/SessionPlayerPanel'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
 import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
@@ -307,7 +309,7 @@ import { useControlSurface } from './hooks/useControlSurface';
 import ProToolsWindows, { PRO_TOOLS_WINDOWS_PRELOAD } from './components/ProToolsWindows';
 import { useChordLaneProp } from './components/ChordLane';
 const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then(m => ({ default: m.HumQuickButtons })));
-import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
+import { applyChordOps, chordChanges, chordSig, chordsStore, sanitizeChords } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
 import { DrumMachine, makeDrumMachineLib, makeDrumMachine, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
@@ -699,6 +701,12 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
         const evs = newState.tempoEvents || [];
         const synced = syncLinkedClips(curr.present.tracks, newState.tracks, evs.length ? buildTempoMap(newState.bpm, newState.timeSignature, evs) : null);
         if (synced !== newState.tracks) newState = { ...newState, tracks: synced };
+      }
+      // L3 · Musiciens de séance (utils/sessionPlayer) : leurs régions suivent accords, tempo et réglages
+      // dans la MÊME mise à jour (une seule étape d'annulation ; rien à calculer sans musicien).
+      {
+        const played = refreshSessionPlayers(curr.present, newState);
+        if (played !== newState.tracks) newState = { ...newState, tracks: played };
       }
 
       // L'historique ne retient que les modifications reelles du projet.
@@ -4351,6 +4359,51 @@ function Studio() {
     setAiNotification(`❄️ Effets MIDI figés en notes sur « ${t.name} » : ${n} → ${after} notes dans les clips, effets coupés. Ctrl+Z pour revenir.`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setState]);
+  // L3 · Écart 16 : musiciens de séance (utils/sessionPlayer) — batteur, basse, claviers qui suivent les accords.
+  const [seanceUi, setSeanceUi] = useState<{ mode: 'create' } | { mode: 'edit'; trackId: string; clipId?: string } | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ trackId?: string; clipId?: string }>).detail || {};
+      const t = d.trackId ? stateRef.current.tracks.find(x => x.id === d.trackId) : null;
+      setSeanceUi(t && t.clips.some(c => c.seance) ? { mode: 'edit', trackId: t.id, clipId: d.clipId } : { mode: 'create' });
+    };
+    window.addEventListener('nova:open-seance', on);
+    return () => window.removeEventListener('nova:open-seance', on);
+  }, []);
+  const handleSeanceCreate = useCallback(async (o: SeanceCreateOptions): Promise<boolean> => {
+    await ensureAudioEngine().catch(() => undefined);
+    const ix = o.role === 'drums' ? (kitIndexIfLoaded() || await loadKitIndex().catch(() => null)) : null;
+    const stamp = Date.now().toString(36);
+    const r = addSessionPlayer(stateRef.current, o, ix, stamp);
+    if (!r.ok || !("trackId" in r)) { setAiNotification("error" in r ? r.error : ""); return false; }
+    setState(prev => { const x = addSessionPlayer(prev, o, ix, stamp); return x.ok ? x.state : prev; });
+    setSeanceUi({ mode: 'edit', trackId: r.trackId });
+    setAiNotification(r.message);
+    return true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
+  const handleSeanceChange = useCallback((trackId: string, clipIds: string[] | null, patch: Partial<SeanceSettings>) => {
+    setState(prev => updateSeance(prev, trackId, clipIds, patch));
+    // Réglé pendant la lecture : les notes déjà programmées avec l'ancien réglage sont relâchées.
+    if (audioEngine.getIsPlaying()) audioEngine.releaseTrackNotes(trackId);
+  }, [setState]);
+  const handleSeanceFreeze = useCallback((trackId: string, clipIds: string[] | null) => {
+    const f = freezeSeance(stateRef.current, trackId, clipIds);
+    if (!f.regions) return;
+    setState(prev => freezeSeance(prev, trackId, clipIds).state);
+    const left = f.state.tracks.find(t => t.id === trackId)?.clips.some(c => c.seance);
+    if (!left) setSeanceUi(null);
+    setAiNotification(`❄️ ${f.regions > 1 ? `${f.regions} régions figées` : 'Région figée'} en notes MIDI (${f.notes} notes) : exactement ce que tu entendais, à éditer au piano roll. Ctrl+Z pour revenir.`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
+  const handleSeanceSplit = useCallback((trackId: string) => {
+    const stamp = Date.now().toString(36);
+    const r = splitSeanceBySections(stateRef.current, trackId, stamp);
+    if (!r.ok || !("message" in r)) { setAiNotification(`🎚️ ${"error" in r ? r.error : ""}`); return; }
+    setState(prev => { const x = splitSeanceBySections(prev, trackId, stamp); return x.ok ? x.state : prev; });
+    setAiNotification(r.message);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
   const openTempoDialog = useCallback((bar: number | null) => setTempoDialog({ open: true, focusBar: bar }), []);
   const tempoLaneShown = useTempoLaneShown();
   const [tapBpm, setTapBpm] = useState<number | null>(null);
@@ -5337,11 +5390,12 @@ function Studio() {
   // Sons des pads : générés / chargés puis donnés au moteur (808 accordée sur la tonalité).
   const loadedPads = useRef(new Map<string, string>());
   useEffect(() => {
-    const t = state.tracks.find(x => x.id === DRUM_TRACK_ID);
-    if (!t?.drumMachine || !audioEngine.ctx) return;
+    // La boîte à rythmes et, L3, chaque batteur de séance (sa propre piste de batterie).
+    const drums = state.tracks.filter(x => x.drumMachine && (x.id === DRUM_TRACK_ID || x.type === TrackType.DRUM_RACK));
+    if (!drums.length || !audioEngine.ctx) return;
     const ctx = audioEngine.ctx;
     const root = typeof state.projectKey === 'number' ? state.projectKey : 0;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(() => drums.forEach(t => {
       t.drumMachine!.rows.forEach((r, i) => {
         const key = padLoadKey(r, root);
         const padKey = `${t.id}:${i + 1}`;
@@ -5351,7 +5405,7 @@ function Studio() {
           loadedPads.current.set(padKey, key);
         }).catch(() => { /* son indisponible */ });
       });
-    }, 60);
+    }), 60);
     return () => clearTimeout(timer);
   }, [state.tracks, state.projectKey]);
 
@@ -9258,6 +9312,8 @@ function Studio() {
       },
       editClip: handleEditClip,
       setBpm: handleUpdateBpm,
+      // Piste d'accords posée comme au couloir Accords (une étape d'annulation ; les musiciens de séance suivent).
+      setChords: (chords: unknown) => setState(prev => ({ ...prev, chords: sanitizeChords(chords) })),
       syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale),
       // Scénarios de bout en bout (endurance, pannes injectées) : mêmes chemins que l'interface.
       updateTrack: handleUpdateTrack,
@@ -10862,6 +10918,11 @@ function Studio() {
         const sel = stateRef.current.tracks.find(t => t.id === stateRef.current.selectedTrackId && t.type === TrackType.MIDI) || stateRef.current.tracks.find(t => t.type === TrackType.MIDI);
         if (sel) setMidiFxTrackId(sel.id); else setAiNotification('🎹 Effets MIDI : crée d’abord une piste MIDI (synthé, instrument).');
       }, { keywords: 'arpege arpeggiator accord chord gamme scale midi fx effets' })] : []),
+      // L3 · Écart 16 : musiciens de séance (mode avancé).
+      ...(!simpleNow ? [a('Beat', 'pal.seance', '🥁 Musiciens de séance : batteur, basse, claviers qui suivent les accords', () => {
+        const sel = stateRef.current.tracks.find(t => t.id === stateRef.current.selectedTrackId && t.clips.some(c => c.seance));
+        setSeanceUi(sel ? { mode: 'edit', trackId: sel.id } : { mode: 'create' });
+      }, { keywords: 'musicien seance session player batteur drummer bassiste basse 808 claviers keys accompagnement accords groove fill remplissage' })] : []),
       ...(!simpleNow ? [a('Mix', 'pal.modulators', 'Modulateurs (LFO, suiveur d’enveloppe) de la piste sélectionnée', () => {
         const id = stateRef.current.selectedTrackId || stateRef.current.tracks.find(t => t.id !== 'master')?.id;
         if (id) setModTrackId(id);
@@ -11585,6 +11646,22 @@ function Studio() {
         <Suspense fallback={null}>
           <MidiFxPanel track={state.tracks.find(t => t.id === midiFxTrackId)!} projectKey={state.projectKey} projectScale={state.projectScale}
             onChange={slots => handleMidiFxChange(midiFxTrackId, slots)} onFreeze={() => handleMidiFxFreeze(midiFxTrackId)} onClose={() => setMidiFxTrackId(null)} />
+        </Suspense>
+      )}
+      {seanceUi && (seanceUi.mode === 'create' || state.tracks.some(t => t.id === seanceUi.trackId)) && (
+        <Suspense fallback={null}>
+          <SessionPlayerPanel
+            track={seanceUi.mode === 'edit' ? state.tracks.find(t => t.id === seanceUi.trackId) || null : null}
+            focusClipId={seanceUi.mode === 'edit' ? seanceUi.clipId : undefined}
+            chordCount={(state.chords || []).length}
+            sectionCount={(state.markers || []).filter(m => m.type === 'REGION' && typeof m.endTime === 'number' && m.endTime > m.time).length}
+            defaultStyle={defaultSeanceStyle(state)}
+            onCreate={handleSeanceCreate}
+            onChange={(clipIds, patch) => seanceUi.mode === 'edit' && handleSeanceChange(seanceUi.trackId, clipIds, patch)}
+            onFreeze={clipIds => seanceUi.mode === 'edit' && handleSeanceFreeze(seanceUi.trackId, clipIds)}
+            onSplitSections={() => seanceUi.mode === 'edit' && handleSeanceSplit(seanceUi.trackId)}
+            onOpenNotes={clipId => { if (seanceUi.mode === 'edit') { setMidiEditorOpen({ trackId: seanceUi.trackId, clipId }); setSeanceUi(null); } }}
+            onClose={() => setSeanceUi(null)} />
         </Suspense>
       )}
       {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}

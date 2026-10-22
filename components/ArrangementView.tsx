@@ -969,6 +969,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       title: 'Arpège, accord d’une touche, gamme forcée : joués avant l’instrument, réglables pendant la lecture, figeables en notes.',
       onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-midi-fx', { detail: { trackId } })); },
     });
+    // L3 · Musiciens de séance (batteur, basse, claviers qui suivent les accords), mode avancé.
+    if (target && !simple && target.id !== 'master') menuItems.push({
+      label: target.clips.some(c => c.seance) ? 'Musicien de séance : réglages…' : 'Ajouter un musicien de séance…', icon: 'fa-drum',
+      title: 'Un batteur, un bassiste ou des claviers qui jouent tout seuls en suivant la piste d’accords et la grille ; intensité, complexité et remplissages par section.',
+      onClick: () => { setContextMenu(null); window.dispatchEvent(new CustomEvent('nova:open-seance', { detail: { trackId } })); },
+    });
     // L3 · Modulateurs (LFO calés sur le tempo, suiveurs d'enveloppe), mode avancé.
     if (target && !simple) menuItems.push({
       label: target.modulators?.some(m => m.on) ? `Modulateurs (${target.modulators.filter(m => m.on).length} actif${target.modulators.filter(m => m.on).length > 1 ? 's' : ''})…` : 'Modulateurs (LFO, suiveur)…', icon: 'fa-wave-square',
@@ -2537,9 +2543,13 @@ useEffect(() => {
       'separator',
       // Les deux outils voix les plus utilisés (audio) ; pour un clip MIDI, le piano roll.
       ...(audioOnly ? [justesse, respirations] : []),
+      // L3 · Région d'un musicien de séance : ses réglages (intensité, complexité, remplissages) et « Figer ».
+      ...(isMidiClip && cm.clip.seance ? [{ label: 'Musicien de séance : régler cette région…', icon: 'fa-drum',
+        title: 'Intensité, complexité et remplissages de cette section ; « Figer en notes MIDI » pour l’éditer à la main.',
+        onClick: () => { close(); window.dispatchEvent(new CustomEvent('nova:open-seance', { detail: { trackId: cm.trackId, clipId: cm.clip.id } })); }} as ContextMenuItem] : []),
       ...(isMidiClip && onEditMidi ? [{ label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(cm.trackId, cm.clip.id); close(); }}] : []),
-      // L3 · Copies liées d'un motif (utils/linkedClips) : mode avancé.
-      ...(isMidiClip && !simple ? [{ label: 'Dupliquer en copie liée', icon: 'fa-link',
+      // L3 · Copies liées d'un motif (utils/linkedClips) : mode avancé (pas pour une région musicien, qui calcule ses notes).
+      ...(isMidiClip && !simple && !cm.clip.seance ? [{ label: 'Dupliquer en copie liée', icon: 'fa-link',
         title: 'La copie suit le motif : modifier une note dans une copie la modifie dans toutes.',
         onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'DUPLICATE_LINKED'); close(); }} as ContextMenuItem] : []),
       ...(isMidiClip && isLinked(cm.clip, linkCountMap) ? [{ label: `Rendre unique (détacher de ses ${(linkCountMap.get(cm.clip.linkId!) || 1) - 1} autre${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''} copie${(linkCountMap.get(cm.clip.linkId!) || 1) > 2 ? 's' : ''})`, icon: 'fa-link-slash',
