@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { angleOf, fromNorm, nudge, quantize, toNorm, type KnobRange } from './knobMath';
 import { useHwHelp } from './help';
+import { solveTypedValue, startsValueEntry } from './valueEntry';
 
 /**
  * Bouton rotatif « matériel » (SVG) :
- *  - glisser vertical (souris, doigt, stylet : pointer events), Maj = réglage fin ;
- *  - double-clic / double tape = valeur par défaut ; molette ; flèches, Page, Début / Fin ;
+ *  - glisser vertical (souris, doigt, stylet : pointer events), Ctrl ou Maj = réglage fin ;
+ *  - double-clic / double tape / Alt+clic = valeur par défaut ; molette ; flèches, Page, Début / Fin ;
+ *  - saisie d'une valeur au clavier : taper un chiffre sur le bouton (ou Entrée), puis Entrée ;
  *  - course linéaire ou logarithmique, crans pour les choix discrets ;
  *  - tailles S / M / L / XL, capuchons chicken-head, argent, noir, crème, rouge, graphite ;
  *  - bulle de valeur pendant qu'on tourne, aide dans la ligne d'info ;
@@ -164,9 +166,30 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
     if (el) el.addEventListener('wheel', onWheel.current, { passive: false });
   }, []);
 
+  // Saisie au clavier : un chiffre (ou Entrée) sur le bouton ouvre un champ, Entrée valide, Échap annule.
+  const [entry, setEntry] = useState<string | null>(null);
+  // Champ déjà fermé (Entrée, Échap) : la perte de focus qui suit ne valide pas une 2e fois.
+  const entryDone = useRef(false);
+  const openEntry = (txt: string) => { entryDone.current = false; setEntry(txt); };
+  const cancelEntry = () => { entryDone.current = true; setEntry(null); boxRef.current?.focus({ preventScroll: true }); };
+  const commitEntry = (txt: string) => {
+    const { props: p, range: r } = latest.current;
+    if (entryDone.current) return;
+    entryDone.current = true;
+    setEntry(null);
+    boxRef.current?.focus({ preventScroll: true });
+    const v = solveTypedValue(r, p.format || fmtDefault, txt, p.value);
+    if (v !== null) { emit(v); flash(); }
+  };
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const { props: p, range: r } = latest.current;
     if (p.disabled) return;
+    if (!e.ctrlKey && !e.altKey && !e.metaKey && (startsValueEntry(e.key) || e.key === 'Enter')) {
+      e.preventDefault();
+      e.stopPropagation();
+      openEntry(e.key === 'Enter' ? (p.format || fmtDefault)(p.value) : e.key);
+      return;
+    }
     let next: number | null = null;
     const big = e.key === 'PageUp' || e.key === 'PageDown';
     if (e.key === 'ArrowUp' || e.key === 'ArrowRight' || e.key === 'PageUp') next = nudge(r, p.value, 1, { fine: e.shiftKey, big });
@@ -270,7 +293,7 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
   return (
     <div className={`hw-knob hw-ks-${size}${labeled ? ' hw-kscale' : ''}${className ? ` ${className}` : ''}`} data-nova-param={paramId} data-disabled={disabled ? 'true' : undefined}
       title={`${hint ? `${name} : ${hint}` : name}
-(glisser pour régler · Maj : réglage fin · molette · double-clic : valeur d'origine)`}>
+(glisser pour régler · Ctrl ou Maj : réglage fin · molette · double-clic ou Alt+clic : valeur d'origine · taper un chiffre : saisir la valeur)`}>
       {labelPos === 'top' && labelEl}
       <div ref={setBox} className="hw-knob-box" role="slider" tabIndex={disabled ? -1 : 0}
         aria-label={name} aria-valuemin={detents?.length ? detents[0].v : min} aria-valuemax={detents?.length ? detents[detents.length - 1].v : max}
@@ -289,8 +312,20 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
           {arcPath && <path d={arcPath} fill="none" stroke={arc} strokeWidth={2.8} strokeLinecap="round" />}
           {capSvg}
         </svg>
-        {active && <div className="hw-bubble" aria-hidden="true">{text}</div>}
+        {active && entry === null && <div className="hw-bubble" aria-hidden="true">{text}</div>}
       </div>
+      {entry !== null && (
+        <input className="hw-bubble hw-entry" data-hw-entry="" aria-label={`Valeur de ${name}`} value={entry}
+          ref={el => { if (el && el.ownerDocument.activeElement !== el) { el.focus({ preventScroll: true }); const n = el.value.length; el.setSelectionRange(n, n); } }}
+          onChange={e => setEntry(e.target.value)}
+          onPointerDown={e => e.stopPropagation()}
+          onKeyDown={e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); commitEntry(e.currentTarget.value); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelEntry(); }
+          }}
+          onBlur={e => commitEntry(e.currentTarget.value)} />
+      )}
       {labelPos === 'bottom' && labelEl}
       {sub && <div className="hw-knob-sub">{sub}</div>}
       {nativeInput && (

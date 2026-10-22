@@ -326,6 +326,8 @@
   white-space: nowrap;
   pointer-events: none;
 }
+/* Champ de saisie d'une valeur (taper un chiffre sur un bouton) : même bulle, cliquable. */
+.hw-bubble.hw-entry { pointer-events: auto; width: 9ch; text-align: center; outline: 2px solid #22d3ee; outline-offset: 0; bottom: auto; top: calc(var(--hw-kb) * 0.5 - 12px); }
 .hw-bubble::after {
   content: '';
   position: absolute;

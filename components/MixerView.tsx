@@ -3,6 +3,7 @@ import { MixScenesPanel, type SceneAction } from './MixScenesPanel';
 import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
+import { dbTextToGain } from '../plugins/hw/valueEntry';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -57,10 +58,25 @@ const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElemen
     </div>
   );
 };
-const LiveDbText: React.FC<{ track: Track }> = ({ track }) => {
+const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = ({ track, onSet }) => {
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
+  // Saisie au clavier (comme la case de volume d'une console de DAW) : clic, « -3,5 », Entrée.
+  const [editing, setEditing] = useState(false);
+  const done = useRef(false);
+  const commit = (v: string) => { if (done.current) return; done.current = true; setEditing(false); const g = dbTextToGain(v); if (g !== null) onSet?.(g); };
+  if (editing) {
+    return (
+      <input autoFocus defaultValue={text.replace(/ dB$/, '')} aria-label={`Volume de ${track.name} en dB`} data-testid={`fader-db-input-${track.id}`}
+        onFocus={e => e.currentTarget.select()}
+        onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget.value); } if (e.key === 'Escape') { e.preventDefault(); done.current = true; setEditing(false); } }}
+        onBlur={e => commit(e.currentTarget.value)}
+        className="mt-2 h-4 w-full rounded border border-cyan-500/60 bg-black/70 text-center text-[10px] font-mono tabular-nums text-white outline-none" />
+    );
+  }
   // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la tranche.
-  return <div className="mt-2 h-4 leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300" style={{ contain: 'strict' }}>{text}</div>;
+  return <button type="button" disabled={!onSet} onClick={() => { done.current = false; setEditing(true); }} data-testid={`fader-db-${track.id}`}
+    title="Clic pour taper le volume en dB (ex. -3,5 puis Entrée)" aria-label={`Volume de ${track.name} : ${text}. Clic pour le taper`}
+    className="mt-2 block h-4 w-full leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
 };
 const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);
@@ -520,7 +536,7 @@ const ChannelStrip: React.FC<{
                 data-nova-target={`vol-${track.id}`}
                 {...fader.bind}
                 ref={(el) => { faderTrackRef.current = el; fader.wheelRef(el); }}
-                title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+                title="Volume : glisser (Ctrl ou Maj = fin), molette, double-clic ou Alt+clic = 0 dB ; clic sur la valeur pour la taper"
                 role="slider"
                 aria-label={`Volume ${track.name}`}
                 aria-valuetext={gainToDbText(track.volume)}
@@ -536,7 +552,7 @@ const ChannelStrip: React.FC<{
              label={isMaster ? 'Sortie master' : track.name} className={isMaster ? 'w-[44px]' : 'w-[30px]'} />
         </div>
 
-        <LiveDbText track={track} />
+        <LiveDbText track={track} onSet={(g) => onUpdate({ ...track, volume: g })} />
         {isMaster && (
           <button type="button" onClick={() => loudnessPanel.toggle()} data-testid="mixer-loudness"
             title="Fenêtre Loudness : LUFS intégré / court terme / momentané, LRA, crête vraie, corrélation, goniomètre, spectre"

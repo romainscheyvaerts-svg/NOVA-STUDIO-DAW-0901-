@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { automationRecorder } from '../services/AutomationManager';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { solveTypedValue } from '../plugins/hw/valueEntry';
 
 interface SmartKnobProps {
   id: string;           // Identifiant unique du potard (ex: 'track-1-pan')
@@ -29,6 +30,16 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
   const [visualValue, setVisualValue] = useState(value);
   const internalValueRef = useRef(value);
   const [held, setHeld] = useState(false);
+  // Saisie au clavier : clic sur la valeur, on tape (« G 30 », « -6 »), Entrée.
+  const [editing, setEditing] = useState(false);
+  const entryDone = useRef(false);
+  const commitEntry = (txt: string) => {
+    if (entryDone.current) return;
+    entryDone.current = true;
+    setEditing(false);
+    const v = solveTypedValue({ min, max }, format || (x => `${x.toFixed(1)}${suffix}`), txt, internalValueRef.current);
+    if (v !== null) { setVisualValue(v); internalValueRef.current = v; onChange(v); }
+  };
 
   // Synchro avec les props (réglage changé ailleurs, ou automation rejouée)
   useEffect(() => {
@@ -86,11 +97,21 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
       
       <div className="text-center">
         <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
-        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[40px]">
-          <span className="text-[9px] font-mono font-bold text-white">
-            {format ? format(visualValue) : <>{visualValue.toFixed(1)}{suffix}</>}
-          </span>
-        </div>
+        {editing ? (
+          <input autoFocus defaultValue={format ? format(visualValue) : `${visualValue.toFixed(1)}`} aria-label={`${label} : taper la valeur`} data-testid={`knob-input-${id}`}
+            onFocus={e => e.currentTarget.select()}
+            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commitEntry(e.currentTarget.value); } if (e.key === 'Escape') { e.preventDefault(); entryDone.current = true; setEditing(false); } }}
+            onBlur={e => commitEntry(e.currentTarget.value)}
+            className="w-[56px] rounded border border-cyan-500/60 bg-black/70 px-1 py-0.5 text-center text-[9px] font-mono font-bold text-white outline-none" />
+        ) : (
+          <button type="button" onClick={() => { entryDone.current = false; setEditing(true); }} data-testid={`knob-value-${id}`}
+            title="Clic pour taper la valeur (ex. G 30, -6), puis Entrée"
+            className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[40px] hover:border-white/20 cursor-text">
+            <span className="text-[9px] font-mono font-bold text-white">
+              {format ? format(visualValue) : <>{visualValue.toFixed(1)}{suffix}</>}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );
