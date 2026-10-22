@@ -92,6 +92,29 @@ async ({ sr }) => {
     let mx = 0; for (let i = 0; i < n; i++) mx = Math.max(mx, Math.abs(a[i] - r[i]));
     out.bitExact.push({ reglage: `${b.type} ${b.frequency} Hz, ancien Q ${b.q}`, ecartMax: mx });
   }
+  // Saturation : « le niveau reste à peu près constant » (compensation calée sur un sinus crête
+  // −14 dBFS) et bouton Sortie exact. Sinus 1 kHz, mélange 100 %.
+  const satm = await window.__novaAppModule('/plugins/VocalSaturatorPlugin.tsx');
+  out.saturation = [];
+  for (const mode of ['TAPE', 'TUBE']) for (const drive of [0, 25, 50, 100]) for (const og of [1, 2]) {
+    if (og === 2 && drive !== 25) continue;
+    const n = Math.round(sr * 0.5);
+    const ctx = new OfflineAudioContext(2, n, sr);
+    const node = new satm.VocalSaturatorNode(ctx);
+    // Même ordre que le moteur à l'export : réglages posés à la création, puis le worklet se charge
+    // avec eux (un réglage envoyé APRÈS par message arrive à un instant quelconque du rendu hors ligne).
+    node.updateParams({ drive, mix: 1, tone: 0, eqLow: 0, eqMid: 0, eqHigh: 0, mode, isEnabled: true, outputGain: og });
+    await node.ready;
+    const osc = ctx.createOscillator(); osc.frequency.value = 1000;
+    const g = ctx.createGain(); g.gain.value = 0.2; // crête −14 dBFS
+    const sp = ctx.createChannelSplitter(2), mg = ctx.createChannelMerger(2);
+    osc.connect(g); g.connect(node.input); node.output.connect(sp); sp.connect(mg, 0, 0); g.connect(mg, 0, 1); mg.connect(ctx.destination);
+    osc.start(0);
+    const buf = await ctx.startRendering();
+    const y = buf.getChannelData(0), x = buf.getChannelData(1);
+    let ey = 0, ex = 0; for (let i = n >> 1; i < n; i++) { ey += y[i] * y[i]; ex += x[i] * x[i]; }
+    out.saturation.push({ mode, drive, sortie: og, ecartNiveauDb: 10 * Math.log10(ey / ex), attenduDb: 20 * Math.log10(og) });
+  }
   return out;
 }
 """
@@ -115,6 +138,8 @@ def main():
             pire = max(abs(m["ecart"]) for m in r["mesures"] if m["affiche"] > -40)
             bits = max(x["ecartMax"] for x in r["bitExact"])
             print(f"{sr} Hz : écart max navigateur / courbe affichée = {pire:.4f} dB ; ancien projet vs anciens filtres natifs = {bits:g}")
+            for x in r.get("saturation", []):
+                print(f"   saturation {x['mode']} chaleur {x['drive']} sortie {x['sortie']} : niveau {x['ecartNiveauDb']:+.2f} dB (attendu {x['attenduDb']:+.2f})")
             for m in r["mesures"]:
                 if abs(m["ecart"]) > 0.02 and m["affiche"] > -40:
                     print("   hors tolérance :", m)
