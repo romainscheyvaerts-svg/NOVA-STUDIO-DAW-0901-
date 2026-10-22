@@ -320,7 +320,7 @@ import { loadPadBuffer } from './utils/padBuffers';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
-import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, type UndoHistory } from './utils/undoHistory';
+import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, trackUserActions, type UndoHistory, type UserAction } from './utils/undoHistory';
 import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose, needsUnloadWarning } from './utils/autosavePolicy';
 import { DiskMirror, bridgeDiskBackend, latestOnDisk, pickMostRecent, importFromDisk, audioFrom, type RecoverySource } from './services/DiskProjectStore';
 import { requestPersistence, refreshStorageStatus, isQuotaError, QUOTA_FULL_MESSAGE, markLocalSaves, evictionSuspected, EVICTED_WEB_MESSAGE, EVICTED_DESKTOP_MESSAGE } from './utils/storageProtection';
@@ -673,6 +673,15 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
     });
   };
 
+  // Gestes de l'utilisateur (appuis, touches) : une étape d'annulation par geste (utils/undoHistory).
+  const userActionsRef = useRef<{ current: () => UserAction } | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = trackUserActions(window);
+    userActionsRef.current = t;
+    return () => { t.dispose(); if (userActionsRef.current === t) userActionsRef.current = null; };
+  }, []);
+
   const setState = useCallback((updater: DAWState | ((prev: DAWState) => DAWState)) => {
     // L'anti-rebond est decide ICI, hors du reducer. Il etait calcule a
     // l'interieur en mutant lastHistoryUpdateRef : sous StrictMode React invoque
@@ -683,6 +692,8 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
     // depuis la dernière modification réelle : sélectionner une piste juste
     // avant un glisser ne fond plus ce glisser dans l'entrée précédente.
     const maintenant = Date.now();
+    // Lu ici (hors du reducer, qui reste pur) : le geste en cours au moment de la modification.
+    const user = userActionsRef.current?.current();
 
     setHistory(curr => {
       let newState = typeof updater === 'function' ? updater(curr.present) : updater;
@@ -743,7 +754,7 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
 
       // Changements rapproches (ou groupe ouvert par le chat) : on met a jour le present
       // sans nouvelle entree (utils/undoHistory, recordChange).
-      return recordChange(curr, newState, maintenant, { debounceMs: HISTORY_DEBOUNCE_MS, limit: MAX_HISTORY, clean: cleanStateForHistory });
+      return recordChange(curr, newState, maintenant, { debounceMs: HISTORY_DEBOUNCE_MS, limit: MAX_HISTORY, clean: cleanStateForHistory, user });
     });
   }, []);
 
