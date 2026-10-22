@@ -8667,9 +8667,10 @@ function Studio() {
         }
         if (d.wasPlaying && stateRef.current.isPlaying && !stateRef.current.isRecording) {
           const pos = typeof d.position === 'number' ? d.position : stateRef.current.currentTime;
-          audioEngine.startPlayback(pos, stateRef.current.tracks);
+          // Le moteur a déjà repris la lecture lui-même (sinon : reprise ici).
+          if (!audioEngine.isPlayingNow()) audioEngine.startPlayback(pos, stateRef.current.tracks);
           const mt = stateRef.current.metronome;
-          if (mt.enabled && mt.mode !== 'record') metronomeService.start(pos);
+          if (mt.enabled && mt.mode !== 'record') metronomeService.start(audioEngine.getCurrentTime());
         }
       })();
     };

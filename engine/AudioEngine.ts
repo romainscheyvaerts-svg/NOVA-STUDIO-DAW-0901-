@@ -527,6 +527,8 @@ export class AudioEngine {
   }
   /** État de la garde de l'horloge (Réglages audio, QA). */
   public getClockWatchStatus() { return this.clockWatchInst?.status() ?? null; }
+  /** Lecture en cours (moteur). */
+  public isPlayingNow() { return this.isPlaying; }
 
   /**
    * Relance du moteur audio quand la sortie ne répond plus (horloge figée, erreur du
@@ -539,12 +541,20 @@ export class AudioEngine {
     const wasPlaying = this.isPlaying;
     const position = wasPlaying ? this.getCurrentTime() : this.pausedAt;
     const armed = this.armedIds();
+    const tracks = this.practiceRawTracks;
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
       await this.rebuildContext();
     } catch (e) {
       console.error('[AudioEngine] relance du moteur audio impossible', e);
       return false;
+    }
+    // Le moteur repart seul : pistes recâblées et lecture reprise à la même position (App complète
+    // ensuite : mixes casque, pistes armées, métronome, diffusion du mix).
+    if (tracks && this.ctx) {
+      try { await this.resume(); } catch { /* */ }
+      try { tracks.forEach(t => this.updateTrack(t, tracks)); } catch (e) { console.warn('[AudioEngine] pistes non recâblées', e); }
+      if (wasPlaying) { try { this.startPlayback(position, tracks); } catch (e) { console.warn('[AudioEngine] lecture non reprise', e); } }
     }
     try { window.dispatchEvent(new CustomEvent('nova:audio-restarted', { detail: { reason, wasPlaying, position, armed, ms: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) } })); } catch { /* hors navigateur */ }
     return true;
@@ -1181,8 +1191,11 @@ export class AudioEngine {
     }
     // Latence MESURÉE par la boucle (measureRoundTrip) pour ce micro, cette sortie, cette fréquence :
     // c'est le retard réel d'une prise, il remplace l'estimation ci-dessous.
+    // La boucle part de la sortie du navigateur : on y ajoute le retard du chemin du master, que le
+    // son de la timeline traverse avant (anticipation de 6 ms du limiteur de sécurité de Chrome,
+    // DynamicsCompressorNode : mesuré 288 images à 48 kHz dans qa/moteur_web.py).
     const cal = this.calibratedLatency();
-    if (cal !== null) return { total: cal, mode: 'mesuree' };
+    if (cal !== null) return { total: cal + this.masterPathLatency(), mode: 'mesuree' };
     const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
     let inp = 0.01;
     try {
@@ -1206,6 +1219,10 @@ export class AudioEngine {
     if (this.asioStreamActive && this.isUsingASIOInput()) return null;
     const v = this.rtTable()[this.rtKey()];
     return v && Number.isFinite(v.s) && v.s > 0 && v.s < 0.5 ? v.s : null;
+  }
+  /** Retard du chemin du master avant la sortie (s) : anticipation du limiteur de sécurité. */
+  public masterPathLatency(): number {
+    return this.safetyLimiterOn && this.ctx ? Math.round(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate : 0;
   }
   /** Oublie la mesure (retour à l'estimation). */
   public clearCalibratedLatency() {
