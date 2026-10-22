@@ -2842,7 +2842,7 @@ useEffect(() => {
     const gain = clipGainMenuItems(cm.trackId, cm.clip, close);
     const gainLine = gain.filter(it => /ligne de gain|Rendre le gain|gain d’avant/.test(it.label));
     const editTools = gain.filter(it => !gainLine.includes(it));
-    const justesse: ContextMenuItem = { label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
+    const justesse: ContextMenuItem = { label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Corrige la justesse de ta voix note par note',
       onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } };
     const respirations: ContextMenuItem = { label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX',
       onClick: () => { requestBreaths({ mode: 'dialog', clipIds: selTargets().map(x => x.clipId), reason: 'menu' }); close(); } };
@@ -2969,13 +2969,13 @@ useEffect(() => {
     const pitchTime = group('Hauteur et temps', 'fa-arrows-up-down', [
       ...(audioOnly && !cm.clip.notes ? [
         { label: simple ? 'Changer la tonalité…' : 'Transposer / étirer…', icon: 'fa-arrows-up-down',
-          title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
+          title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé',
           onClick: () => {
             const targets = selTargets().filter(tg => { const c = tracks.find(t => t.id === tg.trackId)?.clips.find(x => x.id === tg.clipId); return !!c && !c.notes && c.type !== TrackType.MIDI; });
             openNovaWindow('transpose', { targets, simple }); close();
           } },
         ...(!simple ? [{ label: 'Marqueurs de warp…', icon: 'fa-arrows-left-right-to-line',
-          title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
+          title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas',
           onClick: () => { openNovaWindow('warp', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } }] : []),
       ] : []),
       ...(cm.clip.warp?.originalBpm && Math.abs(cm.clip.warp.originalBpm - bpm) > 0.5 ? [
@@ -3046,7 +3046,7 @@ useEffect(() => {
     // 6. Traitement : AudioSuite, stems, sampler et découpe (R18).
     const processing = group('Traitement', 'fa-wand-magic-sparkles', [
       ...(audioOnly ? [{ label: 'Traiter avec un effet…', icon: 'fa-wand-magic-sparkles',
-        title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« Traitement de fichier » de Logic, Edison dans FL)',
+        title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé',
         onClick: () => { openNovaWindow('audiosuite', { targets: selTargets() }); close(); }}] : []),
       ...(cm.clip.audioSuite ? [{ label: 'Revenir à l’original (avant traitement)', icon: 'fa-rotate-left',
         title: `Remet la prise d’origine à la même place (traitements : ${cm.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,

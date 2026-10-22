@@ -418,7 +418,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
         <div>
           <h2 id="stems-title" className="text-lg font-black text-white" title={STEMS_TOOLTIP}>Séparer en stems</h2>
           <p className="mt-1 text-[12px] text-slate-300 truncate">« {target.clipName} »</p>
-          <p className="text-[11px] text-slate-500">Comme Stem Splitter (Logic), Stem Separation (FL Studio) et Splitter (BandLab)</p>
+          <p className="text-[11px] text-slate-500">Voix, batterie, basse… séparées gratuitement sur ton appareil</p>
         </div>
         {body}
       </div>

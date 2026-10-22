@@ -10,7 +10,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { nextPreset, PRACTICE_PRESETS, practiceLabel, practiceSpeedStore, usePracticeSpeed } from '../utils/practiceSpeed';
 
-const TITLE = 'Lecture ralentie : écoute de 50 à 100 % sans changer la hauteur, pour travailler un passage rapide ou apprendre un texte (Half-Speed, Maj+Espace · Logic : Varispeed « vitesse seulement » · Live : tempo baissé avec Warp · FL : tempo baissé). L’export n’est jamais ralenti. Maj+Espace : lecture à 50 %.';
+const TITLE = 'Lecture ralentie : écoute de 50 à 100 % sans changer la hauteur, pour travailler un passage rapide ou apprendre un texte (Half-Speed, Maj+Espace). L’export n’est jamais ralenti. Maj+Espace : lecture à 50 %.';
 
 const PracticeSpeed: React.FC<{ compact?: boolean; className?: string; inline?: boolean }> = ({ compact = false, className = '', inline = false }) => {
   const speed = usePracticeSpeed();

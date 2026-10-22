@@ -59,7 +59,7 @@ const ArrangeLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, m
     editSelectionStore.set({ time: makeSelection(sec.start, sec.end, ids), clipIds: [] });
   };
   const items = (sec: Section) => [
-    { label: `Dupliquer « ${sec.name} » à la suite`, onClick: () => act(sec, 'copy', sec.end), title: 'Logic : Arrangement › Dupliquer' },
+    { label: `Dupliquer « ${sec.name} » à la suite`, onClick: () => act(sec, 'copy', sec.end), title: 'Copie toute la section juste après elle : clips, automation, accords et repères' },
     { label: 'Sélectionner la section (toutes les pistes)', onClick: () => selectSection(sec) },
     { label: 'Insérer du temps avant…', onClick: () => openR12Panel('time', { preset: { mode: 'insert', at: sec.start } }), title: 'Insert Time' },
     'separator' as const,
@@ -97,7 +97,7 @@ const ArrangeLane: React.FC<Props> = ({ zoomH, scrollLeft, headerWidth, width, m
     <div className="shrink-0 flex border-b relative z-30 select-none" data-testid="arrange-lane"
       style={{ height: ARRANGE_LANE_H, borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
       <div className="shrink-0 flex items-center gap-1.5 px-2 border-r" style={{ width: headerWidth, borderColor: 'var(--border-dim)' }}
-        title="Piste Arrangement : glisse une section (Couplet, Refrain…) pour la déplacer, Alt / Ctrl pour la dupliquer (Logic, Studio One). Clips, automation, accords, repères et tempo suivent.">
+        title="Piste Arrangement : glisse une section (Couplet, Refrain…) pour la déplacer, Alt / Ctrl pour la dupliquer. Clips, automation, accords, repères et tempo suivent.">
         <i className="fas fa-layer-group text-[10px] text-fuchsia-300" aria-hidden />
         <span className="text-[11px] font-black truncate" style={{ color: 'var(--text-primary)' }}>Arrangement</span>
         <button type="button" aria-pressed={copyMode} onClick={() => setCopyMode(c => !c)} data-testid="arrange-copy-mode"

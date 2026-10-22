@@ -11222,9 +11222,9 @@ function Studio() {
       a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
-      a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
+      a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Alt+Maj+I' }),
       a('Fichier', 'pal.aafImport', 'Importer une séance AAF (logiciel de studio)', () => openAafImport(), { pt: 'Export › Selected Tracks as New AAF/OMF', keywords: 'aaf omf logiciel studio séance session importer ingé' }),
-      a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Import › Session Data (AAF)', keywords: 'aaf omf logiciel studio séance session exporter ingé bwf' }),
+      a('Fichier', 'pal.aafExport', 'Exporter la séance pour un logiciel de studio (AAF + BWF)', () => openAafExport(), { pt: 'Fichier AAF + BWF', keywords: 'aaf omf logiciel studio séance session exporter ingé bwf' }),
       a('Pistes', 'pal.trackSearch', 'Filtrer les pistes : nom, voix, couleur, état (grosses séances)', () => openTrackSearch(), { keywords: 'chercher filtrer filtre trouver piste pistes voix grosse séance liste' }),
       a('Pistes', 'pal.trackPin', 'Épingler / désépingler la piste sélectionnée en haut', () => { const id = stateRef.current.selectedTrackId; if (id && id !== 'master') setAiNotification(togglePin(id) ? '📌 Piste épinglée en haut de l’arrangement' : 'Piste désépinglée'); }, { keywords: 'épingler épingle pin garder en haut visible défiler' }),
       ...(isMobile ? [] : [
@@ -11263,9 +11263,9 @@ function Studio() {
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
-      a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne / Elastic Pitch', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
+      a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
       a('Voix', 'pal.melodyne', 'Ouvrir le clip dans Melodyne (ARA)', () => openNovaWindow('ara-melodyne', { targets: clipTargets }), { pt: 'ARA Melodyne', keywords: 'melodyne ara justesse', disabledReason: needClip }),
-      a('Édition', 'pal.stems', 'Séparer le clip en stems (voix, instru, batterie, basse)', () => { if (clipTargets[0]) onSeparateStemsStable(clipTargets[0].trackId, clipTargets[0].clipId); }, { pt: 'Stem Splitter (Logic) · Splitter (BandLab)', keywords: 'stems séparer separation voix instru acapella karaoké batterie basse demucs isoler extraire', disabledReason: needClip }),
+      a('Édition', 'pal.stems', 'Séparer le clip en stems (voix, instru, batterie, basse)', () => { if (clipTargets[0]) onSeparateStemsStable(clipTargets[0].trackId, clipTargets[0].clipId); }, { pt: 'Séparation de stems', keywords: 'stems séparer separation voix instru acapella karaoké batterie basse demucs isoler extraire', disabledReason: needClip }),
       // Pistes et mix
       a('Pistes', 'pal.audioTrack', 'Nouvelle piste audio', () => handleCreateTrack(TrackType.AUDIO, 'AUDIO'), { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste audio nouvelle' }),
       a('Pistes', 'pal.bus', 'Nouveau bus (groupe de pistes)', () => handleCreateTrack(TrackType.BUS, 'BUS'), { pt: 'New Aux Input', keywords: 'bus aux sous-groupe' }),
@@ -11274,7 +11274,7 @@ function Studio() {
       a('Pistes', 'pal.trackList', 'Liste des pistes (afficher, masquer, dossiers, VCA)', () => setStructurePanel('tracks'), { pt: 'Track List', keywords: 'vca dossier masquer pistes' }),
       a('Pistes', 'pal.groups', 'Groupes de pistes', () => setR12Panel({ panel: 'groups' }), { pt: 'Groups List', keywords: 'groupe' }),
       a('Pistes', 'pal.time', 'Insérer ou supprimer du temps', () => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } }), { keys: k('pt.insertTime'), pt: 'Insert Silence / Insert Time' }),
-      a('Mix', 'pal.masterNova', 'Master Nova : mastering en un clic', () => setMasterNovaOpen(true), { pt: 'Mastering Assistant (Logic)', keywords: 'master mastering spotify loudness' }),
+      a('Mix', 'pal.masterNova', 'Master Nova : mastering en un clic', () => setMasterNovaOpen(true), { pt: 'Assistant de mastering', keywords: 'master mastering spotify loudness' }),
       a('Voix', 'pal.warmup', '🎤 Échauffement voix et flow (sirènes, gammes, virelangues, flow 80 → 140 BPM)', () => setVocalCoach('echauffement'), { keywords: 'échauffement echauffement voix flow rap vocalise sirène trille gamme diction virelangue souffle respiration tessiture voicetrainer bandlab' }),
       a('Voix', 'pal.tuner', '🎯 Accordeur (voix, guitare, basse)', () => setVocalCoach('accordeur'), { keywords: 'accordeur tuner accorder guitare basse justesse note cents' }),
       a('Mix', 'pal.quickMaster', '🎚️ Masteriser un morceau (un fichier WAV / MP3, sans projet)', () => setQuickMasterOpen(true), { keywords: 'masteriser master mastering fichier wav mp3 flac référence bandlab express' }),
@@ -11329,7 +11329,7 @@ function Studio() {
       a('Aide', 'pal.howto', '❓ Comment faire ? Les démarches pas à pas', () => howTo.open(), { keywords: 'aide comment faire tuto tutoriel guide parcours démarche étapes help how to montre-moi' }),
       ...GUIDES.map(g => a('Comment faire', `howto.${g.id}`, `❓ ${g.title}`, () => howTo.open(g.id), { keywords: `comment faire tuto ${g.keywords}`, guide: true })),
       a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
-      a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Studio pro, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
+      a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Studio pro, Beatmaking, Clips et boucles)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
       ...(isMobile ? [] : [a('Aide', 'pal.macros', 'Macros : enchaîner plusieurs commandes sur une touche', () => { openMacrosTabNext(); setKeymapEditorOpen(true); }, { keywords: 'macro macros enchaîner chaîner plusieurs commandes une touche automatiser action personnalisée script' })]),
       ...macroPaletteActions(),
       a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
@@ -11596,7 +11596,7 @@ function Studio() {
                         </button>
                         <button type="button" data-testid="dock-session" aria-label="Session : notes, clips, arrangements, versions" aria-pressed={!!sessionTab}
                           onClick={() => { close(); openSessionPanel(sessionTab ? null : 'notes'); }}
-                          title="Session : notes et commentaires (Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)" className={row(!!sessionTab)}>
+                          title="Session : notes et commentaires (Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Alt+Maj+I)" className={row(!!sessionTab)}>
                           <i className="fas fa-folder-open w-5 text-center text-[11px]" aria-hidden="true" /><span className="flex-1">Notes, clips, arrangements, versions</span>
                           {notes > 0 && <span className="text-[10px] text-slate-400">📝 {notes}</span>}
                         </button>

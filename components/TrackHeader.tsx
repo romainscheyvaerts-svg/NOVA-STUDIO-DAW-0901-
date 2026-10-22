@@ -514,7 +514,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     <button type="button" data-takes-button={track.id}
       onClick={(e) => { e.stopPropagation(); onToggleTakes?.(track.id); }}
       aria-expanded={!!takesOpen}
-      title={`${takesOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
+      title={`${takesOpen ? 'Replier' : 'Déplier'} les couloirs de prises : écoute chaque prise, balaie un passage pour le garder.`}
       className={`${absolute ? 'absolute z-10 right-1.5 bottom-1.5' : 'shrink-0'} h-6 px-2 rounded-full text-[10px] font-black flex items-center gap-1 border whitespace-nowrap ${takesOpen ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-black/70 text-cyan-200 border-cyan-400/50 hover:bg-cyan-500/20 [[data-theme=light]_&]:bg-white [[data-theme=light]_&]:text-cyan-700'}`}>
       <i className="fas fa-layer-group text-[9px]" />Prises ({n})<i className={`fas ${takesOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px]`} />
     </button>

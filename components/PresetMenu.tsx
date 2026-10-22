@@ -197,11 +197,11 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
   return (
     <div className="flex min-w-0 items-center gap-1" data-testid="preset-menu" onPointerDown={e => e.stopPropagation()}>
       {!simple && (
-        <button type="button" onClick={() => step(-1)} disabled={!list.length || busy} aria-label="Preset précédent" title="Preset précédent (flèche « - » du Librarian · FL : ‹)"
+        <button type="button" onClick={() => step(-1)} disabled={!list.length || busy} aria-label="Preset précédent" title="Preset précédent (flèche « - » du Librarian)"
           className="h-8 w-7 rounded-full text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 [@media(pointer:coarse)]:h-10"><i className="fas fa-chevron-left text-[10px]" /></button>
       )}
       <button ref={btnRef} type="button" onClick={() => { setOpen(o => !o); setStatus(null); }} aria-haspopup="menu" aria-expanded={open} data-testid="preset-button"
-        title="Presets de l'effet : enregistrer, charger, favoris, importer / exporter (menu Librarian · Logic : menu Réglages · Ableton : Save Preset · FL : menu Presets)"
+        title="Presets de l'effet : enregistrer, charger, favoris, importer / exporter (menu Librarian)"
         className={`${chip} min-w-0 max-w-[200px] bg-white/[0.06] border border-white/10 text-slate-200 hover:bg-white/15`}>
         <i className={`fas ${current && isFavorite(current.id) ? 'fa-star text-amber-300' : 'fa-bookmark text-slate-400'} text-[10px]`} />
         <span className="truncate">{label}</span>
@@ -209,12 +209,12 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
         <i className="fas fa-caret-down text-[10px] text-slate-500" />
       </button>
       {!simple && (
-        <button type="button" onClick={() => step(1)} disabled={!list.length || busy} aria-label="Preset suivant" title="Preset suivant (flèche « + » du Librarian · FL : ›)"
+        <button type="button" onClick={() => step(1)} disabled={!list.length || busy} aria-label="Preset suivant" title="Preset suivant (flèche « + » du Librarian)"
           className="h-8 w-7 rounded-full text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 [@media(pointer:coarse)]:h-10"><i className="fas fa-chevron-right text-[10px]" /></button>
       )}
       {!simple && (
         <button type="button" onClick={() => void toggleCompare()} disabled={busy || (!modified && !listening)} aria-pressed={listening} data-testid="preset-compare"
-          title={`Comparer (« Compare », Logic « Comparer », bascule A/B d'Ableton) : ${listening ? `tu écoutes « ${cs.refLabel} » ; clic pour retrouver tes modifications.` : modified ? `écoute « ${cs.refLabel} » sans perdre tes modifications.` : 'modifie un réglage pour pouvoir comparer.'}`}
+          title={`Comparer (bascule A/B) : ${listening ? `tu écoutes « ${cs.refLabel} » ; clic pour retrouver tes modifications.` : modified ? `écoute « ${cs.refLabel} » sans perdre tes modifications.` : 'modifie un réglage pour pouvoir comparer.'}`}
           className={`${chip} shrink-0 border ${listening ? 'bg-amber-400 text-black border-amber-300' : modified ? 'border-amber-400/50 text-amber-300 hover:bg-amber-400/15' : 'border-white/10 text-slate-500'} disabled:opacity-40`}>
           <i className="fas fa-right-left text-[10px]" /><span className="hidden md:inline">Comparer</span>
         </button>
@@ -241,7 +241,7 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
               </button>
             )}
             <button type="button" disabled={busy} onClick={() => setSaveAs(s => (s === null ? (presetName && !current?.bundled ? `${presetName} 2` : '') : null))} data-testid="preset-save-as"
-              title="Enregistre le réglage actuel comme nouveau preset (Save Settings As… · Logic : Enregistrer le réglage sous…)"
+              title="Enregistre le réglage actuel comme nouveau preset"
               className="min-h-[34px] rounded-lg border border-nv-line px-3 text-[11px] font-bold hover:bg-nv-accent/10 disabled:opacity-40">
               <i className="fas fa-plus mr-1" />Enregistrer sous…
             </button>

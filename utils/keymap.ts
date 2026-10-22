@@ -78,7 +78,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.barPrev', keys: [',', ';'], label: 'Mesure précédente (avec Maj : temps précédent)', pt: 'Pavé 1 (Rewind)', category: 'Navigation' }),
   nova({ id: 'nova.barNext', keys: ['.', ':'], label: 'Mesure suivante (avec Maj : temps suivant)', pt: 'Pavé 2 (Fast Forward)', category: 'Navigation' }),
   nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off (avec une plage sélectionnée : boucler cette plage)', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
-  nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Aucun (Logic : Capture as Recording)', category: 'Transport' }),
+  nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Aucun', category: 'Transport' }),
   nova({ id: 'nova.keepTake', keys: ['ctrl+alt+p'], label: '📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste, pour choisir à la fin)', pt: 'Noter la prise (Ctrl+Alt+Démarrer+1…5, Démarrer réservée à Windows) · Copy Selection to Main Playlist', category: 'Transport' }),
   // Jeter la prise en cours (comme le Ctrl+. des studios) : rien n'est gardé, retour au début, R pour la refaire.
   nova({ id: 'nova.discardTake', keys: ['ctrl+.', 'ctrl+numdec'], label: '🗑️ Jeter la prise en cours : rien n’est gardé (aucun couloir), retour au début pour la refaire', pt: 'Ctrl+. pendant l’enregistrement', category: 'Transport' }),
@@ -86,7 +86,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
   nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),
   nova({ id: 'nova.help', keys: ['?', 'shift+/'], label: 'Afficher / masquer l’aide des raccourcis', category: 'Fenêtres' }),
-  nova({ id: 'nova.palette', keys: ['ctrl+k'], label: 'Palette de commandes : chercher n’importe quelle action par son nom (exporter, tempo, bus, Strip Silence…)', pt: 'Aucun (Logic : Commandes rapides ; Live 12 : Ctrl+K)', category: 'Fenêtres' }),
+  nova({ id: 'nova.palette', keys: ['ctrl+k'], label: 'Palette de commandes : chercher n’importe quelle action par son nom (exporter, tempo, bus, Strip Silence…)', pt: 'Aucun', category: 'Fenêtres' }),
   // Géré par components/FeedbackModal (FeedbackHost), même sur la page d'accueil.
   nova({ id: 'nova.feedback', keys: ['ctrl+shift+b'], label: 'Signaler un bug / proposer une idée', category: 'Fenêtres' }),
   nova({ id: 'nova.undo', keys: ['ctrl+z'], label: 'Annuler', pt: 'Ctrl+Z', category: 'Édition' }),
@@ -97,7 +97,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.save', keys: ['ctrl+shift+s'], label: 'Sauvegarder… (autre nom, fichier .zip, en ligne, nouvelle version)', pt: 'Ctrl+Maj+S (Save As)', category: 'Fenêtres' }),
   nova({ id: 'nova.open', keys: ['ctrl+o'], label: 'Ouvrir un projet (récents, fichier .zip, en ligne)', pt: 'Ctrl+O (Open Session)', category: 'Fenêtres' }),
   nova({ id: 'nova.importAudio', keys: ['ctrl+shift+i'], label: 'Importer un son du PC (beat, prise, back) : sur une piste vide du modèle ou une nouvelle piste', pt: 'Ctrl+Maj+I (Import Audio)', category: 'Fenêtres' }),
-  nova({ id: 'nova.importSession', keys: ['alt+shift+i'], label: 'Importer depuis une session (pistes, effets, envois et automation d’un autre projet)', pt: 'Alt+Maj+I (Import Session Data)', category: 'Fenêtres' }),
+  nova({ id: 'nova.importSession', keys: ['alt+shift+i'], label: 'Importer depuis une session (pistes, effets, envois et automation d’un autre projet)', pt: 'Alt+Maj+I', category: 'Fenêtres' }),
   nova({ id: 'nova.export', keys: ['ctrl+shift+e'], label: 'Exporter (mix, stems, voix seules)', pt: 'Bounce to Disk : Ctrl+Alt+B', category: 'Fenêtres' }),
   nova({ id: 'nova.copy', keys: ['ctrl+c'], label: 'Copier le clip', pt: 'Ctrl+C', category: 'Édition' }),
   nova({ id: 'nova.cut', keys: ['ctrl+x'], label: 'Couper le clip', pt: 'Ctrl+X', category: 'Édition' }),
@@ -117,8 +117,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'tool.erase', keys: ['3'], label: 'Gomme : supprimer le clip cliqué', category: 'Outils' }),
   nova({ id: 'tool.cycle', keys: [], label: 'Passer à l’outil suivant', pt: 'Échap (Cycle through Edit tools)', category: 'Outils' }),
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
-  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
-  nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Aucun (Live : Capture MIDI, Ctrl+Maj+C)', category: 'Transport' }),
+  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Clavier MIDI (Ctrl+Démarrer+K)', category: 'Transport' }),
+  nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Aucun', category: 'Transport' }),
   // Talkback (utils/talkback, App.tsx) : N, libre partout (préréglages, Keyboard Focus, clavier MIDI), jamais dans un champ texte.
   nova({ id: 'nova.talkback', keys: ['n'], label: 'Talkback : appui court = reste ouvert (2e appui coupe), maintenu = tu parles tant que tu tiens (casque de l’artiste ; en collaboration, en direct)', pt: 'Bouton Talkback d’une console de studio', category: 'Transport' }),
 
@@ -157,9 +157,9 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.restoreSelection', keys: ['ctrl+alt+z'], label: 'Restaurer la dernière sélection (plage et clips) ; encore une fois : revenir à l’autre', pt: 'Opt+Cmd+Z / Ctrl+Alt+Z (Restore Last Selection)', category: 'Édition' }),
   g({ id: 'pt.memoryWindow', keys: ['ctrl+5', 'ctrl+num5'], label: 'Liste des repères (Memory Locations)', pt: 'Ctrl+5 (pavé)', category: 'Repères' }),
   // Ctrl+→ / Ctrl+← (Logic) : sur tous les claviers. Ctrl+] / Ctrl+[ demandent AltGr en AZERTY.
-  g({ id: 'pt.zoomIn', keys: ['ctrl+arrowright', 'ctrl+]'], label: 'Zoom avant (sur la tête de lecture si elle est à l’écran)', pt: 'Ctrl+] · Logic : Ctrl+→', category: 'Zoom et affichage', command: 'zoomIn' }),
-  g({ id: 'pt.zoomOut', keys: ['ctrl+arrowleft', 'ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[ · Logic : Ctrl+←', category: 'Zoom et affichage', command: 'zoomOut' }),
-  g({ id: 'pt.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (plage, sinon clips) ; sans sélection : tout le morceau et toutes les pistes à l’écran ; Z une 2e fois : retour à la vue d’avant', pt: 'E en Keyboard Focus (Zoom Toggle) · Logic et Live : Z', category: 'Zoom et affichage', command: 'zoomToSelection' }),
+  g({ id: 'pt.zoomIn', keys: ['ctrl+arrowright', 'ctrl+]'], label: 'Zoom avant (sur la tête de lecture si elle est à l’écran)', pt: 'Ctrl+]', category: 'Zoom et affichage', command: 'zoomIn' }),
+  g({ id: 'pt.zoomOut', keys: ['ctrl+arrowleft', 'ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[', category: 'Zoom et affichage', command: 'zoomOut' }),
+  g({ id: 'pt.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (plage, sinon clips) ; sans sélection : tout le morceau et toutes les pistes à l’écran ; Z une 2e fois : retour à la vue d’avant', pt: 'E en Keyboard Focus (Zoom Toggle)', category: 'Zoom et affichage', command: 'zoomToSelection' }),
   g({ id: 'pt.heightUp', keys: ['ctrl+arrowup'], label: 'Pistes plus hautes', pt: 'Ctrl+↑ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightUp' }),
   g({ id: 'pt.heightDown', keys: ['ctrl+arrowdown'], label: 'Pistes plus basses', pt: 'Ctrl+↓ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightDown' }),
   // --- Modes d'édition (hooks/useEditModes, utils/editModes) -----------------------
@@ -208,7 +208,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.soloXor', keys: [], label: 'Mode de solo X-OR : un solo annule les précédents', pt: 'Options › Mode Solo › X-OR', category: 'Mix', command: 'soloMode', arg: { mode: 'xor' } }),
   g({ id: 'pt.soloLatch', keys: [], label: 'Mode de solo Verrouiller : les solos s’ajoutent', pt: 'Options › Mode Solo › Verrouiller (Latch)', category: 'Mix', command: 'soloMode', arg: { mode: 'latch' } }),
   // Section d'écoute (utils/monitorSection) : ce qu'on entend, jamais l'export.
-  g({ id: 'mon.mono', keys: ['alt+m'], label: 'Écoute en mono on / off (G + D à −6 dB) : vérifier la compatibilité mono, l’export reste en stéréo', pt: 'Logic / Cubase : Mono de la section d’écoute', category: 'Mix', command: 'monitorMono' }),
+  g({ id: 'mon.mono', keys: ['alt+m'], label: 'Écoute en mono on / off (G + D à −6 dB) : vérifier la compatibilité mono, l’export reste en stéréo', pt: 'Mono de la section d’écoute', category: 'Mix', command: 'monitorMono' }),
   g({ id: 'mon.side', keys: [], label: 'Écoute des côtés seuls on / off (S = G − D) : ce qui disparaît en mono', pt: 'Écoute S d’un contrôleur de monitoring', category: 'Mix', command: 'monitorSide' }),
   g({ id: 'mon.dim', keys: ['ctrl+alt+d'], label: 'Dim : baisser l’écoute de 20 dB on / off, sans toucher au mix ni à l’export', pt: 'Dim de la section d’écoute', category: 'Mix', command: 'monitorDim' }),
   g({ id: 'mon.cut', keys: ['alt+x'], label: 'Couper / rallumer l’écoute (le mix, les mètres et l’export continuent)', pt: 'Cut de la section d’écoute', category: 'Mix', command: 'monitorCut' }),
@@ -250,7 +250,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'layout.5', keys: ['ctrl+shift+5'], label: 'Disposition 5 (la tienne)', pt: 'Pavé . 5 *', category: 'Dispositions', arg: 5 }),
   g({ id: 'layout.list', keys: ['ctrl+alt+j'], label: 'Dispositions de fenêtres : enregistrer, rappeler, renommer', pt: 'Ctrl+Alt+J (Window Configuration List)', category: 'Dispositions' }),
   g({ id: 'layout.numpad', keys: [], label: 'Au pavé : « . » N « * » rappelle la disposition N, « . » N « / » y enregistre la vue actuelle', pt: 'Pavé . N * / Pavé . N /', category: 'Dispositions', fixed: true }),
-  g({ id: 'keymap.editor', keys: ['ctrl+alt+k'], label: 'Personnaliser les raccourcis (éditeur, préréglages Studio pro, FL Studio, Ableton Live)', pt: 'Démarrer+Maj+K (Keyboard Shortcuts)', category: 'Fenêtres' }),
+  g({ id: 'keymap.editor', keys: ['ctrl+alt+k'], label: 'Personnaliser les raccourcis (éditeur, préréglages Studio pro, Beatmaking, Clips et boucles)', pt: 'Démarrer+Maj+K (Keyboard Shortcuts)', category: 'Fenêtres' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------
   f({ id: 'kf.trimStart', keys: ['a'], label: 'Couper le début du clip jusqu’à la tête de lecture', pt: 'A (Trim Start to Insertion)', category: 'Keyboard Focus', command: 'trimStartToCursor' }),

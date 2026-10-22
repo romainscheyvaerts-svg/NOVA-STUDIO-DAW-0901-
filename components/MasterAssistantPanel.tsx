@@ -145,7 +145,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-3 bg-nv-bg/95 backdrop-blur border-b border-white/10">
           <div className="min-w-0">
             <h2 className="text-base font-black tracking-tight"><i className="fas fa-crown text-amber-400 mr-2"></i>Master Nova</h2>
-            <p className="text-[11px] text-slate-400 leading-snug">Ton morceau prêt pour les plateformes en un clic, comme le Mastering Assistant de Logic Pro</p>
+            <p className="text-[11px] text-slate-400 leading-snug">Ton morceau prêt pour les plateformes en un clic</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Lecture'} title="Écouter / pause (barre d'espace)"

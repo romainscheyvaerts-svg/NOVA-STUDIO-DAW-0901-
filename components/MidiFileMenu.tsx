@@ -18,19 +18,19 @@ export function useCaptureCount(): number {
   return n;
 }
 
-export const CAPTURE_HINT = 'Capturer : crée un clip avec ce que tu viens de jouer, même sans avoir enregistré (comme Capture MIDI dans Ableton Live et la fonction Capture Recording de Logic). Ctrl+Maj+C.';
+export const CAPTURE_HINT = 'Capturer : crée un clip avec ce que tu viens de jouer, même sans avoir enregistré. Ctrl+Maj+C.';
 
 /** Menu du clip : groove (MIDI), export .mid, ou extraction du groove (audio). */
 export function midiClipMenuItems(trackId: string, clip: Clip, close: () => void): ContextMenuItem[] {
   if (clip.type === TrackType.MIDI && Array.isArray(clip.notes)) {
     return [
-      { label: clip.groove ? 'Groove et swing… (actif)' : 'Groove et swing…', icon: 'fa-drum', title: 'Swing 50-75 %, grooves MPC et trap, groove extrait d’une boucle (Groove Pool de Live, swing de FL Studio)',
+      { label: clip.groove ? 'Groove et swing… (actif)' : 'Groove et swing…', icon: 'fa-drum', title: 'Swing 50-75 %, grooves de boîte à rythmes et trap, groove extrait d’une boucle',
         onClick: () => { midiBus.emit({ type: 'groove', trackId, clipId: clip.id }); close(); } },
-      { label: 'Exporter le clip en .mid', icon: 'fa-file-export', title: 'Fichier MIDI standard pour un autre DAW (Export MIDI Clip de Live, Export as MIDI File de Logic)', disabled: !clip.notes.length,
+      { label: 'Exporter le clip en .mid', icon: 'fa-file-export', title: 'Fichier MIDI standard, à ouvrir dans un autre logiciel de musique', disabled: !clip.notes.length,
         onClick: () => { midiBus.emit({ type: 'export', scope: 'clip', trackId, clipId: clip.id }); close(); } },
     ];
   }
-  return [{ label: 'Extraire le groove…', icon: 'fa-drum', title: 'Garde le balancement de cette boucle pour le poser sur tes clips MIDI (Extract Groove dans Ableton Live)',
+  return [{ label: 'Extraire le groove…', icon: 'fa-drum', title: 'Garde le balancement de cette boucle pour le poser sur tes clips MIDI',
     onClick: () => { midiBus.emit({ type: 'groove', trackId, clipId: clip.id }); close(); } }];
 }
 
@@ -76,7 +76,7 @@ export const MidiFileMenu: React.FC<{ tracks?: Track[] }> = ({ tracks }) => {
             <button role="menuitem" type="button" className={item} data-testid="midi-capture" onClick={() => { setOpen(null); midiBus.emit({ type: 'capture' }); }} title={CAPTURE_HINT}>
               <i className="fas fa-hand-sparkles w-4 text-red-400" />Capturer ce que je viens de jouer{count > 0 ? ` (${count})` : ''}<span className="ml-auto text-[10px] text-slate-500">Ctrl+Maj+C</span></button>
             <button role="menuitem" type="button" className={item} onClick={() => { setOpen(null); midiBus.emit({ type: 'groove' }); }}
-              title="Swing et groove du clip MIDI sélectionné (Groove Pool de Live, swing de FL)">
+              title="Swing et groove du clip MIDI sélectionné">
               <i className="fas fa-drum w-4 text-amber-300" />Groove et swing du clip…</button>
           </div>
         </>, document.body)}
@@ -108,7 +108,7 @@ export const MidiExportRow: React.FC<{ tracks: Track[] }> = ({ tracks }) => {
   if (!n) return null;
   return (
     <button type="button" data-testid="export-midi" onClick={() => midiBus.emit({ type: 'export', scope: 'all' })}
-      title="Fichier MIDI standard (format 1) pour l’ouvrir dans un autre DAW : Ableton, FL Studio, Logic…"
+      title="Fichier MIDI standard (format 1) pour l’ouvrir dans un autre logiciel de musique"
       className="w-full min-h-12 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center gap-3">
       <span className="text-2xl leading-none" aria-hidden="true">🎹</span>
       <span className="min-w-0 flex-1">

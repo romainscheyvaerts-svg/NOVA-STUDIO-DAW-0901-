@@ -29,9 +29,9 @@ const setNote = (s: DAWState, f: ProjectNoteField, text: string): DAWState => {
  */
 const TABS: { id: R21Tab; label: string; icon: string; title: string }[] = [
   { id: 'notes', label: 'Notes', icon: 'fa-sticky-note', title: 'Notes de projet et commentaires de piste (Comments, Project Notes)' },
-  { id: 'clips', label: 'Clips', icon: 'fa-th-list', title: 'Liste des clips de la session (Clips List ; Logic : Project Audio Browser)' },
-  { id: 'arrangements', label: 'Arrangements', icon: 'fa-random', title: 'Arrangements multiples : clean, explicite, radio edit (Logic : Arrangement Alternatives)' },
-  { id: 'versions', label: 'Versions', icon: 'fa-code-branch', title: 'Versions nommées v2, v3… (Save As New Version ; Logic : Project Alternatives)' },
+  { id: 'clips', label: 'Clips', icon: 'fa-th-list', title: 'Liste des clips de la session' },
+  { id: 'arrangements', label: 'Arrangements', icon: 'fa-random', title: 'Arrangements multiples : clean, explicite, radio edit' },
+  { id: 'versions', label: 'Versions', icon: 'fa-code-branch', title: 'Versions nommées v2, v3…' },
   { id: 'reglages', label: 'Réglages', icon: 'fa-sliders-h', title: "Réglages de la session : fréquence d'échantillonnage (Session Setup)" },
 ];
 
@@ -375,7 +375,7 @@ const SessionProPanel: React.FC<{ state: DAWState; tab: R21Tab; phone?: boolean;
         <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-nv-ink">Session · {state.name}</h2>
         {!phone && (
           <button type="button" onClick={() => openImportSession()} className={btn} data-testid="session-import"
-            title="Importer des pistes d'un autre projet, d'un modèle ou d'un projet récent (Import Session Data, Alt+Maj+I)">
+            title="Importer des pistes d'un autre projet, d'un modèle ou d'un projet récent (Alt+Maj+I)">
             <i className="fas fa-file-import mr-1.5 text-[11px]" />Importer
           </button>
         )}

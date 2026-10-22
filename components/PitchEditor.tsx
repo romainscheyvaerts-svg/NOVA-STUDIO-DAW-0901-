@@ -553,7 +553,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
 
   const globalBar = (
     <div className={phone ? 'flex flex-col gap-2' : 'flex flex-wrap items-center gap-x-4 gap-y-2'} data-testid="pitch-global">
-      <label className={phone ? 'flex flex-wrap items-center gap-x-2 gap-y-1' : 'flex min-w-[220px] flex-1 items-center gap-2'} title="Comme « Corriger la hauteur » de Flex Pitch : ramène chaque note vers la note de la gamme la plus proche. Les notes que tu as retouchées à la main ne bougent pas.">
+      <label className={phone ? 'flex flex-wrap items-center gap-x-2 gap-y-1' : 'flex min-w-[220px] flex-1 items-center gap-2'} title="Ramène chaque note vers la note de la gamme la plus proche. Les notes que tu as retouchées à la main ne bougent pas.">
         <span className={`whitespace-nowrap text-[12px] font-black text-white ${phone ? 'w-full' : ''}`}>🎯 Corriger tout dans la gamme</span>
         <input type="range" min={0} max={100} step={1} value={amount} aria-label="Dosage de la correction"
           data-testid="pitch-amount" disabled={!notes.length}
@@ -726,7 +726,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       <div className="flex h-full max-h-[920px] w-full max-w-[1400px] flex-col gap-3 rounded-2xl border border-white/10 bg-nv-surface p-3 shadow-2xl sm:p-4"
         onClick={e => e.stopPropagation()} data-testid="pitch-editor" data-mode="full">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h2 id="pitch-title" className="text-[15px] font-black text-white" title="Comme Flex Pitch dans Logic, Melodyne ou le Pitch Editor de FL Studio">
+          <h2 id="pitch-title" className="text-[15px] font-black text-white" title="Corrige la justesse note par note, comme dans Melodyne">
             🎯 Justesse note par note <span className="font-semibold text-slate-400">· {clipName}</span>
           </h2>
           {keyBar}

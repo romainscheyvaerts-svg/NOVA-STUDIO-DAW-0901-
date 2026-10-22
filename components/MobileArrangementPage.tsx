@@ -871,7 +871,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     <button type="button" data-testid={`beat-key-${track.id}`}
                       onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
                       aria-label={`Changer la tonalité de ${track.name}`}
-                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Live : Transpose · FL : Pitch)"
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas"
                       className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-arrows-up-down"></i>
                     </button>
@@ -1199,7 +1199,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <button
                 onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
                 aria-label="Justesse : corriger la voix dans la gamme"
-                title="Comme Flex Pitch dans Logic : ramène ta voix dans la gamme"
+                title="Ramène ta voix dans la gamme"
                 data-testid="mobile-clip-pitch"
                 className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                   selectedClip.clip.pitchEdit ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
@@ -1228,7 +1228,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <button
                 onClick={() => openNovaWindow('transpose', { simple: true, targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
                 aria-label="Changer la tonalité du clip"
-                title="Plus aigu ou plus grave, sans changer le tempo (Live : Transpose · FL : Pitch)"
+                title="Plus aigu ou plus grave, sans changer le tempo"
                 data-testid="mobile-clip-transpose"
                 className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                   selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
