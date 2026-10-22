@@ -120,7 +120,11 @@ def run(page, log, ch, zpath):
     # 5. Automation ----------------------------------------------------------------------------
     ch.start("Mix", "Automation du volume de la lead (Latch, fader pendant 3 s de lecture)", protools="Mode Latch (2 clics), lecture, fader, stop (1 glisser + 2 touches)")
     scroll_to(page, "t8")
-    sel_btn = page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true")
+    # Barre allégée : sur « Lecture » sans automation écrite, le sélecteur est dans le « ⋯ » de la piste.
+    if not page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true").count():
+        mb = page.locator("[data-testid=track-more-t8]").locator("visible=true")
+        if mb.count(): ch.click(mb.first, "⋯ (piste)")
+    sel_btn = page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"], [data-toolbar-menu='track-more-t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true")
     if sel_btn.count():
         ch.click(sel_btn.first, "mode d'automation")
         latch = page.locator("button, [role=menuitem], [role=option]", has_text=re.compile(r"^\s*(Latch|LATCH)")).locator("visible=true")
