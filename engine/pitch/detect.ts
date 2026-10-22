@@ -280,6 +280,8 @@ export interface PitchTrackOptions extends PitchDetectorOptions {
   median?: boolean;
   /** Plage de recherche (type de voix), Hz. */
   range?: [number, number];
+  /** Avancement 0–1 (analyse longue dans un worker : barre de progression). Appelé ~50 fois. */
+  onProgress?: (p: number) => void;
 }
 
 /**
@@ -296,7 +298,9 @@ export function detectPitchTrack(x: Float32Array, sampleRate: number, opts: Pitc
   const tail = Math.ceil(det.frameLength() / 2);
   const total = x.length + tail;
   const zeros = new Float32Array(hop);
+  const every = Math.max(hop, Math.floor(total / 50 / hop) * hop);
   for (let a = 0; a < total; a += hop) {
+    if (opts.onProgress && a % every === 0) opts.onProgress(a / total);
     const n = Math.min(hop, total - a);
     if (a + n <= x.length) det.push(x.subarray(a, a + n));
     else if (a >= x.length) det.push(zeros, n);

@@ -1,19 +1,23 @@
 /**
  * Nova Pitch · analyse d'une voix (hors ligne) et son cache.
  *
- * Hauteur : YIN (de Cheveigné & Kawahara, 2002) sur le signal réduit à
- * ~12 kHz puis affinage de la période au taux plein (utils/pitchAnalysis) :
- * trames de 5 ms, justesse mesurée ≤ 0,05 cent sur sinus et voix de synthèse
- * tenues. Voisement : seuil de niveau + seuil d'apériodicité, trous courts
- * bouchés, éclats isolés retirés, sauts d'octave corrigés. Notes : paliers de
- * hauteur et creux de niveau (segmentNotes). Forme de chaque note (partie
- * tenue, vibrato, dérive) : engine/pitch/notes.
+ * Hauteur : le détecteur commun de NOVA (engine/pitch/detect.ts, le même que
+ * Nova Tune) : YIN (de Cheveigné & Kawahara, 2002) après passe-bas et
+ * sous-échantillonnage, portes de voisement absolue et relative, garde
+ * d'octave par continuité (idée du suivi de pYIN), affinage de la période au
+ * taux plein. Mesuré : ≤ 0,02 cent sur voix de synthèse tenue (45 à 80 MIDI).
+ * Ici, une trame toutes les 5 ms, posée sur la grille de l'éditeur (trame i
+ * centrée sur i·hop), puis nettoyée (trous courts bouchés, éclats isolés et
+ * bords de passage douteux retirés). Notes : paliers de hauteur et creux de
+ * niveau (segmentNotes). Forme de chaque note (partie tenue, vibrato,
+ * dérive) : engine/pitch/notes.
  *
  * Le résultat est gardé en mémoire (clé : son + région) et rangé dans la
  * sauvegarde .zip du projet (fichier `pitch/<clip>.bin`) : on ne réanalyse pas
  * une voix déjà vue.
  */
-import { analyzePitch, monoOf, segmentNotes, type PitchNote, type PitchTrack } from '../../utils/pitchAnalysis';
+import { cleanTrack, monoOf, segmentNotes, type PitchNote, type PitchTrack } from '../../utils/pitchAnalysis';
+import { detectPitchTrack } from './detect';
 
 export interface VoiceAnalysis {
   track: PitchTrack;
@@ -21,8 +25,43 @@ export interface VoiceAnalysis {
   notes: PitchNote[];
 }
 
+/** Plage de hauteur cherchée pour une voix (Hz) : voix d'homme grave → voix de tête. */
+const VOICE_RANGE: [number, number] = [65, 1100];
+
+/** Courbe de hauteur d'une voix sur la grille de l'éditeur (une trame toutes les 5 ms). */
+export function voiceTrack(x: Float32Array, sr: number, onProgress?: (p: number) => void): PitchTrack {
+  const hop = Math.max(16, Math.round(0.005 * sr));
+  const frames = Math.max(0, Math.floor(x.length / hop) + 1);
+  const rmsDb = new Float32Array(frames);
+  const half = Math.round(0.01 * sr);
+  for (let i = 0; i < frames; i++) {
+    const c = i * hop;
+    const a = Math.max(0, c - half), b = Math.min(x.length, c + half);
+    let s = 0;
+    for (let k = a; k < b; k++) s += x[k] * x[k];
+    const r = b > a ? Math.sqrt(s / (b - a)) : 0;
+    rmsDb[i] = r > 1e-9 ? 20 * Math.log10(r) : -180;
+  }
+  const det = detectPitchTrack(x, sr, { hop, fMin: VOICE_RANGE[0], fMax: VOICE_RANGE[1], onProgress });
+  // Trames du détecteur (centres réguliers, décalés d'une constante) → grille i·hop.
+  const midi = new Float32Array(frames).fill(NaN);
+  const dt = hop / sr;
+  let k = 0;
+  for (let i = 0; i < frames; i++) {
+    const t = i * dt;
+    while (k + 1 < det.length && det[k + 1].time <= t) k++;
+    const A = det[k], B = det[k + 1];
+    if (!A) continue;
+    if (B && A.voiced && B.voiced && t >= A.time) midi[i] = A.midi + ((B.midi - A.midi) * (t - A.time)) / Math.max(1e-9, B.time - A.time);
+    else if (A.voiced && Math.abs(t - A.time) <= dt / 2) midi[i] = A.midi;
+    else if (B?.voiced && Math.abs(B.time - t) <= dt / 2) midi[i] = B.midi;
+  }
+  cleanTrack(midi);
+  return { sr, hop, length: x.length, midi, rmsDb };
+}
+
 export function analyzeVoice(channels: Float32Array[], sr: number, onProgress?: (p: number) => void): VoiceAnalysis {
-  const track = analyzePitch(monoOf(channels), sr, { onProgress: onProgress ? p => onProgress(0.95 * p) : undefined });
+  const track = voiceTrack(monoOf(channels), sr, onProgress ? p => onProgress(0.95 * p) : undefined);
   const notes = segmentNotes(track);
   onProgress?.(1);
   return { track, notes };

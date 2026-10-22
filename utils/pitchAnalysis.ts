@@ -221,7 +221,7 @@ export function analyzePitch(x: Float32Array, sr: number, opts: AnalyzeOptions =
 }
 
 /** Bouche les trous d'une ou deux trames, retire les éclats isolés, corrige les sauts d'octave. */
-function cleanTrack(m: Float32Array) {
+export function cleanTrack(m: Float32Array) {
   const n = m.length;
   // Éclats isolés (une ou deux trames voisées seules).
   for (let i = 0; i < n; i++) {

@@ -16,7 +16,7 @@ import { voiceMarks } from '../engine/pitch/marks';
 import { noteShape } from '../engine/pitch/notes';
 import { buildPlan } from '../engine/pitch/plan';
 import { outputPitchCurve, renderVoice } from '../engine/pitch/render';
-import { analyzeVoice } from '../engine/pitch/analysis';
+import { analyzeVoice, voiceTrack } from '../engine/pitch/analysis';
 import { quietLenFrom, silenceFloor, stretchEnd } from '../engine/pitch/elastic';
 import { synthVoice } from '../tests/helpers/synthVoice';
 import { clickDb, diffDb, envelopeGap, harmonicEnvelope, meanPitch, pitchByAnalysis, pitchBySpectrum, vibratoRate, vibratoRateAc, bestLag, pairedCents } from '../tests/helpers/pitchMeasure';
@@ -32,7 +32,7 @@ const E = (shift: number, extra: Partial<NoteEdit> = {}): NoteEdit => ({ shift, 
 const now = () => performance.now();
 
 function prep(x: Float32Array, sr: number) {
-  const track = analyzePitch(x, sr);
+  const track = voiceTrack(x, sr);
   const notes = segmentNotes(track);
   const shapes = notes.map(n => noteShape(track, n));
   const marks = voiceMarks(x, track);
@@ -70,13 +70,13 @@ const render = (chs: Float32Array[], p: P, edits: (NoteEdit | undefined)[], exte
   const gl = new Float32Array(sr * 2);
   let ph = 0;
   for (let i = 0; i < gl.length; i++) { const m = 55 + (12 * i) / gl.length; ph += 440 * 2 ** ((m - 69) / 12) / sr; gl[i] = 0.3 * Math.sin(2 * Math.PI * ph); }
-  const tg = analyzePitch(gl, sr);
+  const tg = voiceTrack(gl, sr);
   let gmax = 0;
   for (let i = 40; i < tg.midi.length - 40; i++) { const t = (i * tg.hop) / sr; const m = 55 + (12 * t) / 2; if (!Number.isNaN(tg.midi[i])) gmax = Math.max(gmax, Math.abs(tg.midi[i] - m) * 100); }
   R.glissando_analyse_max_c = r2(gmax);
   const s = new Float32Array(sr);
   for (let i = 0; i < s.length; i++) s[i] = 0.3 * Math.sin((2 * Math.PI * 440 * 2 ** ((60.37 - 69) / 12) * i) / sr);
-  R.sinus_analyse_err_c = r2((pitchByAnalysis(s, sr, 0.2, 0.8) - 60.37) * 100);
+  R.sinus_analyse_err_c = r2((pitchByAnalysis(s, sr, 0.2, 0.8, voiceTrack(s, sr)) - 60.37) * 100);
 }
 
 // ---------------------------------------------------------------- 2. Voix réelle

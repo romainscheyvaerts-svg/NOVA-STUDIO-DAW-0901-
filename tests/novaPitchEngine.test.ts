@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzePitch, segmentNotes, type PitchNote, type PitchTrack } from '../utils/pitchAnalysis';
 import type { NoteEdit } from '../utils/pitchCorrect';
 import { voiceMarks, irregularMarks } from '../engine/pitch/marks';
+import { voiceTrack } from '../engine/pitch/analysis';
 import { noteShape } from '../engine/pitch/notes';
 import { buildPlan } from '../engine/pitch/plan';
 import { renderVoice } from '../engine/pitch/render';
@@ -18,7 +19,7 @@ import { clickDb, diffDb, harmonicEnvelope, envelopeGap, meanPitch, pitchByAnaly
 const SR = 48000;
 
 function setup(x: Float32Array) {
-  const track = analyzePitch(x, SR);
+  const track = voiceTrack(x, SR);
   const notes = segmentNotes(track);
   const shapes = notes.map(n => noteShape(track, n));
   const marks = voiceMarks(x, track);
@@ -44,7 +45,8 @@ describe('analyse : courbe fine et justesse', () => {
   it('trames de 5 ms, justesse ≤ 1 cent sur sinus et voix de synthèse (45 à 80 MIDI)', () => {
     for (const m of [45.37, 52.81, 60.13, 67.49, 74.02, 79.6]) {
       for (const x of [sine(m, 0.8), synthVoice(SR, 0.8, [{ midi: m, at: 0.05, len: 0.7 }])]) {
-        const tr = analyzePitch(x, SR);
+        // Détecteur commun de NOVA (engine/pitch/detect, partagé avec Nova Tune) sur la grille de l'éditeur.
+        const tr = voiceTrack(x, SR);
         expect((tr.hop / SR) * 1000).toBeLessThanOrEqual(5);
         expect(Math.abs(pitchByAnalysis(x, SR, 0.2, 0.6, tr) - m) * 100).toBeLessThan(1);
       }
@@ -163,7 +165,7 @@ describe('rendu : hauteur demandée à ±1 cent', () => {
 describe('marques de période régulières', () => {
   it('voix aiguë avec vibrato : < 1 % d’espacements faux', () => {
     const x = synthVoice(SR, 1.2, [{ midi: 71.8, at: 0.1, len: 1.0, vibratoCents: 40 }]);
-    const tr = analyzePitch(x, SR);
+    const tr = voiceTrack(x, SR);
     expect(irregularMarks(voiceMarks(x, tr), tr)).toBeLessThan(0.01);
   });
 });
