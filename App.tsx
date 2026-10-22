@@ -11264,7 +11264,8 @@ function Studio() {
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
-      a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne / Elastic Pitch', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
+      a('Voix', 'pal.pitch', 'Éditer les notes de la voix du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { keywords: 'justesse note par note autotune pitch notes voix éditeur hauteur étirer élastique formant vibrato', disabledReason: needClip }),
+      a('Voix', 'pal.pitchSimple', '🎯 Corriger la justesse du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets, simple: true }), { keywords: 'corriger justesse fausse note juste gamme autotune', disabledReason: needClip }),
       a('Voix', 'pal.melodyne', 'Ouvrir le clip dans Melodyne (ARA)', () => openNovaWindow('ara-melodyne', { targets: clipTargets }), { pt: 'ARA Melodyne', keywords: 'melodyne ara justesse', disabledReason: needClip }),
       a('Édition', 'pal.stems', 'Séparer le clip en stems (voix, instru, batterie, basse)', () => { if (clipTargets[0]) onSeparateStemsStable(clipTargets[0].trackId, clipTargets[0].clipId); }, { pt: 'Stem Splitter (Logic) · Splitter (BandLab)', keywords: 'stems séparer separation voix instru acapella karaoké batterie basse demucs isoler extraire', disabledReason: needClip }),
       // Pistes et mix
@@ -11532,6 +11533,8 @@ function Studio() {
                 </PanelBoundary>
               )}
               {/* Panneau ARA (Melodyne / VocAlign en insert) : en bas de la fenêtre Édition, comme Pro Tools. */}
+              {/* Nova Pitch (notes de la voix) : l'éditeur s'ancre ici, en bas de la fenêtre d'édition. */}
+              {shownView === 'ARRANGEMENT' && <div id="nova-pitch-dock" className="shrink-0" />}
               {shownView === 'ARRANGEMENT' && (
                 <PanelBoundary name="l'éditeur ARA">
                   <AraEditorDock tracks={state.tracks} selectedTrackId={state.selectedTrackId} onCommit={handleAraCommit} onSetGuide={handleAraGuide} />
@@ -12167,7 +12170,7 @@ function Studio() {
         onSeek={handleSeek} onAddMarker={handleAddMarkerHere} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator}
-        lyrics={state.lyrics || ''} />
+        lyrics={state.lyrics || ''} setSilently={setSilently} />
       </PanelBoundary>
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
       <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}

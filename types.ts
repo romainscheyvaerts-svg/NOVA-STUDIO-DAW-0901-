@@ -643,6 +643,11 @@ export interface StoredNoteEdit {
   formant?: number;
   /** Transition depuis la note précédente (ms). */
   transitionMs?: number;
+  /** Gain de la note (dB). Absent = niveau chanté. */
+  gain?: number;
+  /** Timing : décalage du début et de la fin de la note (s). Absents = à sa place. */
+  dt0?: number;
+  dt1?: number;
   /** Retouchée à la main (sinon : par « Corriger tout », recalculée si on change le dosage). */
   manual?: boolean;
 }
@@ -667,6 +672,20 @@ export interface PitchEditInfo {
   sourceName?: string;
   /** Heure de la correction (ms). */
   at?: number;
+  /** Fin de la région analysée dans le son d'origine (s) : même région à la réouverture. */
+  regionEnd?: number;
+  /** Notes coupées / fusionnées à la main (instants dans le son d'origine, s). */
+  cuts?: number[];
+  joins?: number[];
+  /** « Décaler la suite » : la fin du son rendu avance ou recule de tant (s). */
+  extend?: number;
+  /**
+   * Éditeur de notes (Nova Pitch) : signature des retouches dont le son joué
+   * est le rendu. '' = rendu en attente. Différente des retouches (annuler,
+   * collaboration) : le son est recalculé en arrière-plan. Absent : ancienne
+   * correction (rendue une fois pour toutes).
+   */
+  renderSig?: string;
 }
 
 /** Une respiration traitée : zone de l'audio source et gain appliqué. */

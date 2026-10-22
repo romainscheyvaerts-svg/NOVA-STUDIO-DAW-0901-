@@ -35,6 +35,8 @@ export function clipRegion(clip: Pick<Clip, 'offset' | 'duration'>, bufferDurati
  */
 export function editingSource(clip: Clip, hasBuffer: (id: string) => boolean): { bufferId?: string; offset: number; fromOriginal: boolean } {
   const pe = clip.pitchEdit;
+  // Rendu en attente (éditeur de notes) : le clip joue encore la prise d'origine.
+  if (pe?.sourceBufferId && clip.bufferId === pe.sourceBufferId) return { bufferId: clip.bufferId, offset: clip.offset || 0, fromOriginal: true };
   if (pe?.sourceBufferId && hasBuffer(pe.sourceBufferId)) {
     return { bufferId: pe.sourceBufferId, offset: (clip.offset || 0) + pe.regionStart, fromOriginal: true };
   }
@@ -52,7 +54,9 @@ export function editsForNotes(notes: PitchNote[], stored: StoredNoteEdit[] | und
       if (ov > bestOv) { bestOv = ov; best = s; }
     }
     if (!best || bestOv < 0.5 * Math.min(b - a, best.t1 - best.t0)) return undefined;
-    const { t0: _a, t1: _b, manual: _m, ...edit } = best;
+    const { t0: _a, t1: _b, manual: _m, gain, ...rest } = best;
+    const edit: NoteEdit = rest;
+    if (gain !== undefined) edit.gainDb = gain;
     return edit;
   });
 }
@@ -75,7 +79,7 @@ export function storeEdits(notes: PitchNote[], edits: (NoteEdit | undefined)[], 
     const e = edits[k];
     if (!e || isNeutral(e)) return;
     const r = (v: number) => Math.round(v * 10000) / 10000;
-    out.push({ t0: r(n.start + regionStart), t1: r(n.end + regionStart), shift: r(e.shift), drift: r(e.drift), vibrato: r(e.vibrato), ...(e.transitionMs !== undefined ? { transitionMs: Math.round(e.transitionMs) } : {}), ...(Math.abs(e.formant || 0) >= 0.05 ? { formant: Math.round((e.formant || 0) * 10) / 10 } : {}), ...(manual?.has(k) ? { manual: true } : {}) });
+    out.push({ t0: r(n.start + regionStart), t1: r(n.end + regionStart), shift: r(e.shift), drift: r(e.drift), vibrato: r(e.vibrato), ...(e.transitionMs !== undefined ? { transitionMs: Math.round(e.transitionMs) } : {}), ...(Math.abs(e.formant || 0) >= 0.05 ? { formant: Math.round((e.formant || 0) * 10) / 10 } : {}), ...(Math.abs(e.gainDb || 0) >= 0.05 ? { gain: Math.round((e.gainDb || 0) * 10) / 10 } : {}), ...(Math.abs(e.dt0 || 0) >= 1e-5 ? { dt0: Math.round((e.dt0 || 0) * 1e5) / 1e5 } : {}), ...(Math.abs(e.dt1 || 0) >= 1e-5 ? { dt1: Math.round((e.dt1 || 0) * 1e5) / 1e5 } : {}), ...(manual?.has(k) ? { manual: true } : {}) });
   });
   return out;
 }
@@ -131,12 +135,16 @@ export function correctedClipPatch(clip: Clip, opts: {
 export function revertClipPatch(clip: Clip, hasBuffer: (id: string) => boolean): Partial<Clip> | null {
   const pe = clip.pitchEdit;
   if (!pe?.sourceBufferId || !hasBuffer(pe.sourceBufferId)) return null;
+  // Éditeur de notes, rendu encore en attente : le clip joue déjà la prise d'origine.
+  const playsSource = clip.bufferId === pe.sourceBufferId;
   return {
     bufferId: pe.sourceBufferId,
-    offset: (clip.offset || 0) + pe.regionStart,
-    ...(clip.breaths?.length ? { breaths: shiftBreaths(clip.breaths, pe.regionStart) } : {}),
+    offset: playsSource ? clip.offset || 0 : (clip.offset || 0) + pe.regionStart,
+    ...(!playsSource && clip.breaths?.length ? { breaths: shiftBreaths(clip.breaths, pe.regionStart) } : {}),
     warp: pe.sourceWarp,
-    name: pe.sourceName ?? clip.name.replace(/\s*\(justesse\)$/, ''),
+    name: pe.sourceName ?? clip.name.replace(/\s*\((justesse|notes retouchées)\)$/, ''),
+    // « Décaler la suite » : le clip retrouve sa durée.
+    ...(pe.extend ? { duration: Math.max(0.01, clip.duration - pe.extend) } : {}),
     pitchEdit: undefined,
   };
 }

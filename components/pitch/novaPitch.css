@@ -1,0 +1,59 @@
+/*
+ * Nova Pitch (éditeur de notes de la voix) : mêmes poussoirs et menus que le
+ * piano roll (components/pianoroll/pianoroll.css), variables propres à ce panneau.
+ */
+[data-nova-pitch] {
+  --pr-panel: linear-gradient(180deg, #16181d, #0e0f12);
+  --pr-panel-line: rgba(255, 255, 255, 0.08);
+  --pr-cap: #1c1f25;
+  --pr-cap-hover: #262a32;
+  --pr-cap-line: rgba(255, 255, 255, 0.09);
+  --pr-cap-ink: #d7dbe2;
+  --pr-cap-ink-soft: #a9b2c4;
+  --pr-accent: #38bdf8;
+  --pr-accent-ink: #04121a;
+  --pr-menu-bg: #1a1d23;
+  --pr-menu-line: rgba(255, 255, 255, 0.12);
+  --pr-menu-soft: #9aa4b5;
+  --np-surface: #111317;
+}
+:root[data-theme='light'] [data-nova-pitch] {
+  --pr-panel: linear-gradient(180deg, #ffffff, #eef1f5);
+  --pr-panel-line: rgba(15, 23, 42, 0.12);
+  --pr-cap: #ffffff;
+  --pr-cap-hover: #eef2f7;
+  --pr-cap-line: rgba(15, 23, 42, 0.16);
+  --pr-cap-ink: #1f2937;
+  --pr-cap-ink-soft: #475569;
+  --pr-accent: #0369a1;
+  --pr-accent-ink: #ffffff;
+  --pr-menu-bg: #ffffff;
+  --pr-menu-line: rgba(15, 23, 42, 0.16);
+  --pr-menu-soft: #475569;
+  --np-surface: #f1f5f9;
+}
+[data-nova-pitch] { background: var(--np-surface); color: var(--pr-cap-ink); }
+.np-bar { background: var(--pr-panel); border-bottom: 1px solid var(--pr-panel-line); }
+.np-pop {
+  background: var(--pr-menu-bg); border: 1px solid var(--pr-menu-line); color: var(--pr-cap-ink);
+  border-radius: 12px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45); padding: 10px 12px; font-size: 12px;
+}
+.np-row { display: grid; grid-template-columns: 92px 1fr 74px; align-items: center; gap: 8px; min-height: 34px; }
+.np-row input[type='range'] { width: 100%; accent-color: var(--pr-accent); }
+.np-val { font-family: ui-monospace, monospace; font-size: 11px; text-align: right; color: var(--pr-accent); }
+.np-field {
+  height: 30px; border-radius: 8px; border: 1px solid var(--pr-cap-line); background: var(--pr-cap); color: var(--pr-cap-ink);
+  padding: 0 8px; font-size: 12px; font-family: ui-monospace, monospace; min-width: 0;
+}
+.np-soft { color: var(--pr-cap-ink-soft); }
+.np-grip { height: 8px; cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.np-grip::before { content: ''; width: 44px; height: 3px; border-radius: 3px; background: var(--pr-cap-line); }
+.np-progress { height: 4px; border-radius: 4px; background: var(--pr-cap-line); overflow: hidden; }
+.np-progress > div { height: 100%; background: var(--pr-accent); transition: width 120ms linear; }
+@media (pointer: coarse) {
+  [data-nova-pitch] .pr-cap { height: 44px; min-width: 44px; }
+  .np-row { min-height: 44px; }
+  .np-row input[type='range'] { height: 44px; }
+  .np-field { height: 44px; }
+  .np-grip { height: 18px; }
+}
