@@ -34,7 +34,21 @@ import { loadWorkletModule } from '../../plugins/vocalDspUtils';
 
 const SLOTS = 16;
 const PEAK_FALL_DB_S = 20;   // retombée de la barre de crête
-const RMS_TAU_S = 0.3;       // intégration RMS / VU (300 ms)
+/**
+ * Balistique VU (IEC 60268-17) : un sinus qui arrive atteint 99 % de sa déviation finale en
+ * 300 ms. Intégration du 1er ordre sur la puissance : √(1 − e^(−0,3/τ)) = 0,99 ⇒ τ = 0,3 / ln(1/(1 − 0,99²)).
+ * (Avant : τ = 300 ms, soit 99 % en 1,2 s en théorie, ~0,6 s mesurées à cause de la double
+ * retombée décrite plus bas : l'aiguille « VU » traînait deux fois trop.)
+ */
+export const RMS_TAU_S = 0.3 / Math.log(1 / (1 - 0.99 * 0.99));
+/**
+ * Le RMS s'intègre au temps du SON reçu (n / fréquence), pas au temps de l'horloge murale.
+ * Entre deux messages (≈ 33 ms), rien ne retombe ; ce n'est qu'après RMS_GRACE_MS sans
+ * message (piste qui se tait, lecture arrêtée) que le RMS retombe au temps mural.
+ * Avant : chaque intervalle comptait deux fois (retombée murale + intégration du message),
+ * un sinus tenu se lisait ~2,8 dB trop bas.
+ */
+const RMS_GRACE_MS = 100;
 const CORR_TAU_S = 0.4;      // lissage du corrélomètre
 export const HOLD_MS = 2500;  // maintien de crête (trait)
 
@@ -101,7 +115,7 @@ export type TapMode = 'pre' | 'post';
 export interface MeterView {
   /** Barre de crête (retombée 20 dB/s). */
   peak: [number, number];
-  /** RMS intégré sur 300 ms. */
+  /** RMS (dBFS, sans pondération : un sinus de crête 0 dBFS lit −3,01), balistique VU (99 % en 300 ms). */
   rms: [number, number];
   /** Trait de maintien (2,5 s). */
   hold: [number, number];
@@ -121,6 +135,9 @@ export interface MeterView {
 
 interface PointState extends MeterView {
   ms: [number, number];
+  /** Horloge murale du dernier message (RMS) et instant jusqu'où la retombée « silence » est appliquée. */
+  msAt: number;
+  msDecayed: number;
   holdAt: [number, number];
   lr: number; ll: number; rr: number;
   slot: { node: number; index: number } | null;
@@ -132,7 +149,7 @@ const lin2db = (x: number) => (x > 1e-10 ? 20 * Math.log10(x) : NEG);
 function freshState(): PointState {
   return {
     peak: [NEG, NEG], rms: [NEG, NEG], hold: [NEG, NEG], maxTp: NEG, maxPeak: NEG, clip: 0, clipAt: null,
-    corr: 0, stereo: false, at: 0, ms: [0, 0], holdAt: [0, 0], lr: 0, ll: 0, rr: 0, slot: null,
+    corr: 0, stereo: false, at: 0, ms: [0, 0], msAt: 0, msDecayed: 0, holdAt: [0, 0], lr: 0, ll: 0, rr: 0, slot: null,
   };
 }
 
@@ -317,19 +334,24 @@ class MeterBank {
     st.corr = correlationOf(st.lr, st.ll, st.rr);
     st.stereo = d[o + 9] === 1;
     st.at = now;
+    st.msAt = now; st.msDecayed = now;
   }
 
   /** Retombée paresseuse : appliquée à la lecture (aucun message quand la piste se tait). */
   private decay(st: PointState, now: number) {
     if (!st.at) return;
+    // RMS : retombée au temps mural seulement en silence (plus de message depuis RMS_GRACE_MS).
+    const from = Math.max(st.msDecayed, st.msAt + RMS_GRACE_MS);
+    if (now > from) {
+      const f = Math.exp(-(now - from) / 1000 / RMS_TAU_S);
+      for (let ch = 0; ch < 2; ch++) { st.ms[ch] *= f; st.rms[ch] = lin2db(Math.sqrt(st.ms[ch])); }
+      st.msDecayed = now;
+    }
     const gap = (now - st.at) / 1000;
     if (gap <= 0.001) return;
-    const f = Math.exp(-gap / RMS_TAU_S);
     for (let ch = 0; ch < 2; ch++) {
       st.peak[ch] -= PEAK_FALL_DB_S * gap;
       if (st.peak[ch] < -150) st.peak[ch] = NEG;
-      st.ms[ch] *= f;
-      st.rms[ch] = lin2db(Math.sqrt(st.ms[ch]));
       if (now - st.holdAt[ch] > HOLD_MS) st.hold[ch] = st.peak[ch];
     }
     st.at = now;

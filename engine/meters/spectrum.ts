@@ -4,9 +4,15 @@
  */
 
 /**
- * Lissage par fraction d'octave (1/3, 1/6…) : moyenne de PUISSANCE sur
- * [f / 2^(frac/2), f · 2^(frac/2)] autour de chaque bin, en O(N) par sommes
- * cumulées. Entrée et sortie en dB.
+ * Lissage par fraction d'octave (1/3, 1/6…), à la façon d'un analyseur en temps réel
+ * (RTA) : SOMME de la puissance sur [f / 2^(frac/2), f · 2^(frac/2)] autour de chaque
+ * bin (au moins ±3,5 bins : tout le lobe principal de la fenêtre de Blackman), bords
+ * fractionnaires, en O(N) par sommes cumulées. Entrée et sortie en dB.
+ *
+ * Avec SPECTRUM_SINE_DB, un sinus se lit à son niveau de crête en dBFS, à sa fréquence,
+ * quelle que soit la fraction d'octave. Avant (22/10/2026) : MOYENNE de la puissance de la
+ * bande, sans calibration : un sinus à −12 dBFS s'affichait vers −31 dB à 100 Hz et plus
+ * bas encore dans les aigus (plus la bande est large, plus la moyenne le diluait).
  */
 export function octaveSmooth(binsDb: ArrayLike<number>, sampleRate: number, fraction = 1 / 3, out?: Float32Array): Float32Array {
   const n = binsDb.length;
@@ -17,10 +23,16 @@ export function octaveSmooth(binsDb: ArrayLike<number>, sampleRate: number, frac
     cum[i + 1] = cum[i] + (Number.isFinite(d) ? Math.pow(10, d / 10) : 0);
   }
   const half = Math.pow(2, fraction / 2);
+  // Puissance cumulée jusqu'à la position x (en bins ; le bin j couvre [j − ½, j + ½]) :
+  // bords de bande fractionnaires, pas d'élargissement par arrondi dans les graves.
+  const F = (x: number) => {
+    const xc = Math.max(-0.5, Math.min(n - 0.5, x));
+    const j = Math.min(n - 1, Math.floor(xc + 0.5));
+    return cum[j] + (cum[j + 1] - cum[j]) * (xc + 0.5 - j);
+  };
   for (let i = 0; i < n; i++) {
-    const lo = Math.max(0, Math.floor(i / half));
-    const hi = Math.min(n - 1, Math.ceil(i * half));
-    const p = (cum[hi + 1] - cum[lo]) / (hi - lo + 1);
+    const a = Math.min(i / half, i - 3.5), b = Math.max(i * half, i + 3.5);
+    const p = F(b) - F(a);
     res[i] = p > 0 ? 10 * Math.log10(p) : -140;
   }
   return res;
@@ -44,3 +56,11 @@ export class SpectrumHold {
 
 /** Fréquence → position horizontale (0…1) sur une échelle log de 20 Hz à 20 kHz. */
 export const freqToX = (f: number) => Math.max(0, Math.min(1, Math.log10(Math.max(20, f) / 20) / 3));
+
+/**
+ * Calibration de l'AnalyserNode (spec Web Audio : fenêtre de Blackman α = 0,16, |X[k]| / N) :
+ * la puissance totale d'un sinus d'amplitude A, sommée sur ses bins, vaut A² · mean(w²) / 4
+ * (mean(w²) = 0,42² + 0,5²/2 + 0,08²/2 = 0,3046). Ajouter ce décalage à une bande lissée
+ * (octaveSmooth) donne le niveau de crête du sinus en dBFS : +11,18 dB.
+ */
+export const SPECTRUM_SINE_DB = -10 * Math.log10((0.42 * 0.42 + 0.5 * 0.5 / 2 + 0.08 * 0.08 / 2) / 4);

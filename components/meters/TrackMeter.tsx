@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { meterBank, meterClock, MeterView, HOLD_MS } from '../../engine/meters/meterBank';
 import { meterPrefs } from '../../engine/meters/meterPrefs';
-import { MeterScale, scaleFrac, scaleReading, METER_SCALES } from '../../engine/meters/scales';
+import { MeterScale, scaleFrac, scaleReading, METER_SCALES, meterMainDb } from '../../engine/meters/scales';
 import { audioEngine } from '../../engine/AudioEngine';
 import { canvasTheme } from '../../utils/canvasTheme';
 import { playheadStore } from '../../utils/playheadStore';
@@ -53,7 +53,7 @@ export function drawStereoMeter(ctx: CanvasRenderingContext2D, W: number, H: num
   for (let ch = 0; ch < 2; ch++) {
     bar(ch, 0, len, bg);
     if (!v) continue;
-    const main = s.ballistics === 'peak' ? v.peak[ch] : v.rms[ch];
+    const main = meterMainDb(s, v.peak[ch], v.rms[ch]);
     const fm = scaleFrac(s, main) * len;
     // barre principale découpée par zones (vert / ambre / rouge)
     for (const [a, b, c] of zones) {

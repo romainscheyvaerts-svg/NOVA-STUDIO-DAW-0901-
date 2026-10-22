@@ -195,9 +195,13 @@ describe('Échelles et analyseur', () => {
     }
   });
 
-  it('lissage par octave : un bruit blanc (plat) reste plat', () => {
-    const bins = new Float32Array(1024).fill(-40);
-    const out = octaveSmooth(bins, 48000, 1 / 3);
-    for (let i = 10; i < 1000; i++) expect(out[i]).toBeCloseTo(-40, 3);
+  it('lissage par octave (RTA, puissance sommée par bande) : un bruit rose reste plat, un bruit blanc monte de 3 dB par octave', () => {
+    // Bruit rose : −3 dB par octave d'un bin à l'autre ; la bande de 1/3 d'octave en somme autant partout.
+    const pink = Float32Array.from({ length: 1024 }, (_, i) => -40 - 10 * Math.log10(Math.max(1, i)));
+    const out = octaveSmooth(pink, 48000, 1 / 3);
+    // (jusqu’à n / 2^(1/6) : au-delà, la bande dépasse la fin du spectre)
+    for (let i = 40; i < 900; i++) expect(Math.abs(out[i] - out[500])).toBeLessThan(0.05);
+    const white = octaveSmooth(new Float32Array(1024).fill(-40), 48000, 1 / 3);
+    expect(white[400] - white[200]).toBeCloseTo(3, 0);
   });
 });
