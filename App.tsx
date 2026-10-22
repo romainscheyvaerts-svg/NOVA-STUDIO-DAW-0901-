@@ -605,6 +605,9 @@ const migrateLoadedState = (loaded: DAWState): DAWState => {
     // l'audio) : on le garde. Seule une piste gelee SANS son audio repasse en direct.
     tracks: tracks.map(t => (t.isFrozen && !t.frozenClip ? { ...t, isFrozen: false } : t)),
     timeSignature: loaded.timeSignature || { numerator: 4, denominator: 4 },
+    // PDC allumé sauf s'il a été coupé exprès : un projet enregistré sans ce réglage
+    // s'ouvrait PDC éteint (effets lents décalés, témoin « PDC coupé »).
+    isDelayCompEnabled: loaded.isDelayCompEnabled !== false,
     trackGroups: loaded.trackGroups || [],
     markers: loaded.markers || [],
     metronome: loaded.metronome || { enabled: false, volume: 0.7, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
