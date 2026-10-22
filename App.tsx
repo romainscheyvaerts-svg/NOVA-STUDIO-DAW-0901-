@@ -6287,6 +6287,9 @@ function Studio() {
   const [collab, setCollab] = useState<{ client: CollabClient; role: CollabRole; name: string; host: boolean; key: string; color: string } | null>(null);
   const collabRef = useRef(collab);
   collabRef.current = collab;
+  // Collaboration en direct : le moteur ne se met pas en veille (l'autre peut lancer la lecture, une prise,
+  // parler en talkback à tout moment, sans geste de ce côté-ci). engine/idleSuspend.
+  useEffect(() => { audioEngine.setIdleBlocker('collaboration en direct', !!collab); }, [collab]);
   const [collabOnline, setCollabOnline] = useState<CollabMember[]>([]);
   const [collabMessages, setCollabMessages] = useState<CollabMessage[]>([]);
   const collabMessagesRef = useRef(collabMessages);
@@ -9720,6 +9723,8 @@ function Studio() {
         // Nova Studio : dernière version copiée sur le disque (durée, sons envoyés, erreur).
         disk: diskMirrorRef.current.status,
         tabLock: projectTabLock().state,
+        // Veille du moteur à l'arrêt (engine/idleSuspend) : endormi ?, raison de rester éveillé, compteurs.
+        idle: audioEngine.getIdleStats(),
       }),
     };
     // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :

@@ -85,7 +85,7 @@ export class DspMonitor {
   private lastEpisodeAt = 0;
   private readonly opts: DspMonitorOptions;
 
-  private last: { wall: number; ctxTime: number; events: number; durationS: number; late: number } | null = null;
+  private last: { wall: number; ctxTime: number; events: number; durationS: number; late: number; running?: boolean } | null = null;
   private longMs = 0;
   /** Historique des fenêtres (1 min) : [instant, sous-régimes, retards, part en sous-régime]. */
   private history: { at: number; underruns: number; late: number; lateDelta: number; ratio: number }[] = [];
@@ -152,7 +152,9 @@ export class DspMonitor {
       const events = ps ? Number(ps.underrunEvents) || 0 : 0;
       const durationS = ps ? Number(ps.underrunDuration) || 0 : 0;
       const ctxTime = ctx.currentTime;
-      if (this.last) {
+      // Fenêtre qui commence contexte suspendu (veille du moteur, engine/idleSuspend) : l'horloge audio
+      // reprend en retard sur l'horloge murale ; ce n'est pas un rendu qui ne suit pas.
+      if (this.last && this.last.running) {
         const dWall = Math.max(1, wall - this.last.wall) / 1000;
         if (ps) {
           source = 'playbackStats';
@@ -165,9 +167,9 @@ export class DspMonitor {
           if (lost > 0.005) { ratio = clamp(lost / dWall, 0, 1); underruns = Math.max(1, Math.round(lost / 0.01)); }
         }
       }
-      this.last = { wall, ctxTime, events, durationS, late };
+      this.last = { wall, ctxTime, events, durationS, late, running: true };
     } else {
-      this.last = ctx ? { wall, ctxTime: ctx.currentTime, events: 0, durationS: 0, late } : null;
+      this.last = ctx ? { wall, ctxTime: ctx.currentTime, events: 0, durationS: 0, late, running: false } : null;
     }
     const prevLate = this.history.length ? this.history[this.history.length - 1].late : late;
     const lateDelta = Math.max(0, late - prevLate);
