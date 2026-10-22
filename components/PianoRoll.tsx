@@ -1264,7 +1264,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const TOGGLE = (on: boolean) => ({ 'aria-pressed': on });
   // Grille des temps : fond en dégradés (mesures, temps, cases), sans milliers de traits dans le DOM.
   // Carte de tempo : traits calculés (SVG), une rampe resserre ou écarte les mesures et les cases.
-  const mapLines = followMap ? mapGridLines(followMap, clipStart, clipStart + contentWidth / zoomX, gridId, 5 / zoomX) : null;
+  const mapLines = useMemo(() => (followMap ? mapGridLines(followMap, clipStart, clipStart + contentWidth / zoomX, gridId, 5 / zoomX) : null), [followMap, clipStart, contentWidth, zoomX, gridId]);
   const gridBg = {
     backgroundImage: [
       `linear-gradient(to right, ${G.bar} 1px, transparent 1px)`,
