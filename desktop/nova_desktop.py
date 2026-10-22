@@ -799,7 +799,9 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             except Exception:
                 pass
             # Fenêtre de la page (contrôle WebView2) : l'éditeur d'un insert ARA (Melodyne) s'y ancre
-            # en fenêtre enfant, en bas de la fenêtre Édition (comme Pro Tools).
+            # en fenêtre enfant, en bas de la fenêtre Édition (comme Pro Tools). La page l'envoie aussi
+            # au pont avec chaque fenêtre de plugin (SHOW_EDITOR owner) : la fenêtre du plugin appartient
+            # alors à Nova Studio (pas d'icône de plus dans la barre des tâches, toujours au-dessus).
             try:
                 page_hwnd = int(self.web.Handle.ToInt64())
             except Exception:

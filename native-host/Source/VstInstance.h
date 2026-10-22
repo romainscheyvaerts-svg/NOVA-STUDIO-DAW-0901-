@@ -67,6 +67,8 @@ namespace nova
     // Module VST3 chargé depuis un dossier .vst3 ou son binaire interne (UADx : nom différent).
     VST3::Hosting::Module::Ptr openModule (const std::string& path, std::string& error);
 
+
+
     class VstInstance
     {
     public:
@@ -76,8 +78,15 @@ namespace nova
         // Chargement par chemin + nom de classe (ou CID). Lève std::runtime_error.
         void load (const std::string& path, const std::string& className, const std::string& cid);
 
+        // Hôte « de réserve » (pont : vst_native.HostPool) : module chargé d'avance (DLL, fabrique,
+        // contexte de l'hôte, liste des classes), repris tel quel par load() (même chemin).
+        static bool preload (const std::string& path, std::string& error, int& classes);
+
         std::string name, vendor, version, category, subCategories, classId, sdkVersion;
         bool instrument = false;
+        // Durées du dernier chargement (ms) : module (DLL + fabrique), composant, contrôleur, réglages.
+        double tModule = 0, tComponent = 0, tController = 0, tParams = 0;
+        bool preloadedModule = false;   // module repris d'un hôte de réserve (preload)
         int numClasses = 0;
 
         // ---- bus

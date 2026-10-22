@@ -166,6 +166,42 @@ namespace nova
         return nullptr;
     }
 
+    struct Preloaded
+    {
+        VST3::Hosting::Module::Ptr module;
+        IPtr<IHostApplication> context;
+    };
+    static std::mutex preloadLock;
+    static std::map<std::string, Preloaded> preloaded;
+
+    // DLL + fabrique + contexte de l'hôte (setHostContext : un WaveShell de Waves y prépare ses
+    // centaines de plugins) + liste des classes : tout ce que « load » refait sinon à chaque plugin.
+    bool VstInstance::preload (const std::string& path, std::string& error, int& classes)
+    {
+        Preloaded p;
+        p.module = openModule (path, error);
+        if (! p.module) return false;
+        p.context = owned (static_cast<IHostApplication*> (new HostContext()));
+        const auto& factory = p.module->getFactory();
+        factory.setHostContext (p.context.get());
+        classes = 0;
+        for (auto& ci : factory.classInfos())
+            if (ci.category() == kVstAudioEffectClass) ++classes;
+        std::lock_guard<std::mutex> l (preloadLock);
+        preloaded[path] = p;
+        return true;
+    }
+
+    static Preloaded takePreloaded (const std::string& path)
+    {
+        std::lock_guard<std::mutex> l (preloadLock);
+        auto it = preloaded.find (path);
+        if (it == preloaded.end()) return {};
+        auto p = it->second;
+        preloaded.erase (it);
+        return p;
+    }
+
     //==========================================================================
     VstInstance::VstInstance() = default;
 
@@ -213,13 +249,21 @@ namespace nova
     void VstInstance::load (const std::string& path, const std::string& className, const std::string& cid)
     {
         std::string err;
-        module = openModule (path, err);
+        const double t0 = nowMs();
+        auto pre = takePreloaded (path);         // hôte de réserve : déjà chargé
+        preloadedModule = pre.module != nullptr;
+        module = preloadedModule ? pre.module : openModule (path, err);
         if (! module)
             throw std::runtime_error ("Plugin introuvable ou illisible : " + path + (err.empty() ? "" : " (" + err + ")"));
 
-        hostContext = owned (static_cast<IHostApplication*> (new HostContext()));
         const auto& factory = module->getFactory();
-        factory.setHostContext (hostContext.get());
+        if (preloadedModule)
+            hostContext = pre.context;
+        else
+        {
+            hostContext = owned (static_cast<IHostApplication*> (new HostContext()));
+            factory.setHostContext (hostContext.get());
+        }
 
         const auto infos = factory.classInfos();
         const VST3::Hosting::ClassInfo* chosen = nullptr;
@@ -253,16 +297,20 @@ namespace nova
         instrument = lowerAscii (subCategories).find ("instrument") != std::string::npos;
 
         chosenId = chosen->ID();
+        tModule = nowMs() - t0;
         createInstance();
+        const double t1 = nowMs();
         readBuses();
         refreshParamInfo();
         refreshValuesFromController();
         cachedLatency = std::max (0, (int) processor->getLatencySamples());
+        tParams = nowMs() - t1;
     }
 
     void VstInstance::createInstance()
     {
         const auto& factory = module->getFactory();
+        const double t0 = nowMs();
         component = factory.createInstance<IComponent> (chosenId);
         if (! component) throw std::runtime_error ("Chargement impossible : le plugin refuse de créer son composant");
         if (component->initialize (hostContext.get()) != kResultOk)
@@ -270,6 +318,8 @@ namespace nova
 
         processor = U::cast<IAudioProcessor> (component);
         if (! processor) throw std::runtime_error ("Chargement impossible : pas de processeur audio");
+        const double t1 = nowMs();
+        tComponent = t1 - t0;
 
         if (auto c = U::cast<IEditController> (component))
         {
@@ -315,6 +365,7 @@ namespace nova
             midiMapping = U::cast<IMidiMapping> (controller);
         }
         updateMidiMappings();
+        tController = nowMs() - t1;
     }
 
     //==========================================================================

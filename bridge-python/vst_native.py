@@ -58,6 +58,7 @@ LOAD_TIMEOUT_S = 16 * 60.0      # un chargement peut attendre une fenêtre de li
 CALL_TIMEOUT_S = 120.0
 PROCESS_TIMEOUT_S = 30.0        # un bloc hors ligne ; le pont applique sa propre limite en temps réel
 READY_TIMEOUT_S = 30.0
+EDITOR_GUARD_S = 0.25           # fenêtre possédée par Nova : surveillance (voir nova_frozen_by_editor)
 
 CREATE_NO_WINDOW = 0x08000000
 PRIORITY = {"below_normal": 0x00004000, "normal": 0x00000020, "above_normal": 0x00008000, "high": 0x00000080}
@@ -364,6 +365,13 @@ if IS_WINDOWS:
     _k32.WaitForMultipleObjects.restype = wintypes.DWORD
     _u32 = ctypes.WinDLL("user32", use_last_error=True)
     _u32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
+    _u32.IsWindow.argtypes = [wintypes.HWND]
+    _u32.IsHungAppWindow.argtypes = [wintypes.HWND]
+    _u32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    _u32.GetAncestor.restype = wintypes.HWND
+    _u32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                         wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+    _u32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
 else:  # pragma: no cover - hôte natif réservé à Windows
     _k32 = None
     _u32 = None
@@ -468,6 +476,7 @@ class HostProcess:
         self.proc = subprocess.Popen([exe, "--serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, creationflags=flags)
         self.pid = self.proc.pid
+        self.preloaded_path: Optional[str] = None    # hôte de réserve : module chargé d'avance (HostPool)
         _attach_to_job(int(self.proc._handle))
         self._ids = itertools.count(1)
         self._pending: Dict[int, list] = {}
@@ -616,6 +625,13 @@ class HostProcess:
             raise HostCrashed(self.crash_reason or "le plugin a planté (processus arrêté)")
         raise TimeoutError("le plugin ne répond plus (bloc audio)")
 
+    def set_priority(self, priority: int):
+        if IS_WINDOWS and self.alive():
+            try:
+                ctypes.windll.kernel32.SetPriorityClass(wintypes.HANDLE(int(self.proc._handle)), wintypes.DWORD(priority))
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"priorité de l'hôte : {e}")
+
     def kill(self):
         try:
             if self.proc.poll() is None:
@@ -646,6 +662,224 @@ class HostProcess:
                 except Exception:
                     pass
         self.req_ev = self.done_ev = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hôtes de réserve (« pool tiède »)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Hôtes prêts d'avance : NOVA_VST_WARM (défaut 2) modules lents récemment utilisés (≥ 150 ms à
+# charger : WaveShell de Waves 1,2 s, Auto-Tune 0,8 s), chacun chargé d'avance dans un hôte de
+# réserve, plus un hôte vierge. 0 : aucun. L'isolation ne change pas : un hôte de réserve ne sert
+# qu'à UN plugin, comme un hôte lancé à la demande.
+WARM_MODULES = max(0, int(os.environ.get("NOVA_VST_WARM", "2") or 0))
+HEAVY_MODULE_MS = 150.0
+WARM_MIN_FREE_MB = 2048          # mémoire libre minimale pour garder un module chargé d'avance
+PENDING_WAIT_S = 5.0             # attente d'un hôte de réserve encore en préparation
+
+
+def _free_memory_mb() -> float:
+    if not IS_WINDOWS:
+        return float("inf")
+    try:
+        class _MS(ctypes.Structure):
+            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                        ("ullTotalPhys", ctypes.c_uint64), ("ullAvailPhys", ctypes.c_uint64),
+                        ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                        ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64),
+                        ("ullAvailExtendedVirtual", ctypes.c_uint64)]
+        m = _MS()
+        m.dwLength = ctypes.sizeof(m)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return m.ullAvailPhys / 1e6
+    except Exception:  # noqa: BLE001
+        return float("inf")
+
+
+class HostPool:
+    """Hôtes NovaVSTHost démarrés d'avance (processus prêt, zone audio attachée), dont le module
+    du plugin est éventuellement déjà chargé (commande « preload »)."""
+
+    def __init__(self, modules: int = WARM_MODULES):
+        self.modules = modules
+        self.state_file: Optional[str] = None      # modules lents récents, gardés d'une séance à l'autre
+        self.lock = threading.Lock()
+        self.spares: List[Tuple[str, "HostProcess"]] = []          # (clé du module | "", hôte)
+        self.recent: Dict[str, str] = {}                           # clé → chemin, du plus ancien au plus récent
+        self.failed: set = set()
+        self.thread: Optional[threading.Thread] = None
+        self.pending: Optional[Tuple[str, threading.Event]] = None   # hôte de réserve en préparation
+        self.waiting: set = set()                                    # modules dont un chargement l'attend
+        self.stats = {"repris": 0, "repris_module": 0, "lancés": 0}
+
+    @staticmethod
+    def key(path: str) -> str:
+        return os.path.normcase(os.path.abspath(path))
+
+    def enabled(self) -> bool:
+        return IS_WINDOWS and self.modules > 0 and find_host_exe() is not None
+
+    def take(self, path: str) -> Optional["HostProcess"]:
+        """Hôte de réserve pour ce plugin (module déjà chargé si possible), sinon None."""
+        if not self.enabled():
+            return None
+        k = self.key(path)
+        got = None
+        with self.lock:
+            pending = self.pending
+            wait = (pending is not None and pending[0] == k and k not in self.waiting
+                    and not any(sk == k for sk, _ in self.spares))
+            if wait:
+                self.waiting.add(k)
+        if wait:
+            # Son module est en train d'être chargé d'avance : il sera prêt avant un hôte neuf (mesuré :
+            # deux chargements du même WaveShell en même temps = 2,2 s au lieu de 1,5 s). Un seul
+            # chargement l'attend ; les suivants (séance) partent aussitôt sur un hôte neuf.
+            try:
+                pending[1].wait(PENDING_WAIT_S)
+            finally:
+                with self.lock:
+                    self.waiting.discard(k)
+        with self.lock:
+            for want in (k, ""):
+                for i, (sk, hp) in enumerate(self.spares):
+                    if sk == want and hp.alive():
+                        got = self.spares.pop(i)
+                        break
+                if got:
+                    break
+        self.refill()
+        if got is None:
+            return None
+        self.stats["repris"] += 1
+        got[1].set_priority(host_priority())        # préparé en priorité basse : remis à la normale
+        if got[0]:
+            self.stats["repris_module"] += 1
+        return got[1]
+
+    def note(self, path: str, module_ms: float):
+        """Plugin chargé : module lent → gardé chargé d'avance pour la prochaine fois."""
+        if not self.enabled():
+            return
+        k = self.key(path)
+        if module_ms < HEAVY_MODULE_MS or k in self.failed:
+            self.refill()
+            return
+        with self.lock:
+            known = bool(self.recent) and next(reversed(self.recent)) == k     # déjà le plus récent
+            self.recent.pop(k, None)
+            self.recent[k] = path
+            while len(self.recent) > self.modules:
+                self.recent.pop(next(iter(self.recent)))
+        if not known:
+            self._save()
+        self.refill()
+
+    def forget(self, path: str):
+        """Plus jamais chargé d'avance (fenêtre de licence vue, plantage…)."""
+        k = self.key(path)
+        with self.lock:
+            self.failed.add(k)
+            had = self.recent.pop(k, None) is not None
+        if had:
+            self._save()
+        self.refill()
+
+    def _save(self):
+        if not self.state_file:
+            return
+        try:
+            with self.lock:
+                paths = list(self.recent.values())
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+            tmp = self.state_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"modules": paths}, f, ensure_ascii=False)
+            os.replace(tmp, self.state_file)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"hôtes de réserve (enregistrement) : {e}")
+
+    def restore(self, state_file: str, skip: Callable[[str], bool] = lambda p: False):
+        """Démarrage du pont : modules lents de la séance précédente chargés d'avance (en fond)."""
+        self.state_file = state_file
+        try:
+            with open(state_file, encoding="utf-8") as f:
+                paths = [p for p in (json.load(f).get("modules") or []) if isinstance(p, str)]
+        except (OSError, ValueError):
+            paths = []
+        paths = [p for p in paths if os.path.exists(p) and not skip(p)]
+        with self.lock:
+            for p in paths[-self.modules:] if self.modules else []:
+                self.recent[self.key(p)] = p
+        self.refill()
+
+    def refill(self):
+        if not self.enabled():
+            return
+        with self.lock:
+            if self.thread is not None and self.thread.is_alive():
+                return
+            self.thread = threading.Thread(target=self._refill, name="vsthost-reserve", daemon=True)
+            self.thread.start()
+
+    def _refill(self):
+        while True:
+            with self.lock:
+                wanted = [""] + list(self.recent.keys())
+                drop = [s for s in self.spares if s[0] not in wanted or not s[1].alive()]
+                self.spares = [s for s in self.spares if s not in drop]
+                have = {s[0] for s in self.spares}
+                missing = [k for k in reversed(wanted) if k not in have]   # le plus récent d'abord
+                path = self.recent.get(missing[0]) if missing and missing[0] else None
+            for _k, hp in drop:
+                hp.close(0.5)
+            if not missing:
+                return
+            k = missing[0]
+            if k and _free_memory_mb() < WARM_MIN_FREE_MB:
+                # PC à court de mémoire : pas de module chargé d'avance (hôte vierge seulement).
+                with self.lock:
+                    self.recent.pop(k, None)
+                continue
+            hp = None
+            ready = threading.Event()
+            with self.lock:
+                self.pending = (k, ready)
+            try:
+                # Priorité basse pendant la préparation (le module de Waves lance même WMIC) : jamais au
+                # détriment du plugin que le musicien est en train d'ouvrir. Remise à la normale à take().
+                hp = HostProcess(priority=PRIORITY["below_normal"])
+                if path:
+                    hp.request("preload", timeout=120.0, path=path)
+                    hp.preloaded_path = path      # « load » le reprend avec exactement ce chemin
+                self.stats["lancés"] += 1
+                with self.lock:
+                    self.spares.append((k, hp))
+                    self.pending = None
+                ready.set()
+            except Exception as e:  # noqa: BLE001
+                with self.lock:
+                    self.pending = None
+                ready.set()
+                logger.debug(f"hôte de réserve ({path or 'vierge'}) : {e}")
+                if hp is not None:
+                    hp.kill()
+                with self.lock:
+                    if k:
+                        self.failed.add(k)
+                        self.recent.pop(k, None)
+                    else:
+                        return          # même un hôte vierge ne démarre pas : on n'insiste pas
+
+    def close(self):
+        with self.lock:
+            spares, self.spares = self.spares, []
+            self.modules = 0
+        for _k, hp in spares:
+            hp.close(0.5)
+
+
+POOL = HostPool()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -884,23 +1118,36 @@ class NativePlugin:
 
     def __init__(self, path: str, plugin_name: Optional[str] = None, *, cid: Optional[str] = None,
                  host_exe: Optional[str] = None, offline: Optional[bool] = None, priority: Optional[int] = None,
-                 sample_rate: Optional[float] = None):
+                 sample_rate: Optional[float] = None, defer_fresh: bool = False):
+        """defer_fresh : l'appelant remet le plugin à zéro (reset()) avant tout usage (prepare_plugin,
+        load_prepared) ; un plugin qui « garde du son » n'est alors pas recréé une première fois ici
+        pour rien (reset() le recrée de toute façon : une recréation de moins au chargement)."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"Plugin introuvable : {path}")
         _s = object.__setattr__
         # Fréquence du projet : sondes du chargement (test de remise à zéro, mise en route d'un
         # instrument) faites à CETTE fréquence (avant : 44,1 kHz codé en dur, comme pedalboard).
         _s(self, "_rate_hint", float(sample_rate) if sample_rate else None)
-        _s(self, "_host", HostProcess(host_exe, priority))
+        _s(self, "_defer_fresh", bool(defer_fresh))
+        t_start = time.monotonic()
+        host = POOL.take(path) if host_exe is None and priority is None else None
+        _s(self, "_host", host or HostProcess(host_exe, priority))
         _s(self, "_lock", threading.RLock())
+        load_path = path
+        if host is not None and host.preloaded_path and HostPool.key(host.preloaded_path) == HostPool.key(path):
+            load_path = host.preloaded_path          # même chaîne que le chargement d'avance
         try:
             t0 = time.monotonic()
-            info = self._host.request("load", timeout=LOAD_TIMEOUT_S, path=path, **{"class": plugin_name or ""},
+            info = self._host.request("load", timeout=LOAD_TIMEOUT_S, path=load_path, **{"class": plugin_name or ""},
                                       cid=cid or "")
         except BaseException:
             self._host.close(0.5)
             raise
         _s(self, "load_seconds", time.monotonic() - t0)
+        _s(self, "host_seconds", t0 - t_start)          # démarrage de l'hôte (0 : hôte de réserve)
+        _s(self, "load_timings", dict(info.get("timings") or {}))
+        if not self.load_timings.get("preloaded"):
+            POOL.note(path, float(self.load_timings.get("module") or 0.0))
         _s(self, "path", path)
         _s(self, "plugin_name", plugin_name)
         _s(self, "name", info.get("name") or os.path.basename(path)[:-5])
@@ -922,6 +1169,8 @@ class NativePlugin:
         _s(self, "_provided", 0)          # échantillons fournis depuis la dernière remise à zéro
         _s(self, "_transport", None)
         _s(self, "_editor_open", threading.Event())
+        _s(self, "_editor_hwnd", 0)
+        _s(self, "_editor_owner", 0)
         _s(self, "_values_dirty", False)
         _s(self, "_ranges_cache", {})
         _s(self, "_wrapped", None)
@@ -960,7 +1209,7 @@ class NativePlugin:
         except HostError:
             persists = False
         object.__setattr__(self, "_reload_persists", persists)
-        if persists:
+        if persists and not self._defer_fresh:
             res = self._host.request("reinstantiate", timeout=LOAD_TIMEOUT_S)
             object.__setattr__(self, "buses", res.get("buses") or self.buses)
             self._host.request("release")
@@ -1038,6 +1287,11 @@ class NativePlugin:
                 object.__setattr__(self, "_latency", int(msg["latency"]))
         elif ev == "editor_closed":
             self._editor_open.clear()
+        elif ev == "editor_detached":
+            logger.warning(f"[{self.name}] interface du plugin figée ({int(msg.get('ms') or 0)} ms) : "
+                           f"fenêtre détachée de Nova Studio, qui reste utilisable")
+        elif ev == "editor_attached":
+            logger.info(f"[{self.name}] interface du plugin de nouveau active : fenêtre rattachée à Nova Studio")
 
     @property
     def _parameters(self) -> List[NativeCppParam]:
@@ -1431,24 +1685,49 @@ class NativePlugin:
 
     # --- fenêtre ---------------------------------------------------------------------
 
-    def show_editor(self, close_event: Optional[threading.Event] = None, offscreen: bool = False):
-        """Fenêtre du plugin (au premier plan) ; rend la main à sa fermeture ou quand
-        close_event est posé (comme pedalboard)."""
+    def _editor_request(self, offscreen: bool, owner: Optional[int], debug_pos=None) -> dict:
+        offscreen = bool(offscreen) or os.environ.get("NOVA_VST_EDITOR_OFFSCREEN") == "1"   # tests
         if _u32 is not None and not offscreen:
             try:
                 _u32.AllowSetForegroundWindow(self._host.pid)
             except Exception:
                 pass
+        kw: Dict[str, Any] = {"offscreen": offscreen, "title": self.name}
+        if owner:
+            kw["owner"] = int(owner)
+        if debug_pos is not None:
+            kw["debug_pos"] = list(debug_pos)
+        res = self._host.request("show_editor", timeout=LOAD_TIMEOUT_S, **kw)
+        object.__setattr__(self, "_editor_hwnd", int(res.get("hwnd") or 0))
+        object.__setattr__(self, "_editor_owner", int(res.get("owner") or 0))
+        return res
+
+    def show_editor(self, close_event: Optional[threading.Event] = None, offscreen: bool = False,
+                    owner: Optional[int] = None, debug_pos=None):
+        """Fenêtre du plugin (au premier plan) ; rend la main à sa fermeture ou quand
+        close_event est posé (comme pedalboard). owner : HWND d'une fenêtre de Nova Studio (appli
+        Windows) ; la fenêtre du plugin lui appartient (pas de bouton dans la barre des tâches,
+        toujours au-dessus de Nova), sous la garde de nova_frozen_by_editor()."""
         self._editor_open.set()
         try:
-            self._host.request("show_editor", timeout=LOAD_TIMEOUT_S, offscreen=bool(offscreen), title=self.name)
+            self._editor_request(offscreen, owner, debug_pos)
         except BaseException:
             self._editor_open.clear()
             raise
+        next_guard = 0.0
         try:
             while self._editor_open.is_set() and self._host.alive():
                 if close_event is not None and close_event.is_set():
                     break
+                now = time.monotonic()
+                if now >= next_guard:
+                    next_guard = now + EDITOR_GUARD_S
+                    if self.nova_frozen_by_editor():
+                        logger.error(f"[{self.name}] l'interface du plugin est figée et retient Nova Studio : "
+                                     f"son processus est arrêté pour libérer Nova (le son passe sans l'effet)")
+                        self._host.crash_reason = "interface du plugin figée : arrêté pour libérer Nova Studio"
+                        self._host.kill()
+                        break
                 time.sleep(0.05)
         finally:
             if self._editor_open.is_set() and self._host.alive():
@@ -1457,15 +1736,31 @@ class NativePlugin:
                 except Exception:
                     pass
             self._editor_open.clear()
+            object.__setattr__(self, "_editor_hwnd", 0)
             object.__setattr__(self, "_values_dirty", True)
 
-    def bring_editor_to_front(self):
-        if _u32 is not None:
-            try:
-                _u32.AllowSetForegroundWindow(self._host.pid)
-            except Exception:
-                pass
-        self._host.request("show_editor", offscreen=False, title=self.name)
+    def nova_frozen_by_editor(self) -> bool:
+        """Dernier recours si le chien de garde de l'hôte n'a pas pu détacher la fenêtre à temps (geste
+        de Nova fait dans les 400 premières ms d'un blocage, ou processus du plugin suspendu) : la
+        fenêtre de Nova « ne répond pas » (IsHungAppWindow, 5 s sans lire ses messages) ET l'interface
+        du plugin ne répond pas non plus → c'est le plugin qui retient Nova. Vrai : arrêter l'hôte."""
+        hwnd, owner = self._editor_hwnd, self._editor_owner
+        if _u32 is None or not hwnd or not owner:
+            return False
+        try:
+            root = _u32.GetAncestor(owner, 2) or owner          # GA_ROOT
+            if not _u32.IsWindow(root) or not _u32.IsHungAppWindow(root):
+                return False
+            if not _u32.IsWindow(hwnd):
+                return False
+            r = ctypes.c_size_t()
+            # SMTO_NORMAL : l'interface du plugin a 300 ms pour répondre.
+            return _u32.SendMessageTimeoutW(hwnd, 0, 0, 0, 0, 300, ctypes.byref(r)) == 0
+        except Exception:  # noqa: BLE001
+            return False
+
+    def bring_editor_to_front(self, owner: Optional[int] = None):
+        self._editor_request(False, owner)
 
     def has_editor(self) -> bool:
         return bool(self._host.request("has_editor").get("has_editor"))
@@ -1505,7 +1800,7 @@ def load_plugin(path: str, plugin_name: Optional[str] = None, **kw) -> NativePlu
 def load_prepared(path: str, plugin_name: Optional[str], state_b64: Optional[str], sample_rate: int,
                   max_block: int, offline: bool) -> NativePlugin:
     """(Contrat vst_sidechain.load) Instance chargée, état restauré, préparée et remise à zéro."""
-    p = NativePlugin(path, plugin_name, offline=offline, sample_rate=sample_rate)
+    p = NativePlugin(path, plugin_name, offline=offline, sample_rate=sample_rate, defer_fresh=True)
     try:
         if state_b64:
             p.raw_state = base64.b64decode(state_b64)

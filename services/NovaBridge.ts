@@ -75,6 +75,23 @@ export interface PluginCrashEvent {
 }
 
 /** Attente avant le n-ième essai de reconnexion (1 s, 2 s, 4 s, 8 s, puis 10 s). */
+/**
+ * Appli Windows Nova Studio : HWND de sa fenêtre (window.__novaDesktop.hwnd). Passé au pont avec les
+ * demandes de fenêtre de plugin (« owner ») : la fenêtre du plugin appartient alors à Nova, comme dans
+ * un DAW (aucune icône de plus dans la barre des tâches, toujours au-dessus de Nova, réduite avec
+ * elle). Site dans un navigateur : rien (fenêtre indépendante, comme avant).
+ */
+export const desktopOwnerHwnd = (): number | undefined => {
+  try {
+    const h = Number((globalThis as any).window?.__novaDesktop?.hwnd);
+    return Number.isFinite(h) && h > 0 ? h : undefined;
+  } catch { return undefined; }
+};
+const withOwner = <T extends object>(req: T): T & { owner?: number } => {
+  const owner = desktopOwnerHwnd();
+  return owner ? { ...req, owner } : req;
+};
+
 export const reconnectDelayMs = (attempt: number): number => Math.min(10000, 1000 * Math.pow(2, Math.max(0, attempt - 1)));
 /** Lecture des plugins en cours sur le pont : liste relue toutes les 3 s. */
 export const PROBE_POLL_MS = 3000;
@@ -938,7 +955,7 @@ class NovaBridgeService {
     return { applied: Number(r.applied) || 0, skipped: Number(r.skipped) || 0, watching: !!r.watching };
   }
 
-  showEditor(slotId: string) { return this.request({ action: 'SHOW_EDITOR', slot_id: slotId }); }
+  showEditor(slotId: string) { return this.request(withOwner({ action: 'SHOW_EDITOR', slot_id: slotId })); }
   closeEditor(slotId: string) { return this.request({ action: 'CLOSE_EDITOR', slot_id: slotId }).catch(() => undefined); }
 
   /**
@@ -1340,6 +1357,7 @@ class NovaBridgeService {
   async araOpen(opts: { sessionId: string; plugin: 'melodyne'; sampleRate: number; tempo: number; archive?: string; clips: AraClipIn[]; offscreen?: boolean }): Promise<AraOpenResult> {
     const seconds = opts.clips.reduce((a, c) => a + (c.channels[0]?.length || 0), 0) / opts.sampleRate;
     const r = await this.sendAraFrame({
+      ...withOwner({}),
       action: 'ARA_OPEN', session_id: opts.sessionId, plugin: opts.plugin, sample_rate: Math.round(opts.sampleRate),
       tempo: opts.tempo, archive_b64: opts.archive || '', offscreen: !!opts.offscreen,
       clips: opts.clips.map(c => ({ id: c.id, name: c.name, track: c.track || c.name, role: c.role || 'edit', start: c.start || 0,
@@ -1366,7 +1384,7 @@ class NovaBridgeService {
     return { renders: r.renders || [], archive: r.archive_b64 || undefined };
   }
 
-  async araShow(sessionId: string): Promise<void> { await this.request({ action: 'ARA_SHOW', session_id: sessionId }); }
+  async araShow(sessionId: string): Promise<void> { await this.request(withOwner({ action: 'ARA_SHOW', session_id: sessionId })); }
 
   async araClose(sessionId: string): Promise<void> {
     if (!this.isConnected()) return;
@@ -1405,7 +1423,8 @@ class NovaBridgeService {
 
   /** Éditeur du plugin : ancré dans l'appli (dock, bounds), flottant (float) ou masqué (hide). */
   async araInsertEditor(slotId: string, opts: { mode: 'dock' | 'bounds' | 'float' | 'hide'; parent?: number; x?: number; y?: number; w?: number; h?: number; visible?: boolean; release?: boolean; offscreen?: boolean }): Promise<any> {
-    return this.request({ action: 'ARA_INSERT_EDITOR', slot_id: slotId, ...opts }, 60000);
+    const req = { action: 'ARA_INSERT_EDITOR', slot_id: slotId, ...opts };
+    return this.request(opts.mode === 'float' ? withOwner(req) : req, 60000);
   }
 
   async araInsertSelect(slotId: string, regions: string[]): Promise<void> {

@@ -134,6 +134,31 @@ rendu pendant ce temps. Les plugins que pedalboard ne sait pas charger
 - Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_ara_insert*.py"` ;
   preuves réelles : `qa/ara_insert_pont.py` (+ `vocalign`), `qa/ara_insert_lecture.py`, `qa/ara_dock_appli.py`.
 
+### Fenêtres de plugins comme dans un DAW, ouverture rapide (hôte natif)
+
+- `SHOW_EDITOR owner=<HWND>` (capacité `editor_owner`) : la page de l'appli Windows envoie
+  `window.__novaDesktop.hwnd` ; la fenêtre du plugin appartient à celle de Nova Studio : aucune icône
+  de plus dans la barre des tâches ni dans Alt+Tab, toujours au-dessus de Nova, réduite avec elle, pas
+  « toujours au-dessus » des autres applis. Sans `owner` (site dans un navigateur) : fenêtre
+  indépendante, comme avant. Même chose pour la fenêtre flottante de Melodyne / VocAlign.
+- Plugin dont l'interface se fige : une fenêtre possédée par un autre processus partage la file
+  d'entrée de Nova. Chien de garde de l'hôte (`native-common/EditorWindow.cpp`) : sans réponse depuis
+  400 ms, la fenêtre est détachée de Nova (rattachée au retour). Dernier recours dans le pont
+  (`NativePlugin.nova_frozen_by_editor`) : Nova « ne répond pas » ET le plugin non plus → l'hôte du
+  plugin est arrêté (le son passe sans l'effet). Preuve : `qa/vst_fenetre_possedee.py`.
+- Chargements en parallèle (`NOVA_VST_PARALLEL_LOADS`, défaut 4) hors du thread JUCE ; lectures des
+  réglages sur place (plus d'attente derrière les chargements de la séance).
+- Hôtes de réserve (`vst_native.HostPool`, `NOVA_VST_WARM`, défaut 2, 0 = aucun) : un hôte vierge
+  prêt d'avance + les 2 modules lents les plus récents (≥ 150 ms : WaveShell, Auto-Tune) chargés
+  d'avance (commande `preload` de l'hôte : DLL, fabrique, contexte, classes), gardés d'une séance à
+  l'autre (`%LOCALAPPDATA%\NovaStudio\vst_reserve.json`, rechargés 8 s après le démarrage). Jamais si
+  le module ouvre une fenêtre (licence) ou si la mémoire libre < 2 Go. Un hôte de réserve ne sert qu'à
+  un plugin : l'isolation des plantages ne change pas.
+- Une recréation de moins au chargement des plugins qui « gardent du son » (`defer_fresh`) : même son,
+  bit pour bit.
+- Bancs : `qa/vst_ouverture_banc.py` (postes de l'ouverture, hors écran), `qa/vst_ouverture_pont.py`
+  (de bout en bout à travers un pont de test, port 8791, insertion + séance de 12 plugins).
+
 ### 2. ASIO Bridge (`asio_bridge.py`) ⭐ NOUVEAU
 Bridge pour connecter le DAW web à une carte son ASIO.
 

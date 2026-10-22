@@ -185,13 +185,15 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 # INSTANCES
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _open_plugin(path: str, plugin_name: Optional[str] = None, sample_rate: Optional[int] = None):
+def _open_plugin(path: str, plugin_name: Optional[str] = None, sample_rate: Optional[int] = None,
+                 defer_fresh: bool = False):
+    """defer_fresh (hôte natif) : l'appelant remet le plugin à zéro avant usage (voir NativePlugin)."""
     if vst_sidechain.is_debug_plugin(path):
         return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
     if NATIVE:
         # Hôte natif : un processus par plugin, chargé par nom de classe (shells Waves
         # compris), dossier UADx compris. Sondes du chargement à la fréquence du projet.
-        return vst_native.load_plugin(path, plugin_name, sample_rate=sample_rate)
+        return vst_native.load_plugin(path, plugin_name, sample_rate=sample_rate, defer_fresh=defer_fresh)
     if not HAS_PEDALBOARD:
         # Moteur « none » : l'hôte natif manque (pedalboard n'est plus livré).
         raise RuntimeError(vst_native.missing_engine_message())
@@ -309,11 +311,14 @@ class JuceThread:
     def run_sync(self, fn, *args, timeout: float = 120.0):
         return self.call(fn, *args).result(timeout=timeout)
 
-    def open_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+    def open_editor(self, slot: "Slot", on_closed: Callable[[], None], owner: Optional[int] = None):
+        """owner : HWND d'une fenêtre de Nova Studio (appli Windows) ; hôte natif seulement : la
+        fenêtre du plugin appartient à Nova (pas de bouton dans la barre des tâches, toujours
+        au-dessus de Nova, réduite avec elle), comme dans un DAW."""
         if isinstance(slot.plugin, vst_native.NativePlugin):
             # Hôte natif : la fenêtre vit dans le processus du plugin ; ce thread reste libre
             # (un chargement ne la ferme plus) et plusieurs fenêtres peuvent rester ouvertes.
-            self._open_native_editor(slot, on_closed)
+            self._open_native_editor(slot, on_closed, owner)
             return
         if self._editor_close is not None:
             self._editor_close.set()  # un seul éditeur à la fois
@@ -327,10 +332,10 @@ class JuceThread:
         if self.editor_slot is slot and self._editor_close is not None:
             self._editor_close.set()
 
-    def _open_native_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+    def _open_native_editor(self, slot: "Slot", on_closed: Callable[[], None], owner: Optional[int] = None):
         if id(slot) in self._native_editors:
             try:
-                slot.plugin.bring_editor_to_front()      # déjà ouverte : ramenée devant
+                slot.plugin.bring_editor_to_front(owner)      # déjà ouverte : ramenée devant
             except Exception as e:
                 logger.debug(f"Fenêtre de {slot.name} : {e}")
             return
@@ -340,8 +345,8 @@ class JuceThread:
 
         def run():
             try:
-                logger.info(f"🪟 Fenêtre ouverte : {slot.name}")
-                plugin.show_editor(ev)
+                logger.info(f"🪟 Fenêtre ouverte : {slot.name}" + (" (dans Nova Studio)" if owner else ""))
+                plugin.show_editor(ev, owner=owner)
             except Exception as e:
                 logger.error(f"Fenêtre de {slot.name} : {e}")
             finally:
@@ -447,10 +452,11 @@ def bring_to_front(title_part: str):
 
 def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[str],
                    sample_rate: int, block: int):
-    """(Thread JUCE) Charge, restaure l'état, prépare à (fréquence, bloc) puis
-    remet à zéro. Après ce reset, pedalboard rend un flux ALIGNÉ sur l'entrée
+    """(Thread JUCE ; hôte natif : un des fils de chargement en parallèle) Charge, restaure l'état,
+    prépare à (fréquence, bloc) puis remet à zéro. Après ce reset, pedalboard rend un flux ALIGNÉ sur l'entrée
     en retenant au début l'équivalent de la latence du plugin."""
-    plugin = _open_plugin(path, plugin_name, sample_rate)
+    # Remis à zéro à la fin (plugin.reset()) : pas de recréation de plus au chargement.
+    plugin = _open_plugin(path, plugin_name, sample_rate, defer_fresh=True)
     restored = _set_state(plugin, state_b64)
     if _is_instrument(plugin):
         # Un instrument refuse l'audio en entrée : on le prépare avec du MIDI vide.
@@ -627,27 +633,49 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
             w.end()
 
 
+# Chargements de l'hôte natif EN PARALLÈLE (un processus par plugin : rien à protéger d'un thread
+# « message » unique, contrairement à pedalboard). Avant : un seul à la fois, à la suite de tout ce
+# que faisait le thread JUCE (mesuré : 12 plugins d'une séance en 11,4 s, la fenêtre d'un plugin
+# attendait son tour). NOVA_VST_PARALLEL_LOADS (défaut 4).
+PARALLEL_LOADS = max(1, int(os.environ.get("NOVA_VST_PARALLEL_LOADS") or 4))
+_load_pool: Optional[ThreadPoolExecutor] = None
+_load_pool_lock = threading.Lock()
+
+
+def _native_load_pool() -> ThreadPoolExecutor:
+    global _load_pool
+    with _load_pool_lock:
+        if _load_pool is None:
+            _load_pool = ThreadPoolExecutor(max_workers=PARALLEL_LOADS, thread_name_prefix="vst-load")
+        return _load_pool
+
+
 def _instantiate_native(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
                         sample_rate: int, block: int, context: Optional[dict] = None):
     """Moteur natif : le plugin vit dans son propre processus, un plantage au chargement
     n'arrête pas le pont (pas d'essai jetable ni de marqueur disque). Il compte quand même
-    pour la quarantaine : deux plantages, le plugin n'est plus chargé (rescan = on réessaie)."""
+    pour la quarantaine : deux plantages, le plugin n'est plus chargé (rescan = on réessaie).
+    Plusieurs chargements en parallèle (PARALLEL_LOADS), hors du thread JUCE."""
     guard = CRASH_GUARD
     if guard is not None and guard.is_quarantined(path):
         raise PluginQuarantined(guard.message(path))
     w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
     t0 = time.time()
     try:
-        fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+        fut = _native_load_pool().submit(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
         while True:
             try:
-                return fut.result(timeout=1.0)
+                res = fut.result(timeout=1.0)
+                if w is not None and w.seen:
+                    vst_native.POOL.forget(path)     # fenêtre de licence : jamais chargé d'avance
+                return res
             except FutureTimeout:
                 limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
                 if time.time() - t0 > limit:
                     fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
                     raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
             except vst_native.HostCrashed as e:
+                vst_native.POOL.forget(path)
                 if guard is not None:
                     guard.record_crash(path)
                 base = os.path.basename(path.rstrip("\\/"))
@@ -1572,6 +1600,14 @@ class Slot:
             return _set_state(self.plugin, state_b64) if self.plugin is not None else False
 
     def _on_message_thread(self, fn, *args):
+        if NATIVE and isinstance(self.plugin, vst_native.NativePlugin):
+            # Hôte natif : le plugin vit dans son processus (aucun verrou JUCE ni de l'interpréteur
+            # partagé avec les autres plugins) : sur place, sans attendre la file des chargements
+            # (mesuré : la liste des réglages d'un effet attendait la fin de TOUTE la séance).
+            return fn(*args)
+        return self._on_message_thread_juce(fn, *args)
+
+    def _on_message_thread_juce(self, fn, *args):
         """Lecture / réglage des paramètres sur le thread JUCE (thread « message »).
 
         Constaté le 04/10/2026 : lire les paramètres d'une instance d'Auto-Tune Pro
