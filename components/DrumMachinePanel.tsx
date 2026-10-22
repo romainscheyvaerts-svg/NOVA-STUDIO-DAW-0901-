@@ -51,15 +51,24 @@ const CAT_OF: Record<string, DrumCategory[]> = {
 };
 
 /**
- * Boîte à rythmes Make Music : un tap allume un pas, un deuxième tap le passe
- * en accent léger, un troisième l'éteint. Sur les hi-hats, l'appui long (ou
- * clic droit) fait un « roll » ×2 ×3 ×4.
+ * Boîte à rythmes Make Music : un clic allume un pas, un deuxième l'éteint (comme dans
+ * toutes les boîtes à rythmes) ; Maj + clic passe un pas en accent léger (ou le remet
+ * fort). Glisser sur les pas les peint (allumés ou éteints, comme le premier touché).
+ * Sur les hi-hats, l'appui long (ou clic droit) fait un « roll » ×2 ×3 ×4.
  */
 const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [playStep, setPlayStep] = useState(-1);
   const [soundMenu, setSoundMenu] = useState<number | null>(null);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  /** Tour beatmaking (22/10/2026) : coup de pinceau sur les pas (souris), comme dans les step sequencers. */
+  const strokeRef = useRef<{ on: boolean; painting: boolean; ri: number; si: number; dm: DrumMachine | null } | null>(null);
+  useEffect(() => {
+    const end = () => { strokeRef.current = null; };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => { window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+  }, []);
   // Téléphone : 8 pas par page (1–8 / 9–16) au lieu d'une grille qui défilait
   // sans le dire (7 pas visibles sur 16) ; le pad touché est le pad « choisi ».
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches);
@@ -236,12 +245,47 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     if (!dm) return;
     p.onChange({ ...dm, rows: dm.rows.map((r, i) => (i === ri ? patch({ ...r, steps: [...r.steps], ratchet: [...r.ratchet] }) : r)) });
   };
-  const toggleStep = (ri: number, si: number) => editRow(ri, r => {
+  /** Clic : allumé ↔ éteint. Maj + clic : accent léger ↔ fort (un pas éteint s'allume en léger). */
+  const toggleStep = (ri: number, si: number, accent = false) => editRow(ri, r => {
     const v = r.steps[si];
-    r.steps[si] = v === 0 ? 110 : v >= 100 ? 70 : 0;
+    r.steps[si] = accent ? (v > 0 && v < 100 ? 110 : 70) : v === 0 ? 110 : 0;
     if (r.steps[si] === 0) r.ratchet[si] = 1;
     return r;
   });
+  /** Pinceau : pose l'état du coup (allumé / éteint) sur un pas, sans relire des props pas encore à jour. */
+  const paintStep = (ri: number, si: number) => {
+    const s = strokeRef.current;
+    if (!s?.dm) return;
+    const row = s.dm.rows[ri];
+    if (!row || si >= row.steps.length) return;
+    const v = row.steps[si] || 0;
+    if (s.on ? v > 0 : v === 0) return;
+    const steps = [...row.steps]; const ratchet = [...row.ratchet];
+    steps[si] = s.on ? 110 : 0;
+    if (!s.on) ratchet[si] = 1;
+    s.dm = { ...s.dm, rows: s.dm.rows.map((x, i) => (i === ri ? { ...x, steps, ratchet } : x)) };
+    p.onChange(s.dm);
+  };
+  const stepDown = (e: React.PointerEvent, ri: number, si: number) => {
+    startPress(ri, si);
+    strokeRef.current = e.pointerType === 'mouse' && e.button === 0 && dm ? { on: !(dm.rows[ri]?.steps[si] > 0), painting: false, ri, si, dm } : null;
+  };
+  const stepEnter = (e: React.PointerEvent, ri: number, si: number) => {
+    const s = strokeRef.current;
+    if (!s || !(e.buttons & 1)) return;
+    if (!s.painting) {
+      s.painting = true;
+      if (pressTimer.current) window.clearTimeout(pressTimer.current);
+      paintStep(s.ri, s.si);
+    }
+    paintStep(ri, si);
+  };
+  const stepUp = (e: React.PointerEvent, ri: number, si: number) => {
+    const s = strokeRef.current;
+    strokeRef.current = null;
+    if (s?.painting) return;
+    endPress(ri, si, e.shiftKey);
+  };
   const cycleRoll = (ri: number, si: number) => editRow(ri, r => {
     const n = r.ratchet[si] || 1;
     r.ratchet[si] = n >= 4 ? 1 : n + 1;
@@ -254,9 +298,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
     pressTimer.current = window.setTimeout(() => { longPressed.current = true; cycleRoll(ri, si); }, 450);
   };
-  const endPress = (ri: number, si: number) => {
+  const endPress = (ri: number, si: number, accent = false) => {
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
-    if (!longPressed.current) toggleStep(ri, si);
+    if (!longPressed.current) toggleStep(ri, si, accent);
   };
 
   const len = dm ? 16 * dm.bars : 16;
@@ -437,7 +481,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                               return (
                                 <button key={si} type="button" disabled={off} data-own-longpress=""
                                   aria-label={`${r.name}, pas ${si + 1}${off ? ' (hors de la longueur de la rangée)' : v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                                  onPointerDown={() => startPress(ri, si)} onPointerUp={() => endPress(ri, si)}
+                                  onPointerDown={e => stepDown(e, ri, si)} onPointerUp={e => stepUp(e, ri, si)} onPointerEnter={e => stepEnter(e, ri, si)}
                                   onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                                   onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
                                   className={`relative flex-1 min-w-0 rounded-[4px] ${narrow ? 'h-10' : 'h-9 [@media(pointer:coarse)]:h-10'} ${ps === si ? 'ring-2 ring-white/70' : ''} ${
@@ -458,8 +502,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                             type="button"
                             data-own-longpress=""
                             aria-label={`${r.name}, pas ${si + 1}${v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                            onPointerDown={() => startPress(ri, si)}
-                            onPointerUp={() => endPress(ri, si)}
+                            onPointerDown={e => stepDown(e, ri, si)}
+                            onPointerUp={e => stepUp(e, ri, si)}
+                            onPointerEnter={e => stepEnter(e, ri, si)}
                             onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                             onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
                             className={`relative rounded-md border transition-colors ${narrow ? 'nova-hit flex-1 min-w-0 h-10' : 'nova-hit-tactile shrink-0 w-8 h-9 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-10'} ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
@@ -566,7 +611,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               </div>
               <p className="text-[11px] text-slate-500">
                 {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
-                Motifs : crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
+                Motifs : crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Clic : allumer / éteindre ; glisse sur les pas pour en peindre plusieurs ; Maj + clic : accent léger. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
               </p>
             </>
           )}
