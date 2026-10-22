@@ -517,7 +517,7 @@ export function drumSongClips(dm: DrumMachine, bpm: number, end: number, idBase:
       const triplet = spb % 3 === 0;
       const sw = typeof row.swing === 'number' ? Math.max(0, Math.min(0.6, row.swing)) : d.swing;
       const rowShift = Math.max(-0.5, Math.min(0.5, (row.shift || 0) / 100)); // en doubles-croches
-      const glideMs = row.smp?.glideMs ?? DEFAULT_GLIDE_MS;
+      const glideMs = Math.max(0, Math.min(2000, Number(row.smp?.glideMs ?? DEFAULT_GLIDE_MS) || 0));
       const L = r.lanes;
       for (let i = 0; i < spb; i++) {
         const v = r.steps[i] || 0;

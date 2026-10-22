@@ -2,6 +2,7 @@ import { DRUM_LIBRARY, DRUM_LIBRARY_STYLES, LibCategory, libUrl } from './drumLi
 import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
 import { rowStepsPerBar, STEP_LANES } from './drumPatterns';
+import { cleanSampler } from './padSampler';
 import { isKitRef, kitSoundLabel } from './drumKitLibrary';
 
 /**
@@ -257,7 +258,7 @@ export function drumPadsFor(dm: DrumMachine): DrumPad[] {
     // le groupe de choke voyage avec le pad (lu par DrumRackNode)
     ...(r.choke ? { chokeGroup: r.choke } as any : {}),
     // Sampler du pad (séquenceur pro) : lu par DrumRackNode ; absent = le son brut d'avant.
-    ...(r.smp ? { smp: r.smp } as any : {}),
+    ...(r.smp && cleanSampler(r.smp) ? { smp: cleanSampler(r.smp) } as any : {}),
   }));
 }
 

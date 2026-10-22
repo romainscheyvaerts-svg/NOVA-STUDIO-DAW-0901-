@@ -312,7 +312,8 @@ export function pickLayer(count: number, mode: 'vel' | 'rr' | undefined, velocit
 /** Le son du pad doit-il être retraité (au-delà de la zone jouée) ? */
 export function needsBake(p: PadSamplerParams | undefined, padTune = 0): boolean {
   if (!p) return false;
-  const s = smpOf(p);
+  const s = smpOf(cleanSampler(p));
+  padTune = Math.max(-48, Math.min(48, padTune || 0));
   return s.invert || s.normalize || s.drive > 0 || s.crushBits > 0 || s.crushDown > 1
     || (s.stretch && Math.abs(padTune + s.cents / 100) > 1e-9) || (s.loop && s.loopXfade > 0);
 }
@@ -320,7 +321,8 @@ export function needsBake(p: PadSamplerParams | undefined, padTune = 0): boolean
 /** Clé de cache du traitement (vide sans traitement : la clé d'un ancien pad ne change pas). */
 export function bakeKey(p: PadSamplerParams | undefined, padTune = 0): string {
   if (!needsBake(p, padTune)) return '';
-  const s = smpOf(p);
+  const s = smpOf(cleanSampler(p));
+  padTune = Math.max(-48, Math.min(48, padTune || 0));
   const st = s.stretch ? +(padTune + s.cents / 100).toFixed(4) : 0;
   return `smp:${s.invert ? 1 : 0},${s.normalize ? 1 : 0},${+s.drive.toFixed(4)},${s.crushBits},${s.crushDown},${st},${s.loop ? 1 : 0},${+s.loopStart.toFixed(5)},${+s.loopEnd.toFixed(5)},${+s.loopXfade.toFixed(4)}`;
 }
@@ -383,7 +385,8 @@ export function timeStretch(ch: Float32Array[], sr: number, factor: number): Flo
  * de boucle (puissance constante, avant la fin de boucle, avec ce qui précède le début de boucle).
  */
 export function bakeChannels(ch: Float32Array[], sr: number, p: PadSamplerParams | undefined, padTune = 0): Float32Array[] {
-  const s = smpOf(p);
+  const s = smpOf(cleanSampler(p));
+  padTune = Math.max(-48, Math.min(48, padTune || 0));
   let out = ch.map(c => new Float32Array(c));
   if (s.invert) out.forEach(c => { for (let i = 0; i < c.length; i++) c[i] = -c[i]; });
   if (s.normalize) {

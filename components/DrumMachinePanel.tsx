@@ -83,7 +83,7 @@ export const DRUM_SHORTCUTS: [string, string][] = [
   ['Suppr', 'effacer la rangée choisie (Maj + Suppr : tout le motif)'],
   ['Ctrl + C / Ctrl + V', 'copier / coller le motif'],
   ['Ctrl + D', 'dupliquer le motif'],
-  ['[ / ]', 'motif précédent / suivant'],
+  ['[ / ] ou Page préc. / Page suiv.', 'motif précédent / suivant'],
   ['Espace', 'lecture / pause'],
 ];
 
@@ -277,7 +277,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       else if (mod && !e.shiftKey && !e.altKey && e.code === 'KeyD') next = duplicatePattern(d, dP.activePattern!);
       else if (!mod && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { const dir = e.key === 'ArrowRight' ? 1 : -1; next = e.altKey ? rotatePattern(d, dir) : rotateRow(d, ri, dir); }
       else if (!mod && !e.altKey && (e.key === 'Delete' || e.key === 'Backspace')) next = e.shiftKey ? clearPattern(d) : clearRow(d, ri);
-      else if (!mod && !e.altKey && (e.key === '[' || e.key === ']') && pats.length > 1) next = selectPattern(d, pats[(ai + (e.key === ']' ? 1 : -1) + pats.length) % pats.length].id);
+      else if ((e.key === '[' || e.key === ']' || (!mod && !e.altKey && (e.key === 'PageUp' || e.key === 'PageDown'))) && pats.length > 1) next = selectPattern(d, pats[(ai + (e.key === ']' || e.key === 'PageDown' ? 1 : -1) + pats.length) % pats.length].id);
       else if (!mod && e.key === '?') { setHelpOpen(v => !v); }
       else return;
       e.preventDefault(); e.stopImmediatePropagation();
