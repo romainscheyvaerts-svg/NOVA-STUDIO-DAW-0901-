@@ -12,6 +12,7 @@ import { installActionLog, installConsoleRing } from './utils/feedbackLog';
 import { startFeedbackQueue } from './services/feedback';
 import { FeedbackHost } from './components/FeedbackHost';
 import { themeStore, followHostTheme } from './utils/themeStore';
+import { startTouchZones } from './utils/touchZones';
 
 // Tampon des 30 dernières erreurs et des 20 dernières actions (anonymes), joint
 // aux signalements « Signaler un bug / proposer une idée » ; file d'envoi hors ligne.
@@ -48,6 +49,9 @@ if (
     navigator.serviceWorker.register('/sw.js').catch(() => { /* pas bloquant */ });
   });
 }
+
+// Écran tactile : zones de toucher des petits boutons étendues dans l'espace libre (utils/touchZones).
+startTouchZones();
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(

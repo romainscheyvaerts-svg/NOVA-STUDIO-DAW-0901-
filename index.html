@@ -172,6 +172,17 @@
       body[data-mobile-nav] [data-track-creation-bar] > button { height: 2.75rem; padding-left: 0.75rem; padding-right: 0.75rem; }
     }
 
+    /* Téléphone : textes utiles à 12 px au moins dans les pages du studio (onglets, barre d'outils, pistes,
+       console, effets, sons, compteur), 11 px pour les petites pastilles ; les façades des effets
+       (.nova-sombre, dessinées comme du matériel) gardent leurs tailles. */
+    /* (Sous 768 px seulement : au-delà, les variantes md: des classes reprennent leur taille.) */
+    @media (max-width: 767px) {
+      body[data-view-mode="MOBILE"] .nv-phone-text :is(.text-\[10px\], .text-\[11px\]):not(.nova-sombre *),
+      body[data-view-mode="MOBILE"] [data-testid=transport-bar] :is(.text-\[10px\], .text-\[11px\]) { font-size: 12px; }
+      body[data-view-mode="MOBILE"] .nv-phone-text :is(.text-\[8px\], .text-\[9px\]):not(.nova-sombre *),
+      body[data-view-mode="MOBILE"] [data-testid=transport-bar] :is(.text-\[8px\], .text-\[9px\]) { font-size: 11px; }
+    }
+
     /* --- MODE MOBILE --- */
     body[data-view-mode="MOBILE"] {
       --btn-height: 3rem;
@@ -304,25 +315,30 @@
       /* Pas la croix « retirer l'effet » (.delete-fx) : posée sur le bord de l'effet, sa zone agrandie avalait le
          toucher destiné à l'effet lui-même. */
       /* Deux petits boutons empilés (flèches ↑ ↓) : data-no-hit, sinon la zone de l'un avalait l'autre. */
+      /* Étendue calculée côté par côté dans l'espace libre (utils/touchZones : jamais sur le voisin, jamais hors du
+         conteneur) ; avant le calcul, 44 px de haut et la largeur du bouton. */
       button:not(.nova-hit):not(.nova-hit-tactile):not([data-no-hit]):not(.delete-fx)::after {
         content: ''; position: absolute;
-        top: min(0px, calc((100% - 44px) / 2)); bottom: min(0px, calc((100% - 44px) / 2));
-        left: 0; right: 0;
+        top: var(--nv-zt, min(0px, calc((100% - 44px) / 2))); bottom: var(--nv-zb, min(0px, calc((100% - 44px) / 2)));
+        left: var(--nv-zl, 0px); right: var(--nv-zr, 0px);
       }
     }
     /* Au doigt (téléphone, tablette) : zone invisible de 44 px de haut (recommandation iOS / Android), pas 40 ;
        en largeur elle reste à 40 px (rangées serrées, mesure de la barre du haut). */
     @media (pointer: coarse) {
       .nova-hit::after, .nova-hit-tactile::after {
-        top: min(0px, calc((100% - 44px) / 2)); bottom: min(0px, calc((100% - 44px) / 2));
+        top: var(--nv-zt, min(0px, calc((100% - 44px) / 2))); bottom: var(--nv-zb, min(0px, calc((100% - 44px) / 2)));
+        left: var(--nv-zl, min(0px, calc((100% - 40px) / 2))); right: var(--nv-zr, min(0px, calc((100% - 40px) / 2)));
       }
     }
     /* Rangée de petits boutons : 4 px d'écart, 12 px au doigt pour que chaque
        zone de 40 px ne déborde pas sur la voisine (le mode tablette agrandit
        déjà les boutons à 44 px, l'écart y reste de 4 px). */
     .nova-hit-gap { column-gap: 4px; }
+    /* Au doigt (tablette comprise) : 16 px d'écart, chaque bouton de 28 px se touche sur 44 px sans voisin dedans
+       (« Envois » passe dans le menu ⋯ de la piste pour garder la place du nom). */
     @media (pointer: coarse) {
-      body:not([data-view-mode="TABLET"]) .nova-hit-gap { column-gap: 12px; }
+      .nova-hit-gap { column-gap: 16px; }
     }
     /* Défilement horizontal sans barre visible (barres d'actions mobiles). */
     .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }

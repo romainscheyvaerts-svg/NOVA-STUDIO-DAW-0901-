@@ -79,7 +79,7 @@ const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = (
   // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la tranche.
   return <button type="button" disabled={!onSet} onClick={() => { done.current = false; setEditing(true); }} data-testid={`fader-db-${track.id}`}
     title="Clic pour taper le volume en dB (ex. -3,5 puis Entrée)" aria-label={`Volume de ${track.name} : ${text}. Clic pour le taper`}
-    className="mt-2 block h-4 w-full leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
+    className="mt-2 block h-4 w-full leading-4 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:leading-7 [@media(pointer:coarse)]:text-[12px] text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
 };
 const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);

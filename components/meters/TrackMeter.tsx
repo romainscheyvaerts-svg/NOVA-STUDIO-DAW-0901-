@@ -256,7 +256,7 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
         <canvas ref={canvasRef} className="flex-1 min-h-0 w-full" />
         {grTrackId && grText && <span ref={grRef} className="h-3 shrink-0 text-center text-[8px] font-mono tabular-nums text-amber-400 leading-3" />}
         {showReadout && <button ref={readRef} type="button" onClick={reset} title="Crête vraie la plus haute (dBTP) : clic pour remettre à zéro"
-          className="h-3.5 shrink-0 text-center text-[8px] font-mono tabular-nums text-slate-300 leading-3 hover:text-white">−∞</button>}
+          className="h-3.5 [@media(pointer:coarse)]:h-5 [@media(pointer:coarse)]:leading-5 [@media(pointer:coarse)]:text-[10px] shrink-0 text-center text-[8px] font-mono tabular-nums text-slate-300 leading-3 hover:text-white">−∞</button>}
         {menu && <MeterMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
       </div>
     );
