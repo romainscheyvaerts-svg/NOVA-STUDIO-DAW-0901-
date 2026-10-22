@@ -7,6 +7,13 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.13
+- Lecture avec un effet à latence (EQ phase linéaire, limiteur) : le début des sons n'est plus coupé.
+- Piano roll : la grille suit les rampes de tempo.
+- Collaboration : annuler un changement de tempo ramène tout le monde au même état.
+- Rack parallèle : les réglages des effets de ses branches s'automatisent.
+- Compresseur multibande et EQ dynamique : clé externe (side-chain), par exemple le kick qui creuse la basse.
+
 ## 1.5.12
 - Tempo : le changer garde tes notes, clips et automation sur la grille ; rampes d'accélération ; option « garder les clips audio à leur place ».
 - MIDI vivant : arpège, accords et gamme forcée en direct, clips liés (modifier un motif modifie ses copies), LFO calés sur le tempo.
