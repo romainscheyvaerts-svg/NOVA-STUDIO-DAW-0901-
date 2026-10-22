@@ -21,6 +21,19 @@ import { isUserIrKey } from '../utils/userIr';
  */
 const wavLater = (b: AudioBuffer): Promise<Blob> => new Promise(r => setTimeout(() => r(wavOf(b)), 0));
 
+/** Au plus `n` tâches à la fois (décodage des sons à l'ouverture). */
+function limitConcurrency(n: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return <T>(fn: () => Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    const go = () => {
+      active++;
+      fn().then(resolve, reject).finally(() => { active--; queue.shift()?.(); });
+    };
+    if (active < n) go(); else queue.push(go);
+  });
+}
+
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
 export const REPAIR_REPORT = '__repairReport';
 
@@ -356,6 +369,20 @@ export class ProjectIO {
     // 2. Reconstruction des AudioBuffers via Registry (un décodage par fichier)
     const decoded = new Map<string, string>();
     const failed = new Set<string>();
+    // Sons des clips décodés 4 par 4 en parallèle (le décodage tourne hors du fil de l'interface) :
+    // avant, un par un, la grosse séance attendait chaque son à la suite.
+    const ctx = audioEngine.ctx!;
+    const run = limitConcurrency(4);
+    const early = new Map<string, Promise<AudioBuffer>>();
+    for (const track of loadedState.tracks) for (const clip of (track.clips || [])) {
+        const ref = clip?.audioRef;
+        if (typeof ref !== 'string' || early.has(ref)) continue;
+        const f = zip.file(ref);
+        if (!f) continue;
+        const p = run(async () => ctx.decodeAudioData(await f.async("arraybuffer")));
+        p.catch(() => { /* lu (et signalé) plus bas */ });
+        early.set(ref, p);
+    }
     for (const track of loadedState.tracks) {
         for (const clip of track.clips) {
             if (clip.audioRef) {
@@ -366,9 +393,8 @@ export class ProjectIO {
                     delete clip.buffer;
                 } else if (audioFile && !failed.has(clip.audioRef)) {
                     try {
-                        const arrayBuffer = await audioFile.async("arraybuffer");
-                        // Décodage WebAudio
-                        const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+                        // Décodage WebAudio (lancé plus haut, 4 à la fois)
+                        const audioBuffer = await (early.get(clip.audioRef) ?? audioFile.async("arraybuffer").then(ab => ctx.decodeAudioData(ab)));
 
                         // Enregistrer dans le registry et stocker l'ID
                         const bufferId = reg(audioBuffer, clip.id);
