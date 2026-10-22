@@ -17,7 +17,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3491/")
 PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\fenetres")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log  # noqa: E402
+from qalib import launch, new_page, OUT, Log, ouvrir_menu_range  # noqa: E402
 from nova_pro_lib import track_point  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 _r1 = (Path(__file__).parent / "r1_export.py").read_text(encoding="utf-8").split("\nwith sync_playwright() as p:")[0]
@@ -116,7 +116,20 @@ def key(k):
 
 
 def click(sel):
-    return lambda p: p.locator(sel).locator("visible=true").first.click(timeout=4000)
+    # Barre allégée (22/10/2026) : ouvre d'abord le menu qui range la commande (Options ▾, Session ▾…).
+    def go(p):
+        ouvrir_menu_range(p, sel)
+        p.locator(sel).locator("visible=true").first.click(timeout=4000)
+    return go
+
+
+def menu_item(testid):
+    # Commande rangée dans le menu ☰ (Master Nova…).
+    def go(p):
+        p.locator("button[aria-label='Ouvrir le menu']").locator("visible=true").first.click(timeout=4000)
+        p.wait_for_timeout(300)
+        p.locator(f"[data-testid={testid}]").locator("visible=true").first.click(timeout=4000)
+    return go
 
 
 def select_first_clip(p):
@@ -141,7 +154,7 @@ CASES = [
     ("Insérer du temps (Ctrl+Alt+I)", key("Control+Alt+i"), None),
     ("Signaler un bug (Ctrl+Maj+B)", key("Control+Shift+B"), None),
     ("Palette de commandes (Ctrl+K)", key("Control+k"), None),
-    ("Master Nova", click("[data-nova-open-master]"), None),
+    ("Master Nova", menu_item("menu-master-nova"), None),
     ("Tempo et mesure", click("[data-testid=open-tempo]"), None),
     ("Clic et décompte", click("[data-testid=open-metronome]"), None),
     ("Réglages du punch", click("button[aria-label^='Réglages du punch']"), None),

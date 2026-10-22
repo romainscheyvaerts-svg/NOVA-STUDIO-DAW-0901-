@@ -74,7 +74,13 @@ def lane_value(points, t):
     return pts[-1][1]
 
 
+def open_auto(page):
+    # Barre allégée : sur « Lecture » sans automation écrite, le sélecteur est dans le « ⋯ » de la piste.
+    ouvrir_menu_range(page, '[data-testid="automation-mode-voix"]', piste="voix")
+
+
 def set_mode(page, label):
+    open_auto(page)
     page.locator('[data-testid="automation-mode-voix"]').first.click()
     page.wait_for_timeout(300)
     page.get_by_role("menuitemradio", name=re.compile(f"^{label}")).first.click()
@@ -82,6 +88,7 @@ def set_mode(page, label):
 
 
 def clear_automation(page):
+    open_auto(page)
     page.locator('[data-testid="automation-mode-voix"]').first.click(); page.wait_for_timeout(300)
     b = page.get_by_role("menuitem", name=re.compile("Effacer l'automation")).first
     if b.is_enabled(): b.click()

@@ -96,6 +96,10 @@ MEASURE = r"""() => {
 
 def toggle_sidebar(page, want_open):
     lab = "Masquer le navigateur" if not want_open else "Afficher le navigateur"
+    import qalib as _q
+    if _q.ouvrir_menu_range(page, f"button[aria-label='{lab}']"):  # « Vue ▾ » (barre allégée)
+        if not page.locator(f"button:visible[aria-label='{lab}']").count():
+            page.keyboard.press("Escape"); page.wait_for_timeout(200)
     b = page.locator(f"button:visible[aria-label='{lab}']")
     if b.count():
         b.first.click(); page.wait_for_timeout(500)

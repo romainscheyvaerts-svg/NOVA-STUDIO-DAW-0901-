@@ -34,7 +34,8 @@ RES = {"etapes": {}, "mesures": {}}
 def ouvrir_midi(pg):
     """Réglages MIDI : bouton de la barre, ou menu ☰ quand la barre l'a replié faute de place."""
     btn = pg.locator("[data-nova-midi-button]").first
-    if btn.get_attribute("data-bar-folded") is None and btn.is_visible():
+    # Barre allégée : le bouton n'apparaît que si un clavier MIDI est branché (sinon menu ☰ → MIDI).
+    if btn.count() and btn.get_attribute("data-bar-folded") is None and btn.is_visible():
         btn.click(); return
     pg.locator("[data-testid=transport-menu]").click()
     pg.locator("[data-testid=menu-midi]").click()

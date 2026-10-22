@@ -273,7 +273,9 @@ def desktop(b, f: Path):
           near(m["mon"]["L440"], 0.3, 0.01) and m["mon"]["R440"] < 0.005 and near(m["mon"]["L660"], 0.15, 0.008) and near(m["mon"]["R660"], 0.15, 0.008), m)
     mix_ref = m["mix"]
 
-    page.locator('[data-testid="open-monitor"]').click(); page.wait_for_timeout(400)
+    # 22/10/2026 (barre allégée) : la section d'écoute est dans « Options ▾ » de la barre du haut.
+    page.locator('[data-testid="transport-options"]').click(); page.wait_for_timeout(400)
+    page.locator('[data-testid="monitor-panel"]').scroll_into_view_if_needed(); page.wait_for_timeout(200)
     check("bouton « Écoute » : le panneau s'ouvre", page.locator('[data-testid="monitor-panel"]').count() == 1)
     bad, n = covered(page, '[data-testid="monitor-panel"] button, [data-testid="monitor-panel"] input')
     check(f"panneau d'écoute : aucun bouton recouvert ({n})", n >= 8 and not bad, bad)
@@ -462,7 +464,8 @@ def desktop(b, f: Path):
 
     # ── 6. Thème clair, balayage, sauvegarde ─────────────────────────────
     page.evaluate("() => window.DAW_CONTROL.setTheme('light')"); page.wait_for_timeout(600)
-    page.locator('[data-testid="open-monitor"]').click(); page.wait_for_timeout(400)
+    page.locator('[data-testid="transport-options"]').click(); page.wait_for_timeout(400)
+    page.locator('[data-testid="monitor-panel"]').scroll_into_view_if_needed(); page.wait_for_timeout(200)
     page.locator('[data-testid="monitor-panel"] [data-testid="monitor-matrix-mono"]').click()
     page.locator('[data-testid="monitor-panel"] [data-testid="monitor-dim"]').click(); page.wait_for_timeout(300)
     shot(page, "pc_10_theme_clair_panneau")

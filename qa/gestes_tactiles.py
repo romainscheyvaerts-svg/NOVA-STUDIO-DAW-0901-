@@ -199,7 +199,9 @@ def synth_count(page):
 
 
 def set_mode(page, m):
+    qalib.ouvrir_menu_range(page, f'[data-edit-mode="{m}"]', tap=True)  # « Édition ▾ » (barre allégée)
     page.locator(f'[data-edit-mode="{m}"]').locator("visible=true").first.tap(); page.wait_for_timeout(250)
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
     return page.evaluate("() => window.__novaEditMode.get().mode")
 
 
@@ -345,9 +347,13 @@ def scenario_tab_crayon(browser, log):
     open_tab(page, "tab_10_crayon_projet")
     f = Finger(page)
     b = box(page)
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-gain-line"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-gain-line").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="tool-pencil"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("tool-pencil").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape-line"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape-line").tap(); page.wait_for_timeout(200)
     # Ligne de gain à 0 dB : 18 + (H - 22) * 0,2 sous le haut du clip (cf. clip_gain_preuve).
     y0 = b["y"] + b["tt"] - b["st"] + 2 + 18 + max(4, ZOOMV - 4 - 22) * 0.2

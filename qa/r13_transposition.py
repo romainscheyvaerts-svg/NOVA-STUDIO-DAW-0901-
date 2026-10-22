@@ -22,7 +22,7 @@ import numpy as np
 
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-r13")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import BASE, Log, launch, new_page, shot, OUT, menu_pick  # noqa
+from qalib import BASE, Log, launch, new_page, shot, OUT, menu_pick, ouvrir_menu_range  # noqa
 from gel_pre_effet import prepare, open_project_file, export_wav, save_zip  # noqa
 from playwright.sync_api import sync_playwright  # noqa
 
@@ -569,7 +569,9 @@ def part_d(page):
     # Voix coupée : on écoute le beat seul (mesure plus nette).
     page.evaluate("() => { const e = window.__novaEdit; const c = e.getState().tracks.find(t => t.id === 'voix').clips[0]; e.patchClips('voix', { [c.id]: { isMuted: true } }); }")
     page.wait_for_timeout(400)
-    page.get_by_test_id("practice-speed").first.click(); page.wait_for_timeout(300)
+    # Barre allégée : à 100 %, la vitesse est dans « Options ▾ » (la puce revient dans la barre dès qu'elle ralentit).
+    if not ouvrir_menu_range(page, "[data-testid=practice-preset-75]"):
+        page.get_by_test_id("practice-speed").first.click(); page.wait_for_timeout(300)
     page.get_by_test_id("practice-preset-75").click(); page.wait_for_timeout(300)
     shot(page, "D1_vitesse_75_reglage")
     page.keyboard.press("Escape"); page.wait_for_timeout(200)

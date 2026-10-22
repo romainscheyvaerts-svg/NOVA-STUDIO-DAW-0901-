@@ -46,6 +46,8 @@ import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
 import { TrackStructureBadge, TrackStructureInline, useStructureSelect, useStructureTracksGetter } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
+import ToolbarMenu, { menuRowClass } from './ToolbarMenu';
+import { automationModeOf, hasAutomation } from '../utils/automationWrite';
 import { automationRecorder } from '../services/AutomationManager';
 import { getLive, liveKey, useLiveParam, useLiveView } from '../utils/automationLiveStore';
 import { STANDARD_SENDS, sendLabel, sendColor } from '../utils/sendLabels';
@@ -206,6 +208,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const lastNameTap = useRef(0);
   const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
   const [showSends, setShowSends] = useState(false);
+  const autoModeShown = automationModeOf(track) !== 'read' || hasAutomation(track);
   const [newName, setNewName] = useState(track.name);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -742,7 +745,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             {track.soloSafe && <i className="fas fa-shield-alt absolute -top-1 -right-1 text-[8px] text-amber-300 drop-shadow" aria-hidden="true" />}
           </button>
 
-          {canHaveSends && !simple && (
+          {/* Envois : visibles quand le panneau est ouvert (pour le refermer) ; sinon dans « ⋯ ». */}
+          {canHaveSends && !simple && showSends && (
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 title="Envois : écho et reverbs"
@@ -780,6 +784,33 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 <i className="fas fa-circle text-[8px]"></i>
               </button>
           )}
+          {/* « ⋯ » (mode avancé, allégé 22/10/2026) : envois, mode d'automation (quand il est sur Lecture sans
+              automation écrite), et toutes les actions du clic droit. Monté seulement à l'ouverture. */}
+          {!simple && track.id !== 'master' && (
+            <ToolbarMenu testId={`track-more-${track.id}`} menuLabel={`Piste ${track.name}`} width={260} alignRight
+              ariaLabel={`Plus d'options : ${track.name}`} title="Envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
+              triggerClassName="nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
+              label={<i className="fas fa-ellipsis-h text-[10px]" aria-hidden="true" />}>
+              {(close) => (<>
+                {canHaveSends && (
+                  <button type="button" aria-label={`Envois de ${track.name}`} aria-expanded={showSends} title="Envois : écho et reverbs"
+                    onClick={() => { close(); setShowSends(!showSends); }} className={menuRowClass(showSends)}>
+                    <i className="fas fa-sliders-h w-5 text-center text-[11px]" aria-hidden="true" /><span>Envois (écho, reverbs)</span>
+                  </button>
+                )}
+                {!autoModeShown && (
+                  <div className="px-2 py-1.5 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-slate-400">Automation</span>
+                    <div className="flex-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
+                  </div>
+                )}
+                <button type="button" onClick={(e) => { close(); onContextMenu(e, track.id); }} className={menuRowClass(false)}
+                  title="Le menu du clic droit : dupliquer, couleur, piste guide, geler, solo safe, supprimer…">
+                  <i className="fas fa-ellipsis-v w-5 text-center text-[11px]" aria-hidden="true" /><span>Autres actions de la piste…</span>
+                </button>
+              </>)}
+            </ToolbarMenu>
+          )}
         </div>
       </div>
       
@@ -802,7 +833,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
       <div ref={controlsRef} className={`${canHaveSends && showSends && !simple ? 'hidden' : 'flex'} items-center space-x-2 mt-1 bg-white/[0.03] p-1.5 rounded-lg relative z-10`}>
         {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
-        {!simple && track.id !== 'master' && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
+        {/* Mode d'automation : visible dès qu'il compte (autre que Lecture, ou automation écrite) ; sinon dans « ⋯ ». */}
+        {!simple && track.id !== 'master' && autoModeShown && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
         <div
           {...panKnob.bind}
           ref={(el) => { panHostRef.current = el; panKnob.bind.ref(el); }}

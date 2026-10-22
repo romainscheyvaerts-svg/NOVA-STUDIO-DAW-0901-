@@ -318,3 +318,53 @@ BALAYAGE_CHEVAUCHEMENT_JS = r"""(scope) => {
 def balayage_chevauchement(page, scope=None):
     """Boutons recouverts par un autre élément sur l'écran (ou dans `scope`) : {'boutons': n, 'recouverts': [...]}."""
     return page.evaluate(BALAYAGE_CHEVAUCHEMENT_JS, scope)
+
+
+# ── Barre allégée (22/10/2026, « trop de boutons ») ─────────────────────────────
+# Les commandes rares sont rangées dans des menus montés seulement à l'ouverture.
+# `ouvrir_menu_range(page, sélecteur)` : si le sélecteur n'est pas dans la page, ouvre le
+# menu qui le contient (« Outils ▾ », « Édition ▾ », « Options ▾ », « Vue ▾ », « Session ▾ »,
+# « ⋯ » d'une piste, « Ø · Trim ▾ » d'une tranche). Renvoie True si un menu a été ouvert.
+MENUS_RANGES = [
+    (("tool-scrub", "tool-zoom", "tool-pencil", "pencil-shape", "toggle-gain-line", "toggle-gain-info", "toggle-loop-trim", "trim-tce"), "tools-more"),
+    (("data-edit-mode", "data-grid-option", "nova-nudge", "automation-follows", "Pas du décalage", "Courbe des fondus"), "grid-value"),
+    (("open-metronome", "open-warmup", "monitor-panel", "monitor-matrix", "monitor-dim", "monitor-cut", "monitor-volume", "solo-listen",
+      "practice-speed-panel", "practice-preset", "practice-speed-slider", 'data-nova-target="punch"', "Réglages du punch"), "transport-options"),
+    (("chord-lane-toggle", "Afficher le navigateur", "Masquer le navigateur"), "view-menu"),
+    (("dock-track-list", "dock-groups", "dock-time", "dock-session", "dock-reviews"), "dock-session-menu"),
+]
+
+
+def ouvrir_menu_range(page, sel, tap=False, piste=None, tranche=None):
+    try:
+        if page.locator(sel).locator("visible=true").count():
+            return False
+    except Exception:
+        pass
+    trig = None
+    if piste:
+        trig = f'track-more-{piste}'
+    elif tranche:
+        trig = f'strip-more-{tranche}'
+    else:
+        for keys, t in MENUS_RANGES:
+            if any(k in sel for k in keys):
+                trig = t
+                break
+    if not trig:
+        return False
+    loc = page.locator(f'[data-testid="{trig}"]').locator("visible=true")
+    if not loc.count():
+        return False
+    (loc.first.tap() if tap else loc.first.click())
+    page.wait_for_timeout(350)
+    return True
+
+
+def ouvrir_master_nova(page):
+    """Master Nova : bouton de la barre s'il existe (mode avancé : rangé dans le menu ☰ depuis le 22/10/2026)."""
+    b = page.locator("[data-nova-open-master]").locator("visible=true")
+    if b.count():
+        b.first.click(); return
+    page.locator("[data-testid=transport-menu]").locator("visible=true").first.click(); page.wait_for_timeout(350)
+    page.locator("[data-testid=menu-master-nova]").locator("visible=true").first.click()
