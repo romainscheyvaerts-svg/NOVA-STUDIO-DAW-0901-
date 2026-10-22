@@ -12,6 +12,8 @@ import { selLength, type TimeSelection } from './timeSelection';
  */
 
 export interface SelectionSnapshot { time: TimeSelection | null; clipIds: string[] }
+/** Appui en cours (souris, doigt, stylet) : `id` augmente à chaque appui, `held` tant qu'il dure. */
+export interface PressState { id: number; held: boolean }
 
 const MAX = 30;
 /**
@@ -49,14 +51,24 @@ export class SelectionHistory {
   private restoring: SelectionSnapshot | null = null;
   /** Depuis quand la sélection courante est là (ms). */
   private since = 0;
+  /** Appui pendant lequel la sélection courante est née (null : clavier, programme). */
+  private bornIn: number | null = null;
 
-  observe(s: SelectionSnapshot, now = Date.now()) {
-    if (this.restoring && sameSnapshot(s, this.restoring)) { this.current = s; this.restoring = null; this.since = now; return; }
+  /**
+   * `press` : l'appui en cours. Une sélection née pendant un appui ENCORE tenu est de passage
+   * (glisser du Sélecteur), quelle que soit sa durée : sur un PC chargé, une image du glisser
+   * restait plus de 300 ms et Ctrl+Alt+Z rendait une plage à mi-chemin au lieu de la sélection d'avant.
+   */
+  observe(s: SelectionSnapshot, now = Date.now(), press?: PressState) {
+    const born = press?.held ? press.id : null;
+    if (this.restoring && sameSnapshot(s, this.restoring)) { this.current = s; this.restoring = null; this.since = now; this.bornIn = born; return; }
     this.restoring = null;
     if (sameSnapshot(s, this.current)) { this.current = s; return; }
     // Sélection de passage (pendant un glisser) : remplacée, pas gardée.
-    const settled = now - this.since >= SETTLE_MS;
+    const sameHeldPress = !!press?.held && this.bornIn === press.id;
+    const settled = !sameHeldPress && now - this.since >= SETTLE_MS;
     this.since = now;
+    this.bornIn = born;
     if (settled && this.current && !isEmptySnapshot(this.current)) {
       this.past = this.past.filter(p => !sameSnapshot(p, this.current));
       this.past.push(this.current);
@@ -77,13 +89,14 @@ export class SelectionHistory {
       this.current = prev;
       this.restoring = prev;
       this.since = 0;
+      this.bornIn = null;
       return prev;
     }
     return null;
   }
 
   get size() { return this.past.length; }
-  clear() { this.past = []; this.current = null; this.restoring = null; }
+  clear() { this.past = []; this.current = null; this.restoring = null; this.bornIn = null; }
 }
 
 // ------------------------------------------------------------- branchement sur la sélection partagée
@@ -91,11 +104,17 @@ export class SelectionHistory {
 export const selectionHistory = new SelectionHistory();
 let unsub: (() => void) | null = null;
 
-/** Suit la sélection partagée (utils/editSelection) ; idempotent. */
+/** Suit la sélection partagée (utils/editSelection) et les appuis (en capture : rien ne les arrête) ; idempotent. */
 export function startSelectionHistory(): () => void {
   if (!unsub) {
+    const press: PressState = { id: 0, held: false };
+    const down = () => { press.id++; press.held = true; };
+    const up = () => { press.held = false; };
+    const evs: [string, () => void][] = [['pointerdown', down], ['pointerup', up], ['pointercancel', up], ['blur', up]];
+    if (typeof window !== 'undefined') for (const [n, f] of evs) window.addEventListener(n, f, true);
     selectionHistory.observe(snapshotOf(editSelectionStore.get()));
-    unsub = editSelectionStore.subscribe(() => selectionHistory.observe(snapshotOf(editSelectionStore.get())));
+    const off = editSelectionStore.subscribe(() => selectionHistory.observe(snapshotOf(editSelectionStore.get()), Date.now(), press));
+    unsub = () => { off(); if (typeof window !== 'undefined') for (const [n, f] of evs) window.removeEventListener(n, f, true); };
   }
   return () => { unsub?.(); unsub = null; };
 }

@@ -29,6 +29,22 @@ describe('Restaurer la dernière sélection (Ctrl+Alt+Z, Pro Tools : Restore Las
     expect(h.restore()).toEqual(range(6, 9));
   });
 
+  it('glisser lent (PC chargé : une image dure plus de 300 ms) : rien de gardé tant que le bouton est tenu', () => {
+    const h = new SelectionHistory();
+    h.observe(clips('c1'), 1000, { id: 1, held: true });   // clic sur un clip
+    const p2 = { id: 2, held: true };                        // appui suivant : glisser du Sélecteur
+    h.observe(range(1, 1.2), 2000, p2);
+    h.observe(range(1, 1.5), 2600, p2);                      // image restée 600 ms
+    h.observe(range(1, 2), 3200, p2);
+    expect(h.restore()).toEqual(clips('c1'));                // pas la plage à mi-chemin
+    expect(h.restore()).toEqual(range(1, 2));
+    // Bouton relâché : la sélection suivante (clavier) range bien la précédente.
+    const h2 = new SelectionHistory();
+    h2.observe(range(1, 2), 1000, { id: 1, held: true });
+    h2.observe(range(3, 4), 2000, { id: 1, held: false });
+    expect(h2.restore()).toEqual(range(1, 2));
+  });
+
   it('saute les sélections vides (clic dans le vide) et les doublons', () => {
     const h = new SelectionHistory();
     h.observe(clips('a', 'b'), 1000);
