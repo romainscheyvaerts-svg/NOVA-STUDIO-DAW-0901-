@@ -22,8 +22,8 @@ const ACCENT = '#fbbf24';
 const HINTS = {
   inputGain: "Pousse le son dans le limiteur : plus fort, sans jamais dépasser le plafond.",
   ceiling: "Niveau maximal de sortie. −1 dBTP est la valeur sûre pour Spotify, Apple Music et YouTube.",
-  release: "Vitesse à laquelle le son revient après une crête. Court = plus fort mais pompe ; long = plus doux.",
-  lookahead: "Le limiteur voit les crêtes arriver et baisse le gain en douceur. Plus long = plus transparent, un peu plus de latence.",
+  release: "Vitesse à laquelle le son revient après une crête (constante de temps : 63 % du retour du gain, la rampe d’anticipation ajoute la moitié de l’anticipation). Court = plus fort mais pompe ; long = plus doux.",
+  lookahead: "Le limiteur voit les crêtes arriver et baisse le gain en douceur. Plus long = plus transparent, un peu plus de latence. Latence totale (affichée en haut, compensée) = anticipation + 32 échantillons de détection.",
   oversample: "Suréchantillonnage de la détection : à 4× et 8×, les crêtes entre les échantillons (crête vraie, dBTP) sont prises en compte, comme le mesurent les plateformes.",
 };
 
@@ -82,7 +82,7 @@ export const NovaLimiterUI: React.FC<Props> = ({ node, initialParams, onParamsCh
               format={(_v, h) => `${h < 0.05 ? '0,0' : `−${fr(h)}`} dB`} readoutAttrs={{ 'data-nova-limiter': 'gr' }} />
             <SegmentMeter label="Sortie" orientation="vertical" min={-30} max={0} segments={20} length={110} holdMs={1200} fallPerSec={30}
               read={() => { const m = node?.getMeters?.(); return m ? m.outPeakDb : -120; }} marker={p.ceiling}
-              colorAt={v => (v > p.ceiling + 0.05 ? '#ef4444' : v > -6 ? '#facc15' : '#4ade80')} hint="Crête de sortie (dB) ; trait blanc : plafond"
+              colorAt={v => (v > p.ceiling + 0.05 ? '#ef4444' : v > -6 ? '#facc15' : '#4ade80')} hint="Crête de sortie (échantillons, dB) ; trait blanc : plafond en crête vraie (dBTP)"
               scale={[{ v: -30, label: '−30' }, { v: -12, label: '−12' }, { v: 0, label: '0' }]}
               format={v => (v > -29.9 ? `${fmt(v)} dB` : '— dB')} />
           </div>
