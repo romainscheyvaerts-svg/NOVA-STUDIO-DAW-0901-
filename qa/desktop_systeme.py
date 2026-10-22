@@ -69,11 +69,11 @@ def ok(k, v, note=None):
     print(("OK  " if v else "KO  ") + k, "" if note is None else json.dumps(note, ensure_ascii=False)[:400], flush=True)
 
 
-def wait_gone(pids, limit=20.0):
+def wait_gone(pids, since, limit=20.0):
     t0 = time.time()
-    while alive(pids) and time.time() - t0 < limit:
+    while alive(pids, since) and time.time() - t0 < limit:
         time.sleep(0.25)
-    return alive(pids), round(time.time() - t0, 1)
+    return alive(pids, since), round(time.time() - t0, 1)
 
 
 def run():
@@ -193,11 +193,11 @@ def run():
                 RES["mesures"]["deuxieme_lancement_s"] = round(time.perf_counter() - t0, 2)
                 ok("2e lancement : s'arrête et laisse la fenêtre ouverte", code == 0 and a.proc.poll() is None,
                    {"code": code, "secondes": RES["mesures"]["deuxieme_lancement_s"]})
-            tree = descendants(a.pid)
+            tree = a.pids()
         finally:
             c2 = a.close(timeout=60)
         RES["mesures"]["fermeture_avec_console"] = c2
-        rest, secs = wait_gone(tree - {a.pid})
+        rest, secs = wait_gone(tree - {a.pid}, a.since)
         RES["mesures"]["processus_restants_apres_s"] = secs
         ok("fermeture avec la console ouverte : plus aucun processus de Nova (≤ 20 s)", not rest, {"restants": rest, "secondes": secs})
 
@@ -206,10 +206,10 @@ def run():
         try:
             a.wait_mounted()
             t = process_table()
-            tree = descendants(a.pid, t)
-            py = [p for p in tree if p != a.pid and t[p][1].lower().startswith("python")]
+            tree = descendants(a.pid, t, a.since)
+            py = [p for p in tree if p != a.pid and "nova_desktop.py" in t[p][2]]
             subprocess.run(["taskkill", "/F", "/PID", str(py[0])], capture_output=True, creationflags=0x08000000)
-            rest, secs = wait_gone(tree - {a.pid, py[0]}, 20)
+            rest, secs = wait_gone(tree - {a.pid, py[0]}, a.since, 20)
             ok("Nova tuée net : aucun processus orphelin", not rest, {"restants": rest, "secondes": secs})
         finally:
             a.kill()

@@ -60,35 +60,48 @@ def rect(hwnd) -> tuple:
 
 
 def process_table() -> dict:
-    """{pid: (ppid, nom, ligne de commande)} via WMI (PowerShell caché)."""
-    ps = ("Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId,$_.ParentProcessId,"
-          "$_.Name,($_.CommandLine -replace '[\\r\\n|]',' ') }")
+    """{pid: (ppid, nom, ligne de commande, création en FILETIME)} via WMI (PowerShell caché)."""
+    ps = ("Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.ProcessId,$_.ParentProcessId,"
+          "$_.Name,$_.CreationDate.ToFileTimeUtc(),($_.CommandLine -replace '[\\r\\n|]',' ') }")
     raw = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                          encoding="utf-8", errors="replace", creationflags=0x08000000).stdout
     t = {}
     for line in raw.splitlines():
-        parts = line.split("|", 3)
-        if len(parts) == 4 and parts[0].isdigit():
-            t[int(parts[0])] = (int(parts[1] or 0), parts[2], parts[3])
+        parts = line.split("|", 4)
+        if len(parts) == 5 and parts[0].isdigit():
+            try:
+                created = int(parts[3])
+            except ValueError:
+                created = 0
+            t[int(parts[0])] = (int(parts[1] or 0), parts[2], parts[4], created)
     return t
 
 
-def descendants(root: int, table: "dict | None" = None) -> set:
+def filetime_now() -> int:
+    return int((time.time() + 11644473600) * 10_000_000)
+
+
+def descendants(root: int, table: "dict | None" = None, since: int = 0) -> set:
+    """Processus nés de root. Garde-fou contre la réutilisation des numéros de processus par
+    Windows : un enfant est forcément né APRÈS son parent (et après `since`, l'heure de lancement
+    du test) ; sinon c'est un processus étranger dont le parent d'origine portait le même numéro
+    (le 22/10, sans ce garde-fou, la vraie Nova Studio de Romain a été prise pour un enfant d'un
+    test arrêté et fermée par lui)."""
     table = table or process_table()
-    found = {root}
+    born = {root: table[root][3] if root in table else since}
     changed = True
     while changed:
         changed = False
-        for pid, (ppid, _n, _c) in table.items():
-            if ppid in found and pid not in found:
-                found.add(pid)
+        for pid, (ppid, _n, _c, created) in table.items():
+            if ppid in born and pid not in born and created >= max(born[ppid], since) - 10_000_000:
+                born[pid] = created
                 changed = True
-    return found
+    return set(born)
 
 
-def alive(pids) -> list:
+def alive(pids, since: int = 0) -> list:
     t = process_table()
-    return [(p, t[p][1]) for p in pids if p in t]
+    return [(p, t[p][1]) for p in pids if p in t and t[p][3] >= since]
 
 
 class App:
@@ -114,6 +127,7 @@ class App:
             env["NOVA_DESKTOP_EXTRA_ARGS"] = "--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=127.0.0.1;localhost"
         env.update(extra_env or {})
         self.t0 = time.perf_counter()
+        self.since = filetime_now() - 20_000_000  # 2 s de marge
         self.proc = subprocess.Popen([str(VENV_PY), str(DESKTOP / "nova_desktop.py")], env=env, cwd=str(DESKTOP),
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                      creationflags=0x08000000)
@@ -181,20 +195,38 @@ class App:
     # ── fenêtres et fermeture ────────────────────────────────────────
     def pids(self) -> set:
         """Processus de l'appli (le python.exe d'un venv relance le vrai Python en enfant)."""
-        return descendants(self.pid)
+        return descendants(self.pid, since=self.since)
+
+    def published_window(self) -> int:
+        """Fenêtre notée par l'appli dans SON dossier de données (window.hwnd) : la seule qu'on
+        ferme ; jamais une fenêtre trouvée par son titre (la vraie Nova Studio s'appelle pareil)."""
+        try:
+            hwnd, pid = (int(x) for x in Path(self.data_dir, "window.hwnd").read_text(encoding="ascii").split()[:2])
+        except (OSError, ValueError):
+            return 0
+        owner = wintypes.DWORD()
+        u32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(owner))
+        return hwnd if owner.value == pid and pid in self.pids() else 0
 
     def main_window(self, timeout=30):
         end = time.time() + timeout
         while time.time() < end:
-            w = [x for x in windows_of(self.pids()) if x[1].startswith("Nova Studio")]
-            if w:
+            h = self.published_window()
+            if h:
+                return h
+            mine = {p for p, (_pp, _n, cmd, _c) in process_table().items()
+                    if p in self.pids() and "nova_desktop.py" in cmd}
+            w = [x for x in windows_of(mine) if x[1].startswith("Nova Studio")] if mine else []
+            if w:  # ancienne version (pas de window.hwnd) : fenêtre d'un Python de nova_desktop.py né du test
                 return w[0][0]
             time.sleep(0.05)
         return 0
 
     def close(self, timeout=120) -> dict:
         """Fermeture « croix » (WM_CLOSE) ; durée jusqu'à la fin du processus, processus restants."""
-        tree = descendants(self.pid)
+        if self.proc.poll() is not None:  # déjà arrêtée : rien à fermer (surtout pas une autre fenêtre)
+            return {"secondes": 0.0, "arbre": 0, "restants": []}
+        tree = self.pids()
         hw = self.main_window(2)
         t0 = time.perf_counter()
         if hw:
@@ -206,9 +238,13 @@ class App:
             secs = None
             self.kill()
         time.sleep(1.5)
-        return {"secondes": secs, "arbre": len(tree), "restants": alive(tree - {self.pid})}
+        return {"secondes": secs, "arbre": len(tree), "restants": alive(tree - {self.pid}, self.since)}
 
     def kill(self):
-        tree = descendants(self.pid)
-        for p in sorted(tree, reverse=True):
-            subprocess.run(["taskkill", "/F", "/PID", str(p)], capture_output=True, creationflags=0x08000000)
+        """Arrêt forcé : seulement les processus nés du test ET marqués comme les siens (Python de
+        nova_desktop.py, ou WebView2 avec le dossier de données jetable du test)."""
+        t = process_table()
+        for p in sorted(descendants(self.pid, t, self.since), reverse=True):
+            cmd = t[p][2] if p in t else ""
+            if p == self.pid or "nova_desktop.py" in cmd or self.data_dir.lower() in cmd.lower():
+                subprocess.run(["taskkill", "/F", "/PID", str(p)], capture_output=True, creationflags=0x08000000)
