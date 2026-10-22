@@ -67,6 +67,8 @@ BOOT_TIMEOUT_S = float(os.environ.get("NOVA_DESKTOP_BOOT_TIMEOUT", "40"))
 UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_UPDATE_DELAY", "25"))
 UPDATE_EVERY_S = 6 * 3600
 APP_UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_APP_UPDATE_DELAY", "40"))
+# prise / lecture / collaboration en cours ? (veille de Windows bloquée pendant ce temps)
+AWAKE_POLL_S = float(os.environ.get("NOVA_DESKTOP_AWAKE_POLL", "20"))
 
 FROZEN = getattr(sys, "frozen", False)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -188,6 +190,29 @@ try:
     _k32.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
 except AttributeError:  # Windows 7/8.0 : absent (non pris en charge de toute façon)
     pass
+
+
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+_k32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+_k32.SetThreadExecutionState.restype = wintypes.DWORD
+
+
+def awake_reason(probe) -> "str | None":
+    """Pourquoi Windows ne doit pas se mettre en veille (window.__novaBusy de la page) : une prise,
+    une lecture ou une séance de collaboration en cours. None : la veille est permise."""
+    if not isinstance(probe, dict):
+        return None
+    for key, why in (("recording", "prise"), ("playing", "lecture"), ("collab", "collaboration")):
+        if probe.get(key):
+            return why
+    return None
+
+
+def keep_system_awake(on: bool) -> bool:
+    """Demande à Windows de ne pas se mettre en veille (l'écran peut s'éteindre), comme un DAW
+    pendant une prise ou une lecture. À appeler depuis un fil qui dure (fil de la fenêtre)."""
+    return bool(_k32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0)))
 
 
 def tune_process(pid: "int | None" = None) -> str:
@@ -1035,6 +1060,7 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             # logiciels d'enregistrement signalés au DAW (admins : le DAW coupe la protection).
             self.capture_protect(True)
             self.start_recorder_watch()
+            threading.Thread(target=self.awake_loop, name="veille", daemon=True).start()
             try:  # exports (R1) : « Ouvrir le dossier » montre le fichier téléchargé
                 core.DownloadStarting += self.on_download_starting
             except Exception:
@@ -1557,6 +1583,30 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             t.Tick += tick
             t.Start()
             tick(None, None)
+
+        # ── veille de Windows : jamais pendant une prise, une lecture, une collaboration ──
+        def awake_loop(self):
+            """Une longue prise sans toucher la souris (voix, podcast, live) : rien n'empêchait Windows
+            de mettre le PC en veille au bout du délai de l'alimentation (le moteur web ne le bloque
+            que s'il entend du son, et il est muet quand le son passe par le pont ASIO). La page dit
+            si elle enregistre / lit / est en collaboration (window.__novaBusy)."""
+            self.awake = None
+            while not self.allow_close:
+                time.sleep(AWAKE_POLL_S)
+                if self.allow_close:
+                    break
+                try:
+                    why = awake_reason(self.eval_js(app_update.BUSY_PROBE_JS, 5))
+                except Exception:
+                    why = self.awake  # page occupée : on garde l'état actuel
+                if why != self.awake:
+                    self.awake = why
+                    self.form.BeginInvoke(Action(lambda w=why: self.apply_awake(w)))
+
+        def apply_awake(self, why):
+            ok = keep_system_awake(why is not None)
+            log.info(f"veille de Windows {'bloquée (' + why + ' en cours)' if why else 'permise'}"
+                     f"{'' if ok else ' (refusé par Windows)'}")
 
         def on_web_message(self, sender, args):
             try:

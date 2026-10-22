@@ -126,6 +126,20 @@ class ServiceWorkerTests(unittest.TestCase):
         self.assertNotIn("CoreWebView2BrowsingDataKinds.CacheStorage", src)
 
 
+class VeilleTests(unittest.TestCase):
+    def test_raisons(self):
+        self.assertEqual(nd.awake_reason({"recording": True, "playing": True}), "prise")
+        self.assertEqual(nd.awake_reason({"playing": True}), "lecture")
+        self.assertEqual(nd.awake_reason({"collab": True}), "collaboration")
+        self.assertIsNone(nd.awake_reason({"recording": False, "playing": False, "collab": False}))
+        self.assertIsNone(nd.awake_reason(None))
+        self.assertIsNone(nd.awake_reason("?"))
+
+    def test_demande_a_windows(self):
+        self.assertTrue(nd.keep_system_awake(True))
+        self.assertTrue(nd.keep_system_awake(False))
+
+
 PROBE = r"""
 import os, sys, subprocess, json
 sys.path.insert(0, %(desktop)r)

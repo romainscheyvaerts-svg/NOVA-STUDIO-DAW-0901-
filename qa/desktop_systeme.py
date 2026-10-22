@@ -16,7 +16,8 @@ Vérifie et mesure :
      même origine que le studio, fermée par la page, fermée avec Nova (aucun processus qui reste) ;
   6. 2e lancement : ramène l'instance ouverte et s'arrête (pas de 2e fenêtre) ;
   7. Nova tuée net (plantage) : aucun processus orphelin, relance normale ;
-  8. fermeture : aucun processus de Nova encore là (moteur WebView2 compris) peu après.
+  8. fermeture : aucun processus de Nova encore là (moteur WebView2 compris) peu après ;
+  9. prise en cours (window.__novaBusy) : veille de Windows bloquée, puis permise à la fin.
 
   NOVA_URL=... PYTHONIOENCODING=utf-8 python qa/desktop_systeme.py
 Sortie : QA_OUT (défaut D:\\1 WORK\\CONTENU\\nova-auditos\\desktop_systeme)
@@ -103,7 +104,7 @@ def run():
         ok("place de la fenêtre retenue", isinstance(saved, dict) and (saved["x"], saved["y"], saved["w"], saved["h"]) == tuple(RES["mesures"]["fenetre_principale"]),
            saved)
 
-        a = App(d, CDP)
+        a = App(d, CDP, extra_env={"NOVA_DESKTOP_AWAKE_POLL": "1"})
         try:
             RES["mesures"]["demarrage_chaud_s"] = a.wait_mounted()
             keys = sorted(a.ev("caches.keys()"))
@@ -111,6 +112,25 @@ def run():
                all(k in keys for k in ("nova-audio-v1", "nova-kits-v1", "nova-images-v1", "nova-models-v1")), keys)
             body = a.ev("(async () => { const c = await caches.open('nova-audio-v1'); const r = await c.match('https://exemple.test/nova-audio-v1'); return r ? (await r.text()).length : -1; })()")
             ok("contenu du cache intact", body == 4096, body)
+
+            # ── veille de Windows pendant une prise ───────────────────────────
+            a.ev("window.__novaBusy = () => ({ recording: true, playing: false, collab: false }); 1")
+            log_path = Path(d, "logs", "app.log")
+            seen = False
+            for _ in range(40):
+                time.sleep(0.25)
+                if "veille de Windows bloquée (prise en cours)" in log_path.read_text(encoding="utf-8", errors="replace"):
+                    seen = True
+                    break
+            ok("prise en cours : veille de Windows bloquée", seen)
+            a.ev("window.__novaBusy = () => ({ recording: false, playing: false, collab: false }); 1")
+            seen = False
+            for _ in range(40):
+                time.sleep(0.25)
+                if "veille de Windows permise" in log_path.read_text(encoding="utf-8", errors="replace"):
+                    seen = True
+                    break
+            ok("prise finie : veille de Windows permise", seen)
 
             # ── 4 : fichier lâché à côté d'une zone d'import ──────────────────
             url = "file:///" + wav.replace("\\", "/").replace(" ", "%20")
