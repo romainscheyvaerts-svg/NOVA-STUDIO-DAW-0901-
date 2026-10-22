@@ -320,6 +320,7 @@ import { loadPadBuffer } from './utils/padBuffers';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
+import { buildClipboard, planPaste, type ClipboardEntry } from './utils/clipClipboard';
 import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, trackUserActions, type UndoHistory, type UserAction } from './utils/undoHistory';
 import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose, needsUnloadWarning } from './utils/autosavePolicy';
 import { DiskMirror, bridgeDiskBackend, latestOnDisk, pickMostRecent, importFromDisk, audioFrom, type RecoverySource } from './services/DiskProjectStore';
@@ -1319,6 +1320,8 @@ function Studio() {
     // en contient une, se connecte elle-même.
   // Presse-papiers de clips (partage entre l'arrangement desktop et mobile).
   const clipboardClipRef = useRef<Clip | null>(null);
+  // Plusieurs clips copiés / coupés d'un coup (utils/clipClipboard) : écarts et pistes relatives gardés.
+  const clipboardManyRef = useRef<ClipboardEntry[] | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
   // Pistes pour les en-têtes (TrackStructure) : un abonnement stable ; seuls les en-têtes dont
@@ -2064,10 +2067,34 @@ function Studio() {
       return;
     }
 
+    // Ctrl+C / Ctrl+X sur plusieurs clips : tous partent au presse-papiers (avant : un seul ;
+    // Ctrl+X supprimait les autres sans les garder). Une seule étape d'annulation.
+    if (action === 'COPY_MANY' || action === 'CUT_MANY') {
+      const entries = buildClipboard(stateRef.current.tracks, payload?.items || []);
+      if (!entries.length) return;
+      clipboardManyRef.current = entries.length > 1 ? entries : null;
+      clipboardClipRef.current = { ...entries[0].clip };
+      if (action === 'CUT_MANY') {
+        const ids = new Set(entries.map(e => e.clip.id));
+        const bufferIds = Array.from(new Set(entries.map(e => e.clip.bufferId).filter((b): b is string => !!b)));
+        setState(produce((draft: DAWState) => { draft.tracks.forEach(t => { if (t.clips.some(c => ids.has(c.id))) t.clips = t.clips.filter(c => !ids.has(c.id)); }); }));
+        setTimeout(() => bufferIds.forEach(b => releaseBufferIfUnused(b, [])), 0);
+      }
+      return;
+    }
+    if (action === 'PASTE' && clipboardManyRef.current?.length) {
+      const plan = planPaste(stateRef.current.tracks, clipboardManyRef.current, trackId, payload?.time ?? 0);
+      const stamp = Date.now();
+      setState(produce((draft: DAWState) => {
+        plan.forEach((p, i) => { const t = draft.tracks.find(x => x.id === p.trackId); if (t) t.clips.push({ ...unlinked(p.clip), id: `clip-paste-${stamp}-${i}`, start: p.start }); });
+      }));
+      return;
+    }
+
     if (action === 'COPY' || action === 'CUT') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
       const clip = track?.clips.find(c => c.id === clipId);
-      if (clip) clipboardClipRef.current = { ...clip };
+      if (clip) { clipboardClipRef.current = { ...clip }; clipboardManyRef.current = null; }
       if (action === 'COPY') return;
       // CUT : on copie puis on supprime via la branche DELETE ci-dessous.
       action = 'DELETE';
@@ -5265,7 +5292,7 @@ function Studio() {
   // Modes d'édition Pro Tools (Shuffle / Slip / Spot / Grid), Tab to Transient, point de synchro.
   useEditModes({
     stateRef, setState, setVisualState, seek: handleSeek, notify: setAiNotification,
-    getClipboardClip: () => clipboardClipRef.current, setClipboardClip: (c) => { clipboardClipRef.current = c; },
+    getClipboardClip: () => clipboardClipRef.current, setClipboardClip: (c) => { clipboardClipRef.current = c; clipboardManyRef.current = null; },
   }, { id: state.id, editMode: state.editMode });
 
   // Aide-mémoire des raccourcis (touche « ? »)

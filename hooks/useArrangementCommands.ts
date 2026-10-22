@@ -113,8 +113,19 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         if (plan.length) c().setSelectedClipIds(new Set(plan.map(p => p.id)));
         return plan.length > 0;
       },
-      copy: () => { const l = targets(); if (l[0]) edit(l[0].trackId, l[0].clip.id, 'COPY'); return l.length > 0; },
-      cut: () => { const l = targets(); l.forEach(({ trackId, clip }) => edit(trackId, clip.id, 'CUT')); return l.length > 0; },
+      // Plusieurs clips : tous au presse-papiers (utils/clipClipboard), écarts et pistes gardés.
+      copy: () => {
+        const l = targets();
+        if (l.length > 1) edit('', '', 'COPY_MANY', { items: l.map(x => ({ trackId: x.trackId, clipId: x.clip.id })) });
+        else if (l[0]) edit(l[0].trackId, l[0].clip.id, 'COPY');
+        return l.length > 0;
+      },
+      cut: () => {
+        const l = targets();
+        if (l.length > 1) edit('', '', 'CUT_MANY', { items: l.map(x => ({ trackId: x.trackId, clipId: x.clip.id })) });
+        else l.forEach(({ trackId, clip }) => edit(trackId, clip.id, 'CUT'));
+        return l.length > 0;
+      },
       paste: () => {
         const target = c().selectedTrackId || c().selectedClip?.trackId;
         if (!target) return false;

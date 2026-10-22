@@ -503,10 +503,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       if (cibles.length === 0 || !id) return;
 
       switch (id) {
-        case 'nova.copy': e.preventDefault(); if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY'); return;
+        case 'nova.copy':
+          e.preventDefault();
+          if (cibles.length > 1) onEditClip?.('', '', 'COPY_MANY', { items: cibles });
+          else if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY');
+          else onEditClip?.(cibles[0].trackId, cibles[0].clipId, 'COPY');
+          return;
         case 'nova.cut':
           e.preventDefault();
-          cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
+          if (cibles.length > 1) onEditClip?.('', '', 'CUT_MANY', { items: cibles });
+          else cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
           setSelectedClip(null); setSelectedClipIds(new Set());
           return;
         case 'nova.duplicate': {
