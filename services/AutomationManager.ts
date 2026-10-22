@@ -5,6 +5,7 @@ import {
   paramSpec, parsePluginParam, pluginParamName, sendParamName, sortedPoints,
   staticParamValue, trimValue, valueAtPoints, widenSpec,
 } from '../utils/automationWrite';
+import { rackAutomationChanges } from '../engine/fxRack';
 
 /**
  * ÉCRITURE D'AUTOMATION (modes Touch / Latch / Write / Trim façon Pro Tools)
@@ -303,8 +304,15 @@ export class AutomationRecorder {
     const vst = plugin.type === 'VST3';
     const stat = plugin.params || {};
     let any = false, all = true;
+    // Rack parallèle : un réglage touché dans la fenêtre d'un effet d'une branche (ou le niveau d'une
+    // branche) s'écrit dans la voie « plugin::<rack>::<effet>/<réglage> », comme ceux des autres effets.
+    const rack = plugin.type === 'FXRACK' && params && 'branches' in params ? rackAutomationChanges(stat, { ...stat, ...params }) : null;
+    if (rack) {
+      if (rack.structurel) all = false;
+      for (const c of rack.changes) { any = true; all = this.change(trackId, pluginParamName(pluginId, c.key), c.value, c.before) && all; }
+    }
     for (const [k, v] of Object.entries(params || {})) {
-      if (stat[k] === v) continue;
+      if (stat[k] === v || (rack && k === 'branches')) continue;
       if (typeof v !== 'number' || (!vst && typeof stat[k] !== 'number')) { all = false; continue; }
       any = true;
       // VST : la valeur d'avant le geste (relevée par le pont) sert de référence hors du passage.

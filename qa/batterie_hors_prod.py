@@ -198,6 +198,17 @@ BATTERIE = [
     # se creuse pendant chaque kick (≈ −19 dB), voix muette → la nappe baisse de la plage (−6 dB), rien entre les salves ;
     # lecture = export au bit près (44,1 / 48 kHz).
     ("mixfx_cle", []),
+    # 22/10/2026 · restes 2 : lecture EN BOUCLE avec un effet à latence sur le master (EQ linéaire 43 ms, + limiteur, synthé
+    # NOVA) : chaque tour commence entier (grosse caisse dès son 1er échantillon, 43 premières ms = son sec), rien d'après la
+    # fin de boucle ne s'entend, chaque tour = export de la même zone au bit près (44,1 / 48 kHz).
+    ("pdc_boucle_lecture", []),
+    # 22/10/2026 · restes 2 : rack parallèle, automation écrite en touchant un bouton dans la fenêtre d'un effet d'une branche
+    # (Latch au clavier, Touch à la souris) : voie « <rack>::<effet>/<réglage> », valeur jouée par le moteur, Ctrl+Z en une étape.
+    ("rack_automation_fenetre", []),
+    # 22/10/2026 · restes 2 : suiveur d'enveloppe (modulateur) : le niveau du Kick creuse le volume de la Basse (plage 60 %,
+    # attaque 5 ms, relâchement 80 ms) ; export de la basse seule = creux à chaque coup (≥ 6 dB), lecture = même courbe ;
+    # coupé, Ctrl+Z, sauvegarde + rechargement ; téléphone.
+    ("modulateurs_suiveur", []),
 ]
 
 

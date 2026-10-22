@@ -155,7 +155,7 @@ def desktop(b):
     check("avant : le son est constant (enveloppe plate)", env0["max"] - env0["min"] < 0.01, env0)
 
     page.locator("[data-track-header='son']").first.click(button="right"); page.wait_for_timeout(400)
-    menu_pick(page, "Modulateurs (LFO)"); page.wait_for_timeout(600)
+    menu_pick(page, "Modulateurs (LFO"); page.wait_for_timeout(600)
     check("menu de la piste : la fenêtre « Modulateurs · Son » s'ouvre, état vide expliqué",
           page.locator('[data-testid="modulators-panel"]').count() == 1 and page.locator('[data-testid="mod-empty"]').count() == 1)
     shot(page, "pc_01_fenetre_vide")

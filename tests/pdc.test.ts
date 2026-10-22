@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computePdc, PdcNode, latencyPreroll } from '../utils/pdc';
+import { computePdc, PdcNode, latencyPreroll, loopPrerollLatency } from '../utils/pdc';
 
 const net = (o: Record<string, [number, string[]]>) => new Map<string, PdcNode>(Object.entries(o).map(([k, [latency, outputs]]) => [k, { latency, outputs }]));
 
@@ -56,5 +56,20 @@ describe('latencyPreroll (pré-roulement de latence, lecture = export)', () => {
     expect(latencyPreroll(0, SR, [{ start: 0, duration: 1 }], 0)).toBe(0);
     expect(latencyPreroll(3, SR, [{ start: 0, duration: 1 }], 0)).toBe(0);
     expect(latencyPreroll(lat, SR, [{ start: 0, duration: 1 }], -1)).toBe(0);
+  });
+});
+
+describe('loopPrerollLatency (retour de boucle avec un effet à latence)', () => {
+  const lat = 1896 / 44100;
+  it('piste à latence : le début de la boucle entre `lat` avant le retour', () => {
+    expect(loopPrerollLatency(lat, 4, 8)).toBe(lat);
+    expect(loopPrerollLatency(2, 0, 4)).toBe(2);
+  });
+  it('rien à pré-rouler : latence nulle, anormale (> 2 s) ou boucle plus courte que la latence', () => {
+    expect(loopPrerollLatency(0, 4, 8)).toBe(0);
+    expect(loopPrerollLatency(-0.01, 4, 8)).toBe(0);
+    expect(loopPrerollLatency(2.5, 0, 10)).toBe(0);
+    expect(loopPrerollLatency(lat, 4, 4 + lat)).toBe(0);
+    expect(loopPrerollLatency(lat, 4, 4.02)).toBe(0);
   });
 });

@@ -42,6 +42,7 @@ import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
+import { setModulatorSourceResolver } from '../utils/modulators';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -94,8 +95,8 @@ import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, fre
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
-import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll } from '../utils/pdc';
-import { applyGainEvents, clipGainEvents, frameTime } from '../utils/fades';
+import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll, loopPrerollLatency } from '../utils/pdc';
+import { applyGainEvents, clipGainAt, clipGainEvents, frameTime } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
 import { Scrubber, type ScrubStats } from './Scrubber';
@@ -247,6 +248,22 @@ interface ScheduledSource {
   trackId?: string;
   /** Fin prévue (horloge du contexte) : veille des effets. */
   end?: number;
+  /** Latence compensée appliquée à ce clip (s) : il entre dans les effets `lat` avant d'être entendu. */
+  lat?: number;
+}
+
+/**
+ * Entrée anticipée du tour suivant de la boucle (pré-roulement au retour de boucle, 22/10/2026) :
+ * une piste à latence compensée L reçoit le début de la boucle L secondes AVANT le retour, comme
+ * l'export reçoit son pré-roulement ; au retour, ces sources deviennent celles du nouveau tour.
+ */
+interface LoopLead {
+  /** Instant du contexte où le retour de boucle s'entend. */
+  at: number;
+  /** Sources du nouveau tour déjà parties (clé = id du clip). */
+  sources: Map<string, ScheduledSource>;
+  /** Pistes dont le début du tour suivant est déjà programmé. */
+  tracks: Set<string>;
 }
 
 export class AudioEngine {
@@ -424,6 +441,8 @@ export class AudioEngine {
   /** Dernières pistes reçues (brutes et vues par le moteur) : changement de mode de solo, bus d'écoute. */
   private lastRawTracks: Track[] = [];
   private lastViewTracks: Track[] = [];
+  /** Pistes du dernier rendu (source d'un suiveur d'enveloppe hors du projet ouvert). */
+  private lastRenderTracks: Track[] = [];
   private monitorUnsub: (() => void) | null = null;
   private appliedListenMode: MonitorSnapshot['listen'] = monitorStore.get().listen;
   /**
@@ -472,6 +491,10 @@ export class AudioEngine {
   // l'ancienne correspondance temps-contexte / temps-projet jusqu'a l'instant reel
   // du bouclage, sinon le playhead reviendrait au debut avant que l'audio le fasse.
   private pendingLoopWrap: { atContextTime: number; previousStartTime: number } | null = null;
+  /** Début du tour suivant déjà parti dans les pistes à latence (voir LoopLead). */
+  private loopLead: LoopLead | null = null;
+  /** Pistes dont le tour en cours a commencé par l'entrée anticipée (pas de rattrapage des notes). */
+  private loopLeadTracks: Set<string> = new Set();
 
   // --- DEVICE MANAGEMENT ---
   private currentInputDeviceId: string = 'default';
@@ -1144,6 +1167,8 @@ export class AudioEngine {
   }
 
   public setLoop(active: boolean, start: number, end: number) {
+    // Boucle changée : le début du tour suivant déjà parti ne vaut plus.
+    if (active !== this.isLoopActive || start !== this.loopStart || end !== this.loopEnd) this.discardLoopLead();
     this.isLoopActive = active;
     this.loopStart = start;
     this.loopEnd = end;
@@ -1560,6 +1585,7 @@ export class AudioEngine {
     if (!targetSampleRate) targetSampleRate = this.getProjectSampleRate();
     /** Pistes telles que reçues (pré-roll : le rendu est relancé avec elles). */
     const tracksIn = tracks;
+    this.lastRenderTracks = tracksIn;
     // Solo d'écoute AFL / PFL (utils/soloListen) : il ne touche jamais un rendu. Les solos
     // posés par l'appelant lui-même (stems, voix seules : options.soloIsDeliberate) restent.
     if (!options.soloIsDeliberate) tracks = tracksForRender(tracks, monitorStore.get().listen);
@@ -2414,6 +2440,7 @@ export class AudioEngine {
       } catch { /* déjà arrêtée */ }
       this.activeSources.delete(key);
     });
+    this.discardLoopLead();
     this.playbackStartTime += k;
     this.nextScheduleTime += k;   // même point du morceau, k plus tard
     if (this.prerollUntil) this.prerollUntil += k;
@@ -3198,6 +3225,8 @@ export class AudioEngine {
 
     this.isPlaying = true;
     this.pendingLoopWrap = null;
+    this.discardLoopLead();
+    this.loopLeadTracks = new Set();
     this.pausedAt = startOffset;
     this.pluginAutoSent.clear();
     // Départ calé sur le début d'un bloc de rendu (128 échantillons, ≤ 2,9 ms plus tard) : les
@@ -3255,6 +3284,7 @@ export class AudioEngine {
     this.releaseKeepAliveSoon();
     this.autoOverrides.clear();
     this.pendingLoopWrap = null;
+    this.discardLoopLead();
     if (this.schedulerTimer) {
       clearInterval(this.schedulerTimer);
       this.schedulerTimer = null;
@@ -3413,6 +3443,11 @@ export class AudioEngine {
   /** Pistes de la session telles que le moteur les joue (clés de side-chain des rendus VST, R10). */
   public getLiveTracks(): Track[] { return this.liveTracks || []; }
 
+  /** Piste source d'un suiveur d'enveloppe : projet ouvert, sinon pistes jouées, sinon dernier rendu. */
+  public modulatorSource(id: string): Track | undefined {
+    return this.lastRawTracks.find(t => t.id === id) || (this.liveTracks || []).find(t => t.id === id) || this.lastRenderTracks.find(t => t.id === id);
+  }
+
   public setLiveTracks(tracks: Track[]) {
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
@@ -3429,6 +3464,13 @@ export class AudioEngine {
         src.source.stop(now + 0.006);
       } catch { /* déjà arrêtée */ }
       this.activeSources.delete(key);
+    });
+    // Début du tour suivant (boucle) d'un clip changé : coupé aussi, le nouveau tour le reprend.
+    this.loopLead?.sources.forEach((src, key) => {
+      const id = src.clipId || key;
+      if (next.get(id) === this.clipSigs.get(id)) return;
+      this.fadeStopSource(src, now);
+      this.loopLead?.sources.delete(key);
     });
     this.clipSigs = next;
     this.liveTracks = tracks;
@@ -3483,10 +3525,75 @@ export class AudioEngine {
         this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.scheduleChordFollow(projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.nextScheduleTime += windowSec;
+        // Pistes à latence : le début du tour suivant entre dans leurs effets avant le retour.
+        if (loopActive) this.scheduleLoopLead(tracks, projectTimeEnd);
       }
 
       if (wrapAfterWindow) this.wrapLoopAt(this.nextScheduleTime, tracks);
     }
+  }
+
+  /**
+   * Latence (s) à pré-rouler au retour de boucle pour cette piste, 0 = rien à faire (règle de
+   * l'export, utils/pdc latencyPreroll : latence nulle, compensation suspendue pendant une
+   * prise, latence anormale > PREROLL_MAX_SECONDS ou boucle plus courte que la latence).
+   */
+  private loopLeadLatency(trackId: string): number {
+    if (this.pdcSuspended || !(this.isLoopActive && this.loopEnd > this.loopStart)) return 0;
+    return loopPrerollLatency(this.getTrackLatency(trackId), this.loopStart, this.loopEnd);
+  }
+
+  /** Coupe une source en 5 ms (sans clic) à partir de `at`. */
+  private fadeStopSource(src: ScheduledSource, at: number) {
+    try {
+      src.gain.gain.cancelScheduledValues(at);
+      src.gain.gain.setValueAtTime(src.gain.gain.value, at);
+      src.gain.gain.linearRampToValueAtTime(0, at + 0.005);
+      src.source.stop(at + 0.006);
+    } catch { /* déjà arrêtée */ }
+  }
+
+  /** Le début du tour suivant déjà parti ne vaut plus (arrêt, boucle changée, transport retenu). */
+  private discardLoopLead() {
+    const lead = this.loopLead;
+    this.loopLead = null;
+    if (!lead || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    lead.sources.forEach(src => this.fadeStopSource(src, now));
+  }
+
+  /**
+   * Pré-roulement au retour de boucle (22/10/2026), même règle que le départ de la lecture et
+   * l'export : une piste à latence compensée L (EQ à phase linéaire, limiteur à anticipation…)
+   * entend le son du morceau L secondes après qu'il est entré dans ses effets. Le début de la
+   * boucle doit donc y entrer L AVANT le retour, à la place de ce qui suit la fin de boucle :
+   * sans ça, chaque tour perdait ses L premières secondes (et faisait entendre l'après-boucle).
+   * Programmé piste par piste dès que tout le tour en cours y est programmé (fin de fenêtre
+   * ≥ fin de boucle − L) : les notes partent dans l'ordre du temps (808 monophonique, synthés).
+   */
+  private scheduleLoopLead(tracks: Track[], projectTimeEnd: number) {
+    if (!this.ctx) return;
+    const at = this.playbackStartTime + this.loopEnd;
+    if (this.loopLead && Math.abs(this.loopLead.at - at) > 1e-6) this.discardLoopLead();
+    tracks.map(t => this.eff(t)).forEach(track => {
+      const L = this.loopLeadLatency(track.id);
+      if (!(L > 0) || this.loopLead?.tracks.has(track.id) || projectTimeEnd < this.loopEnd - L - 1e-9) return;
+      const lead = this.loopLead || (this.loopLead = { at, sources: new Map(), tracks: new Set() });
+      lead.tracks.add(track.id);
+      if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
+      // Clips audio (comme scheduleClips) : ceux qui sonnent dans les L premières secondes du tour.
+      if (isTrackFrozen(track) || track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER || track.type === TrackType.BUS || track.type === TrackType.SEND) {
+        this.livePlayableClips(track, tracks).forEach(clip => {
+          if (clip.start < this.loopStart + L && clip.start + clip.duration > this.loopStart && clip.start < this.loopEnd) {
+            this.playClipSource(track.id, clip, at, this.loopStart, lead.sources);
+          }
+        });
+      }
+      // Notes (comme scheduleMidi) : celles des L premières secondes, L avant le retour.
+      const dsp = this.tracksDSP.get(track.id);
+      if (dsp?.bass808) dsp.bass808.stopAll(at - L);   // la note tenue du tour en cours s'arrête à la fin de boucle
+      this.scheduleMidi([track], this.loopStart - L, this.loopStart, at - L, true);
+    });
   }
 
   /**
@@ -3497,20 +3604,34 @@ export class AudioEngine {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     this.midiRunStart = this.loopStart;
+    // Début du nouveau tour déjà entré dans les pistes à latence (scheduleLoopLead) ?
+    const lead = this.loopLead && Math.abs(this.loopLead.at - boundaryContextTime) < 1e-6 ? this.loopLead : null;
+    if (!lead) this.discardLoopLead();
+    this.loopLead = null;
+    const leadTracks = lead ? lead.tracks : new Set<string>();
 
-    // Fondu de 5 ms avant la coupure pour eviter le clic.
-    this.activeSources.forEach(({ source, gain }) => {
+    // Fondu de 5 ms avant la coupure pour eviter le clic. Piste pré-roulée : la fin de boucle est
+    // entrée dans ses effets `lat` plus tôt (sources déjà bornées à la fin de boucle, voir playClipSource).
+    this.activeSources.forEach(({ source, gain, trackId, lat, end }) => {
+      const cut = trackId && leadTracks.has(trackId) ? Math.max(now, boundaryContextTime - (lat || 0)) : boundaryContextTime;
+      if (cut < boundaryContextTime && end !== undefined && end <= cut + 1e-6) return;   // déjà finie à la fin de boucle
       try {
-        const fadeStart = Math.max(now, boundaryContextTime - 0.005);
+        const fadeStart = Math.max(now, cut - 0.005);
         gain.gain.cancelScheduledValues(fadeStart);
         gain.gain.setValueAtTime(gain.gain.value, fadeStart);
-        gain.gain.linearRampToValueAtTime(0, boundaryContextTime);
+        gain.gain.linearRampToValueAtTime(0, Math.max(fadeStart, cut));
       } catch (e) {}
-      try { source.stop(boundaryContextTime); } catch (e) {}
+      try { source.stop(cut); } catch (e) {}
     });
     this.activeSources.clear();
+    // Les sources du nouveau tour parties en avance deviennent celles du tour (pas de doublon).
+    lead?.sources.forEach((src, key) => this.activeSources.set(key, src));
+    this.loopLeadTracks = leadTracks;
 
-    this.tracksDSP.forEach(dsp => {
+    this.tracksDSP.forEach((dsp, id) => {
+      // Piste pré-roulée : ses notes du tour fini sont déjà relâchées à la fin de boucle, et les
+      // premières du nouveau tour jouent déjà : rien à couper.
+      if (leadTracks.has(id)) return;
       if (dsp.synth) dsp.synth.releaseAll();
       if (dsp.bass808) dsp.bass808.stopAll(boundaryContextTime);
       if (dsp.sampler) dsp.sampler.stopAll();
@@ -3599,7 +3720,11 @@ export class AudioEngine {
     });
   }
 
-  private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number) {
+  /**
+   * @param lead entrée anticipée du tour suivant de la boucle (scheduleLoopLead) : les notes de
+   *        [ws, we[ seulement (aucun rattrapage), contrôleurs repris à leur valeur au début du tour.
+   */
+  private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, lead = false) {
       tracks.map(t => this.eff(t)).forEach(track => {
         if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
@@ -3615,7 +3740,11 @@ export class AudioEngine {
         // Boucle : rien au-delà de la fin de boucle ; 1re fenêtre d'un passage :
         // les notes des `lat` premières secondes partent tout de suite.
         const loopEnd = this.isLoopActive && this.loopEnd > this.loopStart ? this.loopEnd : Infinity;
-        const firstWindow = this.midiRunStart !== null && Math.abs(projectWindowStart - this.midiRunStart) < 1e-6;
+        // Tour de boucle déjà commencé par l'entrée anticipée : ses premières notes sont parties à l'heure.
+        const firstWindow = !lead && !this.loopLeadTracks.has(track.id) && this.midiRunStart !== null && Math.abs(projectWindowStart - this.midiRunStart) < 1e-6;
+        // Boucle pré-roulée : une note tenue au-delà de la fin de boucle est relâchée à la fin de boucle
+        // (heure d'entrée dans les effets), avant que le début du tour suivant n'y entre.
+        const relCap = this.loopLeadLatency(track.id) > 0 ? loopEnd : Infinity;
 
         // 808 : plan monophonique (glissés) joué dans l'ordre du temps.
         const b808 = this.tracksDSP.get(track.id)?.bass808;
@@ -3628,7 +3757,7 @@ export class AudioEngine {
         const synth = this.tracksDSP.get(track.id)?.synth;
         const novaSynth = synth instanceof NovaSynthNode;
         // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
-        if (synth || this.tracksDSP.get(track.id)?.melodicSampler) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow);
+        if (synth || this.tracksDSP.get(track.id)?.melodicSampler) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow || lead);
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -3642,7 +3771,9 @@ export class AudioEngine {
            const slides = novaSynth ? absorbedSlides(heard) : null;
            (novaSynth ? notesInTimeOrder(heard) : heard).forEach(note => {
                const noteAbsStart = clip.start + note.start;
-               const noteAbsEnd = noteAbsStart + note.duration;
+               const noteAbsEnd = Math.min(noteAbsStart + note.duration, noteAbsStart < relCap ? relCap : Infinity);
+               // Entrée anticipée : une note commencée avant la boucle n'y est pas jouée, rien à relâcher.
+               if (lead && noteAbsStart < ws) return;
 
                if (noteAbsStart >= loopEnd) return;
                if (slides && slides.has(note)) {
@@ -3947,7 +4078,10 @@ export class AudioEngine {
     if (parsePluginParam(param)) {
       // Écriture : ce qui était programmé d'avance sur le réglage ne doit pas reprendre la main.
       const a = this.pluginAutoParam(trackId, param);
-      if (a && this.ctx) { try { a.ap.cancelScheduledValues(this.ctx.currentTime); } catch { /* */ } }
+      // La valeur écrite est posée sur le réglage lui-même : la fenêtre de l'effet l'a souvent déjà
+      // passée à l'effet (réglage fixe identique → plus rien n'était posé après l'annulation, le son
+      // restait figé sur la 1re valeur du geste, mesuré dans le rack parallèle).
+      if (a && this.ctx) { try { const now = this.ctx.currentTime; a.ap.cancelScheduledValues(now); a.ap.setTargetAtTime(value, now, 0.01); } catch { /* */ } }
       this.applyPluginAutomation(trackId, param, value);
       return;
     }
@@ -4324,7 +4458,12 @@ export class AudioEngine {
         });
     });
 }
-  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
+  /**
+   * @param lead entrée anticipée du tour suivant de la boucle (scheduleLoopLead) : le son du morceau
+   *        `projectTime` doit s'ENTENDRE à `scheduleTime`, donc il entre dans les effets `lat` plus
+   *        tôt ; la source est rangée dans `lead` (elle devient une source du tour au retour).
+   */
+  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number, lead?: Map<string, ScheduledSource>) {
     if (!this.ctx) return;
 
     let buffer = clip.buffer;
@@ -4343,7 +4482,8 @@ export class AudioEngine {
     if (clip.isMuted) return;
     
     const sourceKey = `${clip.id}`;
-    if (this.activeSources.has(sourceKey)) return;
+    const target = lead || this.activeSources;
+    if (target.has(sourceKey)) return;
     
     try {
         const source = this.ctx.createBufferSource();
@@ -4383,7 +4523,15 @@ export class AudioEngine {
         // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune
         // (~27 ms) arrivait en retard sur le beat.
         // Pendant une prise, la compensation est suspendue (pistes lourdes figées).
-        const pt = projectTime + (this.pdcSuspended ? 0 : (((isFrozenRender ? dsp.postFreezeLatency : dsp.pluginLatency) || 0) + (dsp.downLatency || 0)));
+        const lat = this.pdcSuspended ? 0 : (((isFrozenRender ? dsp.postFreezeLatency : dsp.pluginLatency) || 0) + (dsp.downLatency || 0));
+        let pt = projectTime + lat;
+        if (lead) {
+            // Le son de `projectTime` entre dans les effets à scheduleTime − lat (jamais dans le passé).
+            pt = projectTime;
+            scheduleTime -= lat;
+            const late = this.ctx.currentTime + 0.002 - scheduleTime;
+            if (late > 0) { scheduleTime += late; pt += late; }
+        }
         let offsetIntoClip = clip.offset || 0;
         if (pt > clip.start) {
             offsetIntoClip += (pt - clip.start);
@@ -4395,7 +4543,12 @@ export class AudioEngine {
         }
         
         const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
-        const remainingDuration = clip.duration - playedSoFar;
+        let remainingDuration = clip.duration - playedSoFar;
+        // Boucle pré-roulée (scheduleLoopLead) : rien au-delà de la fin de boucle n'entre dans les
+        // effets, le début du tour suivant y entre à sa place (comme l'export de la zone).
+        const loopCap = this.loopLeadLatency(trackId) > 0 ? this.loopEnd - (clip.start + playedSoFar) : Infinity;
+        const capped = loopCap < remainingDuration;
+        if (capped) remainingDuration = loopCap;
 
         // Fondus calés sur la position RÉELLE dans le clip (comme le rendu
         // offline). Avant, ils partaient de l'instant de planification : en
@@ -4413,7 +4566,17 @@ export class AudioEngine {
             source.start(frameTime(when, this.ctx.sampleRate), offsetIntoClip, actualDuration);
             
             const endAt = when + actualDuration;
-            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId, end: endAt });
+            if (capped && actualDuration > 0.005) {
+                // Fin de boucle : fondu de 5 ms (comme la coupure du retour de boucle), sans casser une courbe en cours.
+                const fs = endAt - 0.005;
+                try {
+                    const p = gainNode.gain as AudioParam & { cancelAndHoldAtTime?: (t: number) => AudioParam };
+                    if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(fs);
+                    else { p.cancelScheduledValues(fs); p.setValueAtTime(clipGainAt({ ...clip, gain: clipGain }, playedSoFar + actualDuration - 0.005), fs); }
+                    p.linearRampToValueAtTime(0, endAt);
+                } catch { /* courbe en cours : coupure nette */ }
+            }
+            target.set(sourceKey, { source, gain: gainNode, clipId: clip.id, trackId, end: endAt, lat });
             if (endAt > (this.lastSourceEnd.get(trackId) ?? -Infinity)) this.lastSourceEnd.set(trackId, endAt);
             
             source.onended = () => {
@@ -4421,6 +4584,8 @@ export class AudioEngine {
                 // source : on ne supprime que si l'entree correspond bien a celle-ci.
                 const current = this.activeSources.get(sourceKey);
                 if (current && current.source === source) this.activeSources.delete(sourceKey);
+                const early = this.loopLead?.sources.get(sourceKey);
+                if (early && early.source === source) this.loopLead?.sources.delete(sourceKey);
                 try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
         } else {
@@ -5953,3 +6118,7 @@ export class AudioEngine {
 }
 
 export const audioEngine = new AudioEngine();
+
+// Suiveur d'enveloppe (utils/modulators) : la source est cherchée dans le PROJET ENTIER, pas dans
+// les pistes rendues (export d'une piste, d'un stem : la basse reste creusée par la grosse caisse).
+setModulatorSourceResolver(id => audioEngine.modulatorSource(id));

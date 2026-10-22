@@ -10862,10 +10862,10 @@ function Studio() {
         const sel = stateRef.current.tracks.find(t => t.id === stateRef.current.selectedTrackId && t.type === TrackType.MIDI) || stateRef.current.tracks.find(t => t.type === TrackType.MIDI);
         if (sel) setMidiFxTrackId(sel.id); else setAiNotification('🎹 Effets MIDI : crée d’abord une piste MIDI (synthé, instrument).');
       }, { keywords: 'arpege arpeggiator accord chord gamme scale midi fx effets' })] : []),
-      ...(!simpleNow ? [a('Mix', 'pal.modulators', 'Modulateurs (LFO) de la piste sélectionnée', () => {
+      ...(!simpleNow ? [a('Mix', 'pal.modulators', 'Modulateurs (LFO, suiveur d’enveloppe) de la piste sélectionnée', () => {
         const id = stateRef.current.selectedTrackId || stateRef.current.tracks.find(t => t.id !== 'master')?.id;
         if (id) setModTrackId(id);
-      }, { keywords: 'lfo modulateur modulation tremolo trémolo filtre wobble pan auto' })] : []),
+      }, { keywords: 'lfo modulateur modulation tremolo trémolo filtre wobble pan auto suiveur enveloppe envelope follower ducking sidechain' })] : []),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
       a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
       a('Réglages', 'pal.appUpdate', 'Rechercher une mise à jour de Nova Studio', () => { requestDesktopUpdateCheck(); setIsAudioSettingsOpen(true); }, { keywords: 'mise a jour maj update nouvelle version installer appli windows automatique', disabledReason: isNovaDesktop() ? undefined : 'Seulement dans l’appli Nova Studio pour Windows (le site est toujours à jour).' }),
