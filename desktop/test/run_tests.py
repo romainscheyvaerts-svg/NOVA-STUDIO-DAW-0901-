@@ -75,23 +75,24 @@ def listening(port):
 u32 = ctypes.WinDLL("user32")
 
 
+_DATA_DIRS = {}  # pid du lancement -> dossier de données jetable
+
+
 def find_window(pid):
-    found = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def cb(hwnd, _):
-        p = wintypes.DWORD()
-        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
-        buf = ctypes.create_unicode_buffer(256)
-        u32.GetWindowTextW(hwnd, buf, 256)
-        # (le python.exe d'un venv est un lanceur : la fenêtre appartient à un processus enfant,
-        # d'où la comparaison sur le titre seul ; l'instance unique garantit qu'il n'y en a qu'une)
-        if u32.IsWindowVisible(hwnd) and buf.value.startswith("Nova Studio") and p.value != os.getpid():
-            found.append(hwnd)
-        return True
-
-    u32.EnumWindows(cb, 0)
-    return found[0] if found else None
+    """Fenêtre de l'instance lancée par le test : celle que l'appli note dans SON dossier de
+    données (window.hwnd). Jamais une fenêtre trouvée par son titre : la vraie Nova Studio
+    ouverte sur le PC s'appelle pareil (et recevrait le WM_CLOSE du test)."""
+    d = _DATA_DIRS.get(pid)
+    if not d:
+        return None
+    try:
+        with open(os.path.join(d, "window.hwnd"), encoding="ascii") as f:
+            hwnd, owner = (int(x) for x in f.read().split()[:2])
+    except (OSError, ValueError):
+        return None
+    p = wintypes.DWORD()
+    u32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(p))
+    return hwnd if p.value == owner and u32.IsWindowVisible(wintypes.HWND(hwnd)) else None
 
 
 def close_window(pid):
@@ -113,8 +114,12 @@ def launch(cmd, url, data_dir, bridges=False, extra_env=None):
     })
     if not bridges:
         env["NOVA_DESKTOP_NO_BRIDGES"] = "1"
+    # fenêtre hors écran et jamais activée : rien ne surgit devant la personne qui travaille sur le PC
+    env.setdefault("NOVA_DESKTOP_WINDOW", "-24000,-24000,1280,800")
     env.update(extra_env or {})
-    return subprocess.Popen(cmd, env=env)
+    p = subprocess.Popen(cmd, env=env)
+    _DATA_DIRS[p.pid] = data_dir
+    return p
 
 
 results = []
@@ -162,7 +167,10 @@ def main():
     data_dir = tempfile.mkdtemp(prefix="nova-desktop-test-")
 
     pre_busy = listening(8766) or listening(8765)
-    if pre_busy:
+    if os.environ.get("NOVA_TEST_SANS_PONTS") == "1":
+        pre_busy = True  # ponts jamais lancés (PC du studio : 8765/8766 réservés à la vraie Nova)
+        print("NOVA_TEST_SANS_PONTS=1 : ponts non testés")
+    elif pre_busy:
         print("ATTENTION : un pont tourne déjà (8765/8766) ; le test des ponts sera faussé")
 
     t0 = close_case(cmd, data_dir, "slow", 3, 15, bridges=not pre_busy)

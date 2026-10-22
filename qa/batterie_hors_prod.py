@@ -142,6 +142,11 @@ BATTERIE = [
     # installation à la fermeture puis relance, « Mis à jour ✓ », appli ancienne (carte web), réglages.
     ("desktop_maj_auto", []),
     ("desktop_hors_ligne", []),
+    # 22/10/2026 · tour « appli Windows » : la VRAIE fenêtre WebView2, hors écran et sans voler le focus, profil
+    # jetable, sans les ponts : démarrage à froid / à chaud, Cache Storage gardé au redémarrage, place de la fenêtre
+    # retenue, fichier lâché hors d'une zone d'import (le DAW reste), console détachée possédée par Nova (titre,
+    # anti-capture, fermée avec Nova), 2e lancement, plantage puis relance, aucun processus qui reste. --jobs 1.
+    ("desktop_systeme", []),
     # 21/10/2026 · effets de mix : Compresseur multibande et EQ dynamique ajoutés par « Ajouter un effet », boutons tournés,
     # mètres de réduction / gain qui bougent en lecture, son du master changé (actif / contourné), solo, écoute d'une bande,
     # sauvegarde ; bureau sombre + clair, téléphone 390 ; lecture = export au bit près (44,1 et 48 kHz).

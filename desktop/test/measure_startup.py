@@ -163,7 +163,13 @@ def one_run(cmd, data_dir, offline, root_timeout=90):
                     out["audio"] = str(e)
         return out
     finally:
-        hw = [h for h in nova_windows() if h not in before]
+        # seulement la fenêtre de CE lancement (notée dans son dossier de données), jamais la vraie
+        # Nova Studio ouverte sur le PC ; ancienne version sans window.hwnd : nouvelles fenêtres
+        try:
+            with open(os.path.join(data_dir, "window.hwnd"), encoding="ascii") as f:
+                hw = [int(f.read().split()[0])]
+        except (OSError, ValueError, IndexError):
+            hw = [h for h in nova_windows() if h not in before]
         for h in hw:
             u32.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE (fermeture normale, avec sauvegarde)
         try:

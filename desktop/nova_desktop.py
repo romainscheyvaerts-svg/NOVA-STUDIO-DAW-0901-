@@ -67,6 +67,8 @@ BOOT_TIMEOUT_S = float(os.environ.get("NOVA_DESKTOP_BOOT_TIMEOUT", "40"))
 UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_UPDATE_DELAY", "25"))
 UPDATE_EVERY_S = 6 * 3600
 APP_UPDATE_FIRST_DELAY_S = float(os.environ.get("NOVA_DESKTOP_APP_UPDATE_DELAY", "40"))
+# prise / lecture / collaboration en cours ? (veille de Windows bloquée pendant ce temps)
+AWAKE_POLL_S = float(os.environ.get("NOVA_DESKTOP_AWAKE_POLL", "20"))
 
 FROZEN = getattr(sys, "frozen", False)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -190,6 +192,29 @@ except AttributeError:  # Windows 7/8.0 : absent (non pris en charge de toute fa
     pass
 
 
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+_k32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+_k32.SetThreadExecutionState.restype = wintypes.DWORD
+
+
+def awake_reason(probe) -> "str | None":
+    """Pourquoi Windows ne doit pas se mettre en veille (window.__novaBusy de la page) : une prise,
+    une lecture ou une séance de collaboration en cours. None : la veille est permise."""
+    if not isinstance(probe, dict):
+        return None
+    for key, why in (("recording", "prise"), ("playing", "lecture"), ("collab", "collaboration")):
+        if probe.get(key):
+            return why
+    return None
+
+
+def keep_system_awake(on: bool) -> bool:
+    """Demande à Windows de ne pas se mettre en veille (l'écran peut s'éteindre), comme un DAW
+    pendant une prise ou une lecture. À appeler depuis un fil qui dure (fil de la fenêtre)."""
+    return bool(_k32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0)))
+
+
 def tune_process(pid: "int | None" = None) -> str:
     """Priorité « supérieure à la normale » (jamais temps réel) et pas d'EcoQoS / de bridage
     des minuteurs par Windows quand la fenêtre est cachée ou sur batterie.
@@ -237,10 +262,28 @@ def _bridge_import_path() -> None:
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), "bridge-python"))
 
 
+def lean_numpy() -> None:
+    """numpy charge OpenBLAS avec un fil et une réserve de calcul par cœur : ~750 Mo de mémoire
+    engagée et ~23 fils inutiles par pont sur un processeur de 24 cœurs (mesuré, 1.5.15), alors
+    que les ponts ne font que de petits calculs par bloc. Un seul fil de calcul pour ce processus
+    (variable remise ensuite : les modules stems / voix lancés plus tard gardent tous les cœurs).
+    OPENBLAS_NUM_THREADS déjà réglé par l'utilisateur : respecté."""
+    if "numpy" in sys.modules or os.environ.get("OPENBLAS_NUM_THREADS"):
+        return
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    try:
+        import numpy  # noqa: F401
+    except Exception:
+        pass
+    finally:
+        os.environ.pop("OPENBLAS_NUM_THREADS", None)
+
+
 def run_bridge(kind: str) -> int:
     _redirect_output(kind)
     print(f"processus : {tune_process()}")
     _bridge_import_path()
+    lean_numpy()
     if kind == "asio":
         import asyncio
         import asio_bridge
@@ -430,6 +473,47 @@ class BridgeSupervisor(threading.Thread):
 _mutex = None
 
 
+def mutex_name() -> str:
+    """Verrou « une seule fenêtre ». Dossier de données personnalisé (tests, 2e profil) : verrou à
+    part, sinon un lancement de test ramènerait devant la vraie fenêtre ouverte (et s'arrêterait)."""
+    custom = os.environ.get("NOVA_DESKTOP_DATA_DIR")
+    if not custom:
+        return MUTEX_NAME
+    import hashlib
+    return MUTEX_NAME + "-" + hashlib.sha1(os.path.normcase(os.path.abspath(custom)).encode("utf-8")).hexdigest()[:12]
+
+
+def _hwnd_file() -> str:
+    return os.path.join(data_dir(), "window.hwnd")
+
+
+def publish_main_window(hwnd: int) -> None:
+    """Fenêtre principale notée dans le dossier de données : un 2e lancement la ramène devant
+    (et pas une autre fenêtre dont le titre commence par « Nova Studio »)."""
+    try:
+        with open(_hwnd_file(), "w", encoding="ascii") as f:
+            f.write(f"{int(hwnd)} {os.getpid()}")
+    except OSError:
+        pass
+
+
+def _published_window() -> int:
+    u32 = ctypes.WinDLL("user32")
+    u32.IsWindow.argtypes = [wintypes.HWND]
+    u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+    try:
+        with open(_hwnd_file(), encoding="ascii") as f:
+            hwnd, pid = (int(x) for x in f.read().split()[:2])
+    except (OSError, ValueError):
+        return 0
+    owner = wintypes.DWORD()
+    if hwnd and u32.IsWindow(wintypes.HWND(hwnd)):
+        u32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(owner))
+        if owner.value == pid and pid != os.getpid():
+            return hwnd
+    return 0
+
+
 def acquire_single_instance(wait_s: float = 0.0) -> bool:
     """Prend le verrou « une seule fenêtre ». wait_s > 0 : attend que l'instance précédente
     se ferme (relance après un arrêt du moteur d'affichage) au lieu de la ramener devant."""
@@ -438,7 +522,7 @@ def acquire_single_instance(wait_s: float = 0.0) -> bool:
     k32.CreateMutexW.restype = wintypes.HANDLE
     end = time.time() + wait_s
     while True:
-        _mutex = k32.CreateMutexW(None, False, MUTEX_NAME)
+        _mutex = k32.CreateMutexW(None, False, mutex_name())
         if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
             return True
         if time.time() >= end:
@@ -447,25 +531,34 @@ def acquire_single_instance(wait_s: float = 0.0) -> bool:
         time.sleep(0.25)
     # Déjà ouverte : on ramène la fenêtre existante au premier plan.
     u32 = ctypes.WinDLL("user32")
-    found = []
+    u32.IsIconic.argtypes = [wintypes.HWND]
+    u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    u32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    hwnd = _published_window()
+    if not hwnd and not os.environ.get("NOVA_DESKTOP_DATA_DIR"):
+        # instance d'une version qui ne notait pas sa fenêtre : recherche par le titre
+        found = []
 
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def _enum(hwnd, _):
-        buf = ctypes.create_unicode_buffer(256)
-        u32.GetWindowTextW(hwnd, buf, 256)
-        if buf.value.startswith(APP_NAME) and u32.IsWindowVisible(hwnd):
-            pid = wintypes.DWORD()
-            u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            if pid.value != os.getpid():
-                found.append(hwnd)
-                return False
-        return True
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _enum(h, _):
+            buf = ctypes.create_unicode_buffer(256)
+            u32.GetWindowTextW(h, buf, 256)
+            if buf.value.startswith(APP_NAME) and u32.IsWindowVisible(h):
+                pid = wintypes.DWORD()
+                u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+                if pid.value != os.getpid():
+                    found.append(h)
+                    return False
+            return True
 
-    u32.EnumWindows(_enum, 0)
-    if found:
-        if u32.IsIconic(found[0]):
-            u32.ShowWindow(found[0], 9)  # SW_RESTORE
-        u32.SetForegroundWindow(found[0])
+        u32.EnumWindows(_enum, 0)
+        hwnd = found[0] if found else 0
+    if hwnd and os.environ.get("NOVA_DESKTOP_WINDOW"):
+        return False  # tests : on ne vole jamais le focus
+    if hwnd:
+        if u32.IsIconic(wintypes.HWND(hwnd)):
+            u32.ShowWindow(wintypes.HWND(hwnd), 9)  # SW_RESTORE
+        u32.SetForegroundWindow(wintypes.HWND(hwnd))
     return False
 
 
@@ -577,6 +670,142 @@ OFFLINE_HTML_FALLBACK = """<!doctype html><meta charset="utf-8"><title>Nova Stud
 <button onclick="location.replace('%(url)s')">Réessayer</button></body>"""
 
 
+def trusted_uri(uri: str, app_host: str) -> bool:
+    """Le DAW lui-même (et ses autres adresses) : permissions accordées, messages acceptés."""
+    h = (urlparse(uri).hostname or "").lower()
+    return (h == app_host or h in ("localhost", "127.0.0.1", "[::1]")
+            or h.endswith(".studiomakemusic.com") or h == "studiomakemusic.com"
+            or (h.startswith("nova-studio-daw-0901") and h.endswith(".vercel.app")))
+
+
+def navigation_policy(uri: str, app_host: str) -> str:
+    """Où va une navigation de la fenêtre : « app » (reste dans Nova Studio), « browser »
+    (navigateur ou programme par défaut) ou « block ».
+    file: est bloqué : un son, un MIDI ou un projet lâché à côté d'une zone d'import ouvrait
+    le fichier À LA PLACE du DAW (séance quittée, aucun « retour » possible)."""
+    p = urlparse(uri)
+    scheme = (p.scheme or "").lower()
+    if scheme in ("about", "data", "blob"):
+        return "app"
+    if scheme in ("http", "https"):
+        h = (p.hostname or "").lower()
+        return "app" if trusted_uri(uri, app_host) or h.endswith(".supabase.co") else "browser"
+    if scheme in ("mailto", "tel"):
+        return "browser"
+    return "block"
+
+
+# Fichier lâché à côté d'une zone d'import (navigation vers file:// bloquée) : on le dit.
+DROP_HINT_JS = r"""
+(function () {
+  var old = document.getElementById('nova-desktop-drop-hint');
+  if (old) old.remove();
+  var d = document.createElement('div');
+  d.id = 'nova-desktop-drop-hint';
+  d.setAttribute('role', 'status');
+  d.textContent = 'Fichier non ouvert ici : pour importer un son ou un MIDI, dépose-le sur la zone des pistes.';
+  d.style.cssText = 'position:fixed;left:50%;top:72px;transform:translateX(-50%);z-index:2147483647;max-width:90vw;' +
+    'background:rgba(12,13,16,.95);color:#e2e8f0;border:1px solid rgba(34,211,238,.55);border-radius:10px;' +
+    'padding:10px 16px;font:500 13px/1.4 Inter,system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5);pointer-events:none';
+  (document.body || document.documentElement).appendChild(d);
+  setTimeout(function () { d.remove(); }, 5000);
+})();
+"""
+
+
+def _placement_file() -> str:
+    return os.path.join(data_dir(), "fenetre.json")
+
+
+def load_placement() -> "dict | None":
+    try:
+        with open(_placement_file(), encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: (bool(d[k]) if k == "max" else int(d[k])) for k in ("x", "y", "w", "h", "max")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def save_placement(d: dict) -> None:
+    try:
+        tmp = _placement_file() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, _placement_file())
+    except OSError:
+        pass
+
+
+def _popouts_file() -> str:
+    return os.path.join(data_dir(), "fenetres-detachees.json")
+
+
+def load_popout_placements() -> dict:
+    try:
+        with open(_popouts_file(), encoding="utf-8") as f:
+            d = json.load(f)
+        return {str(k): {kk: (bool(v[kk]) if kk == "max" else int(v[kk])) for kk in ("x", "y", "w", "h", "max")}
+                for k, v in d.items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def save_popout_placement(key: str, d: dict) -> None:
+    allp = load_popout_placements()
+    allp[key] = d
+    try:
+        tmp = _popouts_file() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(allp, f)
+        os.replace(tmp, _popouts_file())
+    except OSError:
+        pass
+
+
+def choose_placement(saved: "dict | None", areas: list, min_size=(960, 600)) -> "tuple | None":
+    """Place de la fenêtre au lancement : (x, y, largeur, hauteur, agrandie) si la barre de titre
+    enregistrée tombe sur un écran présent (au moins 160 × 24 pixels visibles), sinon None.
+    Fenêtre plus grande que cet écran : ramenée à sa zone de travail. areas : zones de travail
+    des écrans (x, y, largeur, hauteur), pixels physiques."""
+    if not saved or not areas:
+        return None
+    x, y, w, h = saved["x"], saved["y"], max(saved["w"], min_size[0]), max(saved["h"], min_size[1])
+    bar = (x, y, w, 32)
+    best, score = None, 0
+    for a in areas:
+        ix = min(bar[0] + bar[2], a[0] + a[2]) - max(bar[0], a[0])
+        iy = min(bar[1] + bar[3], a[1] + a[3]) - max(bar[1], a[1])
+        if ix >= 160 and iy >= 24 and ix * iy > score:
+            best, score = a, ix * iy
+    if best is None:
+        return None
+    ax, ay, aw, ah = best
+    w, h = min(w, aw), min(h, ah)
+    x = min(max(x, ax), ax + aw - w)
+    y = min(max(y, ay), ay + ah - h)
+    return (x, y, w, h, bool(saved.get("max")))
+
+
+def _sw_flag() -> str:
+    return os.path.join(data_dir(), "webview2-sans-service-worker")
+
+
+def sw_profile_clean() -> bool:
+    """Profil WebView2 déjà débarrassé du service worker du site en ligne ?"""
+    return os.path.isfile(_sw_flag())
+
+
+def mark_sw_profile(clean: bool) -> None:
+    try:
+        if clean:
+            with open(_sw_flag(), "w", encoding="utf-8") as f:
+                f.write("service worker du site en ligne effacé ; à refaire si le site en ligne est chargé\n")
+        elif os.path.exists(_sw_flag()):
+            os.remove(_sw_flag())
+    except OSError:
+        pass
+
+
 def offline_html(url: str) -> str:
     try:
         with open(resource("offline.html"), encoding="utf-8") as f:
@@ -634,6 +863,14 @@ def bring_window_to_front(hwnd_value: int) -> bool:
     if not ok:
         u32.FlashWindow(hwnd, True)
     return ok
+
+
+def system_dpi_scale() -> float:
+    """Échelle de l'affichage de l'écran principal (1.0 = 100 %, 1.5 = 150 %)."""
+    try:
+        return max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96.0)
+    except Exception:
+        return 1.0
 
 
 def _set_dpi_awareness() -> None:
@@ -698,17 +935,10 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
     ui = UiState(url_mode)
 
     def trusted(uri: str) -> bool:
-        h = (urlparse(uri).hostname or "").lower()
-        return (h == app_host or h in ("localhost", "127.0.0.1", "[::1]")
-                or h.endswith(".studiomakemusic.com") or h == "studiomakemusic.com"
-                or (h.startswith("nova-studio-daw-0901") and h.endswith(".vercel.app")))
+        return trusted_uri(uri, app_host)
 
     def stays_in_app(uri: str) -> bool:
-        p = urlparse(uri)
-        if p.scheme not in ("http", "https"):
-            return True  # about:, data:, blob: …
-        h = (p.hostname or "").lower()
-        return trusted(uri) or h.endswith(".supabase.co")
+        return navigation_policy(uri, app_host) == "app"
 
     browser_args = " ".join(BROWSER_ARGS)
     if os.environ.get("NOVA_DESKTOP_EXTRA_ARGS"):
@@ -730,6 +960,8 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             self.crashes = []
             self.tuned = set()
             self.no_focus = bool(os.environ.get("NOVA_DESKTOP_WINDOW"))  # tests : jamais de vol du focus
+            self.popouts = set()           # fenêtres détachées ouvertes (open_popout)
+            self.capture_on = True
             self.google = google_login.GoogleLoginBridge(
                 post=self.post_to_page, open_url=webbrowser.open, focus=self.bring_to_front, log=log.info)
             form = self.form = WinForms.Form()
@@ -740,9 +972,34 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
                 pass
             form.BackColor = Color.FromArgb(*BG)
             form.StartPosition = WinForms.FormStartPosition.CenterScreen
-            form.Size = Size(1440, 900)
-            form.MinimumSize = Size(960, 600)
+            # Tailles en pixels physiques (fenêtre « DPI par écran ») : mises à l'échelle de
+            # l'affichage (125 / 150 %…), sans dépasser la zone de travail de l'écran principal.
+            scale = system_dpi_scale()
+            wa = WinForms.Screen.PrimaryScreen.WorkingArea
+            min_size = (min(int(960 * scale), wa.Width), min(int(600 * scale), wa.Height))
+            form.Size = Size(min(int(1440 * scale), wa.Width), min(int(900 * scale), wa.Height))
+            form.MinimumSize = Size(*min_size)
             form.WindowState = WinForms.FormWindowState.Maximized
+            # Taille, place et écran retrouvés comme au dernier lancement (2e écran, fenêtre
+            # non agrandie…), comme un DAW ; écran débranché depuis : agrandie sur l'écran principal.
+            self.maximized = True
+            if not os.environ.get("NOVA_DESKTOP_WINDOW"):
+                try:
+                    areas = [(a.X, a.Y, a.Width, a.Height) for a in
+                             (sc.WorkingArea for sc in WinForms.Screen.AllScreens)]
+                    pl = choose_placement(load_placement(), areas, min_size)
+                    if pl:
+                        x, y, ww, hh, mx = pl
+                        form.StartPosition = WinForms.FormStartPosition.Manual
+                        form.Location = Point(x, y)
+                        form.Size = Size(ww, hh)
+                        form.WindowState = (WinForms.FormWindowState.Maximized if mx
+                                            else WinForms.FormWindowState.Normal)
+                        self.maximized = mx
+                        log.info(f"fenêtre : place du dernier lancement ({x}, {y}, {ww} × {hh}{', agrandie' if mx else ''})")
+                except Exception:
+                    log.exception("place de la fenêtre")
+            form.Resize += self.on_resize
 
             web = self.web = WebView2()
             props = CoreWebView2CreationProperties()
@@ -760,6 +1017,7 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
 
         # ── initialisation ──────────────────────────────────────────────
         def on_ready(self, sender, args):
+            publish_main_window(self.form.Handle.ToInt64())
             if not args.IsSuccess:
                 log.error(f"WebView2 indisponible : {args.InitializationException}")
                 r = WinForms.MessageBox.Show(
@@ -782,6 +1040,14 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             s.AreBrowserAcceleratorKeysEnabled = debug
             s.IsStatusBarEnabled = False
             s.IsSwipeNavigationEnabled = False
+            # Ctrl+molette / pincement : zoom de TOUTE l'interface par le moteur web (hors de la
+            # timeline, qui s'en sert pour son propre zoom), et rien pour revenir à 100 % (Ctrl+0
+            # est coupé avec les raccourcis du navigateur). La page reçoit toujours ces gestes.
+            s.IsZoomControlEnabled = debug
+            try:
+                s.IsPinchZoomEnabled = False
+            except Exception:
+                pass
             s.AreDefaultScriptDialogsEnabled = True
             core.PermissionRequested += self.on_permission
             core.NewWindowRequested += self.on_new_window
@@ -794,6 +1060,7 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             # logiciels d'enregistrement signalés au DAW (admins : le DAW coupe la protection).
             self.capture_protect(True)
             self.start_recorder_watch()
+            threading.Thread(target=self.awake_loop, name="veille", daemon=True).start()
             try:  # exports (R1) : « Ouvrir le dossier » montre le fichier téléchargé
                 core.DownloadStarting += self.on_download_starting
             except Exception:
@@ -818,7 +1085,37 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             self.tune_webview_processes()
             if ui.active is None:
                 log.info(f"chargement de {url} (en ligne)")
+                if not url_mode:
+                    mark_sw_profile(False)  # le site en ligne peut installer son service worker
                 core.Navigate(url)
+                return
+            self.serve_ui(core)
+
+            # Un service worker installé par le site en ligne (version 1.0, ou repli sur le site
+            # en ligne) passerait avant l'interface locale : on l'efface, sans toucher aux
+            # sessions, à la connexion ni au Cache Storage du DAW (beats, kits, pochettes, modèle
+            # de stems : jusqu'à la 1.5.15 tout était effacé à chaque démarrage, donc retéléchargé).
+            # Une seule fois : un témoin dit que le profil est propre (retiré si le site en ligne
+            # est chargé).
+            if sw_profile_clean():
+                self.navigate_app("démarrage")
+                return
+
+            def go(_task=None):
+                mark_sw_profile(True)
+                self.purge_old_sw_cache = True
+                self.form.BeginInvoke(Action(lambda: self.navigate_app("démarrage, service worker effacé")))
+
+            try:
+                core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.ServiceWorkers).ContinueWith(
+                    Action[Task](go))
+            except Exception:
+                log.exception("effacement du service worker")
+                go()
+
+        def serve_ui(self, core):
+            """Interface embarquée : réponses servies depuis le disque pour cette vue web."""
+            if ui.active is None:
                 return
             core.AddScriptToExecuteOnDocumentCreatedAsync(NO_SW_JS)
             for pattern in [f"{app_origin}/*"] + [f"https://{h}/*" for h in ui_bundle.EXTERNAL_CSS_HOSTS]:
@@ -829,21 +1126,10 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
                     core.AddWebResourceRequestedFilter(pattern, CoreWebView2WebResourceContext.All)
             core.WebResourceRequested += self.on_resource
 
-            # Un service worker installé par la version 1.0 (site en ligne) passerait avant
-            # l'interface locale : on l'efface (sans toucher aux sessions ni à la connexion).
-            def go(_task=None):
-                self.form.BeginInvoke(Action(lambda: self.navigate_app("démarrage")))
-
-            try:
-                core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.ServiceWorkers).ContinueWith(
-                    Action[Task](go))
-                core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.CacheStorage)
-            except Exception:
-                log.exception("effacement du service worker")
-                go()
-
         def navigate_app(self, why: str):
             log.info(f"[{since_start_ms()} ms] chargement de l'interface {ui.active.id if ui.active else 'en ligne'} ({why})")
+            if ui.active is None and not url_mode:
+                mark_sw_profile(False)  # repli sur le site en ligne : service worker possible
             self.core.Navigate(url)
 
         def tune_webview_processes(self):
@@ -945,18 +1231,164 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             uri = str(args.Uri)
             # Fenêtre détachée du studio (console sur un 2e écran, utils/popoutWindow.ts) :
             # popout.html, page vide du DAW qu'il remplit lui-même ; la vue web l'ouvre dans sa fenêtre.
-            if uri in ("", "about:blank") or (stays_in_app(uri) and urlparse(uri).path.endswith("/popout.html")):
+            if stays_in_app(uri) and urlparse(uri).path.endswith("/popout.html"):
+                try:
+                    self.open_popout(args)
+                    return
+                except Exception:
+                    log.exception("fenêtre détachée : repli sur la fenêtre de WebView2")
+                args.Handled = self.no_focus  # tests : jamais de fenêtre à l'écran
+                return
+            if uri in ("", "about:blank"):
                 args.Handled = False
                 return
             args.Handled = True
-            if uri.startswith(("http://", "https://", "mailto:")):
+            where = navigation_policy(uri, app_host)
+            if where in ("app", "browser") and uri.startswith(("http://", "https://", "mailto:", "tel:")):
                 webbrowser.open(uri)
+            elif where == "block":
+                self.navigation_blocked(uri)
+
+        # ── fenêtres détachées (console sur le 2e écran) ────────────────
+        def open_popout(self, args):
+            """popout.html dans une fenêtre de Nova Studio (et non la fenêtre « nue » de WebView2,
+            qui avait sa propre icône dans la barre des tâches, l'adresse du site pour titre,
+            échappait à la protection anti-capture et survivait à la fermeture de Nova avec
+            le moteur WebView2) : fenêtre possédée par Nova (au-dessus d'elle, réduite avec
+            elle, pas de bouton de plus dans la barre des tâches ni dans Alt+Tab), icône de
+            Nova, titre de la vue, place et taille retenues par vue, fermée avec Nova."""
+            deferral = args.GetDeferral()
+            try:
+                key = str(args.Name or "") or "popout"
+            except Exception:
+                key = "popout"
+            f = WinForms.Form()
+            f.Text = APP_NAME
+            f.Icon = self.form.Icon
+            f.BackColor = Color.FromArgb(*BG)
+            f.ShowInTaskbar = False
+            f.MinimumSize = Size(480, 320)
+            f.StartPosition = WinForms.FormStartPosition.Manual
+            areas = [(a.X, a.Y, a.Width, a.Height) for a in (sc.WorkingArea for sc in WinForms.Screen.AllScreens)]
+            pl = None if self.no_focus else choose_placement(load_popout_placements().get(key), areas, (480, 320))
+            if pl is None:
+                ft = args.WindowFeatures
+                scale = self.dpi_scale()
+                if ft.HasPosition:
+                    fx, fy = int(ft.Left * scale), int(ft.Top * scale)
+                else:
+                    fx, fy = self.form.Left + 60, self.form.Top + 60
+                if ft.HasSize:  # taille demandée = contenu : + cadre et barre de titre
+                    fw, fh = int(ft.Width * scale) + 16, int(ft.Height * scale) + 39
+                else:
+                    fw, fh = 1280, 760
+                if self.no_focus:  # tests : à côté de la fenêtre principale, hors écran
+                    pl = (self.form.Left + 40, self.form.Top + 40, fw, fh, False)
+                else:
+                    pl = choose_placement({"x": fx, "y": fy, "w": fw, "h": fh, "max": False}, areas, (480, 320)) or (
+                        self.form.Left + 60, self.form.Top + 60, 1280, 760, False)
+            x, y, w, h, mx = pl
+            f.Location = Point(x, y)
+            f.Size = Size(w, h)
+            if mx:
+                f.WindowState = WinForms.FormWindowState.Maximized
+            web = WebView2()
+            web.DefaultBackgroundColor = Color.FromArgb(255, *BG)
+            web.Dock = WinForms.DockStyle.Fill
+            f.Controls.Add(web)
+            state = {"done": False}
+
+            def finish():
+                if not state["done"]:
+                    state["done"] = True
+                    deferral.Complete()
+
+            def ready(sender_, e):
+                try:
+                    if not e.IsSuccess:
+                        log.warning(f"fenêtre détachée : WebView2 indisponible ({e.InitializationException})")
+                        finish()
+                        f.Close()
+                        return
+                    c = web.CoreWebView2
+                    st = c.Settings
+                    st.AreDevToolsEnabled = debug
+                    st.AreBrowserAcceleratorKeysEnabled = debug
+                    st.IsStatusBarEnabled = False
+                    st.IsSwipeNavigationEnabled = False
+                    st.IsZoomControlEnabled = debug
+                    try:
+                        st.IsPinchZoomEnabled = False
+                    except Exception:
+                        pass
+                    c.PermissionRequested += self.on_permission
+                    c.NewWindowRequested += self.on_new_window
+                    c.NavigationStarting += self.on_navigation_starting
+                    c.ContextMenuRequested += self.on_context_menu
+                    c.WindowCloseRequested += lambda s_, e_: f.Close()
+
+                    def title(s_, e_):
+                        t = str(c.DocumentTitle or "")
+                        f.Text = t if t and not t.startswith(("http", "nova-studio-daw")) else APP_NAME
+                    c.DocumentTitleChanged += title
+                    self.serve_ui(c)  # popout.html servi depuis l'interface embarquée, comme la page
+                    args.NewWindow = c
+                    args.Handled = True
+                except Exception:
+                    log.exception("fenêtre détachée")
+                finish()
+
+            def closing(s_, e_):
+                if not self.no_focus:
+                    b = f.Bounds if f.WindowState == WinForms.FormWindowState.Normal else f.RestoreBounds
+                    save_popout_placement(key, {"x": int(b.X), "y": int(b.Y), "w": int(b.Width), "h": int(b.Height),
+                                                "max": f.WindowState == WinForms.FormWindowState.Maximized})
+
+            f.FormClosing += closing
+            f.FormClosed += lambda s_, e_: self.popouts.discard(f)
+            web.CoreWebView2InitializationCompleted += ready
+            f.Owner = self.form
+            if self.no_focus:
+                ctypes.windll.user32.ShowWindow(wintypes.HWND(f.Handle.ToInt64()), 4)  # SW_SHOWNOACTIVATE
+            else:
+                f.Show(self.form)
+            self.popouts.add(f)
+            capture_guard.set_exclude_from_capture(f.Handle.ToInt64(), self.capture_on)
+            web.EnsureCoreWebView2Async(self.core.Environment)
+            log.info(f"fenêtre détachée « {key} » ouverte ({x}, {y}, {w} × {h})")
+
+        def dpi_scale(self) -> float:
+            try:
+                return max(1.0, ctypes.windll.user32.GetDpiForWindow(wintypes.HWND(self.form.Handle.ToInt64())) / 96.0)
+            except Exception:
+                return 1.0
+
+        def close_popouts(self):
+            for f in list(self.popouts):
+                try:
+                    f.Close()
+                except Exception:
+                    pass
 
         def on_navigation_starting(self, sender, args):
             uri = str(args.Uri)
-            if not stays_in_app(uri):
-                args.Cancel = True
+            where = navigation_policy(uri, app_host)
+            if where == "app":
+                return
+            args.Cancel = True
+            if where == "browser":
                 webbrowser.open(uri)
+            else:
+                self.navigation_blocked(uri)
+
+        def navigation_blocked(self, uri: str):
+            scheme = (urlparse(uri).scheme or "?").lower()
+            log.info(f"navigation {scheme}: bloquée (fichier lâché hors d'une zone d'import ?)")
+            if scheme == "file":
+                try:
+                    self.core.ExecuteScriptAsync(DROP_HINT_JS)
+                except Exception:
+                    pass
 
         # ── hors ligne / page en erreur ─────────────────────────────────
         def on_navigation_completed(self, sender, args):
@@ -964,6 +1396,10 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
                 src = str(self.core.Source)
                 if src.startswith(("http://", "https://")):
                     self.offline = False
+                if getattr(self, "purge_old_sw_cache", False) and (urlparse(src).hostname or "").lower() == app_host:
+                    # cache du service worker de la 1.0 (copie du site) : inutile, place rendue
+                    self.purge_old_sw_cache = False
+                    self.core.ExecuteScriptAsync("try { caches.delete('nova-static-v1') } catch (e) {}")
                 if not self.boot_checked and (urlparse(src).hostname or "").lower() == app_host:
                     self.boot_checked = True
                     log.info(f"[{since_start_ms()} ms] page chargée")
@@ -1113,6 +1549,12 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
 
         # ── anti-enregistrement d'écran ─────────────────────────────────
         def capture_protect(self, on: bool):
+            self.capture_on = on
+            for f in list(self.popouts):  # fenêtres détachées : même protection que la fenêtre principale
+                try:
+                    capture_guard.set_exclude_from_capture(f.Handle.ToInt64(), on)
+                except Exception:
+                    pass
             try:
                 mode = capture_guard.set_exclude_from_capture(self.form.Handle.ToInt64(), on)
                 log.info(f"protection capture d'écran : {mode}{'' if on else ' (admin)'}")
@@ -1141,6 +1583,30 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             t.Tick += tick
             t.Start()
             tick(None, None)
+
+        # ── veille de Windows : jamais pendant une prise, une lecture, une collaboration ──
+        def awake_loop(self):
+            """Une longue prise sans toucher la souris (voix, podcast, live) : rien n'empêchait Windows
+            de mettre le PC en veille au bout du délai de l'alimentation (le moteur web ne le bloque
+            que s'il entend du son, et il est muet quand le son passe par le pont ASIO). La page dit
+            si elle enregistre / lit / est en collaboration (window.__novaBusy)."""
+            self.awake = None
+            while not self.allow_close:
+                time.sleep(AWAKE_POLL_S)
+                if self.allow_close:
+                    break
+                try:
+                    why = awake_reason(self.eval_js(app_update.BUSY_PROBE_JS, 5))
+                except Exception:
+                    why = self.awake  # page occupée : on garde l'état actuel
+                if why != self.awake:
+                    self.awake = why
+                    self.form.BeginInvoke(Action(lambda w=why: self.apply_awake(w)))
+
+        def apply_awake(self, why):
+            ok = keep_system_awake(why is not None)
+            log.info(f"veille de Windows {'bloquée (' + why + ' en cours)' if why else 'permise'}"
+                     f"{'' if ok else ' (refusé par Windows)'}")
 
         def on_web_message(self, sender, args):
             try:
@@ -1404,8 +1870,26 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             except Exception:
                 pass
 
+        def on_resize(self, sender, args):
+            st = self.form.WindowState
+            if st != WinForms.FormWindowState.Minimized:
+                self.maximized = st == WinForms.FormWindowState.Maximized
+
+        def remember_placement(self):
+            try:
+                f = self.form
+                b = f.Bounds if f.WindowState == WinForms.FormWindowState.Normal else f.RestoreBounds
+                save_placement({"x": int(b.X), "y": int(b.Y), "w": int(b.Width), "h": int(b.Height),
+                                "max": bool(self.maximized)})
+            except Exception:
+                log.exception("place de la fenêtre (enregistrement)")
+
         def on_closing(self, sender, args):
+            if not getattr(self, "placement_saved", False):
+                self.placement_saved = True
+                self.remember_placement()
             if self.allow_close or self.core is None or self.offline:
+                self.close_popouts()  # aucune fenêtre (ni moteur WebView2) qui survit à Nova
                 return
             args.Cancel = True
             if self.saving:
@@ -1471,6 +1955,7 @@ def main() -> int:
     if argv and argv[0] == "--probe-vst3":
         # Pont VST : lecture des plugins (instrument ou effet ?) dans un processus enfant
         _bridge_import_path()
+        lean_numpy()
         import vst_probe
         vst_probe.child_main()
         return 0

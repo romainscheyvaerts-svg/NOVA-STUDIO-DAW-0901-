@@ -11,6 +11,7 @@ import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
 import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
 import { midiBus, isMidiFile } from '../utils/midiBus';
+import { dropEntries, expandDropped, isAudioFile, MAX_DROPPED_FILES } from '../utils/droppedFiles';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import { ChordLaneToggleButton, ChordLaneView } from './ChordLane';
 import LiveMidiRecordingClip from './LiveMidiRecordingClip';
@@ -807,49 +808,65 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           return;
       }
 
-      // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
-      const midiDropped = Array.from(e.dataTransfer.files || []).filter(isMidiFile);
-      midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: targetTrackId, time: dropTime }));
-      if (midiDropped.length && midiDropped.length === e.dataTransfer.files.length) return;
-      
-      if (!targetTrackId) {
-          targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
-                          visibleTracks.find(t => t.type === TrackType.AUDIO)?.id || 
-                          null;
+      // Dossier(s) glissé(s) depuis l'Explorateur (stems, prises…) : leurs sons et leurs .mid, dans l'ordre
+      // des noms, une piste par son comme pour plusieurs fichiers (utils/droppedFiles). Entrées relevées
+      // PENDANT l'événement, parcourues ensuite.
+      const entries = dropEntries(e.dataTransfer);
+      if (entries) {
+          const hit = targetTrackId;
+          void expandDropped(entries, f => isMidiFile(f) || isAudioFile(f)).then(({ files, truncated }) => {
+              if (!files.length) { notify('Aucun son ni fichier MIDI dans ce dossier (WAV, MP3, AIFF, FLAC, OGG, M4A, MID).'); return; }
+              placeDroppedFiles(files, hit, dropTime);
+              if (truncated) notify(`Dossier très rempli : seuls les ${MAX_DROPPED_FILES} premiers fichiers ont été importés.`);
+          });
+          return;
       }
-      
+
+      const audioUrl = e.dataTransfer.getData('audio-url');
+      if (audioUrl && onAudioDrop) {
+          const tid = targetTrackId || fallbackTrackId();
+          if (!tid) { console.warn('[ArrangementView Drop] Aucune piste cible trouvée!'); return; }
+          const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
+          onAudioDrop(tid, audioUrl, audioName, dropTime);
+          return;
+      }
+
+      placeDroppedFiles(Array.from(e.dataTransfer.files || []), targetTrackId, dropTime);
+  };
+
+  const notify = (msg: string) => window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg }));
+  const fallbackTrackId = () => visibleTracks.find(t => t.id === 'instrumental')?.id ||
+                                visibleTracks.find(t => t.type === TrackType.AUDIO)?.id || null;
+
+  /** Fichiers lâchés (ou trouvés dans un dossier lâché) : .mid -> MidiHost, sons -> une piste par fichier. */
+  const placeDroppedFiles = (files: File[], hitTrackId: string | null, dropTime: number) => {
+      // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
+      const midiDropped = files.filter(isMidiFile);
+      midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: hitTrackId, time: dropTime }));
+      if (midiDropped.length && midiDropped.length === files.length) return;
+
+      const targetTrackId = hitTrackId || fallbackTrackId();
       if (!targetTrackId) {
           console.warn('[ArrangementView Drop] Aucune piste cible trouvée!');
           return;
       }
-      
-      const audioUrl = e.dataTransfer.getData('audio-url');
-      
-      if (audioUrl && onAudioDrop) {
-          const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
-          onAudioDrop(targetTrackId, audioUrl, audioName, dropTime);
-          return;
-      }
-      
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onAudioDrop) {
-          // Windows ne donne pas toujours de type MIME (.aif, .flac…) : on regarde aussi l'extension.
-          const AUDIO_EXT = /\.(wav|wave|mp3|aif|aiff|flac|ogg|oga|opus|m4a|aac|webm|caf)$/i;
-          const files = Array.from(e.dataTransfer.files);
-          const audio = files.filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
+
+      if (files.length > 0 && onAudioDrop) {
+          const audio = files.filter(isAudioFile);
           const refused = files.length - audio.length - midiDropped.length;
           // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
           const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
           const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
           // Au-delà des pistes existantes : une nouvelle piste par fichier, sous la dernière visée
           // et dans son circuit (bus, effets, envois : utils/importPlacement).
-          const lastTarget = targets.length ? targets[Math.min(targets.length, audio.length) - 1].id : targetTrackId!;
+          const lastTarget = targets.length ? targets[Math.min(targets.length, audio.length) - 1].id : targetTrackId;
           audio.forEach((file, i) => {
-              const tid = targets[i]?.id || (i === 0 ? targetTrackId! : `new-after:${lastTarget}`);
+              const tid = targets[i]?.id || (i === 0 ? targetTrackId : `new-after:${lastTarget}`);
               onAudioDrop(tid, URL.createObjectURL(file), file.name, dropTime);
           });
           const notes: string[] = [];
           if (refused) notes.push(`${refused} fichier${refused > 1 ? 's' : ''} ignoré${refused > 1 ? 's' : ''} (pas de l'audio : WAV, MP3, AIFF, FLAC, OGG, M4A acceptés)`);
-          if (notes.length) window.dispatchEvent(new CustomEvent('nova:notify', { detail: notes.join(' · ') }));
+          if (notes.length) notify(notes.join(' · '));
       }
   };
 

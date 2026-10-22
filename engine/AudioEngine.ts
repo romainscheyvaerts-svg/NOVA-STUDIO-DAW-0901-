@@ -113,6 +113,7 @@ import { buildStrip, disposeStrip, setStrip, stripParam, stripSignature, StripNo
 import { GrPart, readGainReduction } from './meters/gainReduction';
 import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../utils/projectRate';
 import { installHQDecode } from '../utils/hqAudio';
+import { createOutputDeviceWatch } from './outputDeviceWatch';
 
 interface TrackDSP {
   input: GainNode;          
@@ -499,6 +500,7 @@ export class AudioEngine {
   // --- DEVICE MANAGEMENT ---
   private currentInputDeviceId: string = 'default';
   private currentOutputDeviceId: string = 'default';
+  private outputWatch: ReturnType<typeof createOutputDeviceWatch> | null = null;
   /**
    * Fréquence du contexte audio = celle du PROJET (utils/projectRate) : 48 kHz pour
    * un nouveau projet, celle du fichier pour un projet ouvert (44,1 kHz s'il n'en a
@@ -685,6 +687,15 @@ export class AudioEngine {
     // l'applique une fois le graphe construit.
     if (this.currentOutputDeviceId && this.currentOutputDeviceId !== 'default') {
       this.setOutputDevice(this.currentOutputDeviceId).catch(() => {});
+    }
+    // Sortie choisie débranchée / rebranchée : repli sur la sortie de Windows, puis retour (outputDeviceWatch).
+    if (!this.outputWatch && typeof navigator !== 'undefined' && navigator.mediaDevices) {
+      this.outputWatch = createOutputDeviceWatch({
+        media: navigator.mediaDevices as any,
+        wanted: () => this.currentOutputDeviceId,
+        apply: async (id) => { const c: any = this.ctx; if (c && typeof c.setSinkId === 'function') await c.setSinkId(id); },
+        notify: (msg) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ } },
+      });
     }
 
     // Auto-connect to ASIO Bridge if available (Windows only)
@@ -942,6 +953,7 @@ export class AudioEngine {
   public async setOutputDevice(deviceId: string) {
       if (!this.ctx) return;
       this.currentOutputDeviceId = deviceId;
+      void this.outputWatch?.check(); // nouvelle sortie choisie : son nom est relevé
       // @ts-ignore
       if (typeof this.ctx.setSinkId === 'function') {
           try {

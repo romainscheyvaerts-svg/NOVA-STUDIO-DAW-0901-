@@ -171,6 +171,61 @@ def run_message_pump(timeout_seconds: float = 30.0):
     logger.info("   Message pump terminé")
 
 
+def own_visible_windows(exclude=None) -> int:
+    """Fenêtres visibles de ce processus (le panneau du pilote), hors fenêtre cachée."""
+    user32 = ctypes.windll.user32
+    me = ctypes.windll.kernel32.GetCurrentProcessId()
+    found = [0]
+    proto = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def cb(hwnd, _):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == me and user32.IsWindowVisible(hwnd) and int(hwnd or 0) != int(exclude or 0):
+            found[0] += 1
+        return True
+
+    user32.EnumWindows(proto(cb), 0)
+    return found[0]
+
+
+def pump_once() -> bool:
+    """Traite les messages en attente ; False si WM_QUIT."""
+    user32 = ctypes.windll.user32
+    msg = MSG()
+    while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
+        if msg.message == WM_QUIT:
+            return False
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+    return True
+
+
+def wait_panel_closed(visible, pump=pump_once, clock=time.monotonic, sleep=time.sleep,
+                      appear_grace_s: float = 4.0, gone_grace_s: float = 0.6, max_s: float = 1800.0) -> str:
+    """Garde le processus (et donc le pilote ouvert pour le panneau) TANT QUE le panneau est
+    affiché, puis rend la main tout de suite. Avant : 60 s fixes, ce qui fermait le panneau en
+    plein réglage au bout d'une minute, et gardait le pilote occupé jusqu'à une minute après
+    sa fermeture (le pont ne pouvait pas le rouvrir après un changement de taille de tampon).
+    Panneau qui n'ouvre aucune fenêtre ici (application du fabricant) : arrêt après appear_grace_s.
+    Renvoie la raison de l'arrêt : « ferme », « aucune-fenetre », « quit » ou « delai »."""
+    t0 = clock()
+    seen_at = None
+    while True:
+        if not pump():
+            return "quit"
+        now = clock()
+        if visible() > 0:
+            seen_at = now
+        elif seen_at is not None and now - seen_at >= gone_grace_s:
+            return "ferme"
+        elif seen_at is None and now - t0 >= appear_grace_s:
+            return "aucune-fenetre"
+        if now - t0 >= max_s:
+            return "delai"
+        sleep(0.02)
+
+
 def open_asio_control_panel(driver_name: str) -> bool:
     """
     Ouvrir le panneau de configuration ASIO
@@ -279,16 +334,21 @@ def open_asio_control_panel(driver_name: str) -> bool:
         control_panel = CTRL_FUNC(vtable[21])
         
         logger.info("   Appel controlPanel()...")
+        t_call = time.monotonic()
         result = control_panel(p_driver.value)
-        logger.info(f"   controlPanel() result: {result}")
+        blocked = time.monotonic() - t_call
+        logger.info(f"   controlPanel() result: {result} ({blocked:.2f} s)")
         
         if result == 0:  # ASE_OK
             logger.info("   ✅ Panneau ASIO ouvert!")
         else:
             logger.info(f"   ⚠️ controlPanel retourné {result}")
         
-        # 8. Message pump pour le dialogue
-        run_message_pump(timeout_seconds=60.0)
+        # 8. Message pump tant que le panneau est ouvert. Panneau modal (controlPanel() a bloqué
+        #    jusqu'à sa fermeture) : plus rien à attendre.
+        why = wait_panel_closed(lambda: own_visible_windows(hwnd),
+                                appear_grace_s=0.3 if blocked > 0.5 else 4.0)
+        logger.info(f"   Panneau terminé ({why}) après {time.monotonic() - t_call:.1f} s")
         
         # 9. Release
         logger.info("   Release du driver COM...")

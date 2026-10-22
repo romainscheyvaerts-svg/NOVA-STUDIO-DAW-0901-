@@ -1372,6 +1372,7 @@ class NovaBridgeService {
     const meta = (c: AraClipIn) => ({ id: c.id, name: c.name, nch: Math.min(2, c.channels.length), nframes: c.channels[0]?.length || 0 });
     const seconds = (opts.guide.channels[0]?.length || 0) / opts.sampleRate;
     const r = await this.sendAraFrame({
+      ...withOwner({}),
       action: 'ARA_ALIGN', session_id: opts.sessionId, sample_rate: Math.round(opts.sampleRate), interactive: opts.interactive,
       guide: meta(opts.guide), dubs: opts.dubs.map(meta),
     }, [opts.guide, ...opts.dubs], 120000 + seconds * 3000 * Math.max(1, opts.dubs.length));

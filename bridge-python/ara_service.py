@@ -210,8 +210,11 @@ def install(Server, build_render_frame):
                     h.call("load", plugin=plug["path"], sample_rate=sr, ara=False, timeout=180)
                     # Fenêtre visible en mode interactif (la première), sinon hors écran et sans activation.
                     show_here = interactive and i == 0
+                    # Fenêtre visible : possédée par Nova Studio (pas de bouton de plus dans la barre
+                    # des tâches, jamais derrière Nova), comme Melodyne et les plugins.
                     h.call("show_editor", offscreen=not show_here,
-                           title=f"VocAlign — {c['name']} sur le guide (Nova Studio)")
+                           title=f"VocAlign — {c['name']} sur le guide (Nova Studio)",
+                           **(_owner_kw(meta) if show_here else {}))
                     time.sleep(0.5)
                     r = h.call("capture_align", dub=c["path"], guide=str(gpath), out=c["out"],
                                passes=1 if interactive else 2, wait_s=4, realtime=True, keep=interactive,
