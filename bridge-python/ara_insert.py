@@ -541,6 +541,14 @@ class AraInsertSlot:
 STATE_PREFIX = "NARA1."
 
 
+def _owner_of(req: dict) -> Optional[int]:
+    """(appli Windows) HWND de la fenêtre de Nova Studio envoyé avec une demande de fenêtre."""
+    try:
+        return int(req.get("owner") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
 def pack_state(archive_b64: Optional[str], vst_b64: Optional[str]) -> Optional[str]:
     """État d'un insert ARA (GET_STATE) : archive ARA (retouches) + état VST3, en une chaîne ASCII."""
     if not archive_b64 and not vst_b64:
@@ -655,7 +663,9 @@ def install(Server, build_render_frame, parse_render_frame):
     async def _a_show_editor(self, ws, req):
         slot = self.slots.get(str(req.get("slot_id", "")))
         if isinstance(slot, AraInsertSlot):
-            res = await self.loop.run_in_executor(self.misc_pool, lambda: slot.host.call("editor", mode="float", title=f"{slot.name} (Nova Studio)"))
+            owner = _owner_of(req)
+            res = await self.loop.run_in_executor(self.misc_pool, lambda: slot.host.call(
+                "editor", mode="float", title=f"{slot.name} (Nova Studio)", **({"owner": owner} if owner else {})))
             self._reply(ws, req, {"success": True, "mode": res.get("mode")})
             return
         return await orig_show(self, ws, req)
@@ -714,6 +724,9 @@ def install(Server, build_render_frame, parse_render_frame):
         kw = {k: req[k] for k in ("mode", "parent", "x", "y", "w", "h", "visible", "release") if k in req}
         if kw.get("mode") == "float":
             kw["title"] = f"{slot.name} (Nova Studio)"
+            owner = _owner_of(req)
+            if owner:
+                kw["owner"] = owner   # fenêtre flottante possédée par Nova Studio (pas d'icône en plus)
         if req.get("offscreen"):
             kw["offscreen"] = True
         res = await self.loop.run_in_executor(self.misc_pool, lambda: slot.host.call("editor", timeout=60, **kw))

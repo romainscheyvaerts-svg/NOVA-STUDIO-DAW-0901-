@@ -41,6 +41,15 @@ VOCALIGN_DUB_CAPTURE = [69 / 900, 180 / 350]
 SESSION_IDLE_S = 3 * 3600
 
 
+def _owner_kw(req: dict) -> dict:
+    """(appli Windows) owner = HWND de la fenêtre de Nova Studio : la fenêtre du plugin lui
+    appartient (pas d'icône en plus dans la barre des tâches, toujours au-dessus de Nova)."""
+    try:
+        owner = int(req.get("owner") or 0)
+    except (TypeError, ValueError):
+        owner = 0
+    return {"owner": owner} if owner > 0 else {}
+
 class AraSession:
     def __init__(self, sid: str, kind: str, owner):
         self.sid = sid
@@ -144,7 +153,7 @@ def install(Server, build_render_frame):
                 an = h.call("analyze", timeout_s=float(meta.get("analysis_timeout_s") or 180), timeout=240)
                 if meta.get("show_editor", True):
                     h.call("show_editor", offscreen=bool(meta.get("offscreen")),
-                           title=f"{plug['label']} — {spec[0]['name']} (Nova Studio)")
+                           title=f"{plug['label']} — {spec[0]['name']} (Nova Studio)", **_owner_kw(meta))
                 return info, st, an
 
             t = time.time()
@@ -285,7 +294,7 @@ def install(Server, build_render_frame):
         h = next(iter(sess.hosts.values()), None)
         if h is None:
             raise ara_host.AraHostError("Session sans fenêtre")
-        await self._ara_run(lambda: h.call("show_editor", offscreen=False))
+        await self._ara_run(lambda: h.call("show_editor", offscreen=False, **_owner_kw(req)))
         self._reply(ws, req, {"success": True})
 
     async def _a_ara_snapshot(self, ws, req):

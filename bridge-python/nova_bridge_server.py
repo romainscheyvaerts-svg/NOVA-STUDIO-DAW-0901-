@@ -47,6 +47,9 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       nch:2, nframes, sample_rate} + float32 stéréo entrelacés (comme RENDER),
       durée = length_seconds + tail_seconds.
     SHOW_EDITOR / CLOSE_EDITOR slot_id      (fenêtre native du plugin sur le PC)
+                [owner]   (appli Windows) HWND de la fenêtre de Nova Studio : la fenêtre du plugin
+                          lui appartient, comme dans un DAW (aucun bouton dans la barre des tâches,
+                          toujours au-dessus de Nova, réduite avec elle) ; capacité « editor_owner »
     GET_PARAMS [names]          paramètres exposés par le plugin. Chacun : name (clé), display_name,
                                   value (brute 0–1) et depuis la v7 : text (valeur affichée par le
                                   plugin, ex. « F# », « Minor », « 20 »), num_steps, is_boolean,
@@ -401,6 +404,13 @@ class NovaBridgeServer:
             on_clean=lambda w: self.loop.call_soon_threadsafe(self._license_clean, w))
         asyncio.create_task(self._scan())
         asyncio.create_task(self._reaper())
+        if vst_host.NATIVE:
+            # Hôtes de réserve : modules lents de la séance précédente (WaveShell, Auto-Tune…) chargés
+            # d'avance en fond, 8 s après le démarrage (l'appli finit de s'ouvrir d'abord).
+            guard = vst_host.CRASH_GUARD
+            self.loop.call_later(8.0, lambda: vst_native.POOL.restore(
+                os.path.join(os.path.dirname(vst_host._guard_dir()), "vst_reserve.json"),
+                skip=lambda p: guard is not None and guard.is_quarantined(p)))
         self.origins = allowed_origins()
         async with serve(self._handle, HOST, PORT, process_request=self._check_origin,
                          max_size=1024 * 1024 * 1024, compression=None,
@@ -649,6 +659,8 @@ class NovaBridgeServer:
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
+                              # SHOW_EDITOR owner : fenêtre du plugin possédée par celle de Nova Studio
+                              "editor_owner": vst_host.ENGINE == "native",
                               "crash_events": True, "quarantine": True,
                               # (v11) automation des réglages à l'échantillon près, écriture depuis la fenêtre
                               "automation": vst_host.HAS_VST, "param_watch": vst_host.HAS_VST,
@@ -957,7 +969,12 @@ class NovaBridgeServer:
             except Exception:
                 pass
 
-        self.juce.open_editor(slot, on_closed)
+        # (appli Windows) HWND de la fenêtre de Nova Studio : la fenêtre du plugin lui appartient.
+        try:
+            owner = int(req.get("owner") or 0) or None
+        except (TypeError, ValueError):
+            owner = None
+        self.juce.open_editor(slot, on_closed, owner)
         self._reply(ws, req, {"success": True})
 
     async def _editor_closed(self, slot: Slot):

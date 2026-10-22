@@ -35,7 +35,8 @@
       doc_state   notes?, wait_analysis_s? → régions relues dans le plugin (notes en temps du morceau)
       stream_open sample_rate, max_block → tube nommé du flux temps réel (voir AudioPipe.h)
       render_range out, start, duration, sample_rate? → la piste à travers le plugin (export, gel)
-      editor      mode: dock (parent HWND, x, y, w, h, visible) | bounds | float | hide
+      editor      mode: dock (parent HWND, x, y, w, h, visible) | bounds | float (owner?) | hide
+                  float + owner (HWND de Nova Studio) : fenêtre possédée par Nova (pas d'icône en plus)
       select      regions:[ids] → l'éditeur montre ces clips (vide : toute la piste)
       params / set_param id|title, value → réglages VST3 du plugin, en direct
     Évènements
@@ -804,13 +805,16 @@ namespace nova
             if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
             if (editorWindow == nullptr && docked == nullptr && ! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
             const bool offscreen = req["offscreen"].asBool (false);
-            if (editorWindow == nullptr || editorWindow->offscreen != offscreen)
+            // owner : fenêtre de Nova Studio (appli Windows) ; la fenêtre flottante lui appartient (pas
+            // d'icône en plus dans la barre des tâches), sous le chien de garde d'EditorWindow.
+            const HWND owner = EditorWindow::resolveOwner ((HWND) (intptr_t) (int64_t) req["owner"].asDouble (0.0));
+            if (editorWindow == nullptr || editorWindow->offscreen != offscreen || editorWindow->ownerWindow() != owner)
             {
                 editorWindow.reset();
                 auto view = plugin->createView();
                 if (view == nullptr) throw std::runtime_error ("Fenêtre du plugin indisponible");
                 const auto title = req.has ("title") ? req["title"].asString() : plugin->name;
-                editorWindow = std::make_unique<EditorWindow> (view, title, offscreen, [] { io::event ("editor_closed"); });
+                editorWindow = std::make_unique<EditorWindow> (view, title, offscreen, [] { io::event ("editor_closed"); }, owner);
             }
             if (dc) notifySelection();
             editorWindow->show();
@@ -2442,6 +2446,16 @@ int WINAPI wWinMain (HINSTANCE, HINSTANCE, PWSTR, int)
     // Jamais de boîte de dialogue d'erreur Windows (le pont tourne caché).
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetProcessDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Jamais « mode efficacité » (EcoQoS) : un processus sans fenêtre resté en attente (hôte de réserve)
+    // était classé en arrière-plan par Windows 11 et ralenti (cœurs économes) : mesuré, la création du
+    // plugin et de sa fenêtre +30 à 50 %. Le traitement audio en profite aussi.
+    {
+        PROCESS_POWER_THROTTLING_STATE pt {};
+        pt.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        pt.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        pt.StateMask = 0;
+        SetProcessInformation (GetCurrentProcess(), ProcessPowerThrottling, &pt, sizeof (pt));
+    }
     OleInitialize (nullptr);
 
     WNDCLASSEXW wc { sizeof (wc) };
@@ -2451,6 +2465,13 @@ int WINAPI wWinMain (HINSTANCE, HINSTANCE, PWSTR, int)
     RegisterClassExW (&wc);
     app::msgWindow = CreateWindowExW (0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
     SetTimer (app::msgWindow, app::kTimerId, 40, nullptr);
+
+    // Fenêtre flottante possédée par Nova : détachée / rattachée par le chien de garde (journal du pont).
+    EditorWindow::setWatchdogListener ([] (HWND, bool attachedAgain, double ms) {
+        auto ev = json::Value::object();
+        ev.set ("ms", ms);
+        io::event (attachedAgain ? "editor_attached" : "editor_detached", ev);
+    });
 
     session = std::make_unique<AraSession>();
     std::thread reader (readLoop);

@@ -19,6 +19,7 @@
 
     Commandes (mode serve)
       ping
+      preload     path                         (hôte de réserve) module chargé d'avance → ms, classes
       load        path, class?, cid?           → name, vendor, version, sub_categories, instrument,
                                                   class_id, classes, buses, latency, num_params
       attach      shm, req, done, mmcss?        (noms Windows de la zone et des événements)
@@ -34,10 +35,12 @@
       latency                                   → latency, processor_latency
       get_state                                 → component (base64 | null), controller (base64 | null)
       set_state   component?, controller?
-      has_editor | show_editor offscreen?, title? | hide_editor | report_edits on
+      has_editor | show_editor offscreen?, title?, owner? | hide_editor | report_edits on
+                  owner : HWND d'une fenêtre de Nova Studio ; la fenêtre du plugin lui appartient
+                  (pas de bouton dans la barre des tâches), sous chien de garde (EditorWindow.h)
       quit
     Événements : ready {version, layout}, edit {id, index, value}, begin_edit, end_edit,
-      restart {flags, latency}, editor_closed, crashed {error}, log
+      restart {flags, latency}, editor_closed, editor_detached / editor_attached {ms}, crashed {error}, log
 
     (c) Make Music.
 */
@@ -286,6 +289,43 @@ namespace nova
         return Value (base64::encode (v.data(), v.size()));
     }
 
+    namespace scan { static std::set<DWORD> processTree(); }
+
+    // Chargement d'avance (hôte de réserve) : AUCUNE fenêtre ne doit surgir pendant que le musicien
+    // n'a rien demandé. Une fenêtre (licence, activation…) est cachée, fermée, et le chargement
+    // d'avance refusé : le plugin se chargera normalement, à la demande, avec sa fenêtre.
+    static int silentDuring (const std::function<void()>& fn)
+    {
+        std::atomic<bool> stop { false };
+        std::atomic<int> seen { 0 };
+        std::thread watcher ([&] {
+            while (! stop)
+            {
+                Sleep (50);
+                const auto tree = scan::processTree();
+                struct Ctx { const std::set<DWORD>* tree; std::vector<HWND> found; } ctx { &tree, {} };
+                EnumWindows ([] (HWND h, LPARAM lp) -> BOOL {
+                    auto* c = reinterpret_cast<Ctx*> (lp);
+                    DWORD pid = 0;
+                    GetWindowThreadProcessId (h, &pid);
+                    if (c->tree->count (pid) && IsWindowVisible (h)) c->found.push_back (h);
+                    return TRUE;
+                }, (LPARAM) &ctx);
+                for (HWND h : ctx.found)
+                {
+                    ShowWindow (h, SW_HIDE);
+                    PostMessageW (h, WM_CLOSE, 0, 0);
+                    ++seen;
+                }
+            }
+        });
+        try { fn(); }
+        catch (...) { stop = true; watcher.join(); throw; }
+        stop = true;
+        watcher.join();
+        return seen.load();
+    }
+
     static void handle (const std::string& line)
     {
         std::string perr;
@@ -323,6 +363,43 @@ namespace nova
                 o.set ("buses", raw->busesJson());
                 o.set ("latency", raw->latency());
                 o.set ("num_params", (int) raw->params.size());
+                auto t = Value::object();
+                t.set ("module", raw->tModule);
+                t.set ("component", raw->tComponent);
+                t.set ("controller", raw->tController);
+                t.set ("params", raw->tParams);
+                t.set ("preloaded", raw->preloadedModule);
+                o.set ("timings", t);
+                reply (id, o);
+            }
+            else if (cmd == "preload")
+            {
+                // Hôte de réserve : module chargé d'avance, repris par « load » (même chemin).
+                if (session->inst) throw std::runtime_error ("Un plugin est déjà chargé dans ce processus");
+                std::string err;
+                int classes = 0;
+                bool ok = false;
+                const double t0 = nowMs();
+                bool fine = true;
+                const int windows = silentDuring ([&] {
+                    fine = guard::call ([&] {
+                        try { ok = VstInstance::preload (req["path"].asString(), err, classes); }
+                        catch (const std::exception& e) { err = e.what(); }
+                    });
+                });
+                if (! fine)
+                {
+                    char buf[96];
+                    std::snprintf (buf, sizeof (buf), "plantage au chargement d'avance (code 0x%08X)", guard::lastCode());
+                    session->crashed = true;
+                    session->crashReason = buf;
+                    throw guard::Crash (buf);
+                }
+                if (! ok) throw std::runtime_error ("Chargement d'avance impossible : " + err);
+                if (windows > 0) throw std::runtime_error ("Chargement d'avance refusé : le plugin ouvre une fenêtre (licence ?)");
+                auto o = Value::object();
+                o.set ("ms", nowMs() - t0);
+                o.set ("classes", classes);
                 reply (id, o);
             }
             else if (cmd == "attach")
@@ -515,7 +592,13 @@ namespace nova
             {
                 auto& inst = need();
                 const bool offscreen = req["offscreen"].asBool (false);
-                if (session->editor && session->editor->offscreen != offscreen) session->editor.reset();
+                // Fenêtre de Nova Studio (appli Windows) : la fenêtre du plugin lui appartient (pas de
+                // bouton dans la barre des tâches, toujours au-dessus de Nova). Absente : indépendante.
+                const HWND owner = EditorWindow::resolveOwner ((HWND) (intptr_t) (int64_t) req["owner"].asDouble (0.0));
+                if (session->editor && (session->editor->offscreen != offscreen || session->editor->ownerWindow() != owner))
+                    session->editor.reset();
+                const double tv0 = nowMs();
+                const bool created = ! session->editor;
                 if (! session->editor)
                 {
                     guarded ("ouverture de la fenêtre", [&] {
@@ -524,15 +607,24 @@ namespace nova
                         session->editor = std::make_unique<EditorWindow> (inst.createView(), title, offscreen, [] {
                             io::event ("editor_closed");
                             app::post ([] { if (session) session->editor.reset(); });
-                        });
+                        }, owner);
                     });
                 }
-                session->editor->show();
-                if (! offscreen) bringToFront (session->editor->handle());
+                const auto& pos = req["debug_pos"];
+                if (pos.isArray() && pos.size() == 2 && GetEnvironmentVariableW (L"NOVA_HOST_DEBUG", nullptr, 0) > 0)
+                    session->editor->showAt (pos.at (0).asInt (0), pos.at (1).asInt (0));   // tests : sans activation
+                else
+                {
+                    session->editor->show();
+                    if (! offscreen) bringToFront (session->editor->handle());
+                }
                 auto o = Value::object();
                 o.set ("width", session->editor->clientWidth());
                 o.set ("height", session->editor->clientHeight());
                 o.set ("hwnd", (double) (uintptr_t) session->editor->handle());
+                o.set ("created", created);
+                o.set ("owner", (double) (uintptr_t) session->editor->ownerWindow());
+                o.set ("ms", nowMs() - tv0);
                 reply (id, o);
             }
             else if (cmd == "hide_editor")
@@ -547,6 +639,14 @@ namespace nova
                 auto& inst = need();
                 inst.reportEdits = req["on"].asBool (true);
                 reply (id, Value::object());
+            }
+            else if (cmd == "debug_hang")
+            {
+                // Tests seulement (NOVA_HOST_DEBUG=1) : l'interface du plugin se fige ms millisecondes.
+                if (GetEnvironmentVariableW (L"NOVA_HOST_DEBUG", nullptr, 0) == 0) throw std::runtime_error ("Commande de test désactivée");
+                const int ms = req["ms"].asInt (3000);
+                reply (id, Value::object());
+                Sleep ((DWORD) std::max (0, ms));
             }
             else if (cmd == "quit")
             {
@@ -761,6 +861,16 @@ int WINAPI wWinMain (HINSTANCE, HINSTANCE, PWSTR cmdLine, int)
     // Jamais de boîte de dialogue d'erreur Windows (l'hôte tourne caché).
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetProcessDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Jamais « mode efficacité » (EcoQoS) : un processus sans fenêtre resté en attente (hôte de réserve)
+    // était classé en arrière-plan par Windows 11 et ralenti (cœurs économes) : mesuré, la création du
+    // plugin et de sa fenêtre +30 à 50 %. Le traitement audio en profite aussi.
+    {
+        PROCESS_POWER_THROTTLING_STATE pt {};
+        pt.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        pt.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        pt.StateMask = 0;
+        SetProcessInformation (GetCurrentProcess(), ProcessPowerThrottling, &pt, sizeof (pt));
+    }
     OleInitialize (nullptr);
 
     const std::wstring args = cmdLine != nullptr ? cmdLine : L"";
@@ -778,6 +888,13 @@ int WINAPI wWinMain (HINSTANCE, HINSTANCE, PWSTR cmdLine, int)
     RegisterClassExW (&wc);
     app::msgWindow = CreateWindowExW (0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
 
+    // Chien de garde des fenêtres possédées par Nova : détachée / rattachée (journal du pont).
+    EditorWindow::setWatchdogListener ([] (HWND, bool attachedAgain, double ms) {
+        auto o = Value::object();
+        o.set ("ms", ms);
+        io::event (attachedAgain ? "editor_attached" : "editor_detached", o);
+    });
+
     session = std::make_unique<Session>();
     std::thread reader (readLoop);
     reader.detach();
@@ -787,6 +904,14 @@ int WINAPI wWinMain (HINSTANCE, HINSTANCE, PWSTR cmdLine, int)
     o.set ("sdk", "VST3 SDK 3.8.1 (MIT), sans JUCE");
     o.set ("pid", (double) GetCurrentProcessId());
     o.set ("layout", layoutJson());
+    {
+        // Temps écoulé depuis la création du processus (démarrage de l'exe, chargeur Windows).
+        FILETIME c {}, e {}, k {}, u {}, now {};
+        GetProcessTimes (GetCurrentProcess(), &c, &e, &k, &u);
+        GetSystemTimeAsFileTime (&now);
+        const auto ft = [] (FILETIME f) { return ((uint64_t) f.dwHighDateTime << 32) | f.dwLowDateTime; };
+        o.set ("uptime_ms", (double) (ft (now) - ft (c)) / 10000.0);
+    }
     io::event ("ready", o);
 
     MSG m;
