@@ -236,6 +236,9 @@ BATTERIE = [
     # ouvert, .novaproj.zip glissé, sons manquants reliés, .zip sous un autre nom (interface jamais figée), export 4 min
     # (nom propre, mix qui sature signalé).
     ("projets_livraison", []),
+    # 22/10/2026 : tour « édition et navigation » (zoom du morceau à l'échantillon, Z, annuler par geste, sélection
+    # glissée entre pistes, Ctrl+D / couper-coller de plusieurs clips, bord qui défile, suivi de la tête, 60 pistes).
+    ("audit_edition", []),
 ]
 
 

@@ -75,6 +75,8 @@ const Badge = () => (
   <span title={ARA_BADGE_TOOLTIP} className="ml-2 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1.5 py-0.5 align-middle text-[10px] font-black tracking-wider text-fuchsia-200">ARA</span>
 );
 
+const NO_CANDIDATES: ReturnType<typeof alignCandidates> = [];
+
 const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm, onApply, onClose }) => {
   const ctx = useAraContext();
   const track = tracks.find(t => t.id === trackId);
@@ -117,12 +119,16 @@ const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm
   }, [open, plugin, trackId, clipId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [gTrackId, gClipId] = guideKey.split('::');
-  const candidates = useMemo(() => (plugin === 'vocalign' && gTrackId ? alignCandidates(tracks, gTrackId, gClipId) : []), [plugin, tracks, gTrackId, gClipId]);
+  // Fenêtre fermée : aucun calcul ni rendu. Avant, chaque modification des pistes (chaque image
+  // d'un clip glissé) recréait une liste vide, puis une case cochée vide : un 2e rendu à chaque
+  // geste d'édition, même fenêtre fermée (chaîne de rendus signalée par React en glissant contre le bord).
+  const candidates = useMemo(() => (open && plugin === 'vocalign' && gTrackId ? alignCandidates(tracks, gTrackId, gClipId) : NO_CANDIDATES), [open, plugin, tracks, gTrackId, gClipId]);
   useEffect(() => {
+    if (!open) return;
     const next: Record<string, boolean> = {};
     candidates.forEach(c => { next[`${c.trackId}::${c.clipId}`] = c.suggested || (c.trackId === trackId && c.clipId === clipId); });
     setChecked(next);
-  }, [candidates, trackId, clipId]);
+  }, [open, candidates, trackId, clipId]);
 
   useEffect(() => {
     if (!open) { setPhase('idle'); setError(''); setInfo(''); }

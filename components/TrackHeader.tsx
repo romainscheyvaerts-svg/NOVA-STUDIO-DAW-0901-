@@ -72,6 +72,8 @@ interface TrackHeaderProps {
   takesCount?: number;
   takesOpen?: boolean;
   onToggleTakes?: (trackId: string) => void;
+  /** Hauteur Micro / Compacte (utils/trackHeights) : une seule ligne (nom, M, S, R). */
+  compact?: boolean;
 }
 
 const HorizontalSendFader: React.FC<{ 
@@ -182,7 +184,7 @@ const LiveVolumeText: React.FC<{ trackId: string; volume: number }> = ({ trackId
 
 const TrackHeader: React.FC<TrackHeaderProps> = ({ 
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
-  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument, takesCount, takesOpen, onToggleTakes
+  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument, takesCount, takesOpen, onToggleTakes, compact
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
   // Menu « FX » toujours accessible (les pastilles du bas disparaissent quand la piste est basse)
@@ -222,7 +224,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   }, [isRenaming]);
 
+  // Échap pendant le renommage : le blur qui suit ne valide pas le nom tapé.
+  const escapedRef = useRef(false);
   const handleNameSubmit = () => {
+    if (escapedRef.current) { escapedRef.current = false; setIsRenaming(false); return; }
     setIsRenaming(false);
     if (newName.trim() && newName !== track.name) {
       onUpdate({ ...track, name: newName });
@@ -526,7 +531,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/[0.06] px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      data-compact={compact ? '1' : undefined}
+      className={`group border-b border-white/[0.06] ${compact ? 'px-2 py-0 justify-center overflow-hidden [&_.nova-hit-tactile]:!w-5 [&_.nova-hit-tactile]:!h-5' : 'px-3 py-2'} flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <TrackStructureBadge track={track} />
@@ -534,7 +540,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       <div className="absolute right-0.5 top-1.5 bottom-1.5 w-[9px] z-20" data-testid={`header-meter-${track.id}`}>
         <TrackMeter pointId={track.id} grTrackId={track.id} grText={false} marks={false} clipHit={false} label={track.name} className="w-full" />
       </div>
-      <div className="flex justify-between items-start mb-2">
+      <div className={`flex justify-between ${compact ? 'items-center mb-0' : 'items-start mb-2'}`}>
         <div className="flex items-center truncate flex-1 pr-2">
           <div 
             draggable 
@@ -561,7 +567,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onBlur={handleNameSubmit}
-                onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNameSubmit();
+                  // Échap : on garde l'ancien nom et on ferme (avant : le champ restait ouvert).
+                  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); escapedRef.current = true; setTimeout(() => { escapedRef.current = false; }, 0); setNewName(track.name); setIsRenaming(false); }
+                }}
                 className="bg-black/60 border border-cyan-500/50 rounded px-1 text-[10px] font-black uppercase text-white outline-none w-full"
               />
             ) : (
@@ -773,6 +783,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
+      {/* Hauteur Micro / Compacte : une seule ligne (nom, M, S, R), comme les pistes réduites des DAW. */}
+      {!compact && (<>
       {/* Autotune du PC : « Auto-Tune Pro · F# mineur » (ou l'autotune de NOVA en repli). */}
       {/* Piste armée : la ligne des effets laisse place au retour casque ; l'autotune reste visible ici. */}
       {track.isTrackArmed && showInputRow && <AutotuneBadge track={track} onOpen={(e) => { const at = track.plugins.find(x => x.type === 'AUTOTUNE'); if (at) handleFXClick(e, at); }} />}
@@ -908,6 +920,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       )}
       {/* Ni ligne d'effets ni réglages d'entrée (envois affichés) : la pastille reste en bas à droite. */}
       {takesShown && !insertStripShown && !(track.isTrackArmed && showInputRow) && takesPill(takesCount!, true)}
+      </>)}
     </div>
   );
 };

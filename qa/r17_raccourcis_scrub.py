@@ -186,15 +186,20 @@ def open_project(pg, label):
 
 def lane_geom(pg):
     hb = pg.locator('[data-nova-target="track-voix"]').first.bounding_box()
-    zoom = float(pg.locator('input[type=range][max="300"]').first.input_value())
+    # Zoom réel de l'arrangement (px/s). Le curseur est logarithmique depuis le 22/10/2026 (utils/arrangeZoom).
+    zoom = float(pg.locator('[data-arrange-scroll]').first.get_attribute("data-zoom-h"))
     return hb, zoom
 
 
 def set_zoom(pg, value):
-    pg.evaluate("""(v) => { const el = document.querySelector('input[type=range][max="300"]');
+    # Curseur logarithmique (0 à 1000, de 1 à 48 000 px/s) : la position la plus proche de v px/s.
+    pg.evaluate("""(v) => { const el = document.querySelector('[data-testid="zoom-slider"]');
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      setter.call(el, String(v)); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }""", value)
+      setter.call(el, String(Math.round(1000 * Math.log(v) / Math.log(48000)))); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }""", value)
     pg.wait_for_timeout(400)
+    # Le zoom garde la tête de lecture en place (utils/arrangeZoom) : les mesures partent du début du morceau.
+    pg.evaluate("() => { const sc = document.querySelector('[data-arrange-scroll]'); if (sc) sc.scrollLeft = 0; }")
+    pg.wait_for_timeout(200)
 
 
 def open_editor(pg):

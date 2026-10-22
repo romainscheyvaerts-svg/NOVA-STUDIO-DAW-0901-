@@ -144,7 +144,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
         <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest" title="Track Height (Ctrl+↑ / Ctrl+↓)">Hauteur des pistes</div>
-        <div className="grid grid-cols-5 gap-0.5 px-1 pb-1">
+        <div className="grid grid-cols-7 gap-0.5 px-1 pb-1">
           {TRACK_HEIGHTS.map(h => (
             <button key={h.id} title={`${h.label} (${h.px} px) · ${h.pt}`} onClick={() => { runEditCommand('trackHeight', h.px); onClose(); }}
               className="rounded-lg px-1 py-1.5 [@media(pointer:coarse)]:py-2.5 text-[9px] font-bold text-slate-300 hover:bg-white/5">

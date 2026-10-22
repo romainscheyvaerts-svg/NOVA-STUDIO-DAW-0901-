@@ -31,7 +31,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
-import { visibleEnvelope } from '../utils/waveformPeaks';
+import { visibleEnvelope, visibleSamples } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
 import { linkCounts, isLinked } from '../utils/linkedClips';
@@ -79,6 +79,10 @@ import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
 import { EditMenu, ToolsMoreMenu } from './EditToolbarMenus';
+import { multiShiftFor, planMultiShift } from '../utils/multiClipMove';
+import { planDuplicate } from '../utils/duplicateClips';
+import { isCompactHeight } from '../utils/trackHeights';
+import { clampZoom, scrollForAnchor, sliderToZoom, zoomAnchor, zoomToSlider, SLIDER_STEPS, ZOOM_DEFAULT, type ZoomAnchor } from '../utils/arrangeZoom';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -123,7 +127,8 @@ interface ArrangementViewProps {
   recStartTime: number | null;
   onCreatePattern?: (trackId: string, time: number) => void;
   /** Decale d'un meme delta un ensemble de clips (deplacement groupe). */
-  onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
+  /** `dest` : piste d'arrivée de chaque clip (sélection glissée vers une autre piste). */
+  onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number, dest?: Record<string, string>) => void;
   /** Fin d'un déplacement de clips (R8) : l'automation suit les clips (préférence). Positions d'AVANT le geste. */
   onClipsMoved?: (moves: { clipId: string; fromTrackId: string; fromStart: number }[]) => void;
   onSwapInstrument?: (trackId: string) => void; 
@@ -282,7 +287,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     get: () => ({ ...zoomLayoutRef.current, scroll: scrollContainerRef.current?.scrollLeft ?? 0 }),
     set: (z) => {
       if (!z || typeof z !== 'object') return;
-      if (Number.isFinite(z.h)) setZoomH(Math.max(10, Math.min(300, z.h)));
+      if (Number.isFinite(z.h)) setZoomH(clampZoom(z.h, durationRef.current));
       if (Number.isFinite(z.v)) setZoomV(Math.max(40, Math.min(400, z.v)));
       if (Number.isFinite(z.scroll)) requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = z.scroll; });
     },
@@ -335,6 +340,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
   const multiDragRef = useRef<{trackId:string, clipId:string, start:number}[] | null>(null);
+  // Sélection multiple glissée vers le haut ou le bas : décalage de pistes en cours et piste d'arrivée de chaque clip.
+  const multiShiftRef = useRef<{ shift: number; dest: Record<string, string> } | null>(null);
   /** Piste d'origine du clip saisi (l'automation suit le clip, R8). */
   const dragOriginTrackRef = useRef<string | null>(null);
   // Groupe d'édition (R12) : clips jumeaux des autres pistes du groupe, photographiés au début du geste.
@@ -484,7 +491,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
 
       if (id === 'nova.paste') {
-        const target = sel?.trackId || selectedTrackId;
+        // Sur la piste choisie en dernier (clic sur son nom ou sur un de ses clips), comme le curseur
+        // d'édition des DAW. Avant : la piste du clip sélectionné passait avant, le collage partait ailleurs.
+        const target = selectedTrackId || sel?.trackId;
         if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: playheadStore.get() }); }
         return;
       }
@@ -496,16 +505,37 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         ? tracks.flatMap(tr => tr.clips.filter(c => selectedClipIds.has(c.id)).map(c => ({ trackId: tr.id, clipId: c.id })))
         : (sel ? [{ trackId: sel.trackId, clipId: sel.clip.id }] : []);
 
+      // S sans clip sélectionné : les clips de la piste choisie sous la tête de lecture (comme le
+      // curseur de Pro Tools, B / Ctrl+E). Avant : rien ne se passait, sans explication.
+      if (id === 'nova.split' && cibles.length === 0) { if (runEditCommand('split')) e.preventDefault(); return; }
       if (cibles.length === 0 || !id) return;
 
       switch (id) {
-        case 'nova.copy': e.preventDefault(); if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY'); return;
+        case 'nova.copy':
+          e.preventDefault();
+          if (cibles.length > 1) onEditClip?.('', '', 'COPY_MANY', { items: cibles });
+          else if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY');
+          else onEditClip?.(cibles[0].trackId, cibles[0].clipId, 'COPY');
+          return;
         case 'nova.cut':
           e.preventDefault();
-          cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
+          if (cibles.length > 1) onEditClip?.('', '', 'CUT_MANY', { items: cibles });
+          else cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
           setSelectedClip(null); setSelectedClipIds(new Set());
           return;
-        case 'nova.duplicate': e.preventDefault(); cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DUPLICATE')); return;
+        case 'nova.duplicate': {
+          e.preventDefault();
+          // En bloc après la sélection, puis les copies deviennent la sélection (Ctrl+D encore = à la suite).
+          const found = cibles.map(c => ({ trackId: c.trackId, clip: tracks.find(tr => tr.id === c.trackId)?.clips.find(x => x.id === c.clipId) })).filter((x): x is { trackId: string; clip: Clip } => !!x.clip);
+          const plan = planDuplicate(found);
+          plan.forEach(p => onEditClip?.(p.trackId, p.clipId, 'DUPLICATE', { start: p.start, id: p.id }));
+          if (plan.length) {
+            setSelectedClipIds(new Set(plan.map(p => p.id)));
+            const first = found[0];
+            setSelectedClip({ trackId: plan[0].trackId, clip: { ...first.clip, id: plan[0].id, start: plan[0].start } });
+          }
+          return;
+        }
         case 'nova.delete':
           e.preventDefault();
           cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DELETE'));
@@ -551,6 +581,31 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
    * du navigateur.
    */
   const pendingZoomAnchorRef = useRef<{ time: number; pointerX: number } | null>(null);
+  // Durée du contenu (bornes du zoom : la largeur défilante reste sous la limite de Chrome).
+  const durationRef = useRef(300);
+  const zoomHRef = useRef(zoomH);
+  zoomHRef.current = zoomH;
+  const headerWidthRef = useRef(headerWidth);
+  headerWidthRef.current = headerWidth;
+  /**
+   * Zoom horizontal ancré (utils/arrangeZoom) : sans ancre, la tête de lecture si elle est
+   * visible, sinon le milieu de la vue. Clavier, curseur, menus, outil Zoom et Ctrl+molette
+   * passent tous par ici.
+   */
+  const zoomTo = useCallback((next: number, anchor?: ZoomAnchor) => {
+    const el = scrollContainerRef.current;
+    const cur = zoomHRef.current;
+    const z = clampZoom(next, durationRef.current);
+    const hw = headerWidthRef.current;
+    const a = anchor || zoomAnchor({ playhead: playheadStore.get(), scrollLeft: el?.scrollLeft ?? 0, viewWidth: (el?.clientWidth ?? 800) - hw, zoom: cur });
+    if (z === cur) {
+      // Même zoom (borne atteinte, ou cadrage) : seul le défilement suit l'ancre.
+      if (el && anchor) { el.scrollLeft = scrollForAnchor(a, z); setScrollLeft(el.scrollLeft); }
+      return;
+    }
+    pendingZoomAnchorRef.current = { time: a.time, pointerX: a.px + hw };
+    setZoomH(z);
+  }, []);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -571,7 +626,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const timeUnderPointer = Math.max(0, (el.scrollLeft + pointerX - headerWidth) / zoomH);
 
       const factor = Math.exp(-e.deltaY * 0.0015);
-      const nextZoom = Math.min(300, Math.max(10, zoomH * factor));
+      const nextZoom = clampZoom(zoomH * factor, durationRef.current);
       if (nextZoom === zoomH) return;
 
       // Le repositionnement se fait apres le rendu (useLayoutEffect ci-dessous) :
@@ -702,10 +757,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     ] as any });
   };
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
+  durationRef.current = projectDuration;
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
-  useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
-    viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
+  useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomTo, zoomV, setZoomV, bpm,
+    viewportWidth: viewportSize.width - headerWidth, tracksViewHeight: viewportSize.height - tracksTop - 14, visibleTrackCount: visibleTracks.length, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + rowH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
   // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
   const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH, aboveH });
@@ -1208,10 +1264,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     // Outil Zoom (Pro Tools : Zoomer, F5) : clic = zoom avant centré sur ce point, Alt+clic = zoom arrière.
     if (activeTool === 'ZOOM' && e.button === 0) {
         e.preventDefault();
-        const next = Math.max(10, Math.min(300, Math.round(zoomH * (e.altKey ? 0.5 : 2))));
-        const offsetPx = e.clientX - rect.left - headerWidth;
-        setZoomH(next);
-        requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = Math.max(0, time * next - offsetPx); });
+        zoomTo(zoomH * (e.altKey ? 0.5 : 2), { time, px: e.clientX - rect.left - headerWidth });
         return;
     }
     // Scrub audible (R17) : outil Scrubber (F9), ou Ctrl+glisser avec le Sélecteur / le haut du
@@ -1356,7 +1409,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 const onFadeCorner = inFadeRow && (x - clipStartX < FADE_HANDLE_PX || clipEndX - x < FADE_HANDLE_PX);
                 if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && relY < zoomV * 0.5 && !onGainHandle && !nearEdge && !onFadeCorner)) {
                     // Simple clic (sans glisser) dans le haut du clip : le clip est sélectionné, comme avant.
-                    startRange(t.id, time, useSnap, { trackId: t.id, clip });
+                    startRange(t.id, time, e.shiftKey ? extendSnap(e) : useSnap, e.shiftKey ? undefined : { trackId: t.id, clip }, e.shiftKey);
                     return;
                 }
                 editSelectionStore.set({ time: null });
@@ -1414,7 +1467,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         laneY += aboveH(t);
         const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
-          if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, useSnap); return; }
+          if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, e.shiftKey ? extendSnap(e) : useSnap, undefined, e.shiftKey); return; }
           break;
         }
         laneY += laneH;
@@ -1433,8 +1486,33 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 };
 
 /** Début d'une sélection de plage (point d'ancrage) : la tête de lecture y va, comme dans Pro Tools. */
-const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickClip?: { trackId: string; clip: Clip }) => {
+/** Maj+clic d'extension : la grille du mode en cours (Maj n'inverse pas l'aimantation ici). */
+const extendSnap = (e: { ctrlKey?: boolean; metaKey?: boolean }) => snapsToGrid(effectiveMode(editModeStore.get(), !!(e.ctrlKey || e.metaKey)));
+const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickClip?: { trackId: string; clip: Clip }, extend = false) => {
     const t0 = Math.max(0, getSnappedTime(rawTime, bpm, gridSize, useSnap));
+    // Maj+clic (Sélecteur, haut du Smart Tool) : la plage s'étend jusqu'au clic, depuis la plage en
+    // cours (son bord le plus éloigné) ou depuis la tête de lecture et la piste choisie, comme dans
+    // les DAW. Avant : Maj+clic repartait de zéro (aucune plage).
+    if (extend) {
+        const order = visibleTracks.map(t => t.id);
+        const cur = editSelectionStore.get().time;
+        let anchor: number, anchorTrack: string;
+        if (cur && cur.trackIds.length) {
+            anchor = Math.abs(t0 - cur.start) > Math.abs(t0 - cur.end) ? cur.start : cur.end;
+            const i = order.indexOf(trackId), first = cur.trackIds[0], last = cur.trackIds[cur.trackIds.length - 1];
+            anchorTrack = Math.abs(order.indexOf(first) - i) >= Math.abs(order.indexOf(last) - i) ? first : last;
+        } else {
+            anchor = playheadStore.get();
+            anchorTrack = selectedTrackId && order.includes(selectedTrackId) ? selectedTrackId : trackId;
+        }
+        if (Math.abs(anchor - t0) > 1e-6) {
+            rangeDragRef.current = { anchor, anchorTrack };
+            setSelectedClip(null); setSelectedClipIds(new Set()); setActiveClip(null);
+            editSelectionStore.set({ time: makeSelection(anchor, t0, tracksBetween(order, anchorTrack, trackId)) });
+            setDragAction('RANGE');
+            return;
+        }
+    }
     rangeDragRef.current = { anchor: t0, anchorTrack: trackId, clickClip };
     setSelectedClip(null); setSelectedClipIds(new Set()); setActiveClip(null);
     editSelectionStore.set({ time: null });
@@ -1445,6 +1523,9 @@ const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickCli
 
 const handleMouseMove = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
+    // Glisser contre un bord : la vue défile toute seule (edgeScroll, plus bas).
+    lastMoveRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey };
+    if (edgeRafRef.current === null && edgeScrollActive() && edgeStep(e.clientX) !== 0) edgeRafRef.current = requestAnimationFrame(edgeTick);
     const rect = scrollContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
@@ -1687,7 +1768,14 @@ const handleMouseMove = (e: React.MouseEvent) => {
         // selectionnes, en une seule mise a jour d'etat.
         if (multiDragRef.current && multiDragRef.current.length > 1) {
             const delta = newStart - initialClipState.start;
-            onMoveClipsBy?.(multiDragRef.current, delta);
+            // Toute la sélection change de piste avec la souris (comme dans les DAW ; avant, un
+            // groupe ne bougeait que dans le temps), si chaque clip tombe sur une piste du même type.
+            const order = visibleTracks.map(t => ({ id: t.id, kind: String(t.type) }));
+            const wanted = multiShiftFor(order, dragOriginTrackRef.current || activeClip.trackId, targetTrackId);
+            const prev = multiShiftRef.current?.shift ?? 0;
+            const plan = planMultiShift(order, multiDragRef.current, wanted) || planMultiShift(order, multiDragRef.current, prev) || planMultiShift(order, multiDragRef.current, 0)!;
+            multiShiftRef.current = plan;
+            onMoveClipsBy?.(multiDragRef.current, delta, plan.dest);
             return;
         }
 
@@ -1769,7 +1857,59 @@ const handleMouseMove = (e: React.MouseEvent) => {
     }
 };
 
+// --- Défilement automatique aux bords pendant un glisser (tour « édition et navigation ») ---
+// Avant : tirer un clip, un bord, une plage ou un rectangle contre le bord de la vue ne faisait
+// rien défiler (il fallait dézoomer pour aller plus loin), et sortir de la zone des pistes, le
+// bouton encore appuyé, lâchait le clip là où il était. Maintenant la vue défile d'autant plus
+// vite qu'on s'approche du bord (ou qu'on le dépasse) et le geste continue hors de la zone.
+const lastMoveRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean } | null>(null);
+const edgeRafRef = useRef<number | null>(null);
+const edgeMovePendingRef = useRef(false);
+const moveHandlerRef = useRef<(e: any) => void>(() => {});
+const upHandlerRef = useRef<() => void>(() => {});
+const EDGE_DRAGS: DragAction[] = ['MOVE', 'TRIM_START', 'TRIM_END', 'TCE_START', 'TCE_END', 'RANGE', 'SCRUB'];
+function edgeScrollActive(): boolean {
+    const a = dragActionRef.current;
+    return (!!a && EDGE_DRAGS.includes(a)) || !!marqueeOriginRef.current || !!rangeDragRef.current || !!loopDragRef.current;
+}
+/** Pas de défilement (px par image) selon la distance au bord des pistes ; 0 loin des bords. */
+function edgeStep(clientX: number): number {
+    const sc = scrollContainerRef.current;
+    if (!sc) return 0;
+    const r = sc.getBoundingClientRect();
+    const left = r.left + headerWidthRef.current, right = r.left + sc.clientWidth;
+    const zone = 40;
+    const speed = (d: number) => Math.round(Math.min(80, 3 + Math.pow(Math.min(2.5, d / zone), 2) * 24));
+    if (clientX > right - zone) return speed(clientX - (right - zone));
+    if (clientX < left + zone && sc.scrollLeft > 0 && clientX > r.left - 400) return -speed(left + zone - clientX);
+    return 0;
+}
+function edgeTick() {
+    edgeRafRef.current = null;
+    const ev = lastMoveRef.current, sc = scrollContainerRef.current;
+    if (!ev || !sc || !edgeScrollActive()) return;
+    const step = edgeStep(ev.clientX);
+    if (!step) return;
+    const before = sc.scrollLeft;
+    sc.scrollLeft = Math.max(0, before + step);
+    // Le geste suit au « scroll » qui en découle (onScroll) : une seule mise à jour par image
+    // (défilement + clip ensemble) au lieu de deux.
+    if (sc.scrollLeft !== before) edgeMovePendingRef.current = true;
+    edgeRafRef.current = requestAnimationFrame(edgeTick);
+}
+// Bouton toujours appuyé hors de la zone des pistes : le geste continue (et se termine au lâcher).
+useEffect(() => {
+    const inside = (t: EventTarget | null) => !!t && !!scrollContainerRef.current?.contains(t as Node);
+    const mv = (e: MouseEvent) => { if (!inside(e.target) && (e.buttons & 1) && edgeScrollActive()) moveHandlerRef.current(e); };
+    const up = (e: MouseEvent) => { if (!inside(e.target) && edgeScrollActive()) upHandlerRef.current(); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+}, []);
+
 const handleMouseUp = () => {
+    if (edgeRafRef.current !== null) { cancelAnimationFrame(edgeRafRef.current); edgeRafRef.current = null; }
+    lastMoveRef.current = null;
     // 📌 Clip de prise lâché dans la zone des prises gardées de sa piste.
     const keptDrop = keptDropRef.current;
     if (keptDrop) {
@@ -1809,7 +1949,10 @@ const handleMouseUp = () => {
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
     // Un simple clic (aucun déplacement) ne pose pas de crossfade.
     if (editCommands && activeClip && ((dragAction === 'MOVE' && movedRef.current) || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
-        const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
+        const dest = multiShiftRef.current?.dest;
+        const ids = multiDragRef.current && multiDragRef.current.length > 1
+            ? multiDragRef.current.map(it => ({ trackId: dest?.[it.clipId] || it.trackId, clipId: it.clipId }))
+            : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
         const byTrack = new Map<string, string[]>();
         // Clips jumeaux du groupe d'édition (R12) rognés en même temps : crossfade automatique aussi.
         [...ids, ...groupMatesRef.current.map(m => ({ trackId: m.trackId, clipId: m.clip.id }))]
@@ -1831,9 +1974,13 @@ const handleMouseUp = () => {
     setInitialClipState(null);
     marqueeOriginRef.current = null;
     multiDragRef.current = null;
+    multiShiftRef.current = null;
     groupMatesRef.current = [];
     setMarquee(null);
 };
+
+moveHandlerRef.current = handleMouseMove;
+upHandlerRef.current = handleMouseUp;
 
 const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean, zoomH: number, isHovered = false) => {
     if (x + w < 0 || x > ctx.canvas.width) return;
@@ -1873,8 +2020,10 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
             const totalSamples = endSample - startSample;
 
             // Waveform area (avec padding pour le nom du clip)
-            const waveY = y + 18;
-            const waveH = h - 22;
+            // Piste Micro (24 px) : la forme d'onde prend toute la hauteur, sans le nom (comme les DAW).
+            const tiny = h < 30;
+            const waveY = tiny ? y + 3 : y + 18;
+            const waveH = tiny ? h - 5 : h - 22;
             const centerY = waveY + waveH / 2;
 
             if (w > 2 && totalSamples > 0 && waveH > 4) {
@@ -1890,10 +2039,15 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
                     // on lit la portion miroir du buffer pour que la forme d'onde
                     // corresponde a ce qu'on entend.
-                    const env = visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    // Zoom à l'échantillon (< 1 échantillon par pixel) : la vraie onde, signée (passages à zéro).
+                    const sampleView = totalSamples / largeurPx < 1;
+                    const env = sampleView
+                        ? visibleSamples(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed)
+                        : visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    const lim = sampleView ? (v: number) => (v > 1 ? 1 : v < -1 ? -1 : v) : (v: number) => Math.min(1, v);
                     // Forme d'onde à l'échelle du gain du clip (écrêtée visuellement à 100 %).
                     const clipGain = clip.gain ?? 1;
-                    if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * clipGain);
+                    if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = lim(env[i] * clipGain);
                     const x0 = x + px0;
                     // Respirations baissées / supprimées (utils/breaths) : la forme d'onde
                     // montre le creux, et un trait violet en bas du clip les repère.
@@ -1914,9 +2068,31 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     // Ligne de gain (utils/clipGain) : la forme d'onde suit le gain dessiné.
                     if (clip.gainPoints?.length) {
                         const offG = clip.offset || 0;
-                        for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * envelopeGainAt(clip.gainPoints, offG + ((px0 + i + 0.5) / largeurPx) * clip.duration));
+                        for (let i = 0; i < n; i++) env[i] = lim(env[i] * envelopeGainAt(clip.gainPoints, offG + ((px0 + i + 0.5) / largeurPx) * clip.duration));
                     }
 
+                    if (sampleView) {
+                        // Ligne de zéro puis l'onde ; un point par échantillon dès 6 px d'écart.
+                        ctx.strokeStyle = cv.ink(0.18);
+                        ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(x0, Math.round(centerY) + 0.5); ctx.lineTo(x0 + n, Math.round(centerY) + 0.5); ctx.stroke();
+                        ctx.strokeStyle = waveColor;
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(x0, centerY - env[0] * amp);
+                        for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY - env[i] * amp);
+                        ctx.stroke();
+                        const pxPerSample = largeurPx / totalSamples;
+                        if (pxPerSample >= 6 && !clip.isReversed) {
+                            ctx.fillStyle = waveColor;
+                            const first = Math.ceil(px0 / pxPerSample - 0.5), last = Math.floor(px1 / pxPerSample - 0.5);
+                            for (let k = first; k <= last; k++) {
+                                const i = Math.round((k + 0.5) * pxPerSample - 0.5) - px0;
+                                if (i < 0 || i >= n) continue;
+                                ctx.fillRect(x0 + i - 1.5, centerY - env[i] * amp - 1.5, 3, 3);
+                            }
+                        }
+                    } else {
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
                     ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
                     ctx.beginPath();
@@ -1935,6 +2111,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     ctx.moveTo(x0, centerY + env[0] * amp);
                     for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY + env[i] * amp);
                     ctx.stroke();
+                    }
 
                     // Ligne centrale (0 dB)
                     ctx.strokeStyle = cv.ink(0.1);
@@ -2054,7 +2231,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     }
 
     // Nom du clip avec fond, dessiné APRÈS les fondus : la ligne de fondu ne le traverse plus (F3).
-    if (w > 30) {
+    if (w > 30 && h >= 30) {
         ctx.font = '600 11px Inter';
         ctx.fillStyle = cv.labelBg;
         ctx.fillRect(x + 4, y + 3, Math.min(ctx.measureText(clip.name).width + 10, w - 8), 15);
@@ -2362,11 +2539,34 @@ const drawTimeline = useCallback(() => {
         // Numéros de mesure : un sur deux (ou moins) quand les mesures sont serrées.
         const bars = barsInRange(tempoMap, Math.max(0, startTime), endTime);
         const widthPx = bars.length > 1 ? timeToPixels(bars[1].time - bars[0].time) : 999;
-        const every = widthPx >= 24 ? 1 : widthPx >= 12 ? 2 : widthPx >= 6 ? 4 : 8;
+        // Au plus large (tout le morceau, 1 px/s), une mesure ne fait que 2 ou 3 px : 1 numéro sur 16 ou 32.
+        let every = 1;
+        while (every < 256 && widthPx * every < 26) every *= 2;
         for (const b of bars) {
             if (b.bar % every) continue;
             const x = timeToPixels(b.time) - scrollX;
             if (x >= -50) ctx.fillText((b.bar + 1).toString(), x + 4, 24);
+        }
+        // Au plus près (une mesure plus large que l'écran) : graduation en temps (min:s.ms), pour
+        // savoir où l'on est quand aucun numéro de mesure n'est à l'écran.
+        if (widthPx > w * 0.6) {
+            const steps = [1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001];
+            const step = [...steps].reverse().find(st => st * zoomH >= 110) ?? 1;
+            const t0 = Math.floor(Math.max(0, startTime) / step) * step;
+            const dec = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : step >= 0.001 ? 3 : 4;
+            ctx.save();
+            ctx.font = '600 9px Inter';
+            ctx.fillStyle = cv.ink(0.45);
+            ctx.strokeStyle = cv.ink(0.25);
+            for (let t = t0; t <= endTime + step; t += step) {
+                const x = Math.round(timeToPixels(t) - scrollX) + 0.5;
+                if (x < -60 || x > w + 10) continue;
+                const m = Math.floor(t / 60), sec = t - m * 60;
+                const label = `${m}:${sec.toFixed(dec).padStart(dec ? dec + 3 : 2, '0')}`;
+                ctx.beginPath(); ctx.moveTo(x, RULER_H - 6); ctx.lineTo(x, RULER_H); ctx.stroke();
+                ctx.fillText(label, x + 3, RULER_H - 6);
+            }
+            ctx.restore();
         }
         // Changement de tempo / de mesure : rappel discret dans la règle.
         ctx.save();
@@ -2515,8 +2715,54 @@ const playheadLineRef = useRef<HTMLDivElement>(null);
 const overlayWidthRef = useRef(0);
 const isPlayingRef = useRef(isPlaying);
 isPlayingRef.current = isPlaying;
-const viewportWidthRef = useRef(viewportSize.width);
-viewportWidthRef.current = viewportSize.width;
+// Largeur VISIBLE des pistes (sans la colonne des en-têtes). Avant : toute la largeur, en-têtes
+// compris : la page ne tournait qu'à 1 408 px pour 1 265 px visibles, la tête de lecture
+// disparaissait à droite ~3,5 s sur chaque page (214 images sur 541 en 9 s de lecture).
+const viewportWidthRef = useRef(viewportSize.width - headerWidth);
+viewportWidthRef.current = Math.max(1, viewportSize.width - headerWidth);
+// Saut de la tête de lecture à l'arrêt (Entrée, Fin, repère, flèches, mesure suivante…) : la vue
+// suit si elle sortait de l'écran (avant : elle restait ailleurs, il fallait la chercher). Pas
+// pendant un geste de souris dans les pistes (clic, scrub), pour ne pas tirer la vue sous la main.
+const lastPlayheadRef = useRef<number | null>(null);
+const arrangePointerRef = useRef(false);
+const lastInputRef = useRef<'key' | 'pointer'>('pointer');
+useEffect(() => {
+    const down = (e: PointerEvent) => { lastInputRef.current = 'pointer'; arrangePointerRef.current = !!scrollContainerRef.current?.contains(e.target as Node); };
+    const up = () => { arrangePointerRef.current = false; };
+    const key = (e: KeyboardEvent) => {
+        lastInputRef.current = 'key';
+        // Entrée / Début / Fin : la vue montre la tête de lecture même si elle n'a pas bougé
+        // (déjà au début, mais la vue était ailleurs), comme Retour dans les DAW.
+        if (!isPlayingRef.current && matchShortcut(e, ['nova.home', 'nova.end'])) requestAnimationFrame(() => {
+            const sc = scrollContainerRef.current;
+            if (!sc) return;
+            const x = playheadStore.get() * zoomHRef.current, cw = viewportWidthRef.current || sc.clientWidth;
+            if (x < sc.scrollLeft || x > sc.scrollLeft + cw - 2) sc.scrollLeft = Math.max(0, x - cw * 0.25);
+        });
+    };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    window.addEventListener('keydown', key, true);
+    return () => {
+        window.removeEventListener('pointerdown', down, true);
+        window.removeEventListener('pointerup', up, true);
+        window.removeEventListener('pointercancel', up, true);
+        window.removeEventListener('keydown', key, true);
+    };
+}, []);
+// Piste choisie au clavier (↑ / ↓, P / ; en Keyboard Focus) : elle reste à l'écran (avant : ↓ ×15
+// laissait la piste sélectionnée 1 200 px sous le bas de la vue).
+useEffect(() => {
+    if (lastInputRef.current !== 'key' || !selectedTrackId) return;
+    const sc = scrollContainerRef.current;
+    const h = sc?.querySelector(`[data-track-header="${CSS.escape(selectedTrackId)}"]`) as HTMLElement | null;
+    if (!sc || !h) return;
+    const box = sc.getBoundingClientRect(), r = h.getBoundingClientRect();
+    const top = box.top + tracksTop, bottom = box.bottom - 14;
+    if (r.top < top) sc.scrollTop -= top - r.top;
+    else if (r.bottom > bottom) sc.scrollTop += Math.min(r.bottom - bottom, r.top - top);
+}, [selectedTrackId, tracksTop]);
 
 const drawPlayhead = useCallback(() => {
     const line = playheadLineRef.current;
@@ -2534,6 +2780,16 @@ const drawPlayhead = useCallback(() => {
         if (playheadX > viewStart + cw - cw * 0.12 || playheadX < viewStart) {
             autoScrollRef.current = true;
             scroll.scrollLeft = Math.max(0, playheadX - cw * 0.15);
+        }
+    }
+    const prevT = lastPlayheadRef.current;
+    lastPlayheadRef.current = t;
+    if (!isPlayingRef.current && prevT !== null && Math.abs(t - prevT) > 1e-6 && !arrangePointerRef.current) {
+        const x = t * zoomH;
+        const cw = viewportWidthRef.current || scroll.clientWidth;
+        if (x < scroll.scrollLeft || x > scroll.scrollLeft + cw - 2) {
+            autoScrollRef.current = true;
+            scroll.scrollLeft = Math.max(0, x - cw * 0.25);
         }
     }
 
@@ -2859,8 +3115,11 @@ useEffect(() => {
         </div>
         <div className="flex items-center space-x-3 shrink-0">
              <FollowPlayheadButton suspended={follow.suspended} onResume={follow.resume} />
-             <i className="fas fa-search-plus text-[10px]"></i>
-             <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
+             <i className="fas fa-search-plus text-[10px]" aria-hidden="true"></i>
+             <input type="range" min="0" max={SLIDER_STEPS} step="1" value={zoomToSlider(zoomH)} onChange={(e) => zoomTo(sliderToZoom(parseInt(e.target.value, 10)))}
+               aria-label="Zoom horizontal" data-testid="zoom-slider"
+               title={`Zoom horizontal : de tout le morceau jusqu’à l’échantillon (Ctrl+molette sur les pistes, ${[shortcutHint('pt.zoomIn'), shortcutHint('pt.zoomOut')].filter(Boolean).join(' / ') || 'Ctrl+→ / Ctrl+←'} ; ${shortcutHint('pt.zoomSel') || 'Z'} = zoom sur la sélection)`}
+               className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
       {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
@@ -2883,6 +3142,7 @@ useEffect(() => {
       <div 
           ref={scrollContainerRef} 
           data-follow={follow.suspended ? "suspendu" : "actif"}
+          data-arrange-scroll="" data-zoom-h={zoomH} data-zoom-v={zoomV}
           className="flex-1 overflow-auto relative custom-scroll"
           onMouseDown={handleMouseDown}
           onDoubleClick={(e) => {
@@ -2897,7 +3157,7 @@ useEffect(() => {
           }} 
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
-          onMouseLeave={handleMouseUp} 
+          onMouseLeave={(e) => { if (!((e.buttons & 1) && edgeScrollActive())) handleMouseUp(); }} 
           onPointerDown={(e) => {
             if (e.pointerType === 'mouse') return;
             // Pas d'événements souris « de compatibilité » en double après le doigt.
@@ -2966,7 +3226,10 @@ useEffect(() => {
           }}
           onPointerUp={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
           onPointerCancel={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
-          onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
+          onScroll={(e) => {
+            setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop);
+            if (edgeMovePendingRef.current) { edgeMovePendingRef.current = false; if (lastMoveRef.current && edgeScrollActive()) moveHandlerRef.current(lastMoveRef.current); }
+          }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onContextMenu={(e) => e.preventDefault()}
@@ -3011,6 +3274,7 @@ useEffect(() => {
                      onDropPlugin={headerOnDropPlugin} onMovePlugin={headerOnMovePlugin} onSelectPlugin={headerOnSelectPlugin} onRemovePlugin={headerOnRemovePlugin} onRequestAddPlugin={headerOnRequestAddPlugin} 
                      onContextMenu={headerOnContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={headerOnDropTrack}
                      isDraggingOver={dragOverTrackId === track.id} onSwapInstrument={headerOnSwapInstrument}
+                     compact={isCompactHeight(zoomV)}
                   />
                 </div>
                 {track.automationLanes.map(lane => lane.isExpanded && (
@@ -3192,7 +3456,7 @@ useEffect(() => {
           }} />;
       })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
-      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
+      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { zoomTo(ZOOM_DEFAULT); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
       {tceGhost && (() => {

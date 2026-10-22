@@ -326,7 +326,8 @@ import { loadPadBuffer } from './utils/padBuffers';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
-import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, type UndoHistory } from './utils/undoHistory';
+import { buildClipboard, planPaste, type ClipboardEntry } from './utils/clipClipboard';
+import { UNDO_LIMIT, isProjectSwitch, recordChange, openUndoGroup, closeUndoGroup, trackUserActions, type UndoHistory, type UserAction } from './utils/undoHistory';
 import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose, needsUnloadWarning } from './utils/autosavePolicy';
 import { DiskMirror, bridgeDiskBackend, latestOnDisk, pickMostRecent, importFromDisk, audioFrom, type RecoverySource } from './services/DiskProjectStore';
 import { requestPersistence, refreshStorageStatus, isQuotaError, QUOTA_FULL_MESSAGE, markLocalSaves, evictionSuspected, EVICTED_WEB_MESSAGE, EVICTED_DESKTOP_MESSAGE } from './utils/storageProtection';
@@ -680,6 +681,15 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
     });
   };
 
+  // Gestes de l'utilisateur (appuis, touches) : une étape d'annulation par geste (utils/undoHistory).
+  const userActionsRef = useRef<{ current: () => UserAction } | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = trackUserActions(window);
+    userActionsRef.current = t;
+    return () => { t.dispose(); if (userActionsRef.current === t) userActionsRef.current = null; };
+  }, []);
+
   const setState = useCallback((updater: DAWState | ((prev: DAWState) => DAWState)) => {
     // L'anti-rebond est decide ICI, hors du reducer. Il etait calcule a
     // l'interieur en mutant lastHistoryUpdateRef : sous StrictMode React invoque
@@ -690,6 +700,8 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
     // depuis la dernière modification réelle : sélectionner une piste juste
     // avant un glisser ne fond plus ce glisser dans l'entrée précédente.
     const maintenant = Date.now();
+    // Lu ici (hors du reducer, qui reste pur) : le geste en cours au moment de la modification.
+    const user = userActionsRef.current?.current();
 
     setHistory(curr => {
       let newState = typeof updater === 'function' ? updater(curr.present) : updater;
@@ -750,7 +762,7 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
 
       // Changements rapproches (ou groupe ouvert par le chat) : on met a jour le present
       // sans nouvelle entree (utils/undoHistory, recordChange).
-      return recordChange(curr, newState, maintenant, { debounceMs: HISTORY_DEBOUNCE_MS, limit: MAX_HISTORY, clean: cleanStateForHistory });
+      return recordChange(curr, newState, maintenant, { debounceMs: HISTORY_DEBOUNCE_MS, limit: MAX_HISTORY, clean: cleanStateForHistory, user });
     });
   }, []);
 
@@ -1343,6 +1355,8 @@ function Studio() {
     // en contient une, se connecte elle-même.
   // Presse-papiers de clips (partage entre l'arrangement desktop et mobile).
   const clipboardClipRef = useRef<Clip | null>(null);
+  // Plusieurs clips copiés / coupés d'un coup (utils/clipClipboard) : écarts et pistes relatives gardés.
+  const clipboardManyRef = useRef<ClipboardEntry[] | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
   // Pistes pour les en-têtes (TrackStructure) : un abonnement stable ; seuls les en-têtes dont
@@ -2179,10 +2193,34 @@ function Studio() {
       return;
     }
 
+    // Ctrl+C / Ctrl+X sur plusieurs clips : tous partent au presse-papiers (avant : un seul ;
+    // Ctrl+X supprimait les autres sans les garder). Une seule étape d'annulation.
+    if (action === 'COPY_MANY' || action === 'CUT_MANY') {
+      const entries = buildClipboard(stateRef.current.tracks, payload?.items || []);
+      if (!entries.length) return;
+      clipboardManyRef.current = entries.length > 1 ? entries : null;
+      clipboardClipRef.current = { ...entries[0].clip };
+      if (action === 'CUT_MANY') {
+        const ids = new Set(entries.map(e => e.clip.id));
+        const bufferIds = Array.from(new Set(entries.map(e => e.clip.bufferId).filter((b): b is string => !!b)));
+        setState(produce((draft: DAWState) => { draft.tracks.forEach(t => { if (t.clips.some(c => ids.has(c.id))) t.clips = t.clips.filter(c => !ids.has(c.id)); }); }));
+        setTimeout(() => bufferIds.forEach(b => releaseBufferIfUnused(b, [])), 0);
+      }
+      return;
+    }
+    if (action === 'PASTE' && clipboardManyRef.current?.length) {
+      const plan = planPaste(stateRef.current.tracks, clipboardManyRef.current, trackId, payload?.time ?? 0);
+      const stamp = Date.now();
+      setState(produce((draft: DAWState) => {
+        plan.forEach((p, i) => { const t = draft.tracks.find(x => x.id === p.trackId); if (t) t.clips.push({ ...unlinked(p.clip), id: `clip-paste-${stamp}-${i}`, start: p.start }); });
+      }));
+      return;
+    }
+
     if (action === 'COPY' || action === 'CUT') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
       const clip = track?.clips.find(c => c.id === clipId);
-      if (clip) clipboardClipRef.current = { ...clip };
+      if (clip) { clipboardClipRef.current = { ...clip }; clipboardManyRef.current = null; }
       if (action === 'COPY') return;
       // CUT : on copie puis on supprime via la branche DELETE ci-dessous.
       action = 'DELETE';
@@ -2216,7 +2254,8 @@ function Studio() {
         // payload.start permet de deposer la copie a un endroit precis
         // (Alt+glisser laisse une copie a la position d'origine).
         // Copie indépendante (sans lien) : « Dupliquer en copie liée » est à part (DUPLICATE_LINKED).
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...unlinked(newClips[idx]), id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
+        // Juste après le clip (sans trou : une boucle dupliquée reste dans le temps) ; payload.id : l'appelant sélectionne la copie.
+        case 'DUPLICATE': if(idx > -1) newClips.push({ ...unlinked(newClips[idx]), id: payload?.id || `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration) }); break;
         // L3 · Copie liée d'un motif MIDI (utils/linkedClips), posée juste après (ou à payload.start).
         case 'DUPLICATE_LINKED': if (idx > -1) newClips = duplicateLinked(newClips, clipId, { start: payload?.start }).clips; break;
         case 'MAKE_UNIQUE': if (idx > -1) newClips[idx] = makeUnique(newClips[idx]); break;
@@ -3856,13 +3895,23 @@ function Studio() {
    * multiple). Une seule mise a jour d'etat pour tout le groupe : sinon chaque
    * clip declenchait son propre rendu et sa propre entree d'historique.
    */
-  const handleMoveClipsBy = useCallback((items: {trackId:string, clipId:string, start:number}[], delta: number) => {
+  const handleMoveClipsBy = useCallback((items: {trackId:string, clipId:string, start:number}[], delta: number, dest?: Record<string, string>) => {
     if (!items.length) return;
     setState(produce((draft: DAWState) => {
       items.forEach(it => {
-        const track = draft.tracks.find(t => t.id === it.trackId);
-        const clip = track?.clips.find(c => c.id === it.clipId);
-        if (clip) clip.start = Math.max(0, it.start + delta);
+        // Le clip peut déjà être passé sur une autre piste pendant ce glisser (sélection multiple
+        // glissée vers le haut ou le bas : utils/multiClipMove).
+        const track = draft.tracks.find(t => t.id === it.trackId && t.clips.some(c => c.id === it.clipId))
+          || draft.tracks.find(t => t.clips.some(c => c.id === it.clipId));
+        const idx = track ? track.clips.findIndex(c => c.id === it.clipId) : -1;
+        if (!track || idx < 0) return;
+        const clip = track.clips[idx];
+        clip.start = Math.max(0, it.start + delta);
+        const to = dest?.[it.clipId];
+        if (to && to !== track.id) {
+          const destTrack = draft.tracks.find(t => t.id === to);
+          if (destTrack) { track.clips.splice(idx, 1); destTrack.clips.push(clip); }
+        }
       });
     }));
   }, [setState]);
@@ -5474,7 +5523,7 @@ function Studio() {
   // Modes d'édition Pro Tools (Shuffle / Slip / Spot / Grid), Tab to Transient, point de synchro.
   useEditModes({
     stateRef, setState, setVisualState, seek: handleSeek, notify: setAiNotification,
-    getClipboardClip: () => clipboardClipRef.current, setClipboardClip: (c) => { clipboardClipRef.current = c; },
+    getClipboardClip: () => clipboardClipRef.current, setClipboardClip: (c) => { clipboardClipRef.current = c; clipboardManyRef.current = null; },
   }, { id: state.id, editMode: state.editMode });
 
   // Aide-mémoire des raccourcis (touche « ? »)
