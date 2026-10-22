@@ -318,3 +318,25 @@ BALAYAGE_CHEVAUCHEMENT_JS = r"""(scope) => {
 def balayage_chevauchement(page, scope=None):
     """Boutons recouverts par un autre élément sur l'écran (ou dans `scope`) : {'boutons': n, 'recouverts': [...]}."""
     return page.evaluate(BALAYAGE_CHEVAUCHEMENT_JS, scope)
+
+
+# Piano roll pratique (22/10/2026) : la barre ne montre que l'outil actif, la grille et la gamme ;
+# les autres commandes sont rangées dans « Outil ▾ », « Outils ▾ », « Notes ▾ », « Vue ▾ ».
+ROLL_MENUS = ("outil", "outils", "notes", "vue")
+
+
+def roll_reveal(page, sel):
+    """Rend visible une commande du piano roll (ouvre le menu qui la range) et renvoie son localisateur."""
+    vis = page.locator(sel).locator("visible=true")
+    if vis.count():
+        return vis.first
+    for m in ROLL_MENUS:
+        btn = page.locator(f"[data-nova-roll-menu-btn={m}]")
+        if not btn.count():
+            break
+        btn.first.click(); page.wait_for_timeout(150)
+        loc = page.locator(f"[data-nova-roll-menu=liste-{m}] {sel}")
+        if loc.count():
+            return loc.first
+        page.keyboard.press("Escape"); page.wait_for_timeout(120)
+    return page.locator(sel).first

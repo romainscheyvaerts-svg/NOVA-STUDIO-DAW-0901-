@@ -60,7 +60,7 @@ def clavier_midi(pg):
     """Clavier de l'ordinateur = clavier MIDI : A joue Do3, Z / X = octave, C / V = vélocité, S ne coupe pas de clip."""
     clips = "() => (window.__novaEdit?.getState().tracks || []).reduce((n, t) => n + (t.clips || []).length, 0)"
     bandeau = lambda: pg.locator("[data-nova-roll='bandeau']").first.inner_text()  # noqa: E731
-    pg.locator("[data-nova-roll='clavier']").first.click(); pg.wait_for_timeout(300)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(300)
     out = {"au_depart": bandeau()}
     n0 = pg.evaluate(clips)
     pg.keyboard.down("a"); pg.wait_for_timeout(200); out["a_tenu"] = bandeau(); pg.keyboard.up("a")
@@ -71,7 +71,7 @@ def clavier_midi(pg):
     pg.keyboard.press("s"); pg.wait_for_timeout(300)
     out["clips_avant_apres_s"] = [n0, pg.evaluate(clips)]
     pg.screenshot(path=str(OUT / "roll_pc_clavier_midi.png"))
-    pg.locator("[data-nova-roll='clavier']").first.click(); pg.wait_for_timeout(200)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
     out["ok"] = ("Do3" in out["au_depart"] and out["a_tenu"].count("Do3") >= 2 and "Do2" in out["apres_z"]
                  and "Do4" in out["apres_x_x"] and "127" in out["apres_v"] and "80" in out["apres_c_c"]
                  and out["clips_avant_apres_s"][0] == out["clips_avant_apres_s"][1])
@@ -104,7 +104,7 @@ def run(vps, themes):
                 rows = pg.evaluate(f"""() => {{ const r = document.querySelector("{ROLL}");
                   return {{ hors: r.querySelectorAll('[data-hors-gamme-ligne="1"]').length, dans: r.querySelectorAll('[data-hors-gamme-ligne="0"]').length }}; }}""")
                 # Menus : accords, quantification ; panneau Outils (PC et tablette).
-                pg.locator("[data-nova-roll='accords']").first.click(); pg.wait_for_timeout(300)
+                __import__("qalib").roll_reveal(pg, "[data-nova-roll='accords']").click(); pg.wait_for_timeout(300)
                 accords = audit(pg, touch, "[data-nova-roll-menu='chord']")
                 pg.screenshot(path=str(OUT / f"roll_{name}_3_accords.png"))
                 close_menu(pg)
@@ -118,7 +118,7 @@ def run(vps, themes):
                 close_menu(pg)
                 outils = {}
                 if pg.locator("[data-nova-roll='outils']").first.is_visible():
-                    pg.locator("[data-nova-roll='outils']").first.click(); pg.wait_for_timeout(400)
+                    __import__("qalib").roll_reveal(pg, "[data-nova-roll='outils']").click(); pg.wait_for_timeout(400)
                     outils = audit(pg, touch, "[data-nova-roll-menu='outils']")
                     pg.screenshot(path=str(OUT / f"roll_{name}_5_outils.png"))
                     close_menu(pg)

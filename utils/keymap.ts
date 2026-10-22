@@ -283,7 +283,7 @@ export const KEYMAP: ShortcutDef[] = [
 
   // --- Piano roll ouvert (components/PianoRoll) : passe avant les raccourcis globaux ---
   pr({ id: 'pr.close', keys: ['escape'], label: 'Fermer le piano roll' }),
-  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)' }),
+  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (l’outil sourdine, T, aussi)' }),
   pr({ id: 'pr.delete', keys: ['delete', 'backspace'], label: 'Effacer les notes sélectionnées' }),
   pr({ id: 'pr.selectAll', keys: ['ctrl+a'], label: 'Sélectionner toutes les notes' }),
   pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite' }),
@@ -309,6 +309,12 @@ export const KEYMAP: ShortcutDef[] = [
   pr({ id: 'pr.toolSelect', keys: ['e'], label: 'Outil sélection' }),
   pr({ id: 'pr.toolSlice', keys: ['c'], label: 'Outil couteau (couper une note)' }),
   pr({ id: 'pr.toolErase', keys: ['d'], label: 'Outil gomme' }),
+  // Piano roll pratique (22/10/2026) : outils souder et sourdine, zoom sur la sélection, propriétés.
+  pr({ id: 'pr.toolGlue', keys: ['g'], label: 'Outil souder (une note rejoint la suivante de même hauteur)' }),
+  pr({ id: 'pr.toolMute', keys: ['t'], label: 'Outil sourdine (clic ou glisser : notes muettes / réactivées)' }),
+  pr({ id: 'pr.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (sinon sur toutes les notes du clip)' }),
+  pr({ id: 'pr.props', keys: ['alt+enter'], label: 'Propriétés des notes sélectionnées (comme un double-clic sur une note)' }),
+  pr({ id: 'pr.glue', keys: ['ctrl+g'], label: 'Souder les notes sélectionnées (même hauteur, qui se touchent)' }),
 
   // --- Clavier MIDI de l'ordinateur (piano roll, bouton « Clavier » allumé) -------
   ...MIDI_KEYBOARD_SHORTCUTS,

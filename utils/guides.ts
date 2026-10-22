@@ -459,8 +459,8 @@ export const GUIDES: Guide[] = [
         hint: 'Le bouton « Synthé » n’est en bas qu’en mode instru.', done: { visible: tid('synth-panel') } },
       { text: 'Choisis un son dans la liste et essaie-le au mini-clavier.', target: tid('synth-presets'), manual: true },
       { text: 'Ferme la fenêtre du son : tu es dans le piano roll. Clique pour poser une note, glisse pour l’allonger.', target: '[aria-label="Fermer le synthé"]' },
-      { text: 'Ou joue au clavier de l’ordi (Ctrl+Maj+K : Q S D F G H J K L M), ou avec un clavier MIDI.', action: 'nova.computerKeyboard',
-        target: '[data-nova-roll="clavier"]', device: 'desktop', manual: true },
+      { text: 'Ou joue au clavier de l’ordi (Ctrl+Maj+K, ou « Notes ▾ » : Q S D F G H J K L M), ou avec un clavier MIDI.', action: 'nova.computerKeyboard',
+        target: '[data-nova-roll-menu-btn="notes"]', device: 'desktop', manual: true },
     ],
     result: 'Une mélodie au synthé dans ton morceau, que tu peux modifier note par note.',
     pitfalls: [
