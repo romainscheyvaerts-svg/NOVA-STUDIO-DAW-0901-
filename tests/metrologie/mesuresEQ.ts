@@ -13,11 +13,15 @@ export const FREQS12 = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 
 export interface Ligne { effet: string; reglage: string; affiche: string; mesure: number; unite: string; cible: number; tol: number; ok: boolean; sr: number }
 
 /** Égaliseur avec une seule bande active (les autres coupées), réglages « affichés ». */
+/** Classe d'égaliseur mesurée (par défaut celle du moteur ; la capture « avant » du rapport passe l'ancienne). */
+export let EqClass: any = ProEQ12Node;
+export const setEqClass = (c: any) => { EqClass = c; };
+
 export function eqOne(sr: number, band: Record<string, any>, extra: Record<string, any> = {}) {
   const ctx = fakeAudioContext(sr);
   const bands = FREQS12.map((frequency, id) => ({ id, type: 'peaking', frequency, gain: 0, q: 1, isEnabled: false, isSolo: false }));
   bands[4] = { ...bands[4], ...band, isEnabled: true };
-  const node = new ProEQ12Node(ctx, { isEnabled: true, masterGain: 1, bands, qVersion: 2, ...extra } as any);
+  const node = new EqClass(ctx, { isEnabled: true, masterGain: 1, bands, qVersion: 2, ...extra } as any);
   const db = (f: number) => graphDb(node.input as any, node.output as any, f);
   return { node, db, ctx };
 }
@@ -57,7 +61,7 @@ export function mesurerEQClassique(): Ligne[] {
       push({ effet: 'EQ 12 bandes', reglage: `${nom} 1 kHz · Q 0,71 · bosse maximale`, affiche: '0 dB (aucune bosse)', mesure: Math.max(0, pk.db), unite: 'dB', cible: 0, tol: 0.05, sr });
     }
     // 2) Cloches : fréquence centrale, gain, Q (largeur à mi-gain en dB).
-    for (const f0 of [50, 100, 1000, 3000, 5000, 8000, 10000, 12000, 16000]) for (const g of [-12, 3, 12, 30]) for (const q of [0.5, 1, 4, 10]) {
+    for (const f0 of [20, 50, 100, 1000, 3000, 5000, 8000, 10000, 12000, 16000, 20000]) for (const g of [-30, -12, 3, 12, 30]) for (const q of [0.1, 0.5, 1, 4, 10]) {
       const { db } = eqOne(sr, { type: 'peaking', frequency: f0, gain: g, q });
       const s = Math.sign(g);
       const fn = (f: number) => s * db(f);
@@ -93,7 +97,7 @@ export function mesurerEQClassique(): Ligne[] {
     {
       const ctx = fakeAudioContext(sr);
       const bands = FREQS12.map((frequency, id) => ({ id, type: id === 0 ? 'highpass' : id === 11 ? 'lowpass' : 'peaking', frequency, gain: 0, q: 1, isEnabled: id !== 0 && id !== 11, isSolo: false }));
-      const node = new ProEQ12Node(ctx, { isEnabled: true, masterGain: 1, bands, qVersion: 2 } as any);
+      const node = new EqClass(ctx, { isEnabled: true, masterGain: 1, bands, qVersion: 2 } as any);
       let m = 0;
       for (let i = 0; i <= 200; i++) { const f = 20 * Math.pow(1000, i / 200); m = Math.max(m, Math.abs(graphDb(node.input as any, node.output as any, f))); }
       push({ effet: 'EQ 12 bandes', reglage: 'Égaliseur neutre (bandes à 0 dB, coupe-bas / haut coupés) · écart max 20 Hz–20 kHz', affiche: '0 dB', mesure: m, unite: 'dB', cible: 0, tol: 1e-6, sr });
