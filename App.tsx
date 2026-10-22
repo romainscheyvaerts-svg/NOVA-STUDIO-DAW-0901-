@@ -8628,6 +8628,35 @@ function Studio() {
     window.addEventListener('nova:samplerate', on);
     return () => window.removeEventListener('nova:samplerate', on);
   }, []);
+  // Moteur audio relancé (sortie audio qui ne répondait plus, engine/audioClockWatch) : la séance
+  // reste. Pistes recâblées sur le nouveau contexte, mixes casque, pistes armées, diffusion du mix,
+  // et la lecture repart de la même position si elle tournait.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      void (async () => {
+        await ensureAudioEngine();
+        const s = stateRef.current;
+        s.tracks.forEach(t => audioEngine.updateTrack(t, s.tracks));
+        if (s.cueMixes?.length) audioEngine.setCueMixes(s.cueMixes, s.tracks);
+        try { await rearmArmedRef.current?.(); } catch { /* armement signalé ailleurs */ }
+        const rtc = rtcRef.current;
+        if (rtc && rtc.isSending('mix')) {
+          const stream = audioEngine.getCollabMixStream();
+          if (stream) rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+        }
+        if (d.wasPlaying && stateRef.current.isPlaying && !stateRef.current.isRecording) {
+          const pos = typeof d.position === 'number' ? d.position : stateRef.current.currentTime;
+          audioEngine.startPlayback(pos, stateRef.current.tracks);
+          const mt = stateRef.current.metronome;
+          if (mt.enabled && mt.mode !== 'record') metronomeService.start(pos);
+        }
+      })();
+    };
+    window.addEventListener('nova:audio-restarted', on);
+    return () => window.removeEventListener('nova:audio-restarted', on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /**
    * Pendant l'écoute du mix de l'ingé : ce qui arrive vraiment (getStats, toutes les secondes).
    * Rien ne passe pendant 3 s : reprise demandée à l'ingé (offre neuve) ; encore rien à 10 s :

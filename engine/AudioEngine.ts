@@ -114,6 +114,7 @@ import { GrPart, readGainReduction } from './meters/gainReduction';
 import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../utils/projectRate';
 import { installHQDecode } from '../utils/hqAudio';
 import { createOutputDeviceWatch } from './outputDeviceWatch';
+import { AudioClockWatch, type ClockIssue } from './audioClockWatch';
 
 interface TrackDSP {
   input: GainNode;          
@@ -501,6 +502,47 @@ export class AudioEngine {
   private currentInputDeviceId: string = 'default';
   private currentOutputDeviceId: string = 'default';
   private outputWatch: ReturnType<typeof createOutputDeviceWatch> | null = null;
+  /** Garde de l'horloge audio : sortie qui ne démarre pas, se fige ou signale une erreur (engine/audioClockWatch). */
+  private clockWatchInst: AudioClockWatch | null = null;
+  private clockWatch(): AudioClockWatch {
+    if (!this.clockWatchInst) {
+      this.clockWatchInst = new AudioClockWatch({
+        ctx: () => this.ctx,
+        active: () => this.isPlaying || !!this.recordingTrackId || !!this.recSession || (this.inputRouter?.size || 0) > 0,
+        recording: () => !!this.recordingTrackId || !!this.recSession,
+        visible: () => typeof document === 'undefined' || !document.hidden,
+        restart: (reason) => this.restartAudio(reason),
+        resume: () => this.resume(),
+        notify: (msg) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ } },
+        report: (e) => { console.warn('[AudioEngine] horloge audio :', e.issue, e.action, e.ms ?? ''); try { window.dispatchEvent(new CustomEvent('nova:audio-clock', { detail: e })); } catch { /* */ } },
+      });
+    }
+    return this.clockWatchInst;
+  }
+  /** État de la garde de l'horloge (Réglages audio, QA). */
+  public getClockWatchStatus() { return this.clockWatchInst?.status() ?? null; }
+
+  /**
+   * Relance du moteur audio quand la sortie ne répond plus (horloge figée, erreur du
+   * périphérique, démarrage interminable) : contexte recréé à la même fréquence, la séance
+   * reste (App recâble les pistes sur « nova:audio-restarted » et relance la lecture à la même
+   * position). Jamais pendant une prise.
+   */
+  public async restartAudio(reason: ClockIssue | 'manuel' = 'manuel'): Promise<boolean> {
+    if (!this.ctx || this.recordingTrackId || this.recSession) return false;
+    const wasPlaying = this.isPlaying;
+    const position = wasPlaying ? this.getCurrentTime() : this.pausedAt;
+    const armed = this.armedIds();
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      await this.rebuildContext();
+    } catch (e) {
+      console.error('[AudioEngine] relance du moteur audio impossible', e);
+      return false;
+    }
+    try { window.dispatchEvent(new CustomEvent('nova:audio-restarted', { detail: { reason, wasPlaying, position, armed, ms: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) } })); } catch { /* hors navigateur */ }
+    return true;
+  }
   /**
    * Fréquence du contexte audio = celle du PROJET (utils/projectRate) : 48 kHz pour
    * un nouveau projet, celle du fichier pour un projet ouvert (44,1 kHz s'il n'en a
@@ -615,6 +657,7 @@ export class AudioEngine {
     setCurrentRate(this.ctx.sampleRate);
     this.latency = this.ctx.baseLatency;
     this.hookAutoResume();
+    this.clockWatch().attach(this.ctx);
     this.setupEffectSleep();
 
     this.masterOutput = this.ctx.createGain();
@@ -728,7 +771,19 @@ export class AudioEngine {
       this.desiredSampleRate = from;
       throw new Error(`Une prise est en cours : change la fréquence (${rateLabel(to)}) après l'arrêt.`);
     }
-    const old = this.ctx;
+    await this.rebuildContext();
+    try { window.dispatchEvent(new CustomEvent('nova:samplerate', { detail: { from, to } })); } catch { /* hors navigateur */ }
+    return { changed: true, from, to };
+  }
+
+  /**
+   * Contexte audio recréé à la fréquence voulue (desiredSampleRate) : tout ce qui vit dans l'ancien
+   * est libéré, le master est reconstruit, ses réglages rétablis. L'appelant recâble les pistes
+   * (App.ensureAudioEngine voit un nouveau contexte). Sert au changement de fréquence et à la
+   * relance après une sortie audio qui ne répond plus (engine/audioClockWatch).
+   */
+  private async rebuildContext(): Promise<void> {
+    const old = this.ctx!;
     // Réglages du master à garder (le nouveau graphe naît avec les valeurs par défaut).
     const keep = { limiter: this.safetyLimiterOn, monitor: this.masterOutput?.gain.value ?? 1, collabMuted: this.collabOutputMuted, asio: this.asioStreamActive };
     // 1. Tout ce qui joue s'arrête.
@@ -790,8 +845,6 @@ export class AudioEngine {
         this.browserOutput?.gain.setValueAtTime(0, this.ctx.currentTime);
       }
     }
-    try { window.dispatchEvent(new CustomEvent('nova:samplerate', { detail: { from, to } })); } catch { /* hors navigateur */ }
-    return { changed: true, from, to };
   }
 
   /**
@@ -2156,6 +2209,7 @@ export class AudioEngine {
       this.setTrackLowLatency(trackId, true);
       this.syncDirectMonitor();
       if (!this.latencyTimer) this.startLatencyWatch();
+      this.clockWatchInst?.poke();
       this.reportMissingInput(tap);
       console.log("[AudioEngine] Track armed OK:", trackId, tap.channels);
     } catch (e: any) {
@@ -3238,6 +3292,7 @@ export class AudioEngine {
     if (this.practiceRate < 0.999 && !this.recSession && !this.recordingTrackId) { this.startPractice(startOffset, tracks); return; }
 
     this.isPlaying = true;
+    this.clockWatchInst?.poke();
     this.pendingLoopWrap = null;
     this.discardLoopLead();
     this.loopLeadTracks = new Set();
