@@ -1730,13 +1730,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   } as React.CSSProperties;
 
   return (
-    <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-nv-surface select-none text-white font-inter">
+    <div data-nova-pianoroll="" data-zoom-x={Math.round(zoomX)} className="w-full h-full flex flex-col bg-nv-surface select-none text-white font-inter">
        {/* BARRE (piano roll pratique, 22/10/2026) : pas de mur de boutons. Visibles : l'outil actif, la grille, la gamme ;
            le reste dans « Outils ▾ », « Notes ▾ », « Vue ▾ » et au clic droit dans la grille. Fermer reste à droite. */}
        <div data-nova-roll="barre" className="pr-bar min-h-14 flex items-center gap-2 px-3 shrink-0">
-       <div className="flex-1 min-w-0 h-full flex items-center justify-between gap-3 overflow-x-auto no-scrollbar py-1.5">
+       {/* Téléphone (moins de 640 px) : la barre passe à la ligne au lieu de défiler (avant : 918 px de boutons dans
+           366, « Glissé », « Outil », « Grille »… hors de l'écran, à faire défiler au doigt). */}
+       <div className="flex-1 min-w-0 h-full flex items-center justify-between gap-3 overflow-x-auto no-scrollbar py-1.5 max-sm:flex-wrap max-sm:gap-y-1.5 max-sm:overflow-visible max-sm:h-auto [@media(pointer:coarse)]:flex-wrap [@media(pointer:coarse)]:gap-y-1.5 [@media(pointer:coarse)]:overflow-visible [@media(pointer:coarse)]:h-auto">
           <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="md:hidden shrink-0 w-11 h-11 rounded-full bg-white/10 text-white flex items-center justify-center"><i className="fas fa-times"></i></button>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 max-sm:flex-wrap max-sm:shrink max-sm:min-w-0 max-sm:gap-y-1.5 [@media(pointer:coarse)]:flex-wrap [@media(pointer:coarse)]:shrink [@media(pointer:coarse)]:min-w-0">
              <div className="hidden lg:flex items-center space-x-2">
                 <div className={`w-8 h-8 rounded flex items-center justify-center border ${isDrumMode ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
                     <i className={`fas ${isDrumMode ? 'fa-drum' : 'fa-keyboard'}`}></i>
@@ -1830,7 +1832,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 max-sm:flex-wrap max-sm:shrink max-sm:min-w-0 max-sm:gap-y-1.5 [@media(pointer:coarse)]:flex-wrap [@media(pointer:coarse)]:shrink [@media(pointer:coarse)]:min-w-0">
              <div className="text-[10px] text-slate-400 whitespace-nowrap" role="status">
                 {hasSel ? <span className="text-cyan-400 font-bold">{selectedNoteIds.size} sélectionnée{selectedNoteIds.size > 1 ? 's' : ''}</span> : <span>{nNotes} note{nNotes > 1 ? 's' : ''}</span>}
              </div>
@@ -2032,7 +2034,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
           {/* RÈGLE : mesures, boucle, tête de lecture */}
           <div className="flex shrink-0">
             <div className={`flex-shrink-0 ${sideW} pr-ruler border-r border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400`} title={Math.round(bpmEnd) !== Math.round(bpm) ? `Tempo de ${Math.round(bpm)} à ${Math.round(bpmEnd)} BPM dans ce clip : la grille suit` : `${Math.round(bpm)} BPM`}>{Math.round(bpmEnd) !== Math.round(bpm) ? `${Math.round(bpm)}→${Math.round(bpmEnd)}` : `${Math.round(bpm)} BPM`}</div>
-            <Ruler clipStart={clipStart} clipDuration={clip.duration} width={contentWidth} zoomX={zoomX} bpm={bpm} light={light} loop={loop} onSeek={onSeek} onSetLoop={onSetLoop} innerRef={rulerRef} height={touch ? 30 : 22} map={followMap}
+            <Ruler clipStart={clipStart} clipDuration={clip.duration} width={contentWidth} zoomX={zoomX} bpm={bpm} light={light} loop={loop} onSeek={onSeek} onSetLoop={onSetLoop} innerRef={rulerRef} height={touch ? 36 : 22} map={followMap}
               spans={otherClips.filter(o => openClips.includes(o.clip.id)).map(o => ({ id: o.clip.id, start: o.clip.start, end: o.clip.start + o.clip.duration, color: o.track.color || '#94a3b8', label: `${o.clip.name || 'Clip'} · ${o.track.name}`, onClick: () => switchToClip(o.track.id, o.clip.id) }))} />
           </div>
           <div className="flex-1 flex overflow-hidden relative" style={{ minHeight: '60%' }}>
