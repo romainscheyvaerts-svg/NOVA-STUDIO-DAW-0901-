@@ -54,22 +54,24 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             <p className="text-[14px] font-black text-white leading-tight">Ça sonne bien ! Et maintenant ?</p>
-            <p className="mt-0.5 text-[12px] text-slate-300 leading-snug">{sub}</p>
+            <p className={`mt-0.5 text-[12px] text-slate-300 leading-snug ${inline ? 'truncate' : ''}`}>{sub}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer" title="Fermer"
-            className="shrink-0 w-10 h-10 -mt-1 -mr-1 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center">
+            className="shrink-0 w-11 h-11 -mt-1.5 -mr-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center">
             <i className="fas fa-times"></i>
           </button>
         </div>
-        <div className={`mt-2 grid gap-2 ${actions.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {/* Dans la page (téléphone) : une seule rangée qui défile au doigt. En grille, la carte prenait
+            185 px au-dessus des pistes (la piste REC sortait de l'écran juste après la prise). */}
+        <div className={inline ? 'mt-2 -mx-1 px-1 flex gap-2 overflow-x-auto scrollbar-hide' : `mt-2 grid gap-2 ${actions.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {actions.map((a, i) => (
             <button
               key={a}
               type="button"
               onClick={() => onAction(a)}
-              className={`min-h-10 px-3 py-2 rounded-xl text-[12px] font-black leading-tight text-left flex items-center gap-2 transition-all active:scale-[0.98] ${
+              className={`${inline ? 'shrink-0 min-h-11 whitespace-nowrap' : 'min-h-10'} px-3 py-2 rounded-xl text-[12px] font-black leading-tight text-left flex items-center gap-2 transition-all active:scale-[0.98] ${
                 i === 0 ? 'bg-cyan-500 text-black hover:bg-cyan-400' : 'bg-white/10 text-white hover:bg-white/15'
-              } ${actions.length === 3 && i === 0 ? 'col-span-2' : ''}`}
+              } ${actions.length === 3 && i === 0 && !inline ? 'col-span-2' : ''}`}
             >
               <span className="text-base leading-none">{LABELS[a].emoji}</span>
               <span>{LABELS[a].label}</span>

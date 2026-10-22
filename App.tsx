@@ -1598,10 +1598,13 @@ function Studio() {
   };
   // Un téléphone en paysage (≈ 844 px) passait en TABLET, dont les vues sont
   // utilisables seulement à la souris : écran tactile + petit côté < 600 px = MOBILE.
+  // Tablette au doigt (petit côté ≥ 600 px) : la vue tablette (arrangement, console, piano roll),
+  // même en portrait sous 768 px (iPad mini : 744 px), qui avait jusqu'ici la vue du téléphone.
   const autoViewMode = (): ViewMode => {
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const shortSide = Math.min(window.innerWidth, window.innerHeight);
-    if (window.innerWidth < 768 || (coarse && shortSide < 600)) return 'MOBILE';
+    if (coarse) return shortSide < 600 ? 'MOBILE' : window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
+    if (window.innerWidth < 768) return 'MOBILE';
     return window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
   };
   const [viewMode, setViewMode] = useState<ViewMode>(() => readSavedViewMode() ?? autoViewMode());
@@ -11447,7 +11450,8 @@ function Studio() {
           onNewSynthTrack={handleNewSynthTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
-          onOpenLyrics={() => setLyricsOpen(o => !o)}
+          // Mode simple : « Paroles » est déjà un onglet de la barre du bas (pas deux fois le même bouton).
+          onOpenLyrics={simpleMode ? undefined : () => setLyricsOpen(o => !o)}
           lyricsOpen={lyricsOpen}
           currentStyleId={state.vocalMixStyle}
         />
@@ -11784,7 +11788,9 @@ function Studio() {
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
       <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && (activeMobileTab === 'NOVA' || activeMobileTab === 'ARRANGEMENT'))}
+        // Téléphone : jamais en flottant. La carte est posée dans la page Morceau (au-dessus des pistes) ;
+        // flottante sur Mixer / FX / Sons / Pistes, elle recouvrait les M / S de la console et la liste des sons.
+        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !isMobile}
         trigger={nextStep || 'take'}
         actions={nextStepActions}
         beatTitle={getCatalogBeat(state.tracks)?.title}
