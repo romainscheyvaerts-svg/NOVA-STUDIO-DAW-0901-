@@ -1,4 +1,5 @@
 
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Track, AutomationLane } from '../types';
 import AutomationLaneComponent from './AutomationLane';
@@ -6,6 +7,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { playheadStore } from '../utils/playheadStore';
 import { sendLabel } from '../utils/sendLabels';
 import { tempoMapStore, barsInRange } from '../utils/tempoMap';
+import { isStereoTrack, PAN_L, PAN_R, stereoPanOf } from '../utils/panLaw';
 
 interface AutomationEditorViewProps {
   tracks: Track[];
@@ -57,7 +59,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       // Check if already exists
       if (track.automationLanes.some(l => l.parameterName === paramId)) return;
 
-      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'pan' ? track.pan : paramId === 'mute' ? (track.isMuted ? 1 : 0) : paramId === 'trim' ? Math.pow(10, (track.inputTrimDb || 0) / 20) : paramId === 'width' ? (track.stereoWidth ?? 1) : (typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min + (max - min) / 2);
+      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'pan' ? track.pan : paramId === PAN_L ? stereoPanOf(track).l : paramId === PAN_R ? stereoPanOf(track).r : paramId === 'mute' ? (track.isMuted ? 1 : 0) : paramId === 'trim' ? Math.pow(10, (track.inputTrimDb || 0) / 20) : paramId === 'width' ? (track.stereoWidth ?? 1) : (typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min + (max - min) / 2);
 
       const newLane: AutomationLane = {
           id: `auto-${Date.now()}`,
@@ -76,10 +78,13 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   // Get available parameters for a track (Native + Plugins)
   const getAvailableParameters = (track: Track) => {
       const params: { id: string; name: string; min: number; max: number; value?: number }[] = [
-          { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
+          { id: 'volume', name: 'Volume', min: 0, max: FADER_MAX_GAIN },
           // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
-          { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
-          { id: 'pan', name: 'Panoramique', min: -1, max: 1 },
+          { id: 'preVolume', name: 'Volume avant effets', min: 0, max: FADER_MAX_GAIN },
+          // Piste stéréo : double pan (« Pan G » = canal gauche, « Pan D » = canal droit) ; piste mono : un pan.
+          ...(isStereoTrack(track)
+            ? [{ id: PAN_L, name: 'Pan G (canal gauche)', min: -1, max: 1 }, { id: PAN_R, name: 'Pan D (canal droit)', min: -1, max: 1 }]
+            : [{ id: 'pan', name: 'Panoramique', min: -1, max: 1 }]),
           // Mute automatisé (R8, Pro Tools « mute ») : 0 = son, 1 = muet, en paliers.
           { id: 'mute', name: 'Muet', min: 0, max: 1 },
           // Tête de tranche (R11) : trim d'entrée (gain, jusqu'à +12 dB) et largeur stéréo (0 = mono, 2 = très large).
@@ -89,7 +94,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       
       // Sends
       track.sends.forEach(s => {
-          params.push({ id: `send::${s.id}`, name: `Envoi ${sendLabel(s.id, tracks)}`, min: 0, max: 1.5 });
+          params.push({ id: `send::${s.id}`, name: `Envoi ${sendLabel(s.id, tracks)}`, min: 0, max: FADER_MAX_GAIN });
       });
 
       // Plugins

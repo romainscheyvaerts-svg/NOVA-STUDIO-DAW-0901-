@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 import type { AutomationLane, AutomationPoint, Track } from '../types';
 import { valueAtPoints } from './automationWrite';
 
@@ -11,9 +12,9 @@ import { valueAtPoints } from './automationWrite';
 
 /** Rampe à chaque bord de la plage (s). */
 export const RANGE_RAMP = 0.01;
-/** Bornes de la voie de volume de NOVA (gain linéaire, 1,5 ≈ +3,5 dB). */
+/** Bornes de la voie de volume de NOVA (gain linéaire, butée des faders : +12 dB). */
 export const VOLUME_MIN = 0;
-export const VOLUME_MAX = 1.5;
+export const VOLUME_MAX = FADER_MAX_GAIN;
 
 const dbToGain = (db: number) => Math.pow(10, db / 20);
 let seq = 0;

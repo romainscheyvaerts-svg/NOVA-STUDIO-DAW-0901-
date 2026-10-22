@@ -42,7 +42,13 @@ export interface MixReport {
 
 const db = (x: number) => 20 * Math.log10(Math.max(x, 1e-9));
 const pct = (v: number) => `${Math.round(v * 100)} %`;
-const clampVol = (v: number) => Math.max(0.05, Math.min(1.5, v));
+/**
+ * Plafond du mixage automatique : +3,5 dB (1,5), bien sous la butée des faders (+12 dB) — l'assistant
+ * ne pousse jamais un fader tout en haut. Un fader déjà réglé plus haut à la main n'est pas ramené
+ * vers le bas par ce plafond (`cur`).
+ */
+const AUTO_MIX_MAX = 1.5;
+const clampVol = (v: number, cur = 0) => Math.max(0.05, Math.min(Math.max(AUTO_MIX_MAX, cur), v));
 
 interface BufferStats { peak: number; rmsActive: number }
 const statsCache = new WeakMap<AudioBuffer, Map<string, BufferStats>>();
@@ -166,10 +172,10 @@ export function analyseMix(tracks: Track[], getBuffer: (c: Clip) => AudioBuffer 
       let actions: AIAction[];
       let spotTarget: string;
       let spot: string;
-      const newLead = clampVol(lead.volume * Math.pow(10, delta / 20));
-      if (tooLow && newLead >= 1.49) {
+      const newLead = clampVol(lead.volume * Math.pow(10, delta / 20), lead.volume);
+      if (tooLow && newLead >= Math.max(AUTO_MIX_MAX, lead.volume) - 0.01) {
         // Fader voix déjà en haut : on baisse plutôt le beat.
-        const newBeat = clampVol(beat.volume * Math.pow(10, -delta / 20));
+        const newBeat = clampVol(beat.volume * Math.pow(10, -delta / 20), beat.volume);
         actions = [{ action: 'SET_VOLUME', payload: { trackId: beat.id, volume: Math.round(newBeat * 100) / 100 }, description: `Beat à ${pct(newBeat)}` }];
         spotTarget = `vol-${beat.id}`;
         spot = `Baisse le beat vers ${pct(newBeat)}`;
@@ -197,7 +203,7 @@ export function analyseMix(tracks: Track[], getBuffer: (c: Clip) => AudioBuffer 
       const targetRel = l.role === 'adlib' ? -8 : -6;
       const rel = l.mixDb - lead.mixDb;
       if (rel > targetRel + 3) {
-        const newVol = clampVol(l.volume * Math.pow(10, (targetRel - rel) / 20));
+        const newVol = clampVol(l.volume * Math.pow(10, (targetRel - rel) / 20), l.volume);
         issues.push({
           id: `sec-loud-${l.id}`, severity: 'warn',
           title: `${l.name} couvre ton lead`,

@@ -1,3 +1,5 @@
+import { faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
+import { gainToDbText } from '../utils/db';
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
@@ -833,14 +835,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   <input
                     type="range"
                     min="0"
-                    max="100"
+                    max="1000"
                     aria-label={`Volume ${track.name}`}
+                    aria-valuetext={gainToDbText(track.volume ?? 0.8)}
                     data-nova-target={simple ? `vol-${track.id}` : undefined}
-                    value={Math.min(1, track.volume ?? 0.8) * 100}
+                    // Même échelle que les faders (−∞…+12 dB, 0 dB aux 3/4) : une piste au-dessus de 0 dB n'est plus ramenée à 0 dB au toucher.
+                    value={Math.round(gainToFaderPos(track.volume ?? 0.8) * 1000)}
                     onChange={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) {
-                        onUpdateTrack({ ...track, volume: Number(e.target.value) / 100 });
+                        onUpdateTrack({ ...track, volume: faderPosToGain(Number(e.target.value) / 1000) });
                       }
                     }}
                     onClick={(e) => e.stopPropagation()}
@@ -848,7 +852,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     // Trait de 4 px centré, zone de saisie de toute la rangée (+ curseur 24 px)
                     style={{
                       height: 40,
-                      backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${Math.min(1, track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${Math.min(1, track.volume ?? 0.8) * 100}%)`,
+                      backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${gainToFaderPos(track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${gainToFaderPos(track.volume ?? 0.8) * 100}%)`,
                       backgroundColor: 'transparent', backgroundSize: '100% 4px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center'
                     }}
                   />

@@ -1,18 +1,20 @@
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import { describe, expect, it } from 'vitest';
 import { dragSendLevel, sendDbText, sendLevelAt, sendPos, sendTransferMenuItems, UNITY_SNAP } from '../utils/sendFader';
 import { makeTrack } from './helpers/fixtures';
 import type { Track } from '../types';
 
 describe('envoi glissé au doigt comme un fader', () => {
-  it('même courbe que les faders : position √(niveau / 1,5), aller-retour exact', () => {
-    for (const l of [0, 0.1, 0.5, 1, 1.5]) expect(sendLevelAt(sendPos(l))).toBeCloseTo(l, 9);
-    expect(sendPos(2)).toBe(1);
+  it('même échelle que les faders (−∞ … +12 dB, 0 dB aux 3/4), aller-retour exact', () => {
+    for (const l of [0, 0.1, 0.5, 1, 1.5, 3]) expect(sendLevelAt(sendPos(l))).toBeCloseTo(l, 9);
+    expect(sendPos(1)).toBe(0.75);
+    expect(sendPos(5)).toBe(1);
     expect(sendPos(-1)).toBe(0);
   });
 
   it('glisser relatif : toute la course du fader = toute la plage, rien ne saute sous le doigt', () => {
     expect(dragSendLevel(0.5, 0, 200)).toBeCloseTo(0.5, 4);
-    expect(dragSendLevel(0.5, 1000, 200)).toBe(1.5);
+    expect(dragSendLevel(0.5, 1000, 200)).toBeCloseTo(FADER_MAX_GAIN, 4);
     expect(dragSendLevel(0.5, -1000, 200)).toBe(0);
     const up = dragSendLevel(0.2, 30, 200);
     expect(up).toBeGreaterThan(0.2);

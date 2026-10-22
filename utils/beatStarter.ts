@@ -11,6 +11,7 @@
  *
  * Données pures (aucun React) : tests/beatStarter.test.ts.
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import type { Clip, DAWState, MidiNote, Track } from '../types';
 import { TrackType } from '../types';
 import type { ChordEvent, ChordQuality } from './chordDetect';
@@ -347,7 +348,7 @@ export function applyBeatSkeleton(st: DAWState, sk: BeatSkeleton, ix: KitIndex |
     : {
       id: DRUM_TRACK_ID, name: 'PERCUSSIONS', type: TrackType.DRUM_RACK, color: '#f97316', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
       volume: 0.85, pan: 0, outputTrackId: 'master', sends: [], clips: drumClips as Clip[], plugins: [],
-      automationLanes: [{ id: `auto-${stamp}-drums`, parameterName: 'volume', points: [], color: '#f97316', isExpanded: false, min: 0, max: 1.5 }],
+      automationLanes: [{ id: `auto-${stamp}-drums`, parameterName: 'volume', points: [], color: '#f97316', isExpanded: false, min: 0, max: FADER_MAX_GAIN }],
       totalLatency: 0, drumMachine: dm, drumPads: drumPadsFor(dm) as any,
     } as Track;
   if (di >= 0) tracks[di] = drumTrack;

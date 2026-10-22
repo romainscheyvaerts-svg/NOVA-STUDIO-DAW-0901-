@@ -21,7 +21,7 @@ Preuves :
 Usage : NOVA_URL=http://127.0.0.1:3437/ python qa/surface_controle.py
 Sorties : D:\\1 WORK\\CONTENU\\nova-surfaces\\
 """
-import json, os, re, sys, time, zipfile
+import json, math, os, re, sys, time, zipfile
 from pathlib import Path
 
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3437/")
@@ -114,12 +114,26 @@ def to14(p):
     return max(0, min(16383, round(max(0.0, min(1.0, p)) * 16383)))
 
 
+# Échelle des faders de NOVA (utils/faderLaw.ts, 22/10/2026) : −∞ à +12 dB, 0 dB aux 3/4 de la course.
+SCALE = [(1, 12), (0.875, 6), (0.75, 0), (0.65, -5), (0.55, -10), (0.4, -20), (0.28, -30), (0.18, -40), (0.07, -60), (0.005, -120)]
+
+
 def pos_of(gain):
-    return (max(0.0, gain) / 1.5) ** 0.5
+    if gain <= 0: return 0.0
+    db = 20 * math.log10(gain)
+    if db >= 12: return 1.0
+    for (p1, d1), (p0, d0) in zip(SCALE, SCALE[1:]):
+        if db >= d0: return p0 + (p1 - p0) * (db - d0) / (d1 - d0)
+    return 0.005 * gain / 1e-6
 
 
 def gain_of(v14):
-    return (v14 / 16383) ** 2 * 1.5
+    p = v14 / 16383
+    if p <= 0: return 0.0
+    if p < 0.005: return 1e-6 * p / 0.005
+    for (p1, d1), (p0, d0) in zip(SCALE, SCALE[1:]):
+        if p >= p0: return 10 ** ((d0 + (d1 - d0) * (p - p0) / (p1 - p0)) / 20)
+    return 1e-6
 
 
 def pb(strip, gain):
@@ -193,7 +207,12 @@ def wait_js(page, js, timeout=15000):
 GESTURE = r"""
 async ({ strip, gain, ms }) => {
   const S = window.__qaSurf;
-  const v = Math.round(Math.sqrt(gain / 1.5) * 16383);
+  // Échelle des faders de NOVA (utils/faderLaw.ts) : dB → position.
+  const SC = [[1, 12], [0.875, 6], [0.75, 0], [0.65, -5], [0.55, -10], [0.4, -20], [0.28, -30], [0.18, -40], [0.07, -60], [0.005, -120]];
+  const db = 20 * Math.log10(Math.max(gain, 1e-9));
+  let pos = db >= 12 ? 1 : 0;
+  for (let i = 0; i < SC.length - 1 && !pos; i++) { const [p1, d1] = SC[i], [p0, d0] = SC[i + 1]; if (db >= d0) pos = p0 + (p1 - p0) * (db - d0) / (d1 - d0); }
+  const v = Math.round(pos * 16383);
   const t0 = performance.now();
   S.surface([0x90, 0x68 + strip, 0x7f]);
   const s0 = S.clock ? S.clock() : null;
@@ -408,8 +427,9 @@ def run_main(b, src):
     ok("5b automation en lecture → fader 2 de la surface suit la courbe", len(f1) >= 20 and med is not None and med < 0.02 and mx < 0.06,
        {"messages": len(f1), "ecart_median_%": None if med is None else round(med * 100, 2), "ecart_max_%": None if mx is None else round(mx * 100, 2)})
     meters = [m["d"] for m in msgs if m["d"][0] == 0xD0]
+    # Kick : piste mono au centre, loi de pan −3 dB (22/10/2026) : un cran de vumètre plus bas qu avant.
     lv0 = [d[1] & 0x0F for d in meters if d[1] >> 4 == 0]
-    ok("5c vumètres (channel pressure) pendant la lecture", len(lv0) >= 10 and max(lv0) >= 6, {"messages_tranche1": len(lv0), "niveau_max": max(lv0) if lv0 else None, "total": len(meters)})
+    ok("5c vumètres (channel pressure) pendant la lecture", len(lv0) >= 10 and max(lv0) >= 5, {"messages_tranche1": len(lv0), "niveau_max": max(lv0) if lv0 else None, "total": len(meters)})
     RES["mesures"]["vumetres"] = {"messages": len(meters), "tranche1_niveaux": sorted(set(lv0))}
     bar_want = None if tc_song is None else int(tc_song / (4 * 60 / 140)) + 1
     bar_shown = cnt_play.split(".")[0].strip()

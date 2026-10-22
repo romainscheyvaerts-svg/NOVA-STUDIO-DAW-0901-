@@ -1637,7 +1637,8 @@ class ASIOBridgeServer:
                 except (TypeError, ValueError, AttributeError):
                     continue
                 if 0 <= cin < MAX_BRIDGE_CHANNELS and 0 <= cout < MAX_BRIDGE_CHANNELS and g > 0:
-                    routes.append((cin, cout, max(0.0, min(4.0, g))))
+                    # Niveau de piste (jusqu'à +12 dB) × volume du mix casque (jusqu'à +12 dB) : borne à +24 dB.
+                    routes.append((cin, cout, max(0.0, min(16.0, g))))
             self.config.monitor_routes = routes
         if self.audio_stream:
             self.audio_stream.config = self.config

@@ -1,5 +1,6 @@
 import type { Track } from '../types';
 import { automationModeInfo, automationModeOf, laneDisplayName, normalize, paramSpec, sortedPoints, valueAtPoints } from './automationWrite';
+import { PAN_L, PAN_R, stereoPanOf } from './panLaw';
 
 /** Hauteur d'une voie d'automation ouverte sous la piste (même valeur que l'arrangement). */
 export const LANE_HEIGHT = 80;
@@ -32,7 +33,8 @@ export function drawExpandedLanes(
         const n = spec.kind === 'gain' ? normalize({ ...spec, min: 0 }, v) : (v - lane.min) / ((lane.max - lane.min) || 1);
         return y + 8 + (1 - Math.max(0, Math.min(1, n))) * (LANE_HEIGHT - 16);
       };
-      const stat = lane.parameterName === 'volume' ? track.volume : lane.parameterName === 'pan' ? track.pan : (lane.min + lane.max) / 2;
+      const stat = lane.parameterName === 'volume' ? track.volume : lane.parameterName === 'pan' ? track.pan
+        : lane.parameterName === PAN_L ? stereoPanOf(track).l : lane.parameterName === PAN_R ? stereoPanOf(track).r : (lane.min + lane.max) / 2;
       ctx.strokeStyle = mode === 'off' ? 'rgba(148,163,184,0.5)' : (pts.length ? modeColor : 'rgba(148,163,184,0.35)');
       ctx.lineWidth = 2;
       ctx.beginPath();

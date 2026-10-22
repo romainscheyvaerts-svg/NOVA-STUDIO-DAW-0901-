@@ -31,7 +31,7 @@ TRANSPORT ET NAVIGATION
 | SET_BPM | { bpm } | SET_PROJECT_KEY { key 0-11 (0=C), scale } ; SET_METRONOME { enabled } |
 | UNDO / REDO | {} | |
 PISTES ET MIX
-| SET_VOLUME | { trackId, volumeDb } | fader en dB (−60 à +3,5) |
+| SET_VOLUME | { trackId, volumeDb } | fader en dB (−60 à +12 ; reste près de 0 dB, ne monte au-dessus de +3 dB que si on te le demande) |
 | SET_PAN | { trackId, pan } | −1 (G) à 1 (D) |
 | MUTE_TRACK / SOLO_TRACK | { trackId, isMuted / isSolo } | |
 | SET_SEND_LEVEL | { trackId, sendId, level } | 0-1 ; sendId = id d'un envoi de la piste (send-verb-short, send-delay…) |

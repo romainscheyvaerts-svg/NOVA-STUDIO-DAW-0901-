@@ -1,4 +1,6 @@
 import type { CueLevel, CueMix, Track } from '../types';
+import { FADER_MAX_GAIN } from './faderLaw';
+import { DEFAULT_PAN_LAW, legacyPanToStereo, monoMatrix, panGains, stereoMatrix, stereoPanOf, type PanLaw } from './panLaw';
 
 /**
  * R15 · Mixes casque (cue mixes), comme les envois pré-fader de Pro Tools vers les
@@ -42,8 +44,21 @@ export function cueLevelOf(mix: Pick<CueMix, 'levels'>, track: Pick<Track, 'id' 
   return { level: clampLevel(track.volume ?? 1), pan: clampPan(track.pan ?? 0) };
 }
 
-const clampLevel = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : 1);
+// Même butée que les faders (+12 dB, utils/faderLaw) : une piste à +12 dB l'est aussi au casque.
+const clampLevel = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(FADER_MAX_GAIN, v)) : 1);
 const clampPan = (v: number) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+
+/**
+ * Positions du pan d'une piste dans un mix casque (22/10/2026) : [pan, 1] pour une piste mono,
+ * [G, D] pour une piste stéréo. Sans réglage propre au mix : le pan (ou G / D) du mix principal ;
+ * avec un pan propre au mix sur une piste stéréo : converti comme un ancien pan (utils/panLaw).
+ */
+export function cuePanPositions(mix: Pick<CueMix, 'levels'>, track: Pick<Track, 'id' | 'pan' | 'stereoPan'>, stereo: boolean): [number, number] {
+  const l = mix.levels[track.id];
+  if (!stereo) return [l ? clampPan(l.pan) : clampPan(track.pan ?? 0), 1];
+  const sp = l ? legacyPanToStereo(clampPan(l.pan)) : stereoPanOf({ pan: track.pan ?? 0, stereoPan: track.stereoPan });
+  return [sp.l, sp.r];
+}
 
 export function setCueLevel(mix: CueMix, trackId: string, patch: Partial<CueLevel>, track?: Pick<Track, 'id' | 'volume' | 'pan'>): CueMix {
   const cur = mix.levels[trackId] || (track ? cueLevelOf(mix, track) : { level: 1, pan: 0 });
@@ -61,11 +76,18 @@ export function copyMainMix(mix: CueMix, tracks: Pick<Track, 'id' | 'volume' | '
 
 /**
  * Gains gauche / droite d'un signal MONO (loi de balance : au centre, plein niveau des
- * deux côtés — le niveau que l'artiste avait déjà avec le retour direct).
+ * deux côtés). Gardée pour mémoire : le retour direct suit maintenant la loi de pan du
+ * projet (lawGains), comme la lecture et l'export.
  */
 export function balanceGains(level: number, pan: number): [number, number] {
   const p = clampPan(pan);
   return [level * Math.min(1, 1 - p), level * Math.min(1, 1 + p)];
+}
+
+/** Gains gauche / droite d'un signal MONO placé par la loi de pan du projet (même loi que la lecture). */
+export function lawGains(level: number, pan: number, law: PanLaw = DEFAULT_PAN_LAW): [number, number] {
+  const [g, d] = panGains(clampPan(pan), law);
+  return [level * g, level * d];
 }
 
 export interface CueProblem {
@@ -112,10 +134,14 @@ export interface MonitorRoute { in: number; out: number; gain: number }
 /**
  * Matrice du retour direct dans le pont : voix des pistes armées → sorties 1-2 (master,
  * ou le mix casque écouté) et → la paire de chaque mix casque. Une entrée stéréo va
- * gauche → gauche, droite → droite ; une entrée mono est placée par la loi de balance.
+ * gauche → gauche, droite → droite (piste stéréo : par son double pan G / D) ; une entrée mono
+ * est placée par la loi de pan du projet (22/10/2026 : avant, une loi de balance, 0 dB au
+ * centre, différente de la lecture).
  */
 export function directMonitorRoutes(o: {
-  armed: { track: Pick<Track, 'id' | 'volume' | 'pan'>; channels: number[] }[];
+  /** Loi de pan du projet (absente : −3 dB). */
+  panLaw?: PanLaw;
+  armed: { track: Pick<Track, 'id' | 'volume' | 'pan'> & { stereoPan?: Track['stereoPan']; stereo?: boolean }; channels: number[] }[];
   mixes: CueMix[];
   monitoring: boolean;
   monitorLevel: number;
@@ -130,24 +156,37 @@ export function directMonitorRoutes(o: {
     const r = routes.find(x => x.in === cin && x.out === out);
     if (r) r.gain += gain; else routes.push({ in: cin, out, gain });
   };
-  const send = (ch: number[], l: CueLevel, scale: number, pair: number) => {
+  const law = o.panLaw ?? DEFAULT_PAN_LAW;
+  // `pos` : [pan, 1] (piste mono) ou [G, D] (piste stéréo).
+  const send = (ch: number[], l: CueLevel, scale: number, pair: number, pos: [number, number], stereo: boolean) => {
     if (l.muted || !ch.length) return;
-    if (ch.length >= 2) { add(ch[0], 2 * pair, l.level * scale); add(ch[1], 2 * pair + 1, l.level * scale); return; }
-    const [gl, gr] = balanceGains(l.level * scale, l.pan);
+    const g = l.level * scale;
+    if (ch.length >= 2) {
+      const m = stereo ? stereoMatrix(pos[0], pos[1], law) : monoMatrix(pos[0], law);
+      add(ch[0], 2 * pair, g * m.ll); add(ch[0], 2 * pair + 1, g * m.lr);
+      add(ch[1], 2 * pair, g * m.rl); add(ch[1], 2 * pair + 1, g * m.rr);
+      return;
+    }
+    const [gl, gr] = lawGains(g, pos[0], law);
     add(ch[0], 2 * pair, gl); add(ch[0], 2 * pair + 1, gr);
+  };
+  const mainPos = (t: { pan: number; stereoPan?: Track['stereoPan']; stereo?: boolean }): [number, number] => {
+    if (!t.stereo) return [clampPan(t.pan ?? 0), 1];
+    const sp = stereoPanOf({ pan: t.pan ?? 0, stereoPan: t.stereoPan });
+    return [sp.l, sp.r];
   };
   const listen = o.listenId ? o.mixes.find(m => m.id === o.listenId) : undefined;
   if (o.monitoring) {
     for (const a of o.armed) {
       // Sorties 1-2 : le retour habituel (niveau du retour casque), ou le mix casque écouté.
-      if (listen) send(a.channels, cueLevelOf(listen, a.track), (listen.master ?? 1) * o.monitorLevel, 0);
-      else send(a.channels, { level: 1, pan: a.track.pan ?? 0 }, o.monitorLevel, 0);
+      if (listen) send(a.channels, cueLevelOf(listen, a.track), (listen.master ?? 1) * o.monitorLevel, 0, cuePanPositions(listen, a.track, !!a.track.stereo), !!a.track.stereo);
+      else send(a.channels, { level: 1, pan: a.track.pan ?? 0 }, o.monitorLevel, 0, mainPos(a.track), !!a.track.stereo);
     }
   }
   const opts = { bridge: o.bridge !== false, outputChannels: o.outputChannels };
   for (const m of o.mixes) {
     if (!cueRoutable(m, opts)) continue;
-    for (const a of o.armed) send(a.channels, cueLevelOf(m, a.track), m.master ?? 1, m.pair);
+    for (const a of o.armed) send(a.channels, cueLevelOf(m, a.track), m.master ?? 1, m.pair, cuePanPositions(m, a.track, !!a.track.stereo), !!a.track.stereo);
   }
   return routes.map(r => ({ ...r, gain: Math.round(r.gain * 1e6) / 1e6 }));
 }
@@ -185,8 +224,8 @@ export function sanitizeCueMixes(raw: unknown): CueMix[] {
     out.push({
       id, name: typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 40) : 'Casque',
       pair: Number.isInteger(m.pair) && m.pair >= 0 && m.pair < 16 ? m.pair : 1,
-      levels, click: Math.max(0, Math.min(2, Number.isFinite(Number(m.click)) ? Number(m.click) : 0.7)),
-      master: Math.max(0, Math.min(2, Number.isFinite(Number(m.master)) ? Number(m.master) : 1)),
+      levels, click: Math.max(0, Math.min(FADER_MAX_GAIN, Number.isFinite(Number(m.click)) ? Number(m.click) : 0.7)),
+      master: Math.max(0, Math.min(FADER_MAX_GAIN, Number.isFinite(Number(m.master)) ? Number(m.master) : 1)),
       ...(m.muted ? { muted: true } : {}),
     });
   }

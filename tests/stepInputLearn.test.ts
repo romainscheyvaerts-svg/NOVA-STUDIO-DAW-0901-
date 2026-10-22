@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import { describe, expect, it } from 'vitest';
 import { StepInput, STEP_VALUES, stepSeconds } from '../utils/stepInput';
 import { MidiLearnStore, ccToVolume, ccToPan, learnValue } from '../utils/midiLearn';
@@ -87,7 +88,8 @@ describe('MIDI Learn', () => {
   it('courbes : volume (CC100 = 0 dB), pan centré à 64, réglage d’effet sur sa plage', () => {
     expect(ccToVolume(100)).toBeCloseTo(1, 9);
     expect(ccToVolume(0)).toBe(0);
-    expect(ccToVolume(127)).toBeLessThanOrEqual(1.5);
+    expect(ccToVolume(127)).toBeLessThanOrEqual(FADER_MAX_GAIN);
+    expect(20 * Math.log10(ccToVolume(127))).toBeCloseTo(4.15, 1);
     expect(ccToPan(64)).toBe(0);
     expect(ccToPan(0)).toBe(-1);
     expect(ccToPan(127)).toBe(1);

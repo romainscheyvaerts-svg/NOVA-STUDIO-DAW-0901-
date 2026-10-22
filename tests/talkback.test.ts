@@ -209,17 +209,26 @@ describe('talkback local : plan (voix, dim) et réglages', () => {
 // ---------------------------------------------------------------------------------------
 // Graphe audio minimal (connexions + gains) pour suivre où va le son.
 class FakeParam {
-  value = 1;
-  setTargetAtTime(v: number) { this.value = v; }
+  private v = 1;
+  /** Piloté par un signal (pan à la loi : table → gain de la matrice) : compté comme un gain positif. */
+  driven = false;
+  get value() { return this.driven ? 0.5 + this.v : this.v; }
+  set value(x: number) { this.v = x; }
+  setTargetAtTime(v: number) { this.v = v; }
+  setValueAtTime(v: number) { this.v = v; }
 }
 class FakeNode {
   out = new Set<FakeNode>();
   gain = new FakeParam();
   pan = new FakeParam();
-  channelCount = 2; channelCountMode = 'max';
+  offset = new FakeParam();
+  curve: Float32Array | null = null;
+  channelCount = 2; channelCountMode = 'max'; channelInterpretation = 'speakers';
   constructor(public name: string) {}
-  connect(n: FakeNode) { this.out.add(n); return n; }
-  disconnect(n?: FakeNode) { if (n) { if (!this.out.delete(n)) throw new Error('pas branché'); } else this.out.clear(); }
+  connect(n: FakeNode | FakeParam) { if (n instanceof FakeParam) { n.driven = true; return n; } this.out.add(n); return n; }
+  disconnect(n?: FakeNode | FakeParam) { if (n instanceof FakeParam) return; if (n) { if (!this.out.delete(n)) throw new Error('pas branché'); } else this.out.clear(); }
+  start() { /* */ }
+  stop() { /* */ }
 }
 class FakeCtx {
   currentTime = 0;
@@ -227,6 +236,11 @@ class FakeCtx {
   private mk(kind: string) { const n = new FakeNode(`${kind}${this.nodes.length}`); this.nodes.push(n); return n; }
   createGain() { return this.mk('gain'); }
   createStereoPanner() { return this.mk('pan'); }
+  // Pan à la loi (engine/panNode) : séparateur, matrice de gains, sources constantes, tables.
+  createChannelSplitter() { return this.mk('split'); }
+  createChannelMerger() { return this.mk('merge'); }
+  createConstantSource() { return this.mk('const'); }
+  createWaveShaper() { return this.mk('shaper'); }
 }
 /** Gain du chemin de `from` vers `to` (somme des chemins, produit des gains traversés ; 0 = pas relié). */
 function pathGain(from: FakeNode, to: FakeNode, seen = new Set<FakeNode>()): number {

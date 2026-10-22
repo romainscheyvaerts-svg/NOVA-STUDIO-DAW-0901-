@@ -45,6 +45,9 @@ checks = []
 res = {"bureau": {}, "rechargement": {}, "telephone": {}}
 
 
+# « Voix » : prise mono (deux canaux identiques) au centre, fader −6 dB, loi de pan −3 dB (22/10/2026) : 0,3 × ½ × √½.
+V660 = 0.15 * math.sqrt(0.5)
+
 def check(name, cond, detail=None):
     checks.append({"verif": name, "ok": bool(cond), **({"detail": detail} if detail is not None else {})})
     print(("OK " if cond else "KO ") + name + ("" if cond else f" : {json.dumps(detail, ensure_ascii=False, default=str)[:900]}"), flush=True)
@@ -269,8 +272,8 @@ def desktop(b, f: Path):
 
     # ── 1. Section d'écoute ────────────────────────────────────────────────
     m = measure(page); R["stereo"] = m
-    check("stéréo : 440 Hz à gauche seulement (0,30), 660 Hz au centre (0,15 après le fader à −6 dB)",
-          near(m["mon"]["L440"], 0.3, 0.01) and m["mon"]["R440"] < 0.005 and near(m["mon"]["L660"], 0.15, 0.008) and near(m["mon"]["R660"], 0.15, 0.008), m)
+    check("stéréo : 440 Hz à gauche seulement (0,30), 660 Hz au centre (0,15 après le fader à −6 dB, × −3 dB de la loi de pan : 0,106)",
+          near(m["mon"]["L440"], 0.3, 0.01) and m["mon"]["R440"] < 0.005 and near(m["mon"]["L660"], V660, 0.008) and near(m["mon"]["R660"], V660, 0.008), m)
     mix_ref = m["mix"]
 
     # 22/10/2026 (barre allégée) : la section d'écoute est dans « Options ▾ » de la barre du haut.
@@ -282,8 +285,8 @@ def desktop(b, f: Path):
     shot(page, "pc_01_panneau_ecoute")
     page.locator('[data-testid="monitor-matrix-mono"]').click()
     m = measure(page); R["mono"] = m
-    check("mono (panneau) : (G + D) / 2 dans les deux canaux — 440 à 0,15 des deux côtés, 660 centré inchangé (0,15)",
-          near(m["mon"]["L440"], 0.15, 0.008) and near(m["mon"]["R440"], 0.15, 0.008) and near(m["mon"]["L660"], 0.15, 0.008) and near(m["mon"]["R660"], 0.15, 0.008), m)
+    check("mono (panneau) : (G + D) / 2 dans les deux canaux — 440 à 0,15 des deux côtés, 660 centré inchangé (0,106)",
+          near(m["mon"]["L440"], 0.15, 0.008) and near(m["mon"]["R440"], 0.15, 0.008) and near(m["mon"]["L660"], V660, 0.008) and near(m["mon"]["R660"], V660, 0.008), m)
     check("mono : le mix (master, ce qui part à l'export) ne change pas", near(m["mix"]["L440"], mix_ref["L440"], 0.005) and m["mix"]["R440"] < 0.005, m["mix"])
     page.locator('[data-testid="monitor-matrix-side"]').click()
     m = measure(page); R["cotes"] = m
@@ -345,21 +348,21 @@ def desktop(b, f: Path):
     set_tracks(page, {"voix": {"isSolo": True}})
     m = measure(page); R["afl_voix"] = m
     eng = page.evaluate(ENGINE_INFO)
-    check("AFL sur « Voix » : on entend la voix seule APRÈS son fader (660 à 0,15, plus de 440)",
-          near(m["mon"]["L660"], 0.15, 0.008) and m["mon"]["L440"] < 0.004, {"m": m["mon"], "moteur": eng})
+    check("AFL sur « Voix » : on entend la voix seule APRÈS son fader (660 à 0,106, plus de 440)",
+          near(m["mon"]["L660"], V660, 0.008) and m["mon"]["L440"] < 0.004, {"m": m["mon"], "moteur": eng})
     check("AFL : le mix (master / export) n'est pas touché (440 toujours là)", near(m["mix"]["L440"], mix_ref["L440"], 0.005) and near(m["mix"]["L660"], mix_ref["L660"], 0.005), m["mix"])
     page.locator('[data-testid="monitor-badge-afl"]').wait_for(timeout=3000)
     check("pastille « AFL » pendant l'écoute", page.locator('[data-testid="monitor-badge-afl"]').count() == 1)
     shot(page, "pc_06_afl_voix")
     page.evaluate(STORE, {"listen": "pfl"})
     m = measure(page); R["pfl_voix"] = m
-    check("PFL sur « Voix » : AVANT le fader (660 à 0,30), le mix intact",
+    check("PFL sur « Voix » : AVANT le fader et le pan (660 à 0,30), le mix intact",
           near(m["mon"]["L660"], 0.3, 0.012) and m["mon"]["L440"] < 0.004 and near(m["mix"]["L440"], mix_ref["L440"], 0.005), m)
     set_tracks(page, {"bus-voix": {"isSolo": True}})
     page.evaluate(STORE, {"listen": "afl"})
     m = measure(page); eng = page.evaluate(ENGINE_INFO); R["afl_bus_et_voix"] = {"m": m, "moteur": eng}
-    check("AFL : « Voix » et son bus en solo → prélevés une seule fois (660 à 0,15, pas 0,30)",
-          near(m["mon"]["L660"], 0.15, 0.008) and [t["id"] for t in eng["taps"]] == ["bus-voix"], {"m": m["mon"], "moteur": eng})
+    check("AFL : « Voix » et son bus en solo → prélevés une seule fois (660 à 0,106, pas le double)",
+          near(m["mon"]["L660"], V660, 0.008) and [t["id"] for t in eng["taps"]] == ["bus-voix"], {"m": m["mon"], "moteur": eng})
     set_tracks(page, {"bus-voix": {"isSolo": False}, "voix": {"isSolo": False}, "vca": {"isSolo": True}})
     m = measure(page); eng = page.evaluate(ENGINE_INFO); R["afl_vca"] = {"m": m, "moteur": eng}
     check("AFL sur le VCA : on entend ses pistes (« Gauche » : 440 à gauche seulement)",
@@ -383,7 +386,7 @@ def desktop(b, f: Path):
     set_tracks(page, {"vca": {"isSolo": False}, "voix": {"isSolo": True}})
     m = measure(page); eng = page.evaluate(ENGINE_INFO); R["sip_voix"] = {"m": m, "moteur": eng}
     check("solo dans le mix (comme avant) : « Gauche » se tait dans le mix, l'écoute = le mix, aucun prélèvement",
-          m["mix"]["L440"] < 0.004 and near(m["mix"]["L660"], 0.15, 0.008) and not eng["taps"] and not eng["active"], {"m": m, "moteur": eng})
+          m["mix"]["L440"] < 0.004 and near(m["mix"]["L660"], V660, 0.008) and not eng["taps"] and not eng["active"], {"m": m, "moteur": eng})
     set_tracks(page, {"voix": {"isSolo": False}})
     page.evaluate("() => window.DAW_CONTROL.setView('ARRANGEMENT')"); page.wait_for_timeout(600)
 
@@ -441,7 +444,8 @@ def desktop(b, f: Path):
     page.evaluate(RENDER_JS, [2.0, ["master", "clic"]]); page.evaluate(KEEP_REF, "ir"); e = page.evaluate(ECHO_JS); R["echo_export"] = e
     check("export : l'écho de la réponse importée est à 50 ms de chaque clic (± 0,1 ms : son timing exact)", all(abs(x["retard_ms"] - 50) <= 0.1 for x in e), e)
     check("export : réponse stéréo respectée (gauche = 2 × droite, ± 5 %)", all(x["picR"] > 0 and abs(x["picL"] / x["picR"] - 2) < 0.1 for x in e), e)
-    exp_amp = 0.9 * 0.8 * (1 / math.sqrt((0.64 + 0.16) / (2 * SR))) * 10 ** (-58 / 20) * 44100 / SR
+    # Piste « clic » mono au centre : loi de pan −3 dB (22/10/2026), réverbe stéréo en insert gardée × √½.
+    exp_amp = 0.9 * 0.8 * (1 / math.sqrt((0.64 + 0.16) / (2 * SR))) * 10 ** (-58 / 20) * 44100 / SR * math.sqrt(0.5)
     check(f"export : niveau calibré comme prévu (≈ {exp_amp:.3f}, filtres compris)", all(0.6 * exp_amp < x["picL"] < 1.05 * exp_amp for x in e), {"attendu": exp_amp, "echos": e})
     # En direct (AFL sur le clic) : même niveau qu'à l'export
     page.evaluate(STORE, {"listen": "afl"})

@@ -100,9 +100,25 @@ def fader_box(page):
     return page.locator('[data-nova-target="vol-voix"]').first.bounding_box()
 
 
+# Échelle des faders (utils/faderLaw.ts) : (position, dB), 0 dB aux 3/4, butée +12 dB.
+FADER_SCALE = [(1, 12), (0.875, 6), (0.75, 0), (0.65, -5), (0.55, -10), (0.4, -20), (0.28, -30), (0.18, -40), (0.07, -60), (0.005, -120)]
+
+
+def gain_to_pos(gain):
+    import math
+    if gain <= 0:
+        return 0.0
+    db = 20 * math.log10(gain)
+    if db >= 12:
+        return 1.0
+    for (p1, d1), (p0, d0) in zip(FADER_SCALE, FADER_SCALE[1:]):
+        if db >= d0:
+            return p0 + (p1 - p0) * (db - d0) / (d1 - d0)
+    return 0.0
+
+
 def gain_to_x(box, gain):
-    pos = (gain / 1.5) ** 0.5
-    return box["x"] + box["width"] * pos
+    return box["x"] + box["width"] * gain_to_pos(gain)
 
 
 def blur(page):

@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 /**
  * MIDI Learn (R16), comme le « Link to controller » de FL Studio, le MIDI
  * Map de Live et le MIDI Learn des plugins de Pro Tools : un bouton ou un
@@ -37,10 +38,10 @@ const KEY = 'nova.midiLearn';
 export const sameTarget = (a: LearnTarget, b: LearnTarget) =>
   a.kind === b.kind && a.trackId === b.trackId && (a.pluginId || '') === (b.pluginId || '') && (a.paramId || '') === (b.paramId || '');
 
-/** CC 0-127 → volume de piste (0-1,5) : CC 100 = 0 dB, CC 127 ≈ +2 dB (loi du volume MIDI). */
+/** CC 0-127 → volume de piste : CC 100 = 0 dB, CC 127 ≈ +4 dB (loi du volume MIDI, sous la butée +12 dB). */
 export const ccToVolume = (v: number): number => {
   const x = Math.max(0, Math.min(127, v)) / 100;
-  return Math.min(1.5, x * x);
+  return Math.min(FADER_MAX_GAIN, x * x);
 };
 
 /** CC 0-127 → pan −1…1 (64 = centre). */

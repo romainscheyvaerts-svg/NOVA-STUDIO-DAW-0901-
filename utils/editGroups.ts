@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 import { useSyncExternalStore } from 'react';
 import { Clip, Track, TrackGroup, TrackType } from '../types';
 
@@ -140,7 +141,8 @@ export function groupClipMates(trackId: string, clip: Pick<Clip, 'id' | 'start' 
   return out;
 }
 
-const clampVol = (v: number) => Math.max(0, Math.min(1.5, v));
+// Butée des faders (+12 dB, utils/faderLaw).
+const clampVol = (v: number) => Math.max(0, Math.min(FADER_MAX_GAIN, v));
 const clampPan = (v: number) => Math.max(-1, Math.min(1, v));
 
 /**
@@ -212,7 +214,7 @@ export function mixLinkUpdates(prev: Track, next: Track, ctx: GroupCtx, invert =
             const b = before.get(s.id), n = after.get(s.id);
             if (!b || !n) return s;
             let level = s.level;
-            if (n.level !== b.level) { level = b.level > 1e-9 ? Math.max(0, Math.min(1.5, s.level * (n.level / b.level))) : n.level; }
+            if (n.level !== b.level) { level = b.level > 1e-9 ? Math.max(0, Math.min(FADER_MAX_GAIN, s.level * (n.level / b.level))) : n.level; }
             const isEnabled = n.isEnabled !== b.isEnabled ? n.isEnabled : s.isEnabled;
             if (level === s.level && isEnabled === s.isEnabled) return s;
             touched = true;

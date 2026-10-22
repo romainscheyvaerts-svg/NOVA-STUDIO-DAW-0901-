@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './utils/faderLaw';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix, TimeSignature } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
@@ -143,6 +144,9 @@ const ModulatorsPanel = lazyWithPreload(() => import('./components/ModulatorsPan
 const SessionPlayerPanel = lazyWithPreload(() => import('./components/SessionPlayerPanel'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
+import { isStereoTrack, lanesForFormat, PAN_L, PAN_R, sanitizePanLaw } from './utils/panLaw';
+import { interpolateCurve } from './utils/automationWrite';
+import { showPanLaw } from './utils/panLawStore';
 import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
 import { ProjectRateConfirm } from './components/ProjectRateControls';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
@@ -417,7 +421,7 @@ const AVAILABLE_FX_MENU = [
 
 const createDefaultAutomation = (param: string, color: string): AutomationLane => ({
   id: `auto-${Date.now()}-${Math.random()}`,
-  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: 1.5
+  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: FADER_MAX_GAIN
 });
 
 /**
@@ -760,7 +764,9 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
         newState.projectScale !== curr.present.projectScale ||
         newState.beatTitle !== curr.present.beatTitle ||
         // Fréquence du projet (Session › Réglages) : Ctrl+Z revient à l'ancienne (sons reconvertis).
-        newState.sampleRate !== curr.present.sampleRate;
+        newState.sampleRate !== curr.present.sampleRate ||
+        // Loi de pan du projet (Options ▾ › Mixage) : une étape d'annulation.
+        newState.panLaw !== curr.present.panLaw;
 
       if (!modificationReelle) return { ...curr, present: newState };
       // Autre projet ouvert : historique vidé (Ctrl+Z ne ramène plus le projet d'avant, utils/undoHistory).
@@ -780,7 +786,7 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre', 'sampleRate'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre', 'sampleRate', 'panLaw'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -1689,6 +1695,34 @@ function Studio() {
     }
   };
 
+  // ─── Loi de pan du projet (utils/panLaw, 22/10/2026) ─────────────────────────────
+  // Le moteur (lecture, export, envois, casques, retour direct) et les menus suivent l'état :
+  // ouverture d'un projet, Ctrl+Z, collaboration (champ « panLaw »). Absente : −3 dB.
+  useEffect(() => {
+    const law = sanitizePanLaw(state.panLaw);
+    audioEngine.setPanLaw(law);
+    showPanLaw(law);
+  }, [state.panLaw]);
+  useEffect(() => {
+    const onSet = (e: Event) => {
+      const law = sanitizePanLaw((e as CustomEvent).detail?.law);
+      setState(prev => (sanitizePanLaw(prev.panLaw) === law ? prev : { ...prev, panLaw: law }));
+    };
+    window.addEventListener('nova:set-pan-law', onSet);
+    return () => window.removeEventListener('nova:set-pan-law', onSet);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Ancien couloir « Panoramique » d'une piste stéréo (projet d'avant le double pan) : converti
+  // une fois en « Pan G » / « Pan D » (même son, utils/panLaw · convertPanLane), dès que le son de
+  // la piste est connu. Le moteur le convertit de toute façon à la lecture et à l'export.
+  useEffect(() => {
+    const old = (t: Track) => !!t.automationLanes?.some(l => l.parameterName === 'pan' && l.points.length)
+      && !t.automationLanes.some(l => l.parameterName === PAN_L || l.parameterName === PAN_R) && isStereoTrack(t);
+    if (!state.tracks.some(old)) return;
+    setSilently(prev => ({ ...prev, tracks: prev.tracks.map(t => (old(t) ? { ...t, automationLanes: lanesForFormat(t.automationLanes, true, interpolateCurve) } : t)) }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.tracks]);
+
   // ─── Fréquence d'échantillonnage du projet (utils/projectRate, utils/hqAudio) ──────
   // Le moteur suit TOUJOURS la fréquence de l'état : réglage de session, opération de
   // collaboration (champ « sampleRate »), Ctrl+Z / Ctrl+Y. Contexte recréé, sons convertis
@@ -2397,12 +2431,14 @@ function Studio() {
     // Detect atomic updates (volume/pan only) to avoid expensive graph rebuild
     if (previousTrack) {
         const isVolumeOnlyChange = previousTrack.volume !== updatedTrack.volume &&
-            previousTrack.pan === updatedTrack.pan &&
+            previousTrack.pan === updatedTrack.pan && previousTrack.stereoPan === updatedTrack.stereoPan &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
             previousTrack.plugins === updatedTrack.plugins && previousTrack.sends === updatedTrack.sends && previousTrack.clips === updatedTrack.clips;
 
-        const isPanOnlyChange = previousTrack.pan !== updatedTrack.pan &&
+        // Pan (ou double pan G / D d'une piste stéréo) seul : chemin rapide, sans recâbler.
+        const isPanOnlyChange = (previousTrack.pan !== updatedTrack.pan || previousTrack.stereoPan !== updatedTrack.stereoPan) &&
+            previousTrack.panFormat === updatedTrack.panFormat &&
             previousTrack.volume === updatedTrack.volume &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
@@ -2414,7 +2450,7 @@ function Studio() {
                 audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume, updatedTrack.isMuted);
             }
             if (isPanOnlyChange) {
-                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
+                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan, updatedTrack);
             }
             // Cette piste-là n'a pas besoin d'être reconstruite.
             atomicTracksRef.current.set(updatedTrack.id, updatedTrack);
@@ -7772,7 +7808,7 @@ function Studio() {
       if (knownSongRef.current.get(f) !== sig) { changed[f] = fields[f]; knownSongRef.current.set(f, sig); }
     }
     if (Object.keys(changed).length) c.client.queue('song', 'song', { fields: changed });
-  }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, collab]);
+  }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, state.panLaw, collab]);
 
   // Page fermée, rechargée ou mise en arrière-plan : les réglages qui attendaient leur envoi
   // (regroupés 250 ms) partent tout de suite dans la file — gardée dans le navigateur, elle

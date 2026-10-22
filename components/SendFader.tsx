@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { automationRecorder } from '../services/AutomationManager';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
-import { dragSendLevel, sendDbText, sendPos } from '../utils/sendFader';
+import { dragSendLevel, sendDbText, sendPos, SEND_MAX } from '../utils/sendFader';
 
 /**
  * Envoi réglé au doigt comme un fader (utils/sendFader) : barre horizontale,
@@ -49,7 +49,7 @@ export const SendFader: React.FC<{
       tabIndex={0}
       aria-label={label}
       aria-valuemin={0}
-      aria-valuemax={1.5}
+      aria-valuemax={SEND_MAX}
       aria-valuenow={Number(shown.toFixed(4))}
       aria-valuetext={sendDbText(shown)}
       data-testid={testId}

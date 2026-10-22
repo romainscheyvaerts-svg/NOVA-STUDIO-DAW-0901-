@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 import {
   AutomationPoint, Clip, FreezeRef, PluginInstance, RemoteIngePhase, RemoteTrackInfo, SendFreeze, Track, TrackSend, TrackType,
 } from '../types';
@@ -293,7 +294,7 @@ export function applySendOnEngineer(tracks: Track[], p: RemoteSendPayload, from?
   t.clips = p.clips.map(c => ({ ...c }));
   const lanes = (t.automationLanes || []).filter(l => l.parameterName !== PRE_VOLUME);
   if (p.preVolume?.length) {
-    lanes.push({ id: `prevol-${t.id}`, parameterName: PRE_VOLUME, points: p.preVolume.map(x => ({ ...x })), color: t.color, isExpanded: false, min: 0, max: 1.5 });
+    lanes.push({ id: `prevol-${t.id}`, parameterName: PRE_VOLUME, points: p.preVolume.map(x => ({ ...x })), color: t.color, isExpanded: false, min: 0, max: FADER_MAX_GAIN });
   }
   t.automationLanes = lanes;
   // Dégel : le rendu reste en cache (périmé), la chaîne réelle rejoue l'audio sec.

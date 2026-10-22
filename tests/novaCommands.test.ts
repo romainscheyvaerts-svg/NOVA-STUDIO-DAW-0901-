@@ -225,10 +225,13 @@ describe('parseLocalCommand : détails des actions', () => {
     expect(first('monte les backs')?.payload).toEqual({ trackId: 'track-backs', volume: 0.61 });
   });
 
-  it('volume plafonné à 150 %', () => {
+  it('volume plafonné à la butée des faders (+12 dB)', () => {
     const st = studio();
+    st.tracks[1].volume = 3.9;
+    expect(first('monte ma voix', st)?.payload.volume).toBe(3.98);
+    // Au-delà de l'ancienne butée (+3,5 dB) : « monte » continue de monter.
     st.tracks[1].volume = 1.45;
-    expect(first('monte ma voix', st)?.payload.volume).toBe(1.5);
+    expect(first('monte ma voix', st)?.payload.volume).toBe(1.77);
   });
 
   it('la piste voix sélectionnée est visée en priorité', () => {
