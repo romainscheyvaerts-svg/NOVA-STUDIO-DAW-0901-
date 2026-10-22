@@ -2743,10 +2743,10 @@ useEffect(() => {
       ...(audioOnly && !cm.clip.notes && cm.clip.bufferId ? [
         'separator' as const,
         { label: 'Convertir en sampler', icon: 'fa-wave-square',
-          title: 'Met ce son dans un sampler sur une nouvelle piste : il se joue sur tout le clavier, note racine trouvée toute seule (Live : Convert to Simpler · FL : envoyer au Sampler · Logic : Quick Sampler)',
+          title: 'Met ce son dans un sampler sur une nouvelle piste : il se joue sur tout le clavier, note racine trouvée toute seule',
           onClick: () => { requestSampler({ kind: 'from-clip', trackId: cm.trackId, clipId: cm.clip.id }); close(); } },
         { label: 'Découper (chop)…', icon: 'fa-cut',
-          title: 'Découpe ce sample sur les attaques ou à la grille, vers des notes d’un sampler (avec un clip MIDI qui rejoue l’original) ou vers des pads (FL : Slicex · Live : Slice to New MIDI Track · Logic : Quick Sampler en Slice)',
+          title: 'Découpe ce sample sur les attaques ou à la grille, vers des notes d’un sampler (avec un clip MIDI qui rejoue l’original) ou vers des pads',
           onClick: () => { requestSampler({ kind: 'chop-clip', trackId: cm.trackId, clipId: cm.clip.id }); close(); } },
       ] : []),
     ], 'Pour les clips audio.');
@@ -2754,11 +2754,11 @@ useEffect(() => {
     // 7. MIDI : audio → MIDI (V20, Convert … to MIDI d'Ableton Live), groove, export .mid.
     const midi = group('MIDI', 'fa-music', [
       ...(audioOnly ? [
-        { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic)',
+        { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe',
           onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'melody' } }); close(); } },
-        { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI (comme Convert Drums to MIDI d’Ableton Live)',
+        { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI',
           onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'drums' } }); close(); } },
-        { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic)',
+        { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords',
           onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'harmony' } }); close(); } },
         'separator' as const,
       ] : []),
