@@ -200,6 +200,9 @@ BATTERIE = [
     # 22/10/2026 · tour beatmaking : « Nouveau beat » / « Faire un beat », pas peints au glisser, clic allumé ↔ éteint,
     # pads au clavier < 5 ms, piano roll (Maj + flèches, Ctrl+L, Ctrl + glisser = copie, Q sans étape vide), métronome O.
     ("beat_gestes", []),
+    # 22/10/2026 · séquenceur de batterie pro (menus du pas / du pad, motifs, rythmes publiés, enregistrement, mesures à l'export)
+    # et sampler des pads (enveloppes, filtre, hauteur, couches : chaque valeur affichée mesurée sur le rendu d'export).
+    ("sequenceur_pro", []), ("sampler_pads", []),
     # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
     # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
     ("modulateurs", []),

@@ -39,11 +39,11 @@ vi.mock('../services/supabase', () => ({
 vi.mock('../services/SessionCloud', () => ({ call: h.call, sha1: async () => 'hash', CHUNK: 1024 * 1024 }));
 vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, ctx: null } }));
 
-import { CollabClient, contentOf, sigOf } from '../services/Collab';
+import { CollabClient, contentBufferIds, contentOf, sigOf } from '../services/Collab';
 import { TrackType, Track } from '../types';
 import { makeDrumMachine, DrumMachine } from '../utils/drumKits';
-import { addPattern, commitActive, drumSongClips, placePattern } from '../utils/drumPatterns';
-import { assignSample } from '../utils/drumSamples';
+import { addPattern, commitActive, drumSongClips, placePattern, setStepParam } from '../utils/drumPatterns';
+import { assignSample, setPadLayer } from '../utils/drumSamples';
 import { makeTrack } from './helpers/fixtures';
 
 const BPM = 120;
@@ -99,6 +99,18 @@ describe('collaboration : un motif modifié voyage', () => {
     const theirs = drumSongClips(got, BPM, 16, 'c');
     expect(theirs.map(c => c.notes)).toEqual(edited.clips.map(c => c.notes));
     expect(received[0].op.content.clips.map((c: any) => c.name)).toEqual(['Motif A', 'Motif B']);
+  });
+
+  it('séquenceur pro : réglages par pas, sampler et couche perso voyagent avec l’opération « content » ; mêmes notes chez l’autre', () => {
+    let dm = makeDrumMachine('trap');
+    dm = setStepParam(setStepParam(setStepParam(dm, 0, 0, 'prob', 50), 0, 0, 'nudge', 20), 0, 0, 'gate', 3);
+    dm = setPadLayer(dm, 0, null, 'user:lay1', 'Couche', { id: 'lay1', info: { name: 'Couche', duration: 0.1 } });
+    dm = { ...dm, seed: 7, rows: dm.rows.map((r, i) => (i === 0 ? { ...r, smp: { ...r.smp, attack: 0.02, filterType: 'hp' as const, layerMode: 'rr' as const } } : r)) };
+    const t = drumTrack(dm);
+    const wire = JSON.parse(JSON.stringify(contentOf(t)));
+    expect(wire.drumMachine.rows[0].smp).toMatchObject({ attack: 0.02, filterType: 'hp', layerMode: 'rr' });
+    expect(contentBufferIds(t)).toContain('padsample-lay1');
+    expect(drumSongClips(wire.drumMachine, BPM, 16, 'c').map(c => c.notes)).toEqual(t.clips.map(c => c.notes));
   });
 
   it('une ancienne version (sans motifs) lit encore le motif affiché dans rows', () => {

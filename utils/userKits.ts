@@ -1,5 +1,5 @@
 import type { DrumMachine, DrumRow } from './drumKits';
-import { rowLength } from './drumPatterns';
+import { mapPatternRecords, rowLength, STEP_LANES } from './drumPatterns';
 import { PadSampleInfo, userSampleId } from './drumSamples';
 
 /**
@@ -41,21 +41,24 @@ export const newKitId = () => `kit${Date.now().toString(36)}${Math.random().toSt
 export const kitName = (n: string) => (n || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'Mon kit';
 
 const padOf = (r: DrumRow): KitPad => {
-  const { steps: _s, ratchet: _r, stepPan: _p, stepPitch: _h, muted: _m, solo: _o, ...pad } = r;
+  const { steps: _s, ratchet: _r, muted: _m, solo: _o, ...pad } = r;
+  // Couloirs par pas (pan, hauteur, probabilité…) : ils vont avec le motif, pas avec le son du kit.
+  for (const l of STEP_LANES) delete (pad as Partial<DrumRow>)[l.row];
   return JSON.parse(JSON.stringify(pad));
 };
 
 /** Kit à partir de la batterie du projet (le son des samples perso est fourni par `wavOf`). */
 export function kitFromDrumMachine(dm: DrumMachine, name: string, wavOf: (sampleId: string) => ArrayBuffer | undefined, now = Date.now()): UserKit {
   const samples: UserKit['samples'] = {};
-  dm.rows.forEach(r => {
-    const id = userSampleId(r.sound);
+  // Son du pad et sons de ses couches (sampler de pad).
+  dm.rows.forEach(r => [r.sound, ...(r.smp?.layers || []).map(l => l.sound)].forEach(snd => {
+    const id = userSampleId(snd);
     if (id && !samples[id]) {
       const info = dm.samples?.[id] || { name: r.name, duration: 0 };
       const { audioRef: _a, ...clean } = info;
       samples[id] = { info: clean, wav: wavOf(id) };
     }
-  });
+  }));
   return {
     id: newKitId(), name: kitName(name), format: KIT_FORMAT, createdAt: now, updatedAt: now,
     kitId: dm.kitId, ...(dm.swing ? { swing: dm.swing } : {}), pads: dm.rows.map(padOf), samples,
@@ -79,24 +82,19 @@ export function applyKit(dm: DrumMachine | null, kit: UserKit): DrumMachine {
       ...JSON.parse(JSON.stringify(p)),
       steps: keep ? [...prev!.steps] : new Array(len).fill(0),
       ratchet: keep ? [...prev!.ratchet] : new Array(len).fill(1),
-      ...(keep && prev!.stepPan ? { stepPan: [...prev!.stepPan] } : {}),
-      ...(keep && prev!.stepPitch ? { stepPitch: [...prev!.stepPitch] } : {}),
+      ...Object.fromEntries(STEP_LANES.filter(l => keep && prev![l.row]).map(l => [l.row, [...prev![l.row]!]])),
     } as DrumRow;
   });
   // Motifs : les pas suivent le pad renommé (id du kit) ; les pads retirés disparaissent.
   const renamed = new Map<string, string>();
   kit.pads.forEach(p => { const prev = match(p); if (prev && prev.id !== p.id) renamed.set(prev.id, p.id); });
   const ids = new Set(rows.map(r => r.id));
-  const remap = <T,>(rec: Record<string, T> | undefined): Record<string, T> | undefined => {
-    if (!rec) return rec;
-    const out: Record<string, T> = {};
+  const remap = (rec: Record<string, number[]>): Record<string, number[]> => {
+    const out: Record<string, number[]> = {};
     Object.entries(rec).forEach(([k, v]) => { const id = renamed.get(k) || k; if (ids.has(id)) out[id] = v; });
     return out;
   };
-  const patterns = dm?.patterns?.map(p => ({
-    ...p, steps: remap(p.steps)!, ratchet: remap(p.ratchet)!,
-    ...(p.pan ? { pan: remap(p.pan) } : {}), ...(p.pitch ? { pitch: remap(p.pitch) } : {}),
-  }));
+  const patterns = dm?.patterns?.map(p => mapPatternRecords(p, remap));
   const samples: Record<string, PadSampleInfo> = {};
   Object.entries(kit.samples).forEach(([id, s]) => { samples[id] = { ...s.info }; });
   return {
