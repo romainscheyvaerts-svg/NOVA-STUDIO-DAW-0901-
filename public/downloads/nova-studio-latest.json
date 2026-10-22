@@ -1,14 +1,13 @@
 {
-  "version": "1.5.13",
-  "url": "downloads/NovaStudioSetup-1.5.13.exe",
-  "sha256": "f8c687910f97f2f103cf3bdec9fbb49fdf369da81257d3a152b0b5c67cae4ed5",
-  "size": 51256226,
-  "date": "2026-10-22T02:56:42+02:00",
+  "version": "1.5.14",
+  "url": "downloads/NovaStudioSetup-1.5.14.exe",
+  "sha256": "1195cd2d66f84e29196a80c895b236c95886d3cc9f15c9668d272d81bccd9035",
+  "size": 51267137,
+  "date": "2026-10-22T04:46:53+02:00",
   "notes": [
-    "Lecture avec un effet à latence (EQ phase linéaire, limiteur) : le début des sons n'est plus coupé.",
-    "Piano roll : la grille suit les rampes de tempo.",
-    "Collaboration : annuler un changement de tempo ramène tout le monde au même état.",
-    "Rack parallèle : les réglages des effets de ses branches s'automatisent.",
-    "Compresseur multibande et EQ dynamique : clé externe (side-chain), par exemple le kick qui creuse la basse."
+    "Musiciens de séance : un batteur, un bassiste (808) et des claviers qui jouent tout seuls en suivant tes accords ; styles Trap, Drill UK, Drill FR, Boom bap, R&B, Afro ; intensité, complexité et remplissages par section.",
+    "Boucle avec un effet à latence : le début n'est plus coupé à chaque tour.",
+    "Automation : toucher un réglage d'un effet du rack parallèle l'écrit (Touch, Latch, Write).",
+    "Modulateurs : suiveur d'enveloppe (ex. le kick qui creuse le volume de la basse)."
   ]
 }
