@@ -309,10 +309,10 @@ describe('réponse impulsionnelle importée (mise en forme)', () => {
     for (const i of [0, 50, 5000]) expect(short[0][i]).toBe(full[0][i]);
   });
 
-  it('calibration = règle du convolveur de Chrome (1 / RMS, −58 dB, ramenée à 44,1 kHz)', () => {
+  it('calibration = règle du convolveur de la spec Web Audio (1 / RMS × 0,00125, ramenée à 44,1 kHz)', () => {
     const ir = new Float32Array(1000).fill(0.5);
-    expect(irCalibration([ir], 44100)).toBeCloseTo((1 / 0.5) * Math.pow(10, -58 / 20), 9);
-    expect(irCalibration([ir], 48000)).toBeCloseTo((1 / 0.5) * Math.pow(10, -58 / 20) * 44100 / 48000, 9);
+    expect(irCalibration([ir], 44100)).toBeCloseTo((1 / 0.5) * 0.00125, 12);
+    expect(irCalibration([ir], 48000)).toBeCloseTo((1 / 0.5) * 0.00125 * 44100 / 48000, 12);
     expect(Number.isFinite(irCalibration([new Float32Array(10)], SR))).toBe(true);
   });
 

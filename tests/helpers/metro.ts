@@ -128,6 +128,8 @@ export interface MetroRow {
 }
 
 const rows: MetroRow[] = [];
+/** Mesures hors tolérance depuis le dernier assertMetro(). */
+let failed: MetroRow[] = [];
 
 /** Ajoute une ligne au journal et renvoie `ok` (pour expect). */
 export function metro(sujet: string, reglage: string, affiche: number | string, mesure: number | string, unite: string, tol: number | null, ecartVal?: number, fmt = 3): boolean {
@@ -142,7 +144,16 @@ export function metro(sujet: string, reglage: string, affiche: number | string, 
     tolerance: tol === null ? 'info' : `±${tol} ${unite}`.trim(),
     ok,
   });
+  if (!ok) failed.push(rows[rows.length - 1]);
   return ok;
+}
+
+/** Échoue (une seule fois, avec la liste) si une mesure est sortie de sa tolérance depuis le dernier appel. */
+export function assertMetro() {
+  const f = failed;
+  failed = [];
+  const NL = String.fromCharCode(10);
+  if (f.length) throw new Error(`Hors tolérance (${f.length}) :${NL}` + f.map(r => `  ${r.sujet} | ${r.reglage} : affiché ${r.affiche} → mesuré ${r.mesure} (écart ${r.ecart}, tolérance ${r.tolerance})`).join(NL));
 }
 
 /** Écrit le journal du fichier de test (fusionné avec les autres fichiers du banc). */
