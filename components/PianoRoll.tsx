@@ -21,10 +21,10 @@ import { MidiCcPoint } from '../utils/midiCc';
 import { StepInput, STEP_VALUES, stepSeconds } from '../utils/stepInput';
 import { useTheme } from '../utils/themeStore';
 import { useSimpleMode } from '../utils/simpleMode';
-import { quantize as quantizeTool } from '../utils/midiTools';
+import { quantize as quantizeTool, legato as legatoTool } from '../utils/midiTools';
 import {
   GRID_CHOICES, gridSec, snapTime as snapGrid, floorTime, newNoteId, paintNotes, splitNoteAt, duplicateRight, copyNotes, pasteNotes,
-  NoteClipboard, humanize, toggleSlide, slideOrigins, velocityColor, inkOn,
+  NoteClipboard, humanize, toggleSlide, slideOrigins, velocityColor, inkOn, resizeNotesBy, copyForDrag,
 } from '../utils/pianoRollPro';
 import './pianoroll/pianoroll.css';
 
@@ -43,7 +43,7 @@ import './pianoroll/pianoroll.css';
 /** Raccourcis du piano roll (contexte « pianoroll » de utils/keymap, remappables). */
 const PIANO_ROLL_SHORTCUT_IDS = [
   'pr.close', 'nova.muteNotes', 'pr.delete', 'pr.selectAll', 'pr.double', 'pr.up', 'pr.down', 'pr.octUp', 'pr.octDown', 'pr.quantize', 'pr.humanize',
-  'pr.copy', 'pr.cut', 'pr.paste', 'pr.left', 'pr.right', 'pr.slide',
+  'pr.copy', 'pr.cut', 'pr.paste', 'pr.left', 'pr.right', 'pr.slide', 'pr.longer', 'pr.shorter', 'pr.legato',
   'pr.toolDraw', 'pr.toolPaint', 'pr.toolSelect', 'pr.toolSlice', 'pr.toolErase',
 ];
 
@@ -303,6 +303,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const lastTap = useRef<{ id: string; t: number } | null>(null);
   /** Note qu'on vient de poser au crayon : glisser règle sa fin sous la souris (FL), puis elle est désélectionnée. */
   const drawResizeRef = useRef<{ id: string; moved: boolean } | null>(null);
+  /** Ctrl ou Maj + glisser une note : copie (l'original reste). `copies` = original → copie, posé au 1er vrai mouvement. */
+  const copyDragRef = useRef<{ ids: Set<string>; copies: Map<string, string> | null; base: MidiNote[] } | null>(null);
 
   // --- OUTILS MIDI (V25) : menu « Outils » avec aperçu, groove, capture ---
   const [toolsAnchor, setToolsAnchor] = useState<{ x: number; y: number } | null | false>(false);
@@ -538,8 +540,13 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
         const isRightEdge = wPx > edge * 2 ? fromEnd < edge : fromEnd < wPx / (isTouch ? 2 : 3);
 
         setInitialNotes(clip.notes || []);
+        copyDragRef.current = null;
         if (isRightEdge && !isDrumMode) setDragMode('RESIZE_R');
-        else setDragMode('MOVE');
+        else {
+          setDragMode('MOVE');
+          // Ctrl / Maj tenu : si la souris bouge, on emporte une COPIE (la note cliquée comprise).
+          if (e.ctrlKey || e.shiftKey || e.metaKey) copyDragRef.current = { ids: new Set([...newSelected, clickedNote.id]), copies: null, base: clip.notes || [] };
+        }
 
         setDragStart({ x: e.clientX, y: e.clientY, time: absTime, pitch, row });
         lastPreviewPitch.current = clickedNote.pitch;
@@ -566,8 +573,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
     if (dragMode === 'MOVE') {
         let previewPitch: number | null = null;
-        const updatedNotes = initialNotes.map(n => {
-            if (selectedNoteIds.has(n.id)) {
+        const cd = copyDragRef.current;
+        if (cd && !cd.copies && Math.hypot(dx, dy) > 4) {
+            const res = copyForDrag(cd.base, cd.ids);
+            cd.copies = res.copies;
+            cd.base = res.notes;
+        }
+        const moving = cd?.copies ? new Set(cd.copies.values()) : selectedNoteIds;
+        const updatedNotes = (cd?.copies ? cd.base : initialNotes).map(n => {
+            if (moving.has(n.id)) {
                 const newStart = snapTime(n.start + deltaTime, e.altKey);
                 const p = shiftPitch(n.pitch, deltaRows);
                 if (previewPitch === null) previewPitch = p;
@@ -680,6 +694,13 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     }
     // Une note posée au crayon n'est pas laissée sélectionnée (FL) : « Glissé », « Q »… visent la sélection voulue.
     if (drawResizeRef.current) { drawResizeRef.current = null; setSelectedNoteIds(new Set()); }
+    // Glisser-copier : les copies deviennent la sélection.
+    const cd = copyDragRef.current;
+    copyDragRef.current = null;
+    if (cd?.copies && cd.copies.size) {
+        setSelectedNoteIds(new Set(cd.copies.values()));
+        setLastChord(`${cd.copies.size} note${cd.copies.size > 1 ? 's' : ''} copiée${cd.copies.size > 1 ? 's' : ''} en glissant (Ctrl+Z pour annuler)`);
+    }
     lastPreviewPitch.current = null;
     setDragMode(null);
     setDragStart(null);
@@ -812,8 +833,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     if (!all.length) { setLastChord('Rien à quantifier : pose d’abord des notes.'); return; }
     const sel = selectedNoteIds.size > 0 ? selectedNoteIds : null;
     const next = quantizeTool(all, sel, { bpm, clipStart }, { grid: gridId, strength: quantizeStrength / 100, swing: quantizeSwing, ends: quantizeEnds });
-    updateNotes(next);
     const k = sel ? sel.size : all.length;
+    // Déjà sur la grille : rien n'est écrit (avant, une étape d'annulation vide : Ctrl+Z « ne faisait rien »).
+    const byId = new Map(all.map(n => [n.id, n]));
+    if (next.length === all.length && next.every(n => { const o = byId.get(n.id); return !!o && Math.abs(o.start - n.start) < 1e-6 && Math.abs(o.duration - n.duration) < 1e-6; })) {
+      setLastChord(`${k > 1 ? 'Les notes sont déjà' : 'La note est déjà'} sur la grille ${GRID_CHOICES.find(g => g.id === gridId)?.label}.`);
+      return;
+    }
+    updateNotes(next);
     setLastChord(`${k} note${k > 1 ? 's' : ''} quantifiée${k > 1 ? 's' : ''} sur ${GRID_CHOICES.find(g => g.id === gridId)?.label} · force ${quantizeStrength} %${quantizeSwing > 50 ? ` · swing ${quantizeSwing} %` : ''} (Ctrl+Z pour annuler)`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNoteIds, gridId, quantizeStrength, quantizeSwing, quantizeEnds, bpm, clip.notes, clipStart]);
@@ -825,7 +852,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
   // --- DUPLIQUER À LA SUITE (FL : Ctrl+B, Live : Ctrl+D) ---
   const doubleNotes = useCallback(() => {
-    if (selectedNoteIds.size === 0) { setLastChord('Sélectionne des notes (Ctrl+A : tout), puis Ctrl+B pour les recopier à la suite.'); return; }
+    if (selectedNoteIds.size === 0) { setLastChord('Sélectionne des notes (Ctrl+A : tout), puis Ctrl+D pour les recopier à la suite.'); return; }
     const res = duplicateRight(clip.notes || [], selectedNoteIds, grid, barSec);
     updateNotes(res.notes);
     setSelectedNoteIds(new Set(res.added.map(n => n.id)));
@@ -858,6 +885,20 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const nudge = (dir: number) => {
     if (!selectedNoteIds.size) return;
     updateNotes((clip.notes || []).map(n => (selectedNoteIds.has(n.id) ? { ...n, start: Math.max(0, followMap ? snapTime(n.start + dir * cellLenAt(dir < 0 ? n.start - 1e-6 : n.start)) : n.start + dir * grid) } : n)));
+  };
+
+  // --- LONGUEUR AU CLAVIER (Maj + ← / →) et LEGATO (Ctrl+L) ---
+  const resizeSel = (dir: number) => {
+    if (!selectedNoteIds.size) { setLastChord('Sélectionne des notes, puis Maj + → / ← pour les allonger ou les raccourcir.'); return; }
+    const cell = followMap ? cellLenAt(0) : grid;
+    updateNotes(resizeNotesBy(clip.notes || [], selectedNoteIds, dir * cell, cell));
+  };
+  const legatoSel = () => {
+    const all = clip.notes || [];
+    if (all.length < 2) { setLastChord('Legato : il faut au moins deux notes.'); return; }
+    const sel = selectedNoteIds.size > 0 ? selectedNoteIds : null;
+    updateNotes(legatoTool(all, sel, { bpm, clipStart }));
+    setLastChord(`Legato : ${sel ? 'les notes sélectionnées s’allongent' : 'chaque note s’allonge'} jusqu’à la suivante (Ctrl+Z pour annuler)`);
   };
 
   // --- TRANSPOSE (inspired by Logic Pro) ---
@@ -1130,6 +1171,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
         case 'pr.paste': e.preventDefault(); paste(); return;
         case 'pr.left': e.preventDefault(); nudge(-1); return;
         case 'pr.right': e.preventDefault(); nudge(1); return;
+        case 'pr.longer': e.preventDefault(); resizeSel(1); return;
+        case 'pr.shorter': e.preventDefault(); resizeSel(-1); return;
+        case 'pr.legato': e.preventDefault(); legatoSel(); return;
         case 'pr.slide': e.preventDefault(); slideAction(); return;
         case 'pr.toolDraw': e.preventDefault(); setTool('DRAW'); return;
         case 'pr.toolPaint': e.preventDefault(); setTool('PAINT'); return;
@@ -1435,8 +1479,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
             <div className="pr-sep"></div>
             <button type="button" onClick={() => transpose(1)} disabled={!hasSel} className="pr-cap" title="Monter d'un demi-ton (↑)" aria-label="Monter d'un demi-ton"><i className="fas fa-arrow-up text-[10px]"></i></button>
             <button type="button" onClick={() => transpose(-1)} disabled={!hasSel} className="pr-cap" title="Descendre d'un demi-ton (↓)" aria-label="Descendre d'un demi-ton"><i className="fas fa-arrow-down text-[10px]"></i></button>
-            <button type="button" onClick={() => transpose(12)} disabled={!hasSel} className="pr-cap" title="Monter d'une octave (Ctrl+↑)" aria-label="Monter d'une octave">+8ve</button>
-            <button type="button" onClick={() => transpose(-12)} disabled={!hasSel} className="pr-cap" title="Descendre d'une octave (Ctrl+↓)" aria-label="Descendre d'une octave">−8ve</button>
+            <button type="button" onClick={() => transpose(12)} disabled={!hasSel} className="pr-cap" title="Monter d'une octave (Ctrl+↑ ou Maj+↑)" aria-label="Monter d'une octave">+8ve</button>
+            <button type="button" onClick={() => transpose(-12)} disabled={!hasSel} className="pr-cap" title="Descendre d'une octave (Ctrl+↓ ou Maj+↓)" aria-label="Descendre d'une octave">−8ve</button>
             <div className="pr-sep"></div>
             <button type="button" onClick={selectAll} disabled={!nNotes} className="pr-cap" data-nova-roll="tout" title="Tout sélectionner (Ctrl+A)" aria-label="Tout sélectionner"><i className="fas fa-object-group text-[10px]"></i></button>
             <button type="button" onClick={doubleNotes} disabled={!hasSel} className="pr-cap" data-nova-roll="dupliquer" title="Dupliquer la sélection à la suite (Ctrl+D ou Ctrl+B)" aria-label="Dupliquer la sélection à la suite">

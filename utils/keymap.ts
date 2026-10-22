@@ -282,8 +282,8 @@ export const KEYMAP: ShortcutDef[] = [
   pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite' }),
   pr({ id: 'pr.up', keys: ['arrowup'], label: 'Transposer d’un demi-ton vers le haut' }),
   pr({ id: 'pr.down', keys: ['arrowdown'], label: 'Transposer d’un demi-ton vers le bas' }),
-  pr({ id: 'pr.octUp', keys: ['ctrl+arrowup'], label: 'Transposer d’une octave vers le haut' }),
-  pr({ id: 'pr.octDown', keys: ['ctrl+arrowdown'], label: 'Transposer d’une octave vers le bas' }),
+  pr({ id: 'pr.octUp', keys: ['ctrl+arrowup', 'shift+arrowup'], label: 'Transposer d’une octave vers le haut' }),
+  pr({ id: 'pr.octDown', keys: ['ctrl+arrowdown', 'shift+arrowdown'], label: 'Transposer d’une octave vers le bas' }),
   pr({ id: 'pr.quantize', keys: ['q'], label: 'Quantifier les notes (sélection, sinon tout le clip)' }),
   pr({ id: 'pr.humanize', keys: ['h'], label: 'Humaniser (petits décalages de temps et de vélocité)' }),
   // Piano roll pro (15/10/2026) : presse-papiers, déplacement à la grille, glissés, outils (lettres de FL Studio).
@@ -292,6 +292,10 @@ export const KEYMAP: ShortcutDef[] = [
   pr({ id: 'pr.paste', keys: ['ctrl+v'], label: 'Coller les notes à la tête de lecture' }),
   pr({ id: 'pr.left', keys: ['arrowleft'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la gauche' }),
   pr({ id: 'pr.right', keys: ['arrowright'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la droite' }),
+  // Tour beatmaking (22/10/2026) : gestes standard des piano rolls qui manquaient.
+  pr({ id: 'pr.longer', keys: ['shift+arrowright'], label: 'Allonger les notes sélectionnées d’une case de grille' }),
+  pr({ id: 'pr.shorter', keys: ['shift+arrowleft'], label: 'Raccourcir les notes sélectionnées d’une case de grille' }),
+  pr({ id: 'pr.legato', keys: ['ctrl+l'], label: 'Legato : chaque note s’allonge jusqu’à la suivante (sélection, sinon tout le clip)' }),
   pr({ id: 'pr.slide', keys: ['s'], label: 'Glissé : bascule les notes sélectionnées (sinon, les prochaines notes posées glissent)' }),
   pr({ id: 'pr.toolDraw', keys: ['p'], label: 'Outil crayon' }),
   pr({ id: 'pr.toolPaint', keys: ['b'], label: 'Outil pinceau (peindre des notes à la suite)' }),

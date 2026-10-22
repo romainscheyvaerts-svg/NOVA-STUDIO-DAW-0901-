@@ -153,6 +153,39 @@ export function duplicateRight(notes: MidiNote[], ids: Set<string>, grid: number
   return { notes: [...notes, ...added].sort(byTime), added };
 }
 
+/**
+ * Maj + ← / → : raccourcit ou allonge les notes sélectionnées d'une case de grille (geste standard
+ * des piano rolls). Une note ne descend jamais sous une case (ni sous `min` s'il est plus petit).
+ */
+export function resizeNotesBy(notes: MidiNote[], ids: Set<string>, delta: number, cell: number): MidiNote[] {
+  if (!ids.size || !delta) return notes;
+  const min = Math.max(0.01, cell);
+  return notes.map(n => {
+    if (!ids.has(n.id)) return n;
+    // Une note plus courte qu'une case passe d'abord à une case pleine.
+    const base = n.duration < min - 1e-9 ? min : n.duration;
+    const d = Math.max(min, Math.round((base + delta) * 1e9) / 1e9);
+    return d === n.duration ? n : { ...n, duration: d };
+  });
+}
+
+/**
+ * Glisser en tenant Ctrl ou Maj : les notes saisies sont COPIÉES (l'original reste en place), comme
+ * dans les piano rolls des autres logiciels. Renvoie les notes de départ + les copies (nouvel id)
+ * et la table original → copie, pour déplacer ensuite les copies comme une sélection normale.
+ */
+export function copyForDrag(notes: MidiNote[], ids: Set<string>, makeId: () => string = newNoteId): { notes: MidiNote[]; copies: Map<string, string> } {
+  const copies = new Map<string, string>();
+  const added: MidiNote[] = [];
+  for (const n of notes) {
+    if (!ids.has(n.id)) continue;
+    const id = makeId();
+    copies.set(n.id, id);
+    added.push({ ...n, id });
+  }
+  return { notes: [...notes, ...added], copies };
+}
+
 /** Presse-papiers de notes : départs relatifs à la première note copiée. */
 export interface NoteClipboard { notes: Omit<MidiNote, 'id'>[]; span: number }
 

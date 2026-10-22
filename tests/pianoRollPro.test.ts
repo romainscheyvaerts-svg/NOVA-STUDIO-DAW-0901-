@@ -207,3 +207,45 @@ describe('pinceau, couteau, dupliquer, copier / coller', () => {
     expect(copyNotes(notes, new Set())).toBeNull();
   });
 });
+
+// Tour beatmaking (22/10/2026) : gestes standard qui manquaient au piano roll.
+import { resizeNotesBy, copyForDrag } from '../utils/pianoRollPro';
+import { findConflicts, matchShortcut } from '../utils/keymap';
+import { legato } from '../utils/midiTools';
+
+describe('gestes standard du piano roll (tour beatmaking)', () => {
+  const cell = 0.125;
+  it('Maj + → / ← : allonge et raccourcit d’une case, jamais sous une case', () => {
+    const notes = [n('a', 36, 0, 0.25), n('b', 38, 1, 0.25)];
+    const sel = new Set(['a']);
+    expect(resizeNotesBy(notes, sel, cell, cell).map(x => x.duration)).toEqual([0.375, 0.25]);
+    const short = resizeNotesBy(notes, sel, -cell, cell);
+    expect(short[0].duration).toBeCloseTo(0.125);
+    expect(resizeNotesBy(short, sel, -cell, cell)[0].duration).toBeCloseTo(0.125); // plancher : une case
+    expect(resizeNotesBy(notes, new Set(), cell, cell)).toBe(notes);
+  });
+  it('Ctrl / Maj + glisser : copies avec nouvel id, originaux intacts', () => {
+    const notes = [n('a', 36, 0), n('b', 38, 1)];
+    const { notes: out, copies } = copyForDrag(notes, new Set(['a']), ids);
+    expect(out).toHaveLength(3);
+    expect(out.slice(0, 2)).toEqual(notes);
+    const copyId = copies.get('a')!;
+    expect(copyId).not.toBe('a');
+    expect(out.find(x => x.id === copyId)).toMatchObject({ pitch: 36, start: 0, duration: 0.25 });
+  });
+  it('Ctrl+L : legato jusqu’à la note suivante', () => {
+    const notes = [n('a', 36, 0, 0.1), n('b', 38, 0.5, 0.1), n('c', 40, 1, 0.1)];
+    expect(legato(notes, null, { bpm: BPM }).map(x => +x.duration.toFixed(3))).toEqual([0.5, 0.5, 0.1]);
+  });
+  it('raccourcis : Maj + flèches (longueur, octave) et Ctrl+L, sans conflit', () => {
+    const ev = (key: string, mods: Partial<KeyboardEvent> = {}) => ({ key, code: key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
+    const IDS = ['pr.longer', 'pr.shorter', 'pr.legato', 'pr.octUp', 'pr.octDown', 'pr.left', 'pr.right', 'pr.up', 'pr.down'];
+    expect(matchShortcut(ev('ArrowRight', { shiftKey: true }), IDS)).toBe('pr.longer');
+    expect(matchShortcut(ev('ArrowLeft', { shiftKey: true }), IDS)).toBe('pr.shorter');
+    expect(matchShortcut(ev('ArrowUp', { shiftKey: true }), IDS)).toBe('pr.octUp');
+    expect(matchShortcut(ev('ArrowDown', { ctrlKey: true }), IDS)).toBe('pr.octDown');
+    expect(matchShortcut(ev('l', { ctrlKey: true }), IDS)).toBe('pr.legato');
+    expect(matchShortcut(ev('ArrowRight'), IDS)).toBe('pr.right');
+    expect(findConflicts()).toEqual([]);
+  });
+});
