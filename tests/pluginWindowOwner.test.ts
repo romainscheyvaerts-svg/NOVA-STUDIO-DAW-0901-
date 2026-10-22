@@ -41,6 +41,18 @@ describe('Fenêtre du plugin possédée par Nova Studio', () => {
     expect(bridgeMod.desktopOwnerHwnd()).toBe(0x1a2b3c);
   });
 
+  it('appli Windows : VocAlign (ARA_ALIGN) et Melodyne (ARA_OPEN) emportent aussi le HWND de Nova', async () => {
+    (window as any).__novaDesktop = { version: '1.5.15', hwnd: 0x1a2b3c };
+    const b = bridgeMod.novaBridge as any;
+    const spy = vi.spyOn(b, 'sendAraFrame').mockResolvedValue({ success: true, renders: [] });
+    const clip = { id: 'c1', name: 'Double', channels: [new Float32Array(10)] };
+    await b.araAlign({ sessionId: 's', sampleRate: 48000, interactive: true, guide: clip, dubs: [clip] });
+    await b.araOpen({ sessionId: 's2', plugin: 'melodyne', sampleRate: 48000, tempo: 120, clips: [clip] });
+    const metas = spy.mock.calls.map(c => c[0] as any);
+    expect(metas[0]).toMatchObject({ action: 'ARA_ALIGN', owner: 0x1a2b3c });
+    expect(metas[1]).toMatchObject({ action: 'ARA_OPEN', owner: 0x1a2b3c });
+  });
+
   it('site dans un navigateur : aucune clé owner (comportement inchangé)', async () => {
     const spy = sent();
     await bridgeMod.novaBridge.showEditor('slot-1');
