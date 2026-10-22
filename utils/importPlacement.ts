@@ -50,3 +50,14 @@ export function pickAudioFile(onFile: (f: File) => void) {
   input.onchange = () => { const f = input.files?.[0]; if (f) onFile(f); };
   input.click();
 }
+
+/** Sélecteur de plusieurs sons (« Sons manquants › Choisir les fichiers »). */
+export function pickAudioFiles(onFiles: (f: File[]) => void, multiple = true) {
+  if (typeof document === 'undefined') return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = multiple;
+  input.accept = 'audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a';
+  input.onchange = () => { const fs = Array.from(input.files || []); if (fs.length) onFiles(fs); };
+  input.click();
+}

@@ -311,6 +311,15 @@ describe('ProjectIO.loadProject : projets abîmés', () => {
     }
   });
 
+  it('project.json seul (proposé par le sélecteur) : il s\'ouvre, ses clips muets à relier', async () => {
+    audioBufferRegistry.clear();
+    const st: any = await open(new Blob([JSON.stringify(baseProject())], { type: 'application/json' }));
+    const clips = st.tracks.flatMap((t: any) => t.clips);
+    expect(clips.length).toBeGreaterThan(0);
+    expect(clips.every((c: any) => c.isOffline && !c.bufferId)).toBe(true);
+    expect(ProjectIO.repairReportOf(st)?.join(' ')).toMatch(/hors ligne|introuvable|manquant/i);
+  });
+
   it('projet intact : aucun rapport', async () => {
     const { rapport } = await record('Projet intact (témoin)', await zipOf({ 'project.json': JSON.stringify(baseProject()), ...sounds() }));
     expect(rapport).toEqual([]);

@@ -1997,6 +1997,28 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', cv.ink(0.75));
     ctx.restore();
 
+    // Son manquant (introuvable à l'ouverture) : hachures ambre + « Son manquant », comme un clip
+    // hors ligne des logiciels de studio. Avant : un clip vide, sans rien qui le dise.
+    if (clip.isOffline && !clip.bufferId && !clip.notes && !clip.isUnlicensed) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, w, h);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.10)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let k = -h; k < w; k += 10) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); }
+        ctx.stroke();
+        if (w > 100 && h > 34) {
+            ctx.font = '700 11px Inter';
+            ctx.fillStyle = 'rgba(253, 230, 138, 0.95)';
+            ctx.fillText('🔗 Son manquant', x + 9, y + h / 2 + 8, w - 18);
+        }
+        ctx.restore();
+    }
+
     // Poignees de fondu : bien visibles au survol et sur le clip selectionne (G7)
     if (isSelected || isHovered || w > 60) {
         ctx.fillStyle = isSelected || isHovered ? cv.ink(0.9) : cv.ink(0.35);

@@ -289,6 +289,8 @@ import { requestDesktopUpdateCheck, useDesktopBusyProbe } from './utils/appUpdat
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { rememberRecent, type RecentProject } from './utils/recentProjects';
+import { missingClips, relinkedClip } from './utils/missingSounds';
+const MissingSoundsDialog = lazy(() => import('./components/MissingSoundsDialog'));
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
 import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
 import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
@@ -1910,6 +1912,38 @@ function Studio() {
           setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('❌') ? null : n)), 8000);
       }
   }, [handleLoadProject]);
+
+  // Sons manquants (clips muets : son introuvable à l'ouverture) : bandeau + « Relier » (utils/missingSounds).
+  const missingSounds = React.useMemo(() => missingClips(state.tracks), [state.tracks]);
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [missingHidden, setMissingHidden] = useState<string | null>(null);
+  const relinkMissing = useCallback(async (items: { clipId: string; file: File }[]) => {
+    await ensureAudioEngine();
+    const ctx = audioEngine.ctx!;
+    const decodedFiles = new Map<File, { id: string; secs: number } | null>();
+    const done = new Map<string, { id: string; secs: number }>();
+    const failed: string[] = [];
+    for (const it of items) {
+      let r = decodedFiles.get(it.file);
+      if (r === undefined) {
+        try {
+          // Décodé à la fréquence du moteur = celle du projet.
+          const b = await ctx.decodeAudioData(await it.file.arrayBuffer());
+          r = { id: audioBufferRegistry.register(b, `relie-${it.clipId}-${Date.now().toString(36)}`), secs: b.duration };
+        } catch { r = null; failed.push(it.file.name); }
+        decodedFiles.set(it.file, r);
+      }
+      if (r) done.set(it.clipId, r);
+    }
+    if (done.size) {
+      // Une seule étape d'annulation : Ctrl+Z remet les clips muets.
+      setState(prev => ({ ...prev, tracks: prev.tracks.map(t => (t.clips.some(c => done.has(c.id))
+        ? { ...t, clips: t.clips.map(c => { const d = done.get(c.id); return d ? relinkedClip(c, d.id, d.secs) : c; }) }
+        : t)) }));
+    }
+    return { ok: done.size, failed: [...new Set(failed)] };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
 
   // Projet .zip glissé sur l'arrangement (components/ArrangementView) : ouvert comme par « Ouvrir ».
   useEffect(() => {
@@ -10935,6 +10969,7 @@ function Studio() {
       a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer', primary: true }),
       a('Fichier', 'nova.quickSave', 'Enregistrer maintenant (sans fenêtre)', () => { void quickSaveRef.current(); }, { keys: k('nova.quickSave'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer sauvegarder save vite' }),
       a('Fichier', 'nova.save', 'Sauvegarder le projet… (autre nom, .zip, en ligne, nouvelle version)', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save As (Ctrl+Maj+S)', keywords: 'enregistrer sous save as copie zip' }),
+      a('Fichier', 'pal.relink', 'Relier les sons manquants (clips muets à l’ouverture)', () => setMissingOpen(true), { pt: 'Relink', keywords: 'relier relink manquant hors ligne offline fichier son introuvable' }),
       a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { keys: k('nova.open'), pt: 'Open Session (Ctrl+O)', keywords: 'charger load open récents' }),
       a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
@@ -11127,6 +11162,22 @@ function Studio() {
       </div>
       {/* Appli Windows : nouvelle version prête / disponible (dans la page, sous le transport). */}
       <DesktopUpdateCard />
+
+      {/* Sons manquants à l'ouverture : on le dit, et on propose de les relier (fermable). */}
+      {!showLanding && missingSounds.length > 0 && missingHidden !== state.id && !missingOpen && (
+        <div className="fixed left-4 right-4 sm:right-auto bottom-28 z-[660] flex pointer-events-none" data-testid="missing-banner">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-amber-400/50 bg-nv-surface pl-4 pr-1 py-1 shadow-2xl">
+            <p className="text-[12px] font-bold text-amber-100">🔗 {missingSounds.length} son{missingSounds.length > 1 ? 's' : ''} manquant{missingSounds.length > 1 ? 's' : ''} (clip{missingSounds.length > 1 ? 's' : ''} muet{missingSounds.length > 1 ? 's' : ''})</p>
+            <button type="button" onClick={() => setMissingOpen(true)} data-testid="missing-open" className="min-h-9 px-3 rounded-xl bg-amber-400 text-black text-[12px] font-black">Relier…</button>
+            <button type="button" onClick={() => setMissingHidden(state.id)} aria-label="Masquer" title="Masquer (palette : « Relier les sons manquants »)" className="w-9 h-9 rounded-xl text-slate-400 hover:text-white">✕</button>
+          </div>
+        </div>
+      )}
+      {missingOpen && (
+        <Suspense fallback={null}>
+          <MissingSoundsDialog missing={missingSounds} onRelink={relinkMissing} onClose={() => setMissingOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Même projet ouvert dans un autre onglet : cet onglet ne sauvegarde pas (utils/tabLock). */}
       {tabLock.role === 'guest' && tabLock.projectId === state.id && (

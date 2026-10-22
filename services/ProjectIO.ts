@@ -319,7 +319,13 @@ export class ProjectIO {
     try {
         zip = await JSZip.loadAsync(file);
     } catch (e) {
-        throw new Error("Archive illisible : ce fichier n'est pas un projet NOVA ou il est trop abîmé pour être ouvert.");
+        // project.json seul (sorti du .zip, envoyé par message) : le sélecteur le proposait, il ne
+        // s'ouvrait jamais. Il s'ouvre maintenant, ses clips muets (« Sons manquants › Relier »).
+        let text = '';
+        try { text = typeof (file as Blob).text === 'function' ? await (file as Blob).text() : ''; } catch { /* illisible */ }
+        if (!/^\s*\{/.test(text)) throw new Error("Archive illisible : ce fichier n'est pas un projet NOVA ou il est trop abîmé pour être ouvert.");
+        zip = new JSZip();
+        zip.file('project.json', text);
     }
     const files = Object.keys(zip.files).filter(f => !zip.files[f].dir);
     const audioFiles = files.filter(f => /\.(wav|mp3|ogg|oga|flac|m4a|aac|webm)$/i.test(f));
