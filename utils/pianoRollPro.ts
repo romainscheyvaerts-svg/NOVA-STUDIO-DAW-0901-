@@ -331,10 +331,21 @@ export function velocityColor(v: number, light = false): string {
   return `hsl(${hue} ${light ? 75 : 85}% ${light ? 42 : 58}%)`;
 }
 
-/** Texte lisible sur une couleur de note (noir sur clair, blanc sur foncé). */
+/**
+ * Texte lisible sur une couleur de note : noir ou blanc, celui qui contraste le plus avec la
+ * couleur RÉELLE (velocityColor). Avant, un seuil sur la teinte laissait du blanc sur l'orange
+ * du thème clair (« La0 » à 4,1:1, sous le 4,5:1 demandé pour un texte de 8 px).
+ */
 export function inkOn(v: number, light = false): string {
-  const hue = 265 * (1 - clamp(v, 0, 1));
-  // Le jaune-vert est clair : texte noir ; le violet / bleu foncés : blanc.
-  if (light) return hue > 30 && hue < 200 ? '#0b0c0f' : '#ffffff';
-  return hue > 190 ? '#ffffff' : '#0b0c0f';
+  const x = clamp(Number.isFinite(v) ? v : 0.8, 0, 1);
+  const h = Math.round(265 * (1 - x)) / 360, s = light ? 0.75 : 0.85, l = light ? 0.42 : 0.58;
+  // HSL → RGB (CSS Color 4), puis luminance relative (WCAG).
+  const k = (n: number) => (n + h * 12) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const ch = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const lum = 0.2126 * lin(ch(0)) + 0.7152 * lin(ch(8)) + 0.0722 * lin(ch(4));
+  const black = (lum + 0.05) / 0.05; // noir pur : au pire 4,58:1 au point de bascule
+  const white = 1.05 / (lum + 0.05);
+  return black >= white ? '#000000' : '#ffffff';
 }
