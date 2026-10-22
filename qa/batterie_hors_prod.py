@@ -239,6 +239,11 @@ BATTERIE = [
     # 22/10/2026 : tour « édition et navigation » (zoom du morceau à l'échantillon, Z, annuler par geste, sélection
     # glissée entre pistes, Ctrl+D / couper-coller de plusieurs clips, bord qui défile, suivi de la tête, 60 pistes).
     ("audit_edition", []),
+    # 22/10/2026 · tour tactile : iPhone 390 × 844 (sombre, clair), iPhone couché 844 × 390, petit Android 360 × 800,
+    # iPad 820 × 1180 / 1180 × 820, iPad mini 744 × 1133, au doigt (encoche et barre d'accueil simulées) : parcours
+    # instru → 2 prises → écoute → export compté, cibles < 32 px, recouverts, sous l'encoche, défilement parasite,
+    # pincer pour zoomer (ancré sous les doigts), glisser à un doigt, double-toucher sans zoom de la page.
+    ("tactile_audit", ["--strict"]),
 ]
 
 
