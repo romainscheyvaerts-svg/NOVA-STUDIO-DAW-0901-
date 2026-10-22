@@ -11691,6 +11691,20 @@ function Studio() {
         onKit={kitId => { void ensureAudioEngine().then(() => handleSetDrumKit(kitId)); }}
         onRemove={() => { handleRemoveDrums(); setDrumsOpen(false); }}
         onAudition={ri => {
+          // Tour beatmaking (22/10/2026) : pad déjà chargé et moteur lancé → il sonne TOUT DE SUITE.
+          // Avant, chaque frappe attendait resume() du contexte et rechargeait le son : ~29 ms de retard
+          // à chaque coup au clavier (mesuré en headless), contre 0,3 ms pour le clavier du synthé.
+          {
+            const ctx = audioEngine.ctx;
+            const row = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.rows[ri];
+            const pk = stateRef.current.projectKey;
+            if (ctx && ctx.state === 'running' && row
+                && loadedPads.current.get(`${DRUM_TRACK_ID}:${ri + 1}`) === padLoadKey(row, typeof pk === 'number' ? pk : 0)
+                && audioEngine.getDrumRackNode(DRUM_TRACK_ID)?.getBuffers().has(ri + 1)) {
+              audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1);
+              return;
+            }
+          }
           // Le son choisi est chargé avant d'être joué (sample de la bibliothèque au premier clic).
           void ensureAudioEngine().then(async () => {
             const row = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.rows[ri];
