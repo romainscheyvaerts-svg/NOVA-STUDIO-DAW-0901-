@@ -5547,7 +5547,11 @@ function Studio() {
   // en arrière-plan ; seuls les sons nouveaux sont écrits (une fois, sans encodage) ;
   // 20 dernières versions + une par heure. La prise en cours, elle, est écrite au fil de
   // l'eau par le journal de prise (moteur audio).
-  const autosaveNotified = useRef(false);
+  // « Sauvegarde automatique active » : dit une fois sur cet appareil (avant : à chaque ouverture de page,
+  // l'ingé qui enchaîne les projets le relisait à chaque séance).
+  const autosaveNotified = useRef((() => { try { return localStorage.getItem('nova_autosave_told') === '1'; } catch { return false; } })());
+  /** Ctrl+S : la phrase complète la 1re fois de la séance, ensuite « 💾 Enregistré à 14:32 ». */
+  const quickSaveToldRef = useRef(false);
   const quotaNotifiedAtRef = useRef(0);
   const storageCheckedAtRef = useRef(0);
   const storageLevelRef = useRef<string>('unknown');
@@ -5632,6 +5636,7 @@ function Studio() {
       if (r) afterVersionSaved(r.versionId);
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
+        try { localStorage.setItem('nova_autosave_told', '1'); } catch { /* stockage indisponible : redit à la prochaine page */ }
         // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
         if (!named) setAiNotification("💾 Sauvegarde automatique active sur cet appareil, prises comprises : rien n'est perdu, même après un plantage.");
       }
@@ -5671,7 +5676,9 @@ function Studio() {
     hasUnsavedChangesRef.current = false;
     const at = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
     const where = isNovaDesktop() && diskMirrorRef.current.available() ? 'dans Documents › Nova Studio › Projets' : 'sur cet appareil';
-    setAiNotification(`💾 « ${st.name || 'Session'} » enregistré à ${at}, ${where}. Autre nom, .zip ou en ligne : Ctrl+Maj+S.`);
+    setAiNotification(quickSaveToldRef.current ? `💾 Enregistré à ${at}.`
+      : `💾 « ${st.name || 'Session'} » enregistré à ${at}, ${where}. Autre nom, .zip ou en ligne : Ctrl+Maj+S.`);
+    quickSaveToldRef.current = true;
   };
   flushCurrentProjectRef.current = async () => {
     // Sauvegarde en cours : on l'attend (sinon l'écriture demandée partirait sur le NOUVEAU projet).
