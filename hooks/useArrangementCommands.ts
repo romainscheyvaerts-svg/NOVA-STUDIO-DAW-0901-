@@ -6,7 +6,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { requestBreaths } from '../utils/breathBus';
 import { playheadStore } from '../utils/playheadStore';
 import { fadeInTo, fadeOutTo, quickFades, trimEndTo, trimStartTo } from '../utils/clipKeyCommands';
-import { clampTrackHeight, stepTrackHeight } from '../utils/trackHeights';
+import { clampTrackHeight, fitTrackHeight, stepTrackHeight } from '../utils/trackHeights';
 import { editSelectionStore } from '../utils/editSelection';
 import { clampZoom, fitRange, type ZoomAnchor } from '../utils/arrangeZoom';
 
@@ -35,6 +35,9 @@ export interface ArrangementCommandContext {
   bpm: number;
   /** Largeur visible de la timeline (px). */
   viewportWidth: number;
+  /** Hauteur visible des pistes (px) et nombre de pistes affichées (Z sans sélection : tout voir). */
+  tracksViewHeight?: number;
+  visibleTrackCount?: number;
   scrollTo?: (left: number) => void;
 }
 
@@ -49,7 +52,7 @@ export const selectTrackClipIds = (tracks: Track[], trackIds: string[]): Set<str
   new Set(tracks.filter(t => trackIds.includes(t.id)).flatMap(t => t.clips.map(c => c.id)));
 
 /** Zoom précédent (Z une 2e fois revient au cadrage d'avant, comme Logic et Live). */
-interface SavedView { zoom: number; scroll: number; fitted: { zoom: number; scroll: number } }
+interface SavedView { zoom: number; scroll: number; height: number; fitted: { zoom: number; scroll: number } }
 
 export function useArrangementCommands(ctx: ArrangementCommandContext) {
   const ref = useRef(ctx);
@@ -87,10 +90,12 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
     const scrollLeftNow = () => (document.querySelector('[data-arrange-scroll]') as HTMLElement | null)?.scrollLeft ?? 0;
     /** Cadre [start, end] ; garde la vue d'avant pour le retour (Z une 2e fois). */
     let saved: SavedView | null = null;
-    const frame = (start: number, end: number) => {
+    const frame = (start: number, end: number, fitHeights = false) => {
       const f = fitRange(start, end, c().viewportWidth);
-      saved = { zoom: c().zoomH, scroll: scrollLeftNow(), fitted: f };
+      saved = { zoom: c().zoomH, scroll: scrollLeftNow(), height: c().zoomV, fitted: f };
       zoomTo(f.zoom, { time: f.scroll / f.zoom, px: 0 });
+      // Tout le morceau ET toutes les pistes (Logic : Z sans sélection) : 60 pistes tiennent à l'écran.
+      if (fitHeights && c().tracksViewHeight && c().visibleTrackCount) c().setZoomV(fitTrackHeight(c().tracksViewHeight!, c().visibleTrackCount!));
     };
 
     return registerEditCommands({
@@ -187,6 +192,7 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         if (saved && Math.abs(now.zoom - saved.fitted.zoom) < 1e-6 * now.zoom && Math.abs(now.scroll - saved.fitted.scroll) < 2) {
           const back = saved; saved = null;
           zoomTo(back.zoom, { time: back.scroll / back.zoom, px: 0 });
+          if (back.height !== c().zoomV) c().setZoomV(back.height);
           return true;
         }
         const ts = editSelectionStore.get().time;
@@ -196,7 +202,7 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
           frame(Math.min(...l.map(x => x.clip.start)), Math.max(...l.map(x => x.clip.start + x.clip.duration)));
           return true;
         }
-        frame(0, songEnd());
+        frame(0, songEnd(), true);
         return true;
       },
       trackHeight: (px: number) => { c().setZoomV(clampTrackHeight(px)); },

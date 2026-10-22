@@ -69,3 +69,19 @@ describe('forme d’onde au plus près', () => {
     expect(r[0]).toBeCloseTo(-1, 5);
   });
 });
+
+import { fitTrackHeight, isCompactHeight, stepTrackHeight, TRACK_HEIGHTS } from '../utils/trackHeights';
+describe('hauteur des pistes : Micro et Compacte', () => {
+  it('Micro (24 px) et Compacte (44 px) existent, en-tête d’une ligne sous 72 px', () => {
+    expect(TRACK_HEIGHTS[0].px).toBe(24);
+    expect(stepTrackHeight(72, -1)).toBe(44);
+    expect(stepTrackHeight(44, -1)).toBe(24);
+    expect(isCompactHeight(44)).toBe(true);
+    expect(isCompactHeight(72)).toBe(false);
+  });
+  it('Z sans sélection : 60 pistes dans 724 px = hauteur Micro ; 6 pistes = hauteur Moyenne au plus', () => {
+    expect(fitTrackHeight(724, 60)).toBe(24);
+    expect(fitTrackHeight(724, 20)).toBe(36);
+    expect(fitTrackHeight(724, 6)).toBe(120);
+  });
+});

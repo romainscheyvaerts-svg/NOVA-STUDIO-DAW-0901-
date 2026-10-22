@@ -153,7 +153,7 @@ export const KEYMAP: ShortcutDef[] = [
   // Ctrl+→ / Ctrl+← (Logic) : sur tous les claviers. Ctrl+] / Ctrl+[ demandent AltGr en AZERTY.
   g({ id: 'pt.zoomIn', keys: ['ctrl+arrowright', 'ctrl+]'], label: 'Zoom avant (sur la tête de lecture si elle est à l’écran)', pt: 'Ctrl+] · Logic : Ctrl+→', category: 'Zoom et affichage', command: 'zoomIn' }),
   g({ id: 'pt.zoomOut', keys: ['ctrl+arrowleft', 'ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[ · Logic : Ctrl+←', category: 'Zoom et affichage', command: 'zoomOut' }),
-  g({ id: 'pt.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (plage, sinon clips, sinon tout le morceau) ; Z une 2e fois : retour à la vue d’avant', pt: 'E en Keyboard Focus (Zoom Toggle) · Logic et Live : Z', category: 'Zoom et affichage', command: 'zoomToSelection' }),
+  g({ id: 'pt.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (plage, sinon clips) ; sans sélection : tout le morceau et toutes les pistes à l’écran ; Z une 2e fois : retour à la vue d’avant', pt: 'E en Keyboard Focus (Zoom Toggle) · Logic et Live : Z', category: 'Zoom et affichage', command: 'zoomToSelection' }),
   g({ id: 'pt.heightUp', keys: ['ctrl+arrowup'], label: 'Pistes plus hautes', pt: 'Ctrl+↑ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightUp' }),
   g({ id: 'pt.heightDown', keys: ['ctrl+arrowdown'], label: 'Pistes plus basses', pt: 'Ctrl+↓ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightDown' }),
   // --- Modes d'édition (hooks/useEditModes, utils/editModes) -----------------------

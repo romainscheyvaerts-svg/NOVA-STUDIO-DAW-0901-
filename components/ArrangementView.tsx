@@ -78,6 +78,7 @@ import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
 import { multiShiftFor, planMultiShift } from '../utils/multiClipMove';
+import { isCompactHeight } from '../utils/trackHeights';
 import { clampZoom, scrollForAnchor, sliderToZoom, zoomAnchor, zoomToSlider, SLIDER_STEPS, ZOOM_DEFAULT, type ZoomAnchor } from '../utils/arrangeZoom';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
@@ -731,7 +732,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomTo, zoomV, setZoomV, bpm,
-    viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
+    viewportWidth: viewportSize.width - headerWidth, tracksViewHeight: viewportSize.height - tracksTop - 14, visibleTrackCount: visibleTracks.length, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + rowH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
   // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
   const revealRef = useRef({ zoomH, zoomV, tracksTop, visibleTracks, extraH, aboveH });
@@ -1883,8 +1884,10 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
             const totalSamples = endSample - startSample;
 
             // Waveform area (avec padding pour le nom du clip)
-            const waveY = y + 18;
-            const waveH = h - 22;
+            // Piste Micro (24 px) : la forme d'onde prend toute la hauteur, sans le nom (comme les DAW).
+            const tiny = h < 30;
+            const waveY = tiny ? y + 3 : y + 18;
+            const waveH = tiny ? h - 5 : h - 22;
             const centerY = waveY + waveH / 2;
 
             if (w > 2 && totalSamples > 0 && waveH > 4) {
@@ -2070,7 +2073,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     }
 
     // Nom du clip avec fond, dessiné APRÈS les fondus : la ligne de fondu ne le traverse plus (F3).
-    if (w > 30) {
+    if (w > 30 && h >= 30) {
         ctx.font = '600 11px Inter';
         ctx.fillStyle = cv.labelBg;
         ctx.fillRect(x + 4, y + 3, Math.min(ctx.measureText(clip.name).width + 10, w - 8), 15);
@@ -3093,6 +3096,7 @@ useEffect(() => {
                      onDropPlugin={headerOnDropPlugin} onMovePlugin={headerOnMovePlugin} onSelectPlugin={headerOnSelectPlugin} onRemovePlugin={headerOnRemovePlugin} onRequestAddPlugin={headerOnRequestAddPlugin} 
                      onContextMenu={headerOnContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={headerOnDropTrack}
                      isDraggingOver={dragOverTrackId === track.id} onSwapInstrument={headerOnSwapInstrument}
+                     compact={isCompactHeight(zoomV)}
                   />
                 </div>
                 {track.automationLanes.map(lane => lane.isExpanded && (
