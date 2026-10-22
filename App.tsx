@@ -18,6 +18,7 @@ const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m 
 import { setUiBusyProbe } from './utils/uiFrame';
 import { lazyQuiet, lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
 import { detectHeadphones } from './utils/headphoneDetect';
+import WindowLoading from './components/WindowLoading';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
@@ -12583,7 +12584,12 @@ function Studio() {
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => { setIsAudioSettingsOpen(false); setAudioSettingsFocus(undefined); }} focusSection={audioSettingsFocus} />}
-      {cueMixesOpen && <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />}
+      {/* Sa propre attente : « Mixes casque : chargement… » tout de suite, Échap annule (components/WindowLoading). */}
+      {cueMixesOpen && (
+        <Suspense fallback={<WindowLoading label="Mixes casque" closeLabel="Fermer les mixes casque" onClose={() => setCueMixesOpen(false)} />}>
+          <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />
+        </Suspense>
+      )}
       <AutotuneVstManager />
       </Suspense>
       
