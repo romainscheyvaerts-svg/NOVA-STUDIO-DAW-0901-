@@ -395,7 +395,7 @@ def run_pc(b, theme="dark"):
         shot(pg, "r16_pc_09_notes_muettes")
         pg.keyboard.press("Control+m"); pg.wait_for_timeout(300)
         # Saisie pas à pas : 4 notes au clavier MIDI, un silence, un accord.
-        pg.locator("[data-nova-roll='pas-a-pas']").first.click(); pg.wait_for_timeout(300)
+        __import__("qalib").roll_reveal(pg, "[data-nova-roll='pas-a-pas']").click(); pg.wait_for_timeout(300)
         pg.locator("[data-nova-step-value='1/8']").first.click(); pg.wait_for_timeout(100)
         pg.locator("button:has-text('↺ Début')").first.click(); pg.wait_for_timeout(100)
         n_before = len(next(c for c in midi_track(pg, tid)["clips"] if c["id"] == clip["id"])["notes"])
@@ -415,7 +415,7 @@ def run_pc(b, theme="dark"):
         expect = sorted([(round(0 * eighth, 4), 48), (round(1 * eighth, 4), 50), (round(2 * eighth, 4), 52), (round(4 * eighth, 4), 48), (round(4 * eighth, 4), 52), (round(4 * eighth, 4), 55)])
         ok("saisie pas à pas : croches, silence, accord", step_notes == expect, {"obtenu": step_notes, "attendu": expect})
         shot(pg, "r16_pc_10_pas_a_pas")
-        pg.locator("[data-nova-roll='pas-a-pas']").first.click()
+        __import__("qalib").roll_reveal(pg, "[data-nova-roll='pas-a-pas']").click()
         pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
 
     # 6. Clavier de l'ordinateur sur la piste sélectionnée, sans piano roll.
@@ -529,7 +529,7 @@ def run_light(b):
     pg.evaluate("(a) => window.dispatchEvent(new CustomEvent('nova:open-piano-roll', { detail: a }))", {"trackId": tid, "clipId": clip["id"]})
     pg.wait_for_timeout(800)
     pg.get_by_label("Couloir affiché").select_option("pb")
-    pg.locator("[data-nova-roll='pas-a-pas']").first.click(); pg.wait_for_timeout(300)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='pas-a-pas']").click(); pg.wait_for_timeout(300)
     shot(pg, "r16_pc_clair_03_piano_roll")
     ok("thème clair : aucune erreur de page", not errs, errs[:5])
     ctx.close()

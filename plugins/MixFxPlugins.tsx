@@ -2,7 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import { useV21Params } from './v21Ui';
 import { Faceplate, HwPresets, HwSection, HwWindow, Knob, PushButton, SegmentMeter, ToggleSwitch, type KnobProps } from './hw';
 import { fmtHzFr, hwCtx, useHwCanvas } from './hw/screens';
-import { DYN_BANDS, DYN_DEFAULTS, DYN_PRESETS, DYN_SPECS, MB_DEFAULTS, MB_PRESETS, MB_SPECS, type MixFxSpec } from '../engine/mixfx/mixFxParams';
+import { DYN_BANDS, DYN_DEFAULTS, DYN_PRESETS, DYN_SPECS, MB_DEFAULTS, MB_PRESETS, MB_SPECS, dynBandDb, mbEffectiveCrossovers, type MixFxSpec } from '../engine/mixfx/mixFxParams';
+
+/** Fréquence d'échantillonnage du son (celle du nœud ; 48 kHz si inconnue) : courbes et coupures affichées = celles du son. */
+const srOf = (node: any) => (Number.isFinite(+node?.sampleRate) && +node.sampleRate > 0 ? +node.sampleRate : 48000);
 
 /**
  * Fenêtres du « Compresseur multibande » et de l'« EQ dynamique » NOVA, dessinées comme du
@@ -81,7 +84,9 @@ const MbScreen: React.FC<{ node: any; p: Record<string, number> }> = ({ node, p 
   const { wrapRef, canvasRef } = useLiveCanvas((c, w, h, m) => {
     const q = pr.current;
     const nb = +q.bands >= 4 ? 4 : 3;
-    const xs = [20, +q.x1, +q.x2, ...(nb === 4 ? [+q.x3] : []), 20000];
+    // Coupures RÉELLES (celles du son : écart minimal d'1/3 d'octave, plafond 0,45 × fs).
+    const xe = mbEffectiveCrossovers(q, srOf(node));
+    const xs = [20, xe[0], xe[1], ...(nb === 4 ? [xe[2]] : []), 20000];
     const soloOn = Array.from({ length: nb }, (_, i) => +q[`b${i + 1}Solo`] >= 0.5);
     for (let b = 0; b < nb; b++) {
       const x0 = xOf(xs[b], w), x1 = xOf(xs[b + 1], w);
@@ -118,6 +123,11 @@ export const NovaMultibandCompUI: React.FC<Props> = ({ node, initialParams, onPa
   const [p, set] = useV21Params<Record<string, any>>({ ...MB_DEFAULTS }, initialParams, node, onParamsChange);
   const nb = +p.bands >= 4 ? 4 : 3;
   const names = nb === 4 ? MB_NAMES4 : MB_NAMES3;
+  /** Coupure affichée = coupure du son ; si le réglage est trop près de la précédente, la vraie valeur est montrée. */
+  const xFmt = (k: number, v: number) => {
+    const real = mbEffectiveCrossovers({ ...p, [`x${k + 1}`]: v }, srOf(node))[k];
+    return Math.abs(real - v) > 0.5 ? `${fmtHzFr(real)} (réel)` : fmtHzFr(v);
+  };
   const K = (id: string, label: string, o: Partial<KnobProps> = {}) => {
     const s = mbSpec(id);
     return (
@@ -138,8 +148,9 @@ export const NovaMultibandCompUI: React.FC<Props> = ({ node, initialParams, onPa
   };
   const strip = (b: number) => {
     const color = BAND_COLORS[b - 1];
-    const lo = b === 1 ? 20 : +p[`x${b - 1}`];
-    const hi = b === nb ? 20000 : +p[`x${b}`];
+    const xe = mbEffectiveCrossovers(p, srOf(node));
+    const lo = b === 1 ? 20 : xe[b - 2];
+    const hi = b === nb ? 20000 : xe[b - 1];
     return (
       <HwSection key={b} title={`${b} · ${names[b - 1]}`} className="min-w-0" style={{ ['--hw-accent' as any]: color }}>
         <p className="text-center font-mono" style={{ fontSize: 10, color: 'var(--hw-ink-soft)', marginTop: -2 }}>{fmtHzFr(lo)} – {fmtHzFr(hi)}</p>
@@ -183,9 +194,9 @@ export const NovaMultibandCompUI: React.FC<Props> = ({ node, initialParams, onPa
               <ToggleSwitch paramId="bands" label="Bandes" hint={mbSpec('bands').hint} value={nb} onChange={v => set({ bands: v })}
                 options={[{ v: 3, label: '3' }, { v: 4, label: '4' }]} />
             </div>
-            {K('x1', 'Coupure 1', { size: 'M', scale: marks([30, 200, 2000], kHz) })}
-            {K('x2', 'Coupure 2', { size: 'M', scale: marks([150, 1000, 12000], kHz) })}
-            {nb === 4 && K('x3', 'Coupure 3', { size: 'M', scale: marks([1000, 5000, 18000], kHz) })}
+            {K('x1', 'Coupure 1', { size: 'M', scale: marks([30, 200, 2000], kHz), format: v => xFmt(0, v) })}
+            {K('x2', 'Coupure 2', { size: 'M', scale: marks([150, 1000, 12000], kHz), format: v => xFmt(1, v) })}
+            {nb === 4 && K('x3', 'Coupure 3', { size: 'M', scale: marks([1000, 5000, 18000], kHz), format: v => xFmt(2, v) })}
             {K('knee', 'Genou', { size: 'M', ticks: 7 })}
             {K('output', 'Sortie', { size: 'M', bipolar: true, scale: marks([-24, 0, 24], v => (v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '0')) })}
           </div>
@@ -199,28 +210,15 @@ export const NovaMultibandCompUI: React.FC<Props> = ({ node, initialParams, onPa
 
 const dynSpec = (id: string) => DYN_SPECS.find(s => s.id === id)!;
 
-/** Réponse (dB) de la cloche y = x + (g − 1)·passe-bande, à la fréquence f (même filtre que le cœur). */
-function bellDb(f: number, fc: number, q: number, gDb: number, sr = 48000) {
-  if (!gDb) return 0;
-  const w0 = 2 * Math.PI * Math.min(fc, sr * 0.45) / sr, al = Math.sin(w0) / (2 * q), a0 = 1 + al;
-  const b0 = al / a0, a1 = -2 * Math.cos(w0) / a0, a2 = (1 - al) / a0;
-  const w = 2 * Math.PI * f / sr;
-  const c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
-  // BP = b0 (1 − z⁻²) / (1 + a1 z⁻¹ + a2 z⁻²)
-  const nr = b0 * (1 - c2), ni = b0 * s2;
-  const dr = 1 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
-  const den = dr * dr + di * di;
-  const br = (nr * dr + ni * di) / den, bi = (ni * dr - nr * di) / den;
-  const gm1 = Math.pow(10, gDb / 20) - 1;
-  const hr = 1 + gm1 * br, hi = gm1 * bi;
-  return 10 * Math.log10(hr * hr + hi * hi + 1e-30);
-}
+/** Réponse (dB) d'une bande : même filtre que le cœur (largeur préwarpée), à la fréquence d'échantillonnage du son. */
+const bellDb = (f: number, fc: number, q: number, gDb: number, sr: number) => dynBandDb(f, fc, q, gDb, sr);
 
 const DynScreen: React.FC<{ node: any; p: Record<string, number> }> = ({ node, p }) => {
   const pr = useRef(p);
   pr.current = p;
   const { wrapRef, canvasRef } = useLiveCanvas((c, w, h, m) => {
     const q = pr.current;
+    const sr = srOf(node);
     // ±24 dB sur la hauteur ; au-delà (plusieurs bandes qui s'additionnent), la courbe reste dans l'écran.
     const yOf = (db: number) => Math.max(2, Math.min(h - 14, h / 2 - 6 - (db / 24) * (h / 2 - 10)));
     drawGrid(c, w, h, 'rgba(200,220,240,0.55)');
@@ -237,7 +235,7 @@ const DynScreen: React.FC<{ node: any; p: Record<string, number> }> = ({ node, p
       c.strokeStyle = BAND_COLORS[i] + '99';
       c.setLineDash([4, 3]);
       c.beginPath();
-      for (let x = 0; x <= w; x += 2) { const f = 20 * Math.pow(1000, x / w); const y = yOf(bellDb(f, b.f, b.q, b.range)); if (x === 0) c.moveTo(x, y); else c.lineTo(x, y); }
+      for (let x = 0; x <= w; x += 2) { const f = 20 * Math.pow(1000, x / w); const y = yOf(bellDb(f, b.f, b.q, b.range, sr)); if (x === 0) c.moveTo(x, y); else c.lineTo(x, y); }
       c.stroke();
       c.setLineDash([]);
     });
@@ -247,7 +245,7 @@ const DynScreen: React.FC<{ node: any; p: Record<string, number> }> = ({ node, p
     for (let x = 0; x <= w; x += 2) {
       const f = 20 * Math.pow(1000, x / w);
       let db = 0;
-      for (const b of bands) if (b.on && b.now) db += bellDb(f, b.f, b.q, b.now);
+      for (const b of bands) if (b.on && b.now) db += bellDb(f, b.f, b.q, b.now, sr);
       const y = yOf(db);
       if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
     }

@@ -75,7 +75,8 @@ const eq = (s: EqShape): VocalChainItem => {
     type: (id === 0 ? 'highpass' : id === 11 ? 'lowpass' : 'peaking') as string,
     frequency,
     gain: 0,
-    q: id === 0 || id === 11 ? 0.71 : 1.0,
+    // Q en convention v2 (engine/eqQ.ts) : Butterworth = coupe-bas à −3 dB pile à la fréquence de la recette.
+    q: id === 0 || id === 11 ? Math.SQRT1_2 : 1.0,
     isEnabled: id === 0 || id === 11,
     isSolo: false,
   }));
@@ -90,7 +91,7 @@ const eq = (s: EqShape): VocalChainItem => {
     Object.assign(bands[9], { type: 'peaking', frequency: 12000, gain: 4, q: 0.8, isEnabled: true });
     Object.assign(bands[10], { type: 'highshelf', frequency: 15000, gain: 4, q: 0.71, isEnabled: true });
   }
-  return { type: 'PROEQ12', params: { masterGain: 1.0, bands } };
+  return { type: 'PROEQ12', params: { masterGain: 1.0, qVersion: 2, bands } };
 };
 
 const dbToGain = (db: number) => Math.pow(10, db / 20);

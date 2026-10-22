@@ -368,3 +368,24 @@ def ouvrir_master_nova(page):
         b.first.click(); return
     page.locator("[data-testid=transport-menu]").locator("visible=true").first.click(); page.wait_for_timeout(350)
     page.locator("[data-testid=menu-master-nova]").locator("visible=true").first.click()
+
+# Piano roll pratique (22/10/2026) : la barre ne montre que l'outil actif, la grille et la gamme ;
+# les autres commandes sont rangées dans « Outil ▾ », « Outils ▾ », « Notes ▾ », « Vue ▾ ».
+ROLL_MENUS = ("outil", "outils", "notes", "vue")
+
+
+def roll_reveal(page, sel):
+    """Rend visible une commande du piano roll (ouvre le menu qui la range) et renvoie son localisateur."""
+    vis = page.locator(sel).locator("visible=true")
+    if vis.count():
+        return vis.first
+    for m in ROLL_MENUS:
+        btn = page.locator(f"[data-nova-roll-menu-btn={m}]")
+        if not btn.count():
+            break
+        btn.first.click(); page.wait_for_timeout(150)
+        loc = page.locator(f"[data-nova-roll-menu=liste-{m}] {sel}")
+        if loc.count():
+            return loc.first
+        page.keyboard.press("Escape"); page.wait_for_timeout(120)
+    return page.locator(sel).first

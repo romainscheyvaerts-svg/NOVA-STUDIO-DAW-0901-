@@ -39,8 +39,11 @@ export interface AnalogKindSpec {
   presets: AnalogPreset[];
 }
 
-const ATT_HINT_OPTO = "Vitesse à laquelle la cellule optique attrape le son (0 = très rapide, ~1 ms ; 10 = lent, ~300 ms). Lent laisse passer l'attaque des consonnes.";
-const REL_HINT_OPTO = "Vitesse de retour après une phrase (0 = ~25 ms, 5 = ~0,6 s, 10 = ~5 s). Lent = compression « collée », rapide = plus vivante.";
+// Temps des infobulles : MESURÉS sur le modèle NOVA (banc tests/metrologieCompresseurs.test.ts, 22/10/2026 :
+// réduction lue sur la cellule, sinus 1 kHz passant de −70 dBFS à 15 dB au-dessus du seuil, 63 %). Avant,
+// c'étaient les temps de l'appareil d'origine (relâchement « 10 = ~5 s » : NOVA mesure ~9,6 s).
+const ATT_HINT_OPTO = "Vitesse à laquelle la cellule optique attrape le son (0 = rapide, 10 = lent). Mesuré en mode Manuel : ~1,2 ms à 0, ~140 ms à 10 ; la cellule a plusieurs constantes de temps, le temps réel dépend du son. Lent laisse passer l'attaque des consonnes.";
+const REL_HINT_OPTO = "Vitesse de retour après une phrase (0 = rapide, 10 = très lent). Mesuré en mode Manuel après 2 s de compression : ~13 ms à 0, ~9,6 s à 10 (plus court après une crête brève). Lent = compression « collée », rapide = plus vivante.";
 
 export const OPTO_VINTAGE: AnalogKindSpec = {
   kind: 'OPTO_VINTAGE',
@@ -50,9 +53,9 @@ export const OPTO_VINTAGE: AnalogKindSpec = {
   targetGrDb: 5,
   specs: [
     { id: 'threshold', label: 'Seuil', min: -60, max: 20, step: 0.1, unit: 'dBFS', auto: true,
-      hint: "Niveau où la compression atteint 1 dB (définition de l'appareil d'origine). Plus bas = plus de compression. « Caler sur ma voix » le règle pour toi." },
+      hint: "Niveau (crête d'un sinus) où la réduction atteint environ 1 dB en mode Manuel à 4:1. Le mode et le taux déplacent ce point : mesuré de 0,2 dB (Fixe, 2:1) à 2,4 dB (Fixe/Manuel, 10:1). Plus bas = plus de compression. « Caler sur ma voix » le règle pour toi." },
     { id: 'ratio', label: 'Taux', min: 2, max: 10, step: 0.1, unit: ':1', auto: true,
-      hint: "Force de la compression. Sur la voix, reste à 2:1 (deux étages à 2:1 sonnent plus naturel qu'un seul fort). Au-delà, la cellule sature doucement vers 30 dB." },
+      hint: "Force de la compression (marquage de l'appareil d'origine : la pente réelle varie avec le niveau ; mesurée entre −20 et −8 dBFS : ≈ 2,6:1 à « 2 », ≈ 3,3:1 à « 4 », ≈ 11:1 à « 10 »). Sur la voix, reste à 2:1 (deux étages à 2:1 sonnent plus naturel qu'un seul fort). La cellule sature doucement vers 30 dB." },
     { id: 'attack', label: 'Attaque', min: 0, max: 10, step: 0.1, unit: 'pos', auto: true, hint: ATT_HINT_OPTO },
     { id: 'release', label: 'Relâchement', min: 0, max: 10, step: 0.1, unit: 'pos', auto: true, hint: REL_HINT_OPTO },
     { id: 'mode', label: 'Temps', min: 0, max: 2, step: 1, unit: '', auto: false,
@@ -91,14 +94,14 @@ export const FET76: AnalogKindSpec = {
     { id: 'output', label: 'Sortie', min: -60, max: 0, step: 0.1, unit: 'pos', auto: true,
       hint: 'Volume de sortie après la compression : remonte-le pour rattraper ce que la compression a enlevé.' },
     { id: 'attack', label: 'Attaque', min: 1, max: 7, step: 0.1, unit: 'pos', auto: true,
-      hint: "7 = la plus rapide (~0,1 ms, écrase les attaques), 1 = la plus lente (~2,5 ms, laisse passer le claquant)." },
+      hint: "7 = la plus rapide (~0,2 ms mesuré, écrase les attaques), 1 = la plus lente (~6 ms mesuré, laisse passer le claquant)." },
     { id: 'release', label: 'Relâchement', min: 1, max: 7, step: 0.1, unit: 'pos', auto: true,
-      hint: "7 = le plus rapide (~80 ms, son plus fort et plus agressif), 1 = le plus lent (~1 s, plus doux)." },
+      hint: "7 = le plus rapide (~15 ms mesuré, son plus fort et plus agressif), 1 = le plus lent (~1,5 s mesuré, plus doux)." },
     { id: 'ratio', label: 'Taux', min: 0, max: 24, step: 1, unit: '', auto: false,
-      hint: "Plus le taux est haut, plus le seuil monte et plus la compression est ferme. « Écrasé » (4+20) : le son de bus agressif.",
+      hint: "Plus le taux est haut, plus le seuil monte et plus la compression est ferme. « Écrasé » (4+20) : le son de bus agressif. Taux = marquage de l'appareil d'origine ; pente réelle mesurée vers 5 à 15 dB de réduction : ≈ 4,7:1 (2:1), 6,2:1 (4:1), 10:1 (8:1 et 20:1), 15:1 (Écrasé).",
       choices: [{ v: 0, label: 'Aucun', hint: 'Aucun bouton enfoncé : pas de compression, seulement la couleur des transistors et des transformateurs.' }, { v: 2, label: '2:1' }, { v: 4, label: '4:1' }, { v: 8, label: '8:1' }, { v: 20, label: '20:1' }, { v: 24, label: 'Écrasé', hint: '4:1 + 20:1 enfoncés ensemble' }] },
     { id: 'slo', label: 'Attaque lente (SLO)', min: 0, max: 1, step: 1, unit: '', auto: false,
-      hint: "Attaque d'environ 10 ms : laisse passer les transitoires (batterie, consonnes) tout en tenant le niveau.",
+      hint: "Attaque lente (~25 ms mesuré) : laisse passer les transitoires (batterie, consonnes) tout en tenant le niveau.",
       choices: [{ v: 0, label: 'Non' }, { v: 1, label: 'Oui' }] },
     { id: 'mix', label: 'Mélange (parallèle)', min: 0, max: 100, step: 1, unit: '%', auto: true,
       hint: "100 % = tout compressé ; moins = compression parallèle (« New York »)." },
@@ -124,7 +127,7 @@ export const LEVELER2A: AnalogKindSpec = {
     { id: 'gain', label: 'Gain', min: 0, max: 100, step: 0.5, unit: 'gain', auto: true,
       hint: "Gain de sortie à lampes (0 = coupé, 50 ≈ +14,5 dB). Poussé fort, l'étage de sortie sature doucement (H2 puis H3)." },
     { id: 'limit', label: 'Mode', min: 0, max: 1, step: 1, unit: '', auto: false,
-      hint: 'Compress : taux doux (~3:1 à 4:1). Limit : taux élevé, la cellule tient plus fermement les crêtes.',
+      hint: 'Compress : taux doux (≈ 5:1 mesuré entre 4 et 16 dB de réduction). Limit : taux élevé (≈ 9:1 mesuré), la cellule tient plus fermement les crêtes.',
       choices: [{ v: 0, label: 'Compress' }, { v: 1, label: 'Limit' }] },
     { id: 'emphasis', label: 'Accentuation des aigus (détection)', min: 0, max: 100, step: 1, unit: '%', auto: false,
       hint: "Rend la détection plus sensible aux aigus (sifflantes, cymbales) et moins aux graves : la voix est tenue sur sa brillance plutôt que sur son corps." },

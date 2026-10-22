@@ -165,7 +165,7 @@ const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideW
   };
 
   return (
-    <div className="h-[30%] max-sm:h-[26%] min-h-[96px] border-t border-white/10 bg-nv-surface flex relative z-30" data-nova-cc-lanes="">
+    <div className="h-[24%] max-sm:h-[22%] min-h-[88px] border-t border-white/10 bg-nv-surface flex relative z-30" data-nova-cc-lanes="">
       <div className={`flex-shrink-0 border-r border-white/10 bg-nv-bg ${sideWidth} p-1 flex flex-col gap-1 overflow-y-auto no-scrollbar`}>
         <select aria-label="Couloir affiché" value={lane} onChange={e => { setLane(e.target.value); setDraft(null); }} data-nova-cc-select=""
           title="Couloir : vélocité, pitch bend, modulation, sustain, expression ou un autre CC"

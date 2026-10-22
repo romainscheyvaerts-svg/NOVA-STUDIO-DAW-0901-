@@ -86,7 +86,8 @@ def open_project(page):
 
 
 def click(page, sel, phone):
-    loc = page.locator(sel).locator("visible=true").first
+    # Piano roll pratique : une commande rangée dans un menu (Outils ▾, Notes ▾…) est d'abord rendue visible.
+    loc = qalib.roll_reveal(page, sel) if "data-nova-roll=" in sel else page.locator(sel).locator("visible=true").first
     loc.scroll_into_view_if_needed()
     if phone:
         b = loc.bounding_box(); page.touchscreen.tap(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
@@ -106,9 +107,8 @@ def close_roll(page):
 
 
 def show_advanced(page, phone):
-    if not page.locator("[data-nova-roll=mid-export]").locator("visible=true").count():
-        click(page, "[data-nova-roll=plus]", phone)
-        page.wait_for_timeout(300)
+    # Plus de barre avancée (piano roll pratique) : les commandes sont dans les menus, click() les révèle.
+    page.wait_for_timeout(300)
 
 
 def raw_events(data: bytes):
