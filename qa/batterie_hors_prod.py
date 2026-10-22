@@ -214,6 +214,11 @@ BATTERIE = [
     # attaque 5 ms, relâchement 80 ms) ; export de la basse seule = creux à chaque coup (≥ 6 dB), lecture = même courbe ;
     # coupé, Ctrl+Z, sauvegarde + rechargement ; téléphone.
     ("modulateurs_suiveur", []),
+    # 22/10/2026 · tour « projets, fichiers, export, livraison » : Ctrl+S sans fenêtre (Ctrl+Maj+S, Ctrl+O, titre), changer
+    # de projet garde les dernières modifications, « Récents » (studio, accueil, téléphone 390), « Récupérer » = le projet
+    # ouvert, .novaproj.zip glissé, sons manquants reliés, .zip sous un autre nom (interface jamais figée), export 4 min
+    # (nom propre, mix qui sature signalé).
+    ("projets_livraison", []),
 ]
 
 
