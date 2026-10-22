@@ -11556,8 +11556,34 @@ function Studio() {
           {/* Bandeau du bas (ordinateur / tablette) : Collaborer, session en ligne et
               les gestes voix (Piste voix, Paroles, Mix auto). Il prend sa propre place
               sous la grille : plus rien ne flotte sur les clips ni sur le catalogue. */}
+          {/* Bande réservée (ordinateur / tablette), dans le flux juste au-dessus du bandeau du bas : « Et
+              maintenant ? », l'avancement d'un import et les messages de Nova y prennent leur place le temps
+              qu'ils sont là, puis la bande disparaît. En flottant, ils recouvraient la timeline, les clips, les
+              faders de la console. */}
           {!isMobile && (
-            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
+            <div data-nova-band className="shrink-0 flex flex-col empty:hidden" style={{ backgroundColor: 'var(--bg-surface)' }}>
+              {externalImportNotice && (
+                <div role="status" aria-live="polite" data-testid="band-status"
+                  className="mx-3 mt-1.5 self-start px-3 py-1.5 rounded-xl bg-nv-raised border border-white/10 flex items-center gap-2.5 text-[12px] font-medium text-slate-200">
+                  {!/^[✅❌]/.test(externalImportNotice) && <i className="fas fa-circle-notch fa-spin text-cyan-400" aria-hidden="true"></i>}
+                  <span>{externalImportNotice}</span>
+                </div>
+              )}
+              <NextStepCard inline band
+                open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
+                trigger={nextStep || 'take'}
+                actions={nextStepActions}
+                beatTitle={getCatalogBeat(state.tracks)?.title}
+                isMobile={false}
+                besideSidebar={isSidebarOpen}
+                onAction={handleNextStep}
+                onClose={() => setNextStep(null)}
+                footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} row /> : null}
+              />
+            </div>
+          )}
+          {!isMobile && (
+            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-[11rem] border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
                 {/* Mode simple : Pistes, Groupes, Temps, Session, Collaborer et Retours sont rangés (menu ☰,
                     Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
@@ -11826,7 +11852,7 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {/* Téléphone, page Morceau : posé dans la page (MobileStatusInline) ; en flottant, il couvrait la barre du clip. */}
-      {externalImportNotice && !(isMobile && activeMobileTab === 'ARRANGEMENT') && (
+      {externalImportNotice && isMobile && activeMobileTab !== 'ARRANGEMENT' && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
@@ -11847,19 +11873,6 @@ function Studio() {
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
-      <NextStepCard
-        // Téléphone : jamais en flottant. La carte est posée dans la page Morceau (au-dessus des pistes) ;
-        // flottante sur Mixer / FX / Sons / Pistes, elle recouvrait les M / S de la console et la liste des sons.
-        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !isMobile}
-        trigger={nextStep || 'take'}
-        actions={nextStepActions}
-        beatTitle={getCatalogBeat(state.tracks)?.title}
-        isMobile={isMobile}
-        besideSidebar={isSidebarOpen}
-        onAction={handleNextStep}
-        onClose={() => setNextStep(null)}
-        footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null}
-      />
       <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
         onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
         busy={!!nextStep || countInBeat !== null} simple={simpleMode} />

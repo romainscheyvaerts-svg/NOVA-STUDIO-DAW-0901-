@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { dockItem } from '../utils/dockFit';
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DAWState } from '../types';
 import { videoTake, type CamState } from '../utils/videoTakeRecorder';
@@ -108,14 +110,19 @@ const VideoTakeDock: React.FC<Props> = props => {
     // Téléphone couché aussi (844 px de large, vue téléphone) : la pastille couvrait les pistes et la console.
     const phone = typeof window !== 'undefined' && (window.innerWidth < 640 || document.body.getAttribute('data-view-mode') === 'MOBILE');
     if (!voiceArmed || pillHidden || simple || phone) return null;
-    return (
-      <div className="fixed z-[640] bottom-[140px] right-3 sm:bottom-[120px] sm:right-5 flex items-center gap-1 rounded-full border border-nv-line bg-nv-panel/95 text-nv-ink shadow-xl pl-1 pr-1 backdrop-blur" data-testid="video-take-pill">
-        <button type="button" onClick={onOpen} className="h-10 rounded-full px-3 text-[13px] font-bold hover:bg-nv-accent/10" aria-label="Filmer la prise avec la caméra"
-          title="Filme-toi pendant la prise : la vidéo se cale sur ton son">🎥 Filmer la prise</button>
+    // Ordinateur / tablette : la pastille se range dans le bandeau du bas (data-nova-dock), à la suite de ses
+    // boutons : posée en flottant, elle recouvrait les pistes et les faders de la console.
+    const dock = typeof document !== 'undefined' ? document.querySelector('[data-nova-dock]') : null;
+    const pill = (
+      <div className={dock ? 'shrink-0 flex items-center gap-1 rounded-full border border-nv-line bg-nv-panel text-nv-ink pl-1 pr-1' : 'fixed z-[640] bottom-[140px] right-3 sm:bottom-[120px] sm:right-5 flex items-center gap-1 rounded-full border border-nv-line bg-nv-panel/95 text-nv-ink shadow-xl pl-1 pr-1 backdrop-blur'}
+        data-testid="video-take-pill" {...(dock ? dockItem(2) : {})}>
+        <button type="button" onClick={onOpen} className="h-10 rounded-full px-3 text-[13px] font-bold hover:bg-nv-accent/10 whitespace-nowrap" aria-label="Filmer la prise avec la caméra"
+          title="Filme-toi pendant la prise : la vidéo se cale sur ton son"><span data-dock-icon>🎥</span><span data-dock-label> Filmer la prise</span></button>
         <button type="button" onClick={() => { setPillHidden(true); try { sessionStorage.setItem(HIDE_PILL, '1'); } catch { /* */ } }}
           className="h-8 w-8 rounded-full text-nv-muted hover:bg-nv-accent/10" aria-label="Masquer « Filmer la prise » (palette Ctrl+K : « caméra »)" title="Masquer (Ctrl+K « caméra » pour la retrouver)">×</button>
       </div>
     );
+    return dock ? createPortal(pill, dock) : pill;
   }
 
   const vertical = cam.format === '9:16';
