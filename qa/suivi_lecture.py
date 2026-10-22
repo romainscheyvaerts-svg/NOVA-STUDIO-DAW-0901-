@@ -46,7 +46,7 @@ VIEW_JS = """() => {
   const sc = document.querySelector('[data-follow]');
   if (!sc) return null;
   const st = window.DAW_CONTROL.getState();
-  const zoom = +([...document.querySelectorAll('input[type=range][min="10"][max="300"]')].find(e => e.offsetParent) || {}).value || 0;
+  const zoom = +(sc.dataset.zoomH || 0);
   return { follow: sc.dataset.follow, left: sc.scrollLeft, width: sc.clientWidth, t: st.currentTime, playing: st.isPlaying, zoom };
 }"""
 
@@ -138,12 +138,13 @@ def run_case(p, case, vp, theme):
         sc = page.locator("[data-follow]").first
         sc.wait_for(timeout=15000)
         # Zoom au maximum (curseur de zoom, comme à la main) et tête de lecture au début.
-        page.evaluate("""() => { const el = [...document.querySelectorAll('input[type=range][min="10"][max="300"]')].find(e => e.offsetParent);
-          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, '300');
+        # Curseur logarithmique depuis le 22/10/2026 (1 à 48 000 px/s) : la position de 300 px/s.
+        page.evaluate("""() => { const el = [...document.querySelectorAll('[data-testid="zoom-slider"]')].find(e => e.offsetParent);
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, String(Math.round(1000 * Math.log(300) / Math.log(48000))));
           el.dispatchEvent(new Event('input', { bubbles: true })); window.DAW_CONTROL.seek(0); }""")
         page.wait_for_timeout(500)
         v0 = view()
-        check("zoom au maximum (300 px/s)", v0["zoom"] >= 290, v0)
+        check("zoom serré (300 px/s)", v0["zoom"] >= 290, v0)
         check("suivi actif au départ", v0["follow"] == "actif", v0)
 
         # 1. La vue avance seule pendant la lecture.

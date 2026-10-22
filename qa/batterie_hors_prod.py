@@ -214,6 +214,9 @@ BATTERIE = [
     # attaque 5 ms, relâchement 80 ms) ; export de la basse seule = creux à chaque coup (≥ 6 dB), lecture = même courbe ;
     # coupé, Ctrl+Z, sauvegarde + rechargement ; téléphone.
     ("modulateurs_suiveur", []),
+    # 22/10/2026 : tour « édition et navigation » (zoom du morceau à l'échantillon, Z, annuler par geste, sélection
+    # glissée entre pistes, Ctrl+D / couper-coller de plusieurs clips, bord qui défile, suivi de la tête, 60 pistes).
+    ("audit_edition", []),
 ]
 
 
