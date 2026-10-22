@@ -25,6 +25,7 @@ import { DrumMenu, menuAt, menuUnder, type DrumMenuItem, type DrumMenuState } fr
 import PadSamplerEditor, { TOUCH_RANGE } from './PadSamplerEditor';
 import { useSimpleMode } from '../utils/simpleMode';
 import { tempoMapStore, timeToQuarters } from '../utils/tempoMap';
+import { useFocusOnOpen } from '../hooks/useFocusOnOpen';
 
 interface DrumMachinePanelProps {
   open: boolean;
@@ -104,6 +105,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Le focus entre dans la batterie à l'ouverture : ses raccourcis (Maj+←/→, Suppr, Ctrl+D, [ ]) marchent tout de suite.
+  useFocusOnOpen(rootRef, p.open);
   /** Tour beatmaking (22/10/2026) : coup de pinceau sur les pas (souris), comme dans les step sequencers. */
   const strokeRef = useRef<{ on: boolean; painting: boolean; ri: number; si: number; dm: DrumMachine | null } | null>(null);
   useEffect(() => {
@@ -592,7 +595,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       : 'fixed inset-x-0 bottom-0 z-[560] flex justify-center px-4 pb-3 pointer-events-none'}
       onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title"
       onDragOver={allowDrop} onDrop={e => onDropFiles(e, null)}>
-      <div ref={rootRef} className={`w-full flex flex-col bg-nv-surface border border-white/[0.06] shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
+      <div ref={rootRef} tabIndex={-1} className={`outline-none w-full flex flex-col bg-nv-surface border border-white/[0.06] shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
         {/* En-tête : seules les commandes de chaque instant ; le reste est dans ⋯ */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
           <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap min-w-0 truncate">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>

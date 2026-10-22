@@ -453,6 +453,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
       // Piano roll ouvert : ses propres raccourcis passent avant (Ctrl+A, Ctrl+D, Suppr…).
       if (takenByPianoRoll(e)) return;
+      // Panneau de travail ouvert (batterie, piano roll : data-nova-transport) : l'arrangement caché derrière
+      // ne réagit plus (comme App.tsx). Avant, « 2 » tapé dans le piano roll ou la batterie passait l'outil de
+      // l'arrangement aux ciseaux sans qu'on le voie (audit de nuit 22/10/2026) ; piano roll plein écran :
+      // même les combinaisons Ctrl (Ctrl+E séparait des clips cachés).
+      if (document.querySelector('[data-nova-pianoroll]') || (!mod && document.querySelector('[data-nova-transport]'))) return;
       // Table ACTIVE des raccourcis (utils/keymapStore) : préréglage + remappages.
       const id = matchShortcut(e, ARRANGEMENT_SHORTCUT_IDS);
 
