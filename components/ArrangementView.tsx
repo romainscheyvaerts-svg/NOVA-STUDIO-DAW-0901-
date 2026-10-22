@@ -1832,6 +1832,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 // vite qu'on s'approche du bord (ou qu'on le dépasse) et le geste continue hors de la zone.
 const lastMoveRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean } | null>(null);
 const edgeRafRef = useRef<number | null>(null);
+const edgeMovePendingRef = useRef(false);
 const moveHandlerRef = useRef<(e: any) => void>(() => {});
 const upHandlerRef = useRef<() => void>(() => {});
 const EDGE_DRAGS: DragAction[] = ['MOVE', 'TRIM_START', 'TRIM_END', 'TCE_START', 'TCE_END', 'RANGE', 'SCRUB'];
@@ -1859,8 +1860,10 @@ function edgeTick() {
     if (!step) return;
     const before = sc.scrollLeft;
     sc.scrollLeft = Math.max(0, before + step);
-    if (sc.scrollLeft !== before) moveHandlerRef.current(ev);
-    if (edgeRafRef.current === null) edgeRafRef.current = requestAnimationFrame(edgeTick);
+    // Le geste suit au « scroll » qui en découle (onScroll) : une seule mise à jour par image
+    // (défilement + clip ensemble) au lieu de deux.
+    if (sc.scrollLeft !== before) edgeMovePendingRef.current = true;
+    edgeRafRef.current = requestAnimationFrame(edgeTick);
 }
 // Bouton toujours appuyé hors de la zone des pistes : le geste continue (et se termine au lâcher).
 useEffect(() => {
@@ -3208,7 +3211,10 @@ useEffect(() => {
           }}
           onPointerUp={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
           onPointerCancel={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
-          onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
+          onScroll={(e) => {
+            setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop);
+            if (edgeMovePendingRef.current) { edgeMovePendingRef.current = false; if (lastMoveRef.current && edgeScrollActive()) moveHandlerRef.current(lastMoveRef.current); }
+          }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onContextMenu={(e) => e.preventDefault()}
