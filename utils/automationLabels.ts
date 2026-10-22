@@ -1,5 +1,6 @@
 import { Track } from '../types';
 import { panToText } from './db';
+import { PAN_L, PAN_R } from './panLaw';
 import { gainDbFr } from './pluginUi';
 import { sendLabel } from './sendLabels';
 import { parsePluginParam } from './automationWrite';
@@ -24,6 +25,8 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
   if (param === 'volume') return 'Volume';
   if (param === 'preVolume') return 'Volume avant effets';
   if (param === 'pan') return 'Panoramique';
+  if (param === PAN_L) return 'Pan G';
+  if (param === PAN_R) return 'Pan D';
   if (isMuteParam(param)) return 'Muet';
   if (param === 'trim') return "Trim d'entrée";
   if (param === 'width') return 'Largeur stéréo';
@@ -66,7 +69,7 @@ export function automationValueText(param: string, v: number): string {
   const vt = pp ? vstValueText(pp.pluginId, pp.key, v) : null;
   if (vt) return vt;
   if (isGain(param)) return gainDbFr(v);
-  if (param === 'pan') return panToText(v);
+  if (param === 'pan' || param === PAN_L || param === PAN_R) return panToText(v);
   if (param === 'width') return v <= 0.005 ? 'Mono' : `${Math.round(v * 100)} %`;
   return v.toFixed(2).replace('.', ',');
 }
@@ -78,7 +81,7 @@ export function automationRangeText(param: string, min: number, max: number): st
   const hi = pp ? vstValueText(pp.pluginId, pp.key, max) : null;
   if (lo && hi) return `${lo} à ${hi}`;
   if (isGain(param)) return `${gainDbFr(min)} à ${gainDbFr(max)}`;
-  if (param === 'pan') return 'G 100 à D 100';
+  if (param === 'pan' || param === PAN_L || param === PAN_R) return 'G 100 à D 100';
   return `${min.toFixed(1).replace('.', ',')} à ${max.toFixed(1).replace('.', ',')}`;
 }
 

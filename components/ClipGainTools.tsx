@@ -17,6 +17,7 @@ import {
   unloopCommand, useClipGainCommands,
 } from '../hooks/useClipGainCommands';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { PAN_L, PAN_R, stereoPanOf } from '../utils/panLaw';
 import { editSelectionStore } from '../utils/editSelection';
 
 /**
@@ -173,7 +174,8 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
 
   /** Applique le geste du crayon d'automation (relY absolu dans les voies de la piste). */
   const applyAuto = (d: Extract<Drag, { kind: 'auto' }>, final: boolean) => {
-    const stat = d.lane.parameterName === 'volume' ? d.track.volume : d.lane.parameterName === 'pan' ? d.track.pan : (d.lane.min + d.lane.max) / 2;
+    const stat = d.lane.parameterName === 'volume' ? d.track.volume : d.lane.parameterName === 'pan' ? d.track.pan
+      : d.lane.parameterName === PAN_L ? stereoPanOf(d.track).l : d.lane.parameterName === PAN_R ? stereoPanOf(d.track).r : (d.lane.min + d.lane.max) / 2;
     let n = 0;
     const tag = Date.now().toString(36);
     const pts = applyPencilToAutomation(d.points0, d.stroke, t => valueAtPoints(d.points0, t, stat), () => `pt-${tag}-${n++}`, d.stroke.ramp);

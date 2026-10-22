@@ -10,6 +10,8 @@ import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collab
 import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
+import { DualPan } from './DualPan';
+import { isStereoTrack } from '../utils/panLaw';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
@@ -836,6 +838,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
         {/* Mode d'automation : visible dès qu'il compte (autre que Lecture, ou automation écrite) ; sinon dans « ⋯ ». */}
         {!simple && track.id !== 'master' && autoModeShown && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
+        {/* Piste stéréo (hors mode simple) : double pan G / D, comme les consoles de studio. */}
+        {!simple && isStereoTrack(track) ? <DualPan track={track} onUpdate={onUpdate} variant="header" /> : (<>
         <div
           {...panKnob.bind}
           ref={(el) => { panHostRef.current = el; panKnob.bind.ref(el); }}
@@ -849,6 +853,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
         {/* Valeur du panoramique lisible (F2) : « C », « G 30 », « D 30 ». */}
         <span className="w-7 shrink-0 text-[9px] font-mono tabular-nums text-slate-400 pointer-events-none" aria-hidden="true">{panToText(track.pan)}</span>
+        </>)}
         
         <div className="flex-1 flex items-center gap-1 h-6 relative">
           {/* Verrou de volume (collaboration) : « c'est ce volume-là que veut l'artiste ». */}

@@ -87,7 +87,7 @@ export const GUEST_SONG_FIELDS = ['lyrics', 'lyricsRegions'] as const;
  * (utils/projectRate) : la changer recrée le moteur et reconvertit tous les sons
  * de la séance chez tout le monde — c'est la séance de l'ingé.
  */
-export const GUEST_REFUSED_SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'sampleRate'] as const;
+export const GUEST_REFUSED_SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'sampleRate', 'panLaw'] as const;
 
 /**
  * Opérations jamais permises à un invité en mode simple : elles changent la

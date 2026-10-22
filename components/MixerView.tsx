@@ -42,6 +42,8 @@ import { OneKnobStrip } from './voice/OneKnob';
 import { isVoiceTrack } from '../utils/vocalRoles';
 import { projectKey } from '../utils/voiceProjectKey';
 import { sendTransferMenuItems } from '../utils/sendFader';
+import { DualPan, PanMenu } from './DualPan';
+import { isStereoTrack } from '../utils/panLaw';
 
 /**
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
@@ -94,6 +96,19 @@ const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({
   const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);
   return <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({ ...track, pan: val })} />;
 };
+/**
+ * Pan de la tranche (22/10/2026) : piste mono = un pan (loi du projet) ; piste stéréo = double
+ * pan G / D. Même hauteur dans les deux cas (les faders restent alignés) ; menu ▾ : lien,
+ * format mono / stéréo, loi de pan du projet.
+ */
+const StripPan: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => (
+  <div className="relative h-[78px] w-full flex flex-col items-center justify-start" data-testid={`strip-pan-${track.id}`}>
+    {isStereoTrack(track) ? <DualPan track={track} onUpdate={onUpdate} variant="strip" /> : (<>
+      <LivePanKnob track={track} onUpdate={onUpdate} />
+      <div className="absolute top-0 right-3"><PanMenu track={track} onUpdate={onUpdate} compact /></div>
+    </>)}
+  </div>
+);
 
 const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const [editing, setEditing] = useState(false);
@@ -568,7 +583,7 @@ const ChannelStrip: React.FC<{
         <div className="mb-2"><StripHeadOrMenu track={track} onUpdate={onUpdate} isMaster={isMaster} /></div>
 
         <div className="mb-2 flex flex-col items-center">
-           <LivePanKnob track={track} onUpdate={onUpdate} />
+           <StripPan track={track} onUpdate={onUpdate} />
         </div>
 
         {/* Le fader garde au moins 150 px : si l'écran est trop bas, la console défile (le nom reste lisible). */}

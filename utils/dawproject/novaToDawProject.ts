@@ -19,6 +19,7 @@
  * NOVA ne sont jamais écrits en fichier. Module pur : tests/dawProject.test.ts.
  */
 import { FADER_MAX_GAIN } from '../faderLaw';
+import { PAN_L, PAN_R } from '../panLaw';
 import { AutomationLane, Clip, DAWState, PluginInstance, Track, TrackType } from '../../types';
 import { encodeBwf, BwfFormat } from '../bwf';
 import { usesKitSounds } from '../drumKitLibrary';
@@ -64,6 +65,8 @@ export interface NovaSidecar {
   markers: Record<string, { type: string; endTime?: number; number?: number }>;
   samples: string[];
   tempoEvents?: DAWState['tempoEvents'];
+  /** Loi de pan du projet (absente : −3 dB). */
+  panLaw?: DAWState['panLaw'];
 }
 
 export const NOVA_SIDECAR = 'nova/nova.json';
@@ -71,7 +74,9 @@ export const AUDIO_DIR = 'audio';
 
 /** Champs de piste propres à NOVA gardés pour l'aller-retour. */
 export const TRACK_EXTRAS = ['inputTrimDb', 'phaseInvert', 'monoSum', 'stereoWidth', 'comment', 'isGuide', 'guideLevel', 'guideMuted', 'midiChannel',
-  'novaSynth', 'bass808', 'melodicSampler', 'breathKind', 'isHidden', 'soloSafe', 'folder', 'automationMode'] as const;
+  'novaSynth', 'bass808', 'melodicSampler', 'breathKind', 'isHidden', 'soloSafe', 'folder', 'automationMode',
+  // Double pan des pistes stéréo (G / D, lien, format) : le format n'a qu'un pan par piste.
+  'stereoPan', 'panLink', 'panFormat'] as const;
 /** Champs de clip propres à NOVA gardés pour l'aller-retour. */
 export const CLIP_EXTRAS = ['gain', 'gainPoints', 'fadeInCurve', 'fadeOutCurve', 'takeNumber', 'cc', 'syncPoint', 'originStart', 'lock', 'transcript', 'breaths'] as const;
 
@@ -216,6 +221,9 @@ export function buildDawProject(state: DAWState, getAudio: (bufferId: string) =>
     const extras: Record<string, unknown> = {};
     for (const k of TRACK_EXTRAS) if ((t as any)[k] !== undefined) extras[k] = copy((t as any)[k]);
     if (t.vstInstrument) { const { renderSig: _r, ...vi } = t.vstInstrument; extras.vstInstrument = copy(vi); }
+    // Voies « Pan G » / « Pan D » (pistes stéréo) : sans équivalent dans le format, gardées pour NOVA.
+    const panLanes = (t.automationLanes || []).filter(l => (l.parameterName === PAN_L || l.parameterName === PAN_R) && l.points?.length);
+    if (panLanes.length) extras.panLanes = copy(panLanes);
     // Sampler perso : son du sample joint (nova/samples/).
     if (t.melodicSampler?.sampleId && !t.melodicSampler.kitRef) {
       const sid = `msample-${t.melodicSampler.sampleId}`;
@@ -262,6 +270,7 @@ export function buildDawProject(state: DAWState, getAudio: (bufferId: string) =>
     for (const l of (t.automationLanes || []) as AutomationLane[]) {
       if (!l.points?.length) continue;
       let target: string | undefined, unit = 'linear', conv = (v: number) => v;
+      if (l.parameterName === PAN_L || l.parameterName === PAN_R) continue; // gardées dans nova.json (extras.panLanes)
       if (l.parameterName === 'volume') target = ref.volume;
       else if (l.parameterName === 'pan') { target = ref.pan; unit = 'normalized'; conv = v => (v + 1) / 2; }
       else { const m = /^plugin::(.+?)::(.+)$/.exec(l.parameterName); if (m) target = paramIds.get(`${m[1]}::${m[2]}`); }
@@ -351,6 +360,7 @@ export function buildDawProject(state: DAWState, getAudio: (bufferId: string) =>
   if (master && ids.has('master')) structure.push(trackXml(master, []));
 
   // ── Transport, tempo, mesure, repères ──────────────────────────────────────────────
+  if (state.panLaw !== undefined && state.panLaw !== null) side.panLaw = state.panLaw;
   const map = buildTempoMap(state.bpm, state.timeSignature, state.tempoEvents);
   const seg0 = map.segments[0];
   const arrangement: XmlNode[] = [];

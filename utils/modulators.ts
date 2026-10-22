@@ -1,6 +1,7 @@
 import { TrackType, type AutomationLane, type AutomationPoint, type Clip, type Track } from '../types';
 import { parsePluginParam, setLaneModulator, sortedPoints, valueAtPoints } from './automationWrite';
 import { isMuteParam } from './muteAutomation';
+import { PAN_L, PAN_R, stereoPanOf } from './panLaw';
 import { quartersToTime, tempoMapStore, timeToQuarters, type TempoMap } from './tempoMap';
 import { audioBufferRegistry } from './audioBufferRegistry';
 import { blockPeaks, envSourcesOf, envUnitAt, followEnvelope } from './envelopeFollower';
@@ -132,6 +133,9 @@ export function lfoAt(shape: LfoShape, cycles: number, seed = ''): number {
 export function staticValueOf(track: Track, param: string): number | null {
   if (param === 'volume') return track.volume;
   if (param === 'pan') return track.pan;
+  // Double pan d'une piste stéréo : G / D écrits, ou ancien pan converti.
+  if (param === PAN_L) return stereoPanOf(track).l;
+  if (param === PAN_R) return stereoPanOf(track).r;
   if (param.startsWith('send::')) { const s = (track.sends || []).find(x => x.id === param.slice(6)); return s ? s.level : null; }
   const p = parsePluginParam(param);
   if (p) {

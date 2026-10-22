@@ -96,6 +96,6 @@ export function fmtParamValue(param: string, v: number): string {
     const db = 20 * Math.log10(v);
     return `${db > 0.05 ? '+' : db < -0.05 ? '−' : ''}${Math.abs(db).toFixed(1).replace('.', ',')} dB`;
   }
-  if (param === 'pan') return Math.abs(v) < 0.005 ? 'C' : `${v < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v) * 100)}`;
+  if (param === 'pan' || param === 'panL' || param === 'panR') return Math.abs(v) < 0.005 ? 'C' : `${v < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v) * 100)}`;
   return (Math.round(v * 100) / 100).toString().replace('.', ',');
 }

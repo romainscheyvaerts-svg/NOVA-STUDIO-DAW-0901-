@@ -40,6 +40,7 @@ export const HISTORY_MAX = 120;
 export const SONG_LABEL: Record<string, string> = {
   projectKey: 'la tonalité', projectScale: 'la gamme', arrangements: 'les arrangements', lyrics: 'les paroles', lyricsRegions: 'les paroles par section',
   sampleRate: "la fréquence d'échantillonnage du projet",
+  panLaw: 'la loi de pan du projet',
 };
 
 /** Ce qu'un champ de mix veut dire, en français. */
@@ -52,6 +53,7 @@ export function mixFieldLabel(f: string, pluginName?: (id: string) => string | u
   if (f === 'pluginOrder') return 'la liste des effets';
   if (f === 'structure') return 'la structure (masquée, inactive, dossier)';
   if (f === 'strip') return 'la tranche (trim, phase, largeur)';
+  if (f === 'panStereo') return 'le double pan (G / D)';
   if (f === 'automationMode' || f === 'autoOrder' || f.startsWith(AUTO_FIELD)) return "l'automation";
   if (f.startsWith(PLUGIN_FIELD)) {
     const n = pluginName?.(f.slice(PLUGIN_FIELD.length));

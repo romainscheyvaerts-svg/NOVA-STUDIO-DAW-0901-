@@ -43,6 +43,9 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
 import { setModulatorSourceResolver } from '../utils/modulators';
+// Loi de pan pro et double pan des pistes stéréo (22/10/2026).
+import { NovaPanner, type PanMode } from './panNode';
+import { DEFAULT_PAN_LAW, PAN_L, PAN_R, legacyPanToStereo, sanitizePanLaw, stereoPanOf, isStereoTrack, type PanLaw } from '../utils/panLaw';
 import { DrumRackNode, type DrumNoteEx } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -115,10 +118,14 @@ import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../ut
 import { installHQDecode } from '../utils/hqAudio';
 import { createOutputDeviceWatch } from './outputDeviceWatch';
 
+/** Volume / pan connus d'une piste (retour direct, mixes casque). */
+interface TrackMixInfo { id: string; volume: number; pan: number; stereoPan?: Track['stereoPan']; stereo?: boolean }
+
 interface TrackDSP {
   input: GainNode;          
   output: GainNode;         
-  panner: StereoPannerNode; 
+  /** Pan à la loi du projet (piste mono : un pan ; piste stéréo : G / D). engine/panNode. */
+  panner: NovaPanner;
   gain: GainNode;           
   /**
    * Analyseur de la piste (après fader et pan) : créé à la première demande (affichages de prise :
@@ -134,7 +141,7 @@ interface TrackDSP {
   /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
   pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
-  sendPanners?: Map<string, StereoPannerNode>;
+  sendPanners?: Map<string, NovaPanner>;
   /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
   chainIds?: string[];
   postChainIds?: string[];
@@ -416,7 +423,9 @@ export class AudioEngine {
   /** Canaux max que le navigateur donne pour le micro (capabilities), 0 = inconnu. */
   private browserMaxChannels = 0;
   /** Volume / pan connus des pistes (retour direct du pont, mixes casque). */
-  private trackMix = new Map<string, { id: string; volume: number; pan: number }>();
+  private trackMix = new Map<string, TrackMixInfo>();
+  /** Loi de pan du projet (utils/panLaw) : lecture, export, envois, casque, retour direct. */
+  private panLaw: PanLaw = DEFAULT_PAN_LAW;
   // --- R15 · Mixes casque et sorties de la carte ---
   private cueEngine: CueMixEngine | null = null;
   private cueMixes: CueMix[] = [];
@@ -1170,7 +1179,7 @@ export class AudioEngine {
     const direct = this.directMonitorActive();
     if (this.asioBridge.protocol >= 2) {
       const armed = (this.inputRouter?.all() || []).map(t => ({ track: this.trackMix.get(t.trackId) || { id: t.trackId, volume: 1, pan: 0 }, channels: t.channels }));
-      const routes = direct ? directMonitorRoutes({ armed, mixes: this.cueMixes, monitoring: this.inputMonitoring, monitorLevel: this.monitorLevel, outputChannels: this.asioOutputChannels, listenId: this.cueListen }) : [];
+      const routes = direct ? directMonitorRoutes({ panLaw: this.panLaw, armed, mixes: this.cueMixes, monitoring: this.inputMonitoring, monitorLevel: this.monitorLevel, outputChannels: this.asioOutputChannels, listenId: this.cueListen }) : [];
       this.asioBridge.setMonitorRoutes(routes.length > 0, routes);
       try { window.dispatchEvent(new CustomEvent('nova:direct-monitor', { detail: { routes } })); } catch { /* */ }
     } else {
@@ -1638,7 +1647,7 @@ export class AudioEngine {
       down?: number;
       input: GainNode;
       gain: GainNode;
-      panner: StereoPannerNode;
+      panner: NovaPanner;
       output: GainNode;
       sends: Map<string, GainNode>;
       /** Sortie de la chaîne d'effets, avant le fader (clé de side-chain) ; piste muette / coupée par un solo. */
@@ -1705,7 +1714,8 @@ export class AudioEngine {
       if (!offlineKeepAlive) offlineKeepAlive = createKeepAlive(offlineCtx);
       offlineKeepAlive.connect(input);
       const gain = offlineCtx.createGain();
-      const panner = offlineCtx.createStereoPanner();
+      // Pan à la loi du projet (comme en lecture) ; rendu pré-fader : neutre (son d'origine).
+      const panner = new NovaPanner(offlineCtx, options.preFader ? 'neutral' : this.panModeOf(track), this.panLaw, 0);
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
@@ -1772,13 +1782,13 @@ export class AudioEngine {
       head.connect(muteGain);
       muteGain.connect(gain);
       const preNode = head;
-      gain.connect(panner);
+      gain.connect(panner.input);
       panner.connect(output);
 
       // Le solo ne concerne que les pistes sources : un bus ne doit pas etre coupe.
       const silenced = track.isMuted || soloSilenced.has(track.id);
       gain.gain.value = silenced ? 0 : (options.preFader ? 1 : track.volume);
-      panner.pan.value = options.preFader ? 0 : track.pan;
+      if (!options.preFader) this.setPannerStatic(panner, track);
 
       const rt: RenderTrack = {
         input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced, strip,
@@ -1856,12 +1866,13 @@ export class AudioEngine {
         // Envoi muet (Pro Tools) : câblé mais à zéro.
         sendGain.gain.value = (send.preFader && rt.silenced) || send.isMuted ? 0 : send.level;
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
+        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner.output)).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         if (ownPan) {
-          const sp = offlineCtx.createStereoPanner();
-          sp.pan.value = Math.max(-1, Math.min(1, send.pan!));
-          sendGain.connect(sp);
+          // Pan propre de l'envoi : même loi que la piste (piste stéréo : G / D équivalents).
+          const sp = new NovaPanner(offlineCtx, this.panModeOf(track), this.panLaw, 0);
+          this.setSendPanStatic(sp, send.pan!);
+          sendGain.connect(sp.input);
           sp.connect(sendDelay);
         } else sendGain.connect(sendDelay);
         sendDelay.connect(target.input);
@@ -1952,7 +1963,7 @@ export class AudioEngine {
           if (rt.muteGain && lane.points.length) this.programmerVoieHorsLigne(rt.muteGain.gain, muteGainPoints(lane.points), startOffset + toSamples(rt.down || 0), totalDuration);
           return;
         }
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -3228,6 +3239,8 @@ export class AudioEngine {
     // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
+    // Format de pan (mono / stéréo) : un son chargé après le câblage de la piste peut l'avoir changé.
+    this.refreshPanFormats(tracks);
     if (this.isPlaying) this.stopAll();
     // L'extrait du catalogue jouait en même temps que le projet : on le coupe
     // (lecteur interne ici, lecteur <audio> du catalogue via l'événement).
@@ -3325,15 +3338,17 @@ export class AudioEngine {
         try {
           const t = live.get(id);
           const vLane = t ? playedLanes(t).find(l => l.parameterName === 'volume' && l.points.length > 0) : undefined;
-          const pLane = t ? playedLanes(t).find(l => l.parameterName === 'pan' && l.points.length > 0) : undefined;
           const vol = !t ? dsp.gain.gain.value
             : (t.isMuted || this.soloSilencedIds.has(id)) ? 0
             : vLane ? this.valeurAutomationA(this.sortedOf(vLane.points), this.pausedAt) : t.volume;
-          const pan = !t ? dsp.panner.pan.value : pLane ? this.valeurAutomationA(this.sortedOf(pLane.points), this.pausedAt) : t.pan;
           dsp.gain.gain.cancelScheduledValues(now);
           dsp.gain.gain.setValueAtTime(vol, now);
+          // Pan (ou G / D) : valeur de la courbe à l'arrêt, sinon le réglage de la piste.
+          const [pa, pb] = t ? this.panValuesAt(t, this.pausedAt) : [dsp.panner.pan.value, dsp.panner.panR.value];
           dsp.panner.pan.cancelScheduledValues(now);
-          dsp.panner.pan.setValueAtTime(pan, now);
+          dsp.panner.pan.setValueAtTime(pa, now);
+          dsp.panner.panR.cancelScheduledValues(now);
+          dsp.panner.panR.setValueAtTime(pb, now);
         } catch (e) {}
       });
       // Réglages d'effets programmés d'avance : plus rien ne doit bouger après l'arrêt.
@@ -3660,6 +3675,7 @@ export class AudioEngine {
       try {
         dsp.gain.gain.cancelScheduledValues(boundaryContextTime);
         dsp.panner.pan.cancelScheduledValues(boundaryContextTime);
+        dsp.panner.panR.cancelScheduledValues(boundaryContextTime);
         dsp.input.gain.cancelScheduledValues(boundaryContextTime);
         dsp.frozenInput?.gain.cancelScheduledValues(boundaryContextTime);
       } catch (e) {}
@@ -3991,7 +4007,7 @@ export class AudioEngine {
   private cibleAutomation(
     nomParametre: string,
     gain: AudioParam,
-    pan: AudioParam,
+    panner: NovaPanner,
     sends: Map<string, GainNode>,
     pre?: AudioParam,
     strip?: StripNodes | null
@@ -4002,7 +4018,10 @@ export class AudioEngine {
     // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
     // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
     if (nomParametre === PRE_VOLUME) return pre || null;
-    if (nomParametre === 'pan') return pan;
+    // Pan : piste mono = « pan » ; piste stéréo = « Pan G » / « Pan D » (playedLanes convertit l'ancienne voie).
+    if (nomParametre === 'pan') return panner.mode === 'stereo' ? null : panner.pan;
+    if (nomParametre === PAN_L) return panner.mode === 'stereo' ? panner.pan : null;
+    if (nomParametre === PAN_R) return panner.mode === 'stereo' ? panner.panR : null;
     if (nomParametre.startsWith('send::')) {
       const idDepart = nomParametre.slice('send::'.length);
       return sends.get(idDepart)?.gain || null;
@@ -4108,7 +4127,7 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
@@ -4142,7 +4161,7 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     const t0 = now + 0.01;
@@ -4459,7 +4478,7 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -4467,7 +4486,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -4684,7 +4703,7 @@ export class AudioEngine {
       input: this.ctx.createGain(),
       output: this.ctx.createGain(),
       gain: this.ctx.createGain(),
-      panner: this.ctx.createStereoPanner(),
+      panner: new NovaPanner(this.ctx, this.panModeOf(track), this.panLaw, this.ctx.currentTime),
       pluginChain: new Map(),
       sends: new Map(),
     };
@@ -4796,8 +4815,10 @@ export class AudioEngine {
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
-    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
+    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+    dsp.panner.dispose();
+    dsp.sendPanners?.forEach(n => n.dispose());
     meterBank.detachTrack(trackId);
     disposeStrip(dsp.strip);
     const lt = this.listenTapNodes.get(trackId);
@@ -4924,7 +4945,7 @@ export class AudioEngine {
       // gain.value relu plus tard (arrêt, retour au début) renvoyait l'ANCIENNE valeur.
       if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
       else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
-      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      this.applyPannerTargets(dsp, track, t);
       if (dsp.strip) setStrip(dsp.strip, track, t, !this.isPlaying, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
@@ -4951,7 +4972,8 @@ export class AudioEngine {
         const sendGain = dsp.sends.get(send.id);
         const forcedOff = !send.isEnabled || !!send.isMuted || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
-        if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
+        const sp = typeof send.pan === 'number' ? dsp.sendPanners?.get(send.id) : undefined;
+        if (sp) { sp.setFormat(this.panModeOf(track), this.panLaw); this.setSendPanStatic(sp, send.pan!, t); }
       });
       this.syncSidechains(allTracks);
       this.syncVstWatch(track, dsp);
@@ -5124,7 +5146,7 @@ export class AudioEngine {
     link(head, dsp.chainOut);
     dsp.preFaderTap.connect(dsp.gain);
     this.resetMuteGain(track, dsp);
-    dsp.gain.connect(dsp.panner);
+    dsp.gain.connect(dsp.panner.input);
     dsp.panner.connect(dsp.output);
     // Analyseur en dérivation, seulement s'il a été demandé (getTrackAnalyzer) : même signal.
     if (dsp.analyzer) dsp.panner.connect(dsp.analyzer);
@@ -5133,7 +5155,7 @@ export class AudioEngine {
     const targetVolume = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
     dsp.gain.gain.setValueAtTime(0, now + fadeTime);
     dsp.gain.gain.linearRampToValueAtTime(targetVolume, now + fadeTime * 2);
-    dsp.panner.pan.setTargetAtTime(track.pan, now + fadeTime, 0.015);
+    this.applyPannerTargets(dsp, track, now + fadeTime, true);
     
     dsp.output.disconnect();
     let destNode: AudioNode = this.masterOutput!;
@@ -5185,18 +5207,20 @@ export class AudioEngine {
         sendGain.gain.setTargetAtTime(sendLevel, now + fadeTime, 0.015);
         
         // Post-fader : après le fader et le pan ; pré-fader : après les effets, avant le fader.
-        try { dsp!.panner.disconnect(sendGain); } catch (e) {}
+        try { dsp!.panner.output.disconnect(sendGain); } catch (e) {}
         try { dsp!.preFaderTap?.disconnect(sendGain); } catch (e) {}
         // Pan propre de l'envoi (Pro Tools « FMP » éteint) : post-fader pris AVANT le pan de la piste.
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : (ownPan ? dsp!.gain : dsp!.panner)).connect(sendGain);
+        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : (ownPan ? dsp!.gain : dsp!.panner.output)).connect(sendGain);
         let sendTail: AudioNode = sendGain;
         if (ownPan) {
+          // Pan propre de l'envoi : même loi que la piste (piste stéréo : G / D équivalents).
           let sp = dsp!.sendPanners!.get(send.id);
-          if (!sp) { sp = this.ctx!.createStereoPanner(); dsp!.sendPanners!.set(send.id, sp); }
-          sp.pan.setValueAtTime(Math.max(-1, Math.min(1, send.pan!)), now);
-          sendGain.connect(sp);
-          sendTail = sp;
+          if (!sp) { sp = new NovaPanner(this.ctx!, this.panModeOf(track), this.panLaw, this.ctx!.currentTime); dsp!.sendPanners!.set(send.id, sp); }
+          sp.setFormat(this.panModeOf(track), this.panLaw);
+          this.setSendPanStatic(sp, send.pan!, now);
+          sendGain.connect(sp.input);
+          sendTail = sp.output;
         }
         
         // Find the destination send/bus track and connect
@@ -5228,7 +5252,7 @@ export class AudioEngine {
     });
     dsp.sendLinks.forEach((_, sendId) => { if (!currentSendIds.has(sendId)) dsp!.sendLinks!.delete(sendId); });
     dsp.sendPanners.forEach((node, sendId) => {
-      if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
+      if (!currentSendIds.has(sendId)) { node.dispose(); dsp!.sendPanners!.delete(sendId); }
     });
     dsp.outputs = outputs;
     this.syncSidechains(allTracks);
@@ -5236,9 +5260,9 @@ export class AudioEngine {
     this.recomputePdc();
     // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
     // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
-    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.panner);
+    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.panner.output);
     // R15 : les mixes casque reprennent la prise pré-fader (le recâblage l'a débranchée).
-    this.trackMix.set(track.id, { id: track.id, volume: track.volume, pan: track.pan });
+    this.trackMix.set(track.id, this.mixOf(track));
     if (this.cueMixes.length) this.cueEngine?.reconnectTrack(track.id, dsp.preFaderTap || null);
   }
 
@@ -5288,7 +5312,7 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
         if (cible) cible.setValueAtTime(value, now);
     });
 }
@@ -5970,7 +5994,7 @@ export class AudioEngine {
   /** Mixes casque du projet (et pistes, pour les niveaux par défaut et les prises pré-fader). */
   public setCueMixes(mixes: CueMix[], tracks: Track[]) {
     this.cueMixes = mixes || [];
-    tracks.forEach(t => this.trackMix.set(t.id, { id: t.id, volume: t.volume, pan: t.pan }));
+    tracks.forEach(t => this.trackMix.set(t.id, this.mixOf(t)));
     if (!this.ctx || !this.cueEngine) return;
     if (this.cueMixes.length) metronomeService.addTap(this.cueEngine.clickIn);
     const sources = tracks.filter(t => this.isSourceTrackType(t) && t.id !== 'master');
@@ -6124,15 +6148,115 @@ export class AudioEngine {
     }
   }
 
-  public setTrackPan(trackId: string, pan: number) {
+  /**
+   * Pan d'une piste (chemin rapide, sans recâbler). Piste stéréo : `track` donne G / D
+   * (track.stereoPan) ; sans lui, le pan unique est converti (ancienne balance).
+   */
+  public setTrackPan(trackId: string, pan: number, track?: Pick<Track, 'stereoPan'>) {
     const tm = this.trackMix.get(trackId);
-    if (tm && tm.pan !== pan) { tm.pan = pan; if (this.inputRouter?.has(trackId)) this.syncDirectMonitor(); }
+    const stereoPan = track ? track.stereoPan : tm?.stereoPan;
+    if (tm && (tm.pan !== pan || tm.stereoPan !== stereoPan)) { tm.pan = pan; tm.stereoPan = stereoPan; if (this.inputRouter?.has(trackId)) this.syncDirectMonitor(); }
     const live = this.liveTracks?.find(t => t.id === trackId);
-    if (live && this.automationOwns(live, 'pan')) return;
     const dsp = this.tracksDSP.get(trackId);
-    if (dsp && this.ctx) {
-        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
+    if (!dsp || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (dsp.panner.mode === 'stereo') {
+      const sp = stereoPanOf({ pan, stereoPan });
+      if (!(live && this.automationOwns(live, PAN_L))) dsp.panner.pan.setTargetAtTime(sp.l, now, 0.015);
+      if (!(live && this.automationOwns(live, PAN_R))) dsp.panner.panR.setTargetAtTime(sp.r, now, 0.015);
+    } else if (!(live && this.automationOwns(live, 'pan'))) dsp.panner.pan.setTargetAtTime(pan, now, 0.015);
+  }
+
+  // ─── Loi de pan et double pan (22/10/2026) ─────────────────────────────────────────
+
+  /** Loi de pan du projet : appliquée tout de suite à toutes les pistes, aux mixes casque et au retour direct. */
+  public setPanLaw(law: unknown) {
+    const next = sanitizePanLaw(law);
+    if (next === this.panLaw) return;
+    this.panLaw = next;
+    const live = new Map((this.liveTracks || []).map(t => [t.id, t] as const));
+    this.tracksDSP.forEach((dsp, id) => {
+      const t = live.get(id);
+      dsp.panner.setFormat(t ? this.panModeOf(t) : dsp.panner.mode, next);
+      dsp.sendPanners?.forEach(sp => sp.setFormat(sp.mode, next));
+    });
+    this.cueEngine?.setPanLaw(next);
+    this.syncDirectMonitor();
+  }
+
+  public getPanLaw(): PanLaw { return this.panLaw; }
+
+  /** Pistes dont le format de pan a changé (son stéréo chargé après coup, format choisi) : pan reposé. */
+  private refreshPanFormats(tracks: Track[]) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const t of tracks) {
+      const dsp = this.tracksDSP.get(t.id);
+      if (dsp && dsp.panner.mode !== this.panModeOf(t)) this.applyPannerTargets(dsp, t, now, true);
     }
+  }
+
+  /** Format de pan d'une piste : stéréo (G / D) ou mono (utils/panLaw · isStereoTrack). */
+  private panModeOf(track: Track): PanMode { return isStereoTrack(track) ? 'stereo' : 'mono'; }
+
+  /** Réglage fixe du pan (piste mono) ou de G / D (piste stéréo). */
+  private staticPanOf(track: Track, mode: PanMode): [number, number] {
+    if (mode === 'stereo') { const sp = stereoPanOf(track); return [sp.l, sp.r]; }
+    return [Number.isFinite(track.pan) ? track.pan : 0, 1];
+  }
+
+  /** Pan (ou G / D) entendu à l'instant `time` : courbe jouée s'il y en a une, sinon le réglage. */
+  private panValuesAt(track: Track, time: number): [number, number] {
+    const mode = this.panModeOf(track);
+    const [a, b] = this.staticPanOf(track, mode);
+    const lanes = playedLanes(track);
+    const at = (name: string, stat: number) => {
+      const l = lanes.find(x => x.parameterName === name && x.points.length > 0);
+      return l ? this.valeurAutomationA(this.sortedOf(l.points), time) : stat;
+    };
+    return mode === 'stereo' ? [at(PAN_L, a), at(PAN_R, b)] : [at('pan', a), b];
+  }
+
+  /** Pose le pan d'une piste (format, loi, valeurs automatisées ou fixes). */
+  private applyPannerTargets(dsp: TrackDSP, track: Track, t: number, fixed = false) {
+    const mode = this.panModeOf(track);
+    dsp.panner.setFormat(mode, this.panLaw);
+    const [a, b] = this.staticPanOf(track, mode);
+    if (fixed) {
+      dsp.panner.pan.setTargetAtTime(a, t, 0.015);
+      dsp.panner.panR.setTargetAtTime(b, t, 0.015);
+      return;
+    }
+    if (mode === 'stereo') {
+      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, PAN_L, a), t, 0.015);
+      dsp.panner.panR.setTargetAtTime(this.automatedValue(track, PAN_R, b), t, 0.015);
+    } else {
+      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', a), t, 0.015);
+      dsp.panner.panR.setTargetAtTime(1, t, 0.015);
+    }
+  }
+
+  /** Valeurs fixes d'un pan de rendu (export). */
+  private setPannerStatic(panner: NovaPanner, track: Track) {
+    const [a, b] = this.staticPanOf(track, panner.mode === 'stereo' ? 'stereo' : 'mono');
+    panner.pan.value = a;
+    panner.panR.value = b;
+  }
+
+  /** Pan propre d'un envoi : piste mono = position ; piste stéréo = ancien pan converti en G / D. */
+  private setSendPanStatic(sp: NovaPanner, pan: number, t?: number) {
+    const p = Math.max(-1, Math.min(1, pan));
+    const lr = legacyPanToStereo(p);
+    const a = sp.mode === 'stereo' ? lr.l : p;
+    const b = sp.mode === 'stereo' ? lr.r : 1;
+    if (t === undefined) { sp.pan.value = a; sp.panR.value = b; return; }
+    sp.pan.setValueAtTime(a, t);
+    sp.panR.setValueAtTime(b, t);
+  }
+
+  /** Volume / pan connus d'une piste (retour direct du pont, mixes casque). */
+  private mixOf(t: Track): TrackMixInfo {
+    return { id: t.id, volume: t.volume, pan: t.pan, stereoPan: t.stereoPan, stereo: isStereoTrack(t) };
   }
 }
 

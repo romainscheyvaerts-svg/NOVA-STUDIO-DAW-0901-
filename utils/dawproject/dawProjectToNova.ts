@@ -11,7 +11,7 @@
  * Module pur : tests/dawProject.test.ts.
  */
 import { FADER_MAX_GAIN } from '../faderLaw';
-import { AutomationLane, Clip, Marker, MidiNote, PluginInstance, TimeSignature, Track, TrackType } from '../../types';
+import { AutomationLane, Clip, DAWState, Marker, MidiNote, PluginInstance, TimeSignature, Track, TrackType } from '../../types';
 import { buildTempoMap, timeToPosition, TempoEvent } from '../tempoMap';
 import type { DawDevice, DawSession, DawTrack } from './dawProjectRead';
 import { panFromNormalized } from './dawProjectRead';
@@ -43,6 +43,8 @@ export interface DawImportResult {
   tempoEvents: TempoEvent[];
   markers: Marker[];
   master: Pick<Track, 'volume' | 'pan' | 'plugins' | 'automationLanes'> | null;
+  /** Loi de pan du projet NOVA d'origine (absente : fichier d'un autre logiciel). */
+  panLaw?: DAWState['panLaw'];
   report: DawImportReport;
 }
 
@@ -229,6 +231,9 @@ export function dawProjectToNova(s: DawSession, audioOf: (path: string) => Media
   // Automation après les effets (ids des réglages connus) ; dossiers parents.
   all.forEach((t, i) => {
     tracks[i].automationLanes = automationOf(t, tracks[i].id);
+    // Voies « Pan G » / « Pan D » d'une piste stéréo NOVA (gardées dans nova.json).
+    const pl = side?.tracks[t.xmlId]?.extras.panLanes;
+    if (Array.isArray(pl)) tracks[i].automationLanes.push(...(copy(pl) as AutomationLane[]).map(l => ({ ...l, id: `${P}-a${++n}`, points: (l.points || []).map(p => ({ ...p, id: `${P}-ap${++n}` })) })));
     if (t.parentXmlId && tid.has(t.parentXmlId)) tracks[i].parentFolderId = tid.get(t.parentXmlId);
   });
 
@@ -300,6 +305,7 @@ export function dawProjectToNova(s: DawSession, audioOf: (path: string) => Media
   out.push(...lines);
   return {
     tracks, buffers: [...buffers.values()].filter((b): b is DawImportBuffer => !!b), samples, bpm: s.bpm, timeSignature, tempoEvents, markers, master,
+    ...(side?.panLaw !== undefined ? { panLaw: side.panLaw } : {}),
     report: { summary, lines: out, missing: [...missing], absentPlugins: absent, tracks: tracks.length, clips: clipCount, notes: noteCount, fromNova },
   };
 }

@@ -10,11 +10,13 @@ import { isMonitorNeutral, useMonitor } from '../utils/monitorSection';
 import { practiceLabel, usePracticeSpeed } from '../utils/practiceSpeed';
 import { useChordLaneShown } from './ChordLane';
 import { chordLaneStore } from '../utils/chordTrack';
+import { PanLawPicker } from './DualPan';
 
 /**
  * Barre du haut, mode avancé, allégée (22/10/2026, « trop de boutons ») :
  *  - « Options ▾ » : punch (pré / post-roll, QuickPunch, crossfade), clic et décompte,
- *    vitesse de lecture, section d'écoute (mono, Dim, volume, solo AFL / PFL), voix et flow.
+ *    vitesse de lecture, section d'écoute (mono, Dim, volume, solo AFL / PFL), voix et flow,
+ *    loi de pan du projet (−3 / −4,5 / −6 / 0 dB).
  *    Un réglage actif reste signalé : PUNCH / QP et la vitesse ralentie restent dans la barre,
  *    les pastilles d'écoute aussi (MonitorBadges), et une pastille s'allume sur « Options ».
  *  - « Vue ▾ » : Pistes / Console / Automation (la vue en cours est écrite sur le bouton),
@@ -42,7 +44,7 @@ export const TransportOptionsMenu: React.FC<OptionsProps> = ({ punch, bpm, isPun
   return (
     <ToolbarMenu testId="transport-options" menuLabel="Options de lecture et d'enregistrement" width={330}
       ariaLabel="Options de lecture et d'enregistrement"
-      title={`Options : punch et pré-roll, clic et décompte, vitesse de lecture, écoute (mono, Dim, AFL / PFL), voix et flow${lit.length ? `\nActif : ${lit.join(', ')}` : ''}`}
+      title={`Options : punch et pré-roll, clic et décompte, vitesse de lecture, écoute (mono, Dim, AFL / PFL), voix et flow, loi de pan${lit.length ? `\nActif : ${lit.join(', ')}` : ''}`}
       triggerProps={barItem('options', 34)}
       triggerClassName={`nova-hit-tactile relative hidden md:flex h-8 px-2 rounded-lg items-center gap-1 border text-[10px] font-bold tracking-wide transition-all ${lit.length ? 'border-amber-400/50 text-amber-200 [[data-theme=light]_&]:text-amber-700' : 'border-white/10 text-slate-400 hover:text-white hover:bg-white/10'}`}
       triggerStyle={{ backgroundColor: 'var(--bg-item)' }}
@@ -80,6 +82,10 @@ export const TransportOptionsMenu: React.FC<OptionsProps> = ({ punch, bpm, isPun
         </MenuSection>
         <MenuSection title="Écoute (hors export)">
           <div className="px-1"><MonitorPanel onClose={close} /></div>
+        </MenuSection>
+        {/* Loi de pan du projet (22/10/2026) : sauvegardée avec le projet, même loi partout. */}
+        <MenuSection title="Mixage : loi de pan du projet">
+          <PanLawPicker />
         </MenuSection>
       </>)}
     </ToolbarMenu>

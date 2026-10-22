@@ -165,6 +165,8 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
   if (!finite(state.bpm) || state.bpm < 20 || state.bpm > 400) { if (state.bpm !== undefined) bump('bpm'); state.bpm = 120; }
   // Fréquence du projet (utils/projectRate) : illisible → retirée (= 44,1 kHz, comme un ancien projet).
   if (state.sampleRate !== undefined && ![44100, 48000, 88200, 96000].includes(state.sampleRate)) { bump('sampleRate'); delete state.sampleRate; }
+  // Loi de pan du projet (22/10/2026) : −3 / −4,5 / −6 / 0 dB ; illisible : −3 dB.
+  if (state.panLaw !== undefined && state.panLaw !== null && ![-3, -4.5, -6, 0].includes(state.panLaw)) { bump('panLaw'); delete state.panLaw; }
   const ts = state.timeSignature;
   if (!isObj(ts) || !Number.isInteger(ts.numerator) || ts.numerator < 1 || ts.numerator > 32 || !DENOMINATORS.has(ts.denominator)) {
     if (ts !== undefined) bump('timeSignature');
@@ -212,6 +214,14 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
     for (const b of ['isMuted', 'isSolo', 'isTrackArmed', 'isFrozen'] as const) if (typeof t[b] !== 'boolean') t[b] = false;
     if (!finite(t.volume) || t.volume < 0) { if (t.volume !== undefined) bump('volume', t.name); t.volume = 1; } else if (t.volume > 4) { t.volume = 4; bump('volume', t.name); }
     if (!finite(t.pan)) { if (t.pan !== undefined) bump('pan', t.name); t.pan = 0; } else if (t.pan < -1 || t.pan > 1) { t.pan = Math.max(-1, Math.min(1, t.pan)); bump('pan', t.name); }
+    // Double pan G / D (pistes stéréo) : illisible = retiré (le pan unique compte, converti).
+    if (t.stereoPan !== undefined) {
+      const sp = t.stereoPan;
+      if (!sp || typeof sp !== 'object' || !finite(sp.l) || !finite(sp.r) || !finite(sp.at)) { delete t.stereoPan; bump('pan', t.name); }
+      else { sp.l = Math.max(-1, Math.min(1, sp.l)); sp.r = Math.max(-1, Math.min(1, sp.r)); }
+    }
+    if (t.panLink !== undefined && t.panLink !== 'same' && t.panLink !== 'mirror') delete t.panLink;
+    if (t.panFormat !== undefined && t.panFormat !== 'mono' && t.panFormat !== 'stereo') delete t.panFormat;
     if (!finite(t.totalLatency)) t.totalLatency = 0;
     if (typeof t.outputTrackId !== 'string') t.outputTrackId = id === 'master' ? '' : 'master';
     for (const a of ['clips', 'plugins', 'sends', 'automationLanes'] as const) {
@@ -389,6 +399,7 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
     ['structure', n => `${plural(n, 'lien de dossier / VCA vers une piste absente retiré', 'liens de dossiers / VCA vers des pistes absentes retirés')}${who('structure')}.`],
     ['bpm', () => 'Tempo invalide : remis à 120 BPM.'],
     ['sampleRate', () => "Fréquence d'échantillonnage illisible : projet ouvert en 44,1 kHz."],
+    ['panLaw', () => 'Loi de pan illisible : projet ouvert avec la loi −3 dB.'],
     ['timeSignature', () => 'Signature rythmique invalide : remise à 4/4.'],
     ['markers', () => 'Liste des repères illisible : remise à vide.'],
     ['markerDropped', n => `${plural(n, 'repère invalide retiré', 'repères invalides retirés')}.`],

@@ -111,7 +111,7 @@ export function mergeDawImport(target: DAWState, conv: ReturnType<typeof dawProj
   let state: DAWState = { ...r.state, tracks };
   if (opts.takeProjectSettings) {
     state = { ...state, bpm: conv.bpm, timeSignature: { ...conv.timeSignature }, tempoEvents: conv.tempoEvents.length ? conv.tempoEvents : undefined,
-      markers: [...(state.markers || []), ...conv.markers] };
+      markers: [...(state.markers || []), ...conv.markers], ...(conv.panLaw !== undefined ? { panLaw: conv.panLaw } : {}) };
     if (conv.master) {
       state.tracks = state.tracks.map(t => (t.id === 'master' ? { ...t, volume: conv.master!.volume, pan: conv.master!.pan, plugins: conv.master!.plugins, automationLanes: conv.master!.automationLanes } : t));
     }
