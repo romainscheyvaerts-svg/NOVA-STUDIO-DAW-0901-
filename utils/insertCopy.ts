@@ -95,9 +95,58 @@ export function transferSend(tracks: Track[], srcId: string, sendId: string, des
  * ni Alt) : « Copier vers « Backs » »… pour chaque autre tranche.
  */
 export function insertCopyMenuItems(track: Track, p: PluginInstance, all: Track[], apply: (fn: (ts: Track[]) => Track[], label: string) => void): ContextMenuItem[] {
-  return all.filter(t => t.id !== track.id && acceptsInserts(t) && !t.isHidden).slice(0, 10).map(t => ({
-    label: `Copier vers « ${t.name} »`, icon: 'fa-copy',
-    title: 'Alt+glisser l’insert sur une autre tranche (réglages compris)',
-    onClick: () => apply(ts => transferInsert(ts, track.id, p.id, t.id).tracks, `${p.name || p.type} copié sur « ${t.name} » (réglages compris)`),
-  }));
+  const name = p.name || String(p.type);
+  const items: ContextMenuItem[] = [];
+  // En une fois (audit mix 22/10) : les pistes qui sortent vers le même bus, toutes les pistes audio.
+  for (const g of insertCopyGroups(track, all)) {
+    items.push({
+      label: `${g.label} (${g.ids.length})`, icon: 'fa-clone',
+      title: 'Une copie de l’effet (réglages compris) en fin de chaîne de chacune de ces pistes ; Ctrl+Z annule tout',
+      onClick: () => apply(ts => copyInsertToMany(ts, track.id, p.id, g.ids), `${name} copié sur ${g.ids.length} piste${g.ids.length > 1 ? 's' : ''} (réglages compris)`),
+    });
+  }
+  // Une par une : les voisines de la tranche d'abord (avant : les 10 premières pistes de la séance,
+  // la piste 30 d'une séance de 60 n'était jamais proposée).
+  for (const t of nearestInsertTargets(track, all, 8)) {
+    items.push({
+      label: `Copier vers « ${t.name} »`, icon: 'fa-copy',
+      title: 'Alt+glisser l’insert sur une autre tranche (réglages compris)',
+      onClick: () => apply(ts => transferInsert(ts, track.id, p.id, t.id).tracks, `${name} copié sur « ${t.name} » (réglages compris)`),
+    });
+  }
+  return items;
+}
+
+const isAudioLike = (t: Track) => t.type === 'AUDIO' || t.type === 'SAMPLER' || t.type === 'MIDI';
+
+/** Groupes de destinations proposés pour copier un insert d'un coup. Pur. */
+export function insertCopyGroups(track: Track, all: Track[]): { label: string; ids: string[] }[] {
+  const others = all.filter(t => t.id !== track.id && t.id !== 'master' && acceptsInserts(t) && !t.isHidden);
+  const out: { label: string; ids: string[] }[] = [];
+  const bus = track.outputTrackId && track.outputTrackId !== 'master' ? all.find(t => t.id === track.outputTrackId) : undefined;
+  if (bus) {
+    const ids = others.filter(t => t.outputTrackId === bus.id).map(t => t.id);
+    if (ids.length) out.push({ label: `Copier sur les pistes vers « ${bus.name} »`, ids });
+  }
+  const audio = others.filter(isAudioLike).map(t => t.id);
+  if (audio.length > 1 && audio.length !== out[0]?.ids.length) out.push({ label: 'Copier sur toutes les pistes', ids: audio });
+  return out;
+}
+
+/** Les `n` tranches les plus proches (dans l'ordre de la séance) qui acceptent un insert. Pur. */
+export function nearestInsertTargets(track: Track, all: Track[], n: number): Track[] {
+  const i = all.findIndex(t => t.id === track.id);
+  return all
+    .map((t, k) => ({ t, d: Math.abs(k - i) + (k < i ? 0.5 : 0) }))
+    .filter(({ t }) => t.id !== track.id && acceptsInserts(t) && !t.isHidden)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, n)
+    .map(({ t }) => t);
+}
+
+/** Copie (réglages compris) d'un insert en fin de chaîne de plusieurs pistes. Pur. */
+export function copyInsertToMany(tracks: Track[], srcId: string, pluginId: string, destIds: string[]): Track[] {
+  let ts = tracks;
+  for (const id of destIds) ts = transferInsert(ts, srcId, pluginId, id).tracks;
+  return ts;
 }
