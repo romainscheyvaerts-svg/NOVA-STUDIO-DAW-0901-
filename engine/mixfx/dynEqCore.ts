@@ -24,6 +24,10 @@
  * Sans clic : seuil, plage, marche/arrêt, écoute et sortie glissent sur 256 échantillons ;
  * fréquence et Q glissent (log) par sous-blocs de 32 échantillons. Aucune allocation dans
  * `process`.
+ *
+ * Clé externe (side-chain, 22/10/2026) : `keyL` / `keyR` présents, chaque bande DÉTECTE dans la
+ * clé passée par le même passe-bande (état à part) et agit sur le son de la piste : la voix creuse
+ * le médium du beat seulement quand elle chante. Sans clé : inchangé, à l'échantillon près.
  */
 
 export interface DynEqCoreParams { [k: string]: number | boolean | undefined }
@@ -41,7 +45,7 @@ export interface DynEqMeters {
 
 export interface DynEqCore {
   setParams(p: DynEqCoreParams): void;
-  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number): void;
+  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null): void;
   takeMeters(): DynEqMeters;
   reset(): void;
   atRest(): boolean;
@@ -57,6 +61,8 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
   // Passe-bande de chaque bande (b0, b2 = −b0, a1, a2 ; b1 = 0) et état DF-I par canal.
   var B0 = new Float64Array(NB), A1 = new Float64Array(NB), A2 = new Float64Array(NB);
   var S = new Float64Array(NB * 2 * 4);
+  // Passe-bande de chaque bande appliqué à la clé externe (side-chain) : états à part.
+  var KS = new Float64Array(NB * 2 * 4);
   var fCur = new Float64Array(NB), fTgt = new Float64Array(NB), qCur = new Float64Array(NB), qTgt = new Float64Array(NB);
   var gliding = false;
   // Réglages lissés par bande b : 0 seuil (dB), 1 plage (dB), 2 marche (0/1), 3 écoute (0/1) ; global 16 : sortie (linéaire).
@@ -145,10 +151,12 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
 
   var LN10_20 = Math.LN10 / 20, DB_PER_LN = 20 / Math.LN10;
 
-  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number) {
+  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     first = false;
     var right = inR || inL;
     var stereo = !!inR;
+    var key = !!keyL;
+    var kStereo = key && !!keyR && keyR !== keyL;
     var i = 0;
     while (i < n) {
       var end = n;
@@ -180,7 +188,21 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
             br = bb0 * yr - bb0 * S[so + 5] - ba1 * S[so + 6] - ba2 * S[so + 7];
             S[so + 5] = S[so + 4]; S[so + 4] = yr; S[so + 7] = S[so + 6]; S[so + 6] = br;
           }
-          var lv = bl < 0 ? -bl : bl, lr = br < 0 ? -br : br;
+          var dl = bl, dr = br;
+          if (key) {
+            // Détection dans la même bande de la clé.
+            var kx = (keyL as Float32Array)[i];
+            var kl = bb0 * kx - bb0 * KS[so + 1] - ba1 * KS[so + 2] - ba2 * KS[so + 3];
+            KS[so + 1] = KS[so]; KS[so] = kx; KS[so + 3] = KS[so + 2]; KS[so + 2] = kl;
+            var kr = kl;
+            if (kStereo) {
+              var ky = (keyR as Float32Array)[i];
+              kr = bb0 * ky - bb0 * KS[so + 5] - ba1 * KS[so + 6] - ba2 * KS[so + 7];
+              KS[so + 5] = KS[so + 4]; KS[so + 4] = ky; KS[so + 7] = KS[so + 6]; KS[so + 6] = kr;
+            }
+            dl = kl; dr = kr;
+          }
+          var lv = dl < 0 ? -dl : dl, lr = dr < 0 ? -dr : dr;
           if (lr > lv) lv = lr;
           var e = env[b];
           e += (lv - e) * (lv > e ? cA[b] : cR[b]);
@@ -224,12 +246,12 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
       // Bande au repos (coupée ou plage 0 dB, plus écoutée) : filtre remis à zéro ; elle repartira
       // d'un état propre, en fondu (marche ou plage qui glissent depuis 0).
       var idle = (Pc[z * 4 + 2] === 0 && Pn[z * 4 + 2] === 0) || (Pc[z * 4 + 1] === 0 && Pn[z * 4 + 1] === 0);
-      if (idle && Pc[z * 4 + 3] === 0 && Pn[z * 4 + 3] === 0) { for (var s = 0; s < 8; s++) S[z * 8 + s] = 0; env[z] = 0; gNow[z] = 0; }
+      if (idle && Pc[z * 4 + 3] === 0 && Pn[z * 4 + 3] === 0) { for (var s = 0; s < 8; s++) { S[z * 8 + s] = 0; KS[z * 8 + s] = 0; } env[z] = 0; gNow[z] = 0; }
     }
   }
 
   function reset() {
-    S.fill(0); env.fill(0); gNow.fill(0); gPk.fill(0); inPk = 0; outPk = 0;
+    S.fill(0); KS.fill(0); env.fill(0); gNow.fill(0); gPk.fill(0); inPk = 0; outPk = 0;
     for (var q = 0; q < NP; q++) { Pc[q] = Pt[q]; Pn[q] = 0; }
     ramping = 0;
     for (var b = 0; b < NB; b++) { fCur[b] = fTgt[b]; qCur[b] = qTgt[b]; design(b); }

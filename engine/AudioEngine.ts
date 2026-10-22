@@ -1,6 +1,7 @@
 
 import { isLiteMode } from '../utils/perfMode';
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
+import { sanitizeRack, rackChildAutomatable, parseRackChildKey, findRackChild } from './fxRack';
 import { soloSilencedIds } from '../utils/soloMute';
 import { monitorStore, monitorCoefs, monitorGain, type MonitorSnapshot } from '../utils/monitorSection';
 import { listenTaps, liveSoloSilenced, tracksForRender, type ListenTap } from '../utils/soloListen';
@@ -93,7 +94,7 @@ import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, fre
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
-import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
+import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents, frameTime } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
@@ -339,6 +340,8 @@ export class AudioEngine {
   private schedulerTimer: number | null = null;
   private nextScheduleTime: number = 0;
   private playbackStartTime: number = 0; 
+  /** Instant du contexte où le point de départ s'entend (après le pré-roulement de latence) : la tête l'attend jusque-là. */
+  private prerollUntil = 0;
   private pausedAt: number = 0; 
 
   // Latency & Rec
@@ -1868,16 +1871,15 @@ export class AudioEngine {
     }
 
     // --- 2-PDC bis. Pré-roll (22/10/2026) : un son qui commence avant la latence compensée de sa piste
-    // (égaliseur à phase linéaire, limiteur… sur le master) perdait son début dans un export depuis 0.
-    // Ce graphe (jamais rendu) est abandonné : rendu commencé `pre` plus tôt puis rogné. À partir de 0,
-    // chaque échantillon est celui du rendu sans pré-roll ; seul le début n'est plus coupé.
-    if (startOffset === 0 && !(options as any).__sansPreRoll) {
+    // (égaliseur à phase linéaire, limiteur… sur le master) perdait son début dans un export.
+    // Ce graphe (jamais rendu) est abandonné : rendu commencé `pre` plus tôt puis rogné. Même règle
+    // que la lecture (utils/pdc latencyPreroll, startPlayback) : depuis 0 comme depuis le milieu.
+    if (startOffset >= 0 && !(options as any).__sansPreRoll) {
       let lat = 0;
       rendered.forEach(rt => { lat = Math.max(lat, (rt.latency || 0) + (rt.down || 0)); });
-      const first = tracks.reduce((m, t) => (t.clips || []).reduce((mm, c) => Math.min(mm, c.start), m), Infinity);
-      if (lat > 0 && lat <= 2 && first < lat) {
-        const pre = Math.ceil(lat * targetSampleRate) / targetSampleRate;
-        const full = await this.renderProject(tracksIn, totalDuration + pre, -pre, targetSampleRate, onProgress, { ...options, __sansPreRoll: true } as any);
+      const pre = latencyPreroll(lat, targetSampleRate, tracks.flatMap(t => t.clips || []), startOffset);
+      if (pre > 0) {
+        const full = await this.renderProject(tracksIn, totalDuration + pre, startOffset - pre, targetSampleRate, onProgress, { ...options, __sansPreRoll: true } as any);
         const skip = Math.round(pre * targetSampleRate);
         const out = new AudioBuffer({ length: totalSamples, numberOfChannels: full.numberOfChannels, sampleRate: targetSampleRate });
         for (let c = 0; c < full.numberOfChannels; c++) out.copyToChannel(full.getChannelData(c).subarray(skip, skip + totalSamples), c);
@@ -2414,6 +2416,7 @@ export class AudioEngine {
     });
     this.playbackStartTime += k;
     this.nextScheduleTime += k;   // même point du morceau, k plus tard
+    if (this.prerollUntil) this.prerollUntil += k;
     const now = this.ctx.currentTime;
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, now); });
     this.resyncTimelineEffects();
@@ -3202,10 +3205,18 @@ export class AudioEngine {
     // resetEffectsAt) et découpent le son en blocs exactement comme l'export (bloc 0 = départ).
     const quantum = 128 / this.ctx.sampleRate;
     this.nextScheduleTime = Math.ceil(Math.max(this.ctx.currentTime + 0.01, opts.at ?? 0) / quantum - 1e-6) * quantum;
-    // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
-    // exactement là (1er kick de la batterie, 1re 808) était sautée.
-    this.playbackStartTime = this.nextScheduleTime - startOffset;
-    this.midiRunStart = startOffset;
+    // Pré-roulement de latence (PDC, 22/10/2026) : avec un effet à latence (EQ à phase linéaire,
+    // limiteur à anticipation…), le son posé avant la latence compensée était coupé à l'écoute.
+    // Comme l'export (même règle, utils/pdc latencyPreroll) : l'audio part `pre` plus tôt, le point
+    // de départ s'entend `pre` après le 1er bloc ; la tête de lecture reste sur le départ jusque-là.
+    const lat = this.pdcSuspended ? 0 : tracks.reduce((m, t) => Math.max(m, this.getTrackLatency(t.id)), 0);
+    const pre = latencyPreroll(lat, this.ctx.sampleRate, tracks.flatMap(t => t.clips || []), startOffset);
+    // (Départ différé `at` ou pré-roulement : la tête reste sur le départ, elle ne recule plus avant.)
+    this.prerollUntil = this.nextScheduleTime + pre;
+    // Le point de départ (moins le pré-roulement) tombe pile au début de la 1re fenêtre : une note
+    // posée exactement là (1er kick de la batterie, 1re 808) était sautée.
+    this.playbackStartTime = this.nextScheduleTime + pre - startOffset;
+    this.midiRunStart = startOffset - pre;
     this.flashbackRunStart(this.nextScheduleTime, this.playbackStartTime);
     // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
@@ -3304,6 +3315,8 @@ export class AudioEngine {
     if (this.practice) return this.practiceTime();
 
     const now = this.ctx.currentTime;
+    // Départ pas encore entendu (pré-roulement de latence, départ différé) : la tête l'attend.
+    if (now < this.prerollUntil) return Math.max(0, this.pausedAt);
     let startTime = this.playbackStartTime;
     if (this.pendingLoopWrap) {
       if (now < this.pendingLoopWrap.atContextTime) {
@@ -4028,7 +4041,7 @@ export class AudioEngine {
    * de la piste (bus latent : les clips partent aussi en avance d'autant)
    * s'y ajoute.
    */
-  private pluginLead(trackId: string, pluginId: string): number {
+  private pluginLead(trackId: string, pluginId: string, key?: string): number {
     if (this.pdcSuspended) return 0;
     const dsp = this.tracksDSP.get(trackId);
     const ids = dsp?.chainIds || [];
@@ -4039,6 +4052,9 @@ export class AudioEngine {
       const l = dsp.pluginChain.get(ids[k])?.instance?.latency;
       if (typeof l === 'number' && l > 0 && l < 0.5) lead += l;
     }
+    // Effet d'une branche du rack parallèle (« <effet>/<réglage> ») : moins les effets qui le précèdent dans sa branche.
+    const inst = dsp.pluginChain.get(pluginId)?.instance;
+    if (key && typeof inst?.childLeadOffset === 'function') { try { lead -= inst.childLeadOffset(key) || 0; } catch { /* */ } }
     return lead;
   }
 
@@ -4129,7 +4145,7 @@ export class AudioEngine {
     if (!inst || typeof inst.automationParam !== 'function') return null;
     let ap: AudioParam | null = null;
     try { ap = inst.automationParam(pp.key); } catch { ap = null; }
-    return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId) } : null;
+    return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId, pp.key) } : null;
   }
 
   /**
@@ -4172,7 +4188,7 @@ export class AudioEngine {
     const a = end !== undefined ? this.pluginAutoParam(trackId, param) : null;
     if (a) { this.programPluginWindow(a.ap, this.sortedOf(points), start, end!, when, a.lead); return; }
     const pp = parsePluginParam(param);
-    const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId) : 0), 0);
+    const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId, pp.key) : 0), 0);
     const key = `${trackId}|${param}`;
     if (this.pluginAutoSent.get(key) === v || !this.ctx) return;
     const delay = Math.max(0, (when - this.ctx.currentTime) * 1000);
@@ -4213,7 +4229,8 @@ export class AudioEngine {
         const node = p && nodes.get(p.pluginId);
         if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
         const pts = this.sortedOf(lane.points);
-        const from = startOffset + (lead.get(p.pluginId) || 0) + (rendered.get(track.id)?.down || 0);
+        const childLead = typeof node.childLeadOffset === 'function' ? (node.childLeadOffset(p.key) || 0) : 0;
+        const from = startOffset + (lead.get(p.pluginId) || 0) - childLead + (rendered.get(track.id)?.down || 0);
         // Réglage exposé en AudioParam (limiteur) : toute la voie est programmée
         // d'avance sur le paramètre, sans pause du rendu (rampes exactes, au bloc près).
         const ap: AudioParam | null = typeof node.automationParam === 'function' ? node.automationParam(p.key) : null;
@@ -5157,7 +5174,7 @@ export class AudioEngine {
   /** Réglages automatisables des effets du registre (V21 : harmoniseur, tape stop…) de la piste. */
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] {
     const track = this.liveTracks?.find(t => t.id === trackId);
-    return (track?.plugins || []).flatMap(pl => {
+    return (track?.plugins || []).flatMap((pl): { pluginId: string, pluginName: string, params: PluginParameter[] }[] => {
       if (pl.type === 'VST3') {
         // VST du PC (R9) : réglages lus par le pont (noms du plugin), valeur brute 0–1.
         const list = vstParamCatalog.get(pl.id) || [];
@@ -5168,7 +5185,18 @@ export class AudioEngine {
       // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
       const list = reg?.automatable?.length ? reg.automatable : legacyAutomatable(pl.type);
       if (!list.length) return [];
-      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params: list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit })) }];
+      const params: PluginParameter[] = list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit }));
+      // Rack parallèle : chaque réglage automatisable des effets de ses branches (« Branche 1 · Compresseur · Seuil »).
+      if (pl.type === 'FXRACK') {
+        const rack = sanitizeRack(pl.params || {});
+        const listFor = (type: string) => { const r = getRegisteredPlugin(type); return r?.automatable?.length ? r.automatable : legacyAutomatable(type); };
+        for (const a of rackChildAutomatable(rack, listFor)) {
+          const ck = parseRackChildKey(a.id);
+          const child = ck ? findRackChild(rack, ck.pluginId)?.plugin : undefined;
+          params.push({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: (child && ck ? pluginParamStaticValue(child.params, ck.key) : undefined) as any, unit: a.unit });
+        }
+      }
+      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params }];
     });
   }
   public getMasterAnalyzer() { return this.masterAnalyzer; }

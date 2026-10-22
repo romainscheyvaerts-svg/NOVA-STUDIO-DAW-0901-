@@ -10,7 +10,8 @@ import { useCaptureCount, CAPTURE_HINT } from './MidiFileMenu';
 import { midiBus } from '../utils/midiBus';
 import ChordRollOverlay from './ChordRollOverlay';
 import { useTempoMap } from './TempoLane';
-import { tempoAt } from '../utils/tempoMap';
+import { tempoAt, TempoMap } from '../utils/tempoMap';
+import { rollFollowsMap, mapSnap, mapCell, spanQuarters, beatLenAt, mapSnapBeat, mapGridLines, mapBarBeat } from '../utils/rollGrid';
 import { linkCounts, makeUnique } from '../utils/linkedClips';
 import { NoteRecorder, defaultKeyLabel, KEY_TO_SEMITONE, computerKeyboardStore } from '../utils/computerKeyboard';
 import { useComputerKeyboard } from './MidiInputHost';
@@ -108,14 +109,19 @@ const Ruler: React.FC<{
   clipStart: number; clipDuration: number; width: number; zoomX: number; bpm: number; light: boolean;
   loop?: LoopState; onSeek?: (t: number) => void; onSetLoop?: (start: number, end: number, active: boolean) => void;
   innerRef: React.RefObject<HTMLDivElement>; height: number;
-}> = ({ clipStart, clipDuration, width, zoomX, bpm, light, loop, onSeek, onSetLoop, innerRef, height }) => {
+  /** Carte de tempo suivie (rampes, changements, mesures) : mesures et temps à leur vraie place. */
+  map?: TempoMap | null;
+}> = ({ clipStart, clipDuration, width, zoomX, bpm, light, loop, onSeek, onSetLoop, innerRef, height, map }) => {
   const beat = 60 / bpm, bar = beat * 4;
-  const barPx = bar * zoomX;
+  // Carte de tempo : traits calculés (une rampe resserre ou écarte les mesures).
+  const mapLines = useMemo(() => (map ? mapGridLines(map, clipStart, clipStart + width / zoomX, '1/4', Infinity) : null), [map, clipStart, width, zoomX]);
+  const barPx = mapLines && mapLines.bars.length > 1 ? Math.min(...mapLines.bars.slice(1).map((b, i) => b.time - mapLines.bars[i].time)) * zoomX : bar * zoomX;
   const every = barPx >= 36 ? 1 : barPx >= 18 ? 2 : barPx >= 9 ? 4 : 8;
   const first = Math.floor(clipStart / bar);
   const last = Math.ceil((clipStart + width / zoomX) / bar);
   const labels: { x: number; n: number }[] = [];
-  for (let k = first; k <= last; k++) if ((k % every) === 0) labels.push({ x: (k * bar - clipStart) * zoomX, n: k + 1 });
+  if (mapLines) mapLines.bars.forEach(b => { if (b.bar % every === 0) labels.push({ x: (b.time - clipStart) * zoomX, n: b.bar + 1 }); });
+  else for (let k = first; k <= last; k++) if ((k % every) === 0) labels.push({ x: (k * bar - clipStart) * zoomX, n: k + 1 });
   const offset = -((clipStart % bar) * zoomX);
   const drag = useRef<{ x0: number; t0: number; moved: boolean } | null>(null);
   const [draft, setDraft] = useState<{ a: number; b: number } | null>(null);
@@ -123,14 +129,16 @@ const Ruler: React.FC<{
     const r = (innerRef.current?.firstElementChild as HTMLElement | null)?.getBoundingClientRect();
     return Math.max(0, (clientX - (r?.left || 0)) / zoomX);
   };
-  const snapBeat = (t: number) => Math.round((clipStart + t) / beat) * beat - clipStart;
+  const snapBeat = (t: number) => (map ? mapSnapBeat(map, clipStart + t) : Math.round((clipStart + t) / beat) * beat) - clipStart;
+  const beatAt = (t: number) => (map ? beatLenAt(map, clipStart + t) : beat);
   const lineCol = light ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.28)';
   const tickCol = light ? 'rgba(15,23,42,0.18)' : 'rgba(255,255,255,0.14)';
   const shown = draft ? { active: true, start: clipStart + Math.min(draft.a, draft.b), end: clipStart + Math.max(draft.a, draft.b) } : loop;
   return (
     <div ref={innerRef} className="flex-1 overflow-hidden relative pr-ruler" style={{ height }}>
       <div data-nova-roll-ruler="" role="slider" aria-label="Règle des mesures : clic pour placer la lecture, glisser pour une boucle" aria-valuemin={0} aria-valuemax={Math.round(clipDuration)} aria-valuenow={0}
-        className="relative h-full cursor-pointer" style={{ width, touchAction: 'none',
+        data-nova-roll-tempo={mapLines ? 'carte' : 'fixe'}
+        className="relative h-full cursor-pointer" style={mapLines ? { width, touchAction: 'none' } : { width, touchAction: 'none',
           backgroundImage: `linear-gradient(to right, ${lineCol} 1px, transparent 1px), linear-gradient(to right, ${tickCol} 1px, transparent 1px)`,
           backgroundSize: `${barPx}px 100%, ${beat * zoomX}px 40%`, backgroundRepeat: 'repeat-x', backgroundPosition: `${offset}px 0, ${offset}px 100%` }}
         onPointerDown={e => { if (e.pointerType === 'mouse' && e.button !== 0) return; try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* pointeur relâché */ } const t = toT(e.clientX); drag.current = { x0: e.clientX, t0: t, moved: false }; }}
@@ -140,7 +148,7 @@ const Ruler: React.FC<{
           if (!d) return;
           if (d.moved && onSetLoop) {
             const a = snapBeat(d.t0), b = snapBeat(toT(e.clientX));
-            if (Math.abs(b - a) >= beat * 0.99) onSetLoop(clipStart + Math.min(a, b), clipStart + Math.max(a, b), true);
+            if (Math.abs(b - a) >= beatAt(Math.min(a, b)) * 0.99) onSetLoop(clipStart + Math.min(a, b), clipStart + Math.max(a, b), true);
             return;
           }
           onSeek?.(clipStart + d.t0);
@@ -150,6 +158,12 @@ const Ruler: React.FC<{
           <div data-nova-roll-loop={shown.active ? 'on' : 'off'} className="absolute top-0 bottom-0 pointer-events-none"
             style={{ left: (shown.start - clipStart) * zoomX, width: (shown.end - shown.start) * zoomX,
               background: shown.active ? 'rgba(245,158,11,0.28)' : 'rgba(148,163,184,0.16)', borderLeft: `2px solid ${shown.active ? '#f59e0b' : '#94a3b8'}`, borderRight: `2px solid ${shown.active ? '#f59e0b' : '#94a3b8'}` }} />
+        )}
+        {mapLines && (
+          <svg aria-hidden className="absolute inset-0 pointer-events-none" width={width} height={height} shapeRendering="crispEdges">
+            <path data-nova-roll-ruler-bars="" d={mapLines.bars.map(b => `M${((b.time - clipStart) * zoomX + 0.5).toFixed(2)} 0V${height}`).join('')} stroke={lineCol} strokeWidth={1} />
+            <path d={mapLines.beats.map(t => `M${((t - clipStart) * zoomX + 0.5).toFixed(2)} ${(height * 0.6).toFixed(1)}V${height}`).join('')} stroke={tickCol} strokeWidth={1} />
+          </svg>
         )}
         {labels.map(l => (
           <span key={l.n} className="absolute top-0.5 text-[10px] font-bold font-mono pointer-events-none" style={{ left: l.x + 3 }}>{l.n}</span>
@@ -201,6 +215,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   // Piste tempo (R2) : la grille et la quantification du clip suivent le tempo à l'endroit du clip.
   const tempoMap = useTempoMap();
   const bpm = Math.abs(tempoMap.segments[0].bpm - projectBpm) < 1e-6 ? tempoAt(tempoMap, clip?.start ?? 0) : projectBpm;
+  // Rampe, changement de tempo ou de mesure : grille, aimantation et règle suivent la carte réelle
+  // (utils/rollGrid), comme l'arrangement. 4/4 à tempo fixe : grille régulière d'avant.
+  const followMap = rollFollowsMap(tempoMap, projectBpm) ? tempoMap : null;
+  const bpmEnd = followMap && clip ? tempoAt(followMap, clip.start + clip.duration - 1e-6) : bpm;
   const beatSec = 60 / bpm;
   const linkedCount = useMemo(() => (clip?.linkId ? linkCounts(allTracks || [track]).get(clip.linkId) || 0 : 0), [clip?.linkId, allTracks, track]);
   const barSec = beatSec * 4;
@@ -290,7 +308,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const [toolsAnchor, setToolsAnchor] = useState<{ x: number; y: number } | null | false>(false);
   const [toolPreview, setToolPreview] = useState<MidiNote[] | null>(null);
   const captureCount = useCaptureCount();
-  const toolCtx = useMemo(() => ({ bpm, clipStart: clip?.start || 0, keyRoot: hasKey ? keyRoot : undefined, keyScale }), [bpm, clip?.start, hasKey, keyRoot, keyScale]);
+  const toolCtx = useMemo(() => ({ bpm, clipStart: clip?.start || 0, keyRoot: hasKey ? keyRoot : undefined, keyScale, ...(followMap ? { tempoMap: followMap } : {}) }), [bpm, clip?.start, hasKey, keyRoot, keyScale, followMap]);
   /** Résultat d'un outil : une seule écriture (une étape d'annulation, une opération de collaboration). */
   const applyToolResult = (next: MidiNote[], label: string) => {
     const end = next.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
@@ -309,9 +327,21 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
   // --- HELPERS ---
   /** Cale un temps du clip sur la grille du morceau (sauf magnétisme coupé ou Alt tenu). */
-  const snapTime = useCallback((t: number, free = false) => snapGrid(t, grid, clipStart, magnet && !free), [grid, clipStart, magnet]);
-  const cellTime = useCallback((t: number, free = false) => floorTime(t, grid, clipStart, magnet && !free), [grid, clipStart, magnet]);
-  const minLen = magnet ? grid : 0.02;
+  const snapTime = useCallback((t: number, free = false) => (followMap && magnet && !free ? mapSnap(followMap, clipStart + t, gridId) - clipStart : snapGrid(t, grid, clipStart, magnet && !free)), [grid, gridId, clipStart, magnet, followMap]);
+  const cellTime = useCallback((t: number, free = false) => (followMap && magnet && !free ? mapSnap(followMap, clipStart + t, gridId, 'floor') - clipStart : floorTime(t, grid, clipStart, magnet && !free)), [grid, gridId, clipStart, magnet, followMap]);
+  /** Longueur de la case qui contient `t` (dans le clip) : elle varie dans une rampe. */
+  const cellLenAt = (t: number) => { if (!followMap) return grid; const [a, b] = mapCell(followMap, clipStart + Math.max(0, t), gridId); return b - a > 1e-6 ? b - a : grid; };
+  /** Durée d'une noire à l'endroit `t` (dans le clip). */
+  const quarterAt = (t: number) => (followMap ? spanQuarters(followMap, clipStart + Math.max(0, t), 1) : beatSec);
+  const minLenAt = (t: number) => (magnet ? cellLenAt(t) : 0.02);
+  /** Case du pinceau (une note par case) : index régulier, ou début exact de la case sur la carte. */
+  const paintKey = (abs: number) => (followMap ? Math.round(mapSnap(followMap, abs, gridId, 'floor') * 1e6) : Math.floor(abs / grid + 1e-9));
+  /** Pinceau sur la carte : une note au début exact de la case (déjà prise à cette hauteur : rien). */
+  const paintOnMap = (from: number, pitch: number, existing: MidiNote[]): MidiNote[] => {
+    if (from < 0 || existing.some(n => n.pitch === pitch && Math.abs(n.start - from) < 1e-6)) return [];
+    const len = isDrumMode ? Math.min(cellLenAt(from), quarterAt(from) / 4) : (noteLen ?? cellLenAt(from));
+    return [{ id: newNoteId(), pitch, start: Math.round(from * 1e9) / 1e9, duration: Math.max(0.01, len), velocity: Math.max(0.01, Math.min(1, noteVel)), ...(slideDraw && !isDrumMode ? { slide: true } : {}) }];
+  };
 
   // --- OUTILS : accords, clavier d'ordinateur, fantômes ---
   const [chordKind, setChordKind] = useState<ChordKind | null>(null);
@@ -369,7 +399,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const pendingDrawRef = useRef<{ x: number; y: number; time: number; pitch: number; alt: boolean } | null>(null);
   const addNoteAt = (absTime: number, pitch: number, free = false) => {
     const start = Math.max(0, cellTime(absTime, free));
-    const duration = isDrumMode ? Math.max(0.05, Math.min(grid, beatSec / 4)) : (noteLen ?? Math.max(grid, beatSec / 4));
+    const duration = isDrumMode ? Math.max(0.05, Math.min(cellLenAt(start), quarterAt(start) / 4)) : (noteLen ?? Math.max(cellLenAt(start), quarterAt(start) / 4));
     const mk = (p: number): MidiNote => ({ id: newNoteId(), pitch: p, start, duration, velocity: noteVel, ...(slideDraw && !isDrumMode ? { slide: true } : {}) });
     // Tampon d'accord (Chord Stamp de FL) : toutes les notes de l'accord en un clic.
     if (chordKind && !isDrumMode) {
@@ -450,8 +480,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     if (tool === 'PAINT' && !clickedNote) {
         const base = clip.notes || [];
         const p = snapOn ? snapToScale(pitch, keyRoot!, keyScale) : pitch;
-        const first = paintNotes({ from: cellTime(absTime, e.altKey), to: cellTime(absTime, e.altKey), pitch: p, step: magnet && !e.altKey ? grid : Math.max(grid, 0.05), length: isDrumMode ? Math.min(grid, beatSec / 4) : (noteLen ?? grid), velocity: noteVel, existing: base, slide: slideDraw && !isDrumMode });
-        paintRef.current = { cells: new Set(first.map(n => Math.round((clipStart + n.start) / grid))), added: first, base };
+        const first = followMap && magnet && !e.altKey
+          ? paintOnMap(cellTime(absTime), p, base)
+          : paintNotes({ from: cellTime(absTime, e.altKey), to: cellTime(absTime, e.altKey), pitch: p, step: magnet && !e.altKey ? grid : Math.max(grid, 0.05), length: isDrumMode ? Math.min(grid, beatSec / 4) : (noteLen ?? grid), velocity: noteVel, existing: base, slide: slideDraw && !isDrumMode });
+        paintRef.current = { cells: new Set(first.map(n => (followMap ? paintKey(clipStart + n.start) : Math.round((clipStart + n.start) / grid)))), added: first, base };
         if (first.length) { updateNotes([...base, ...first]); playPreview(p); lastPreviewPitch.current = p; }
         setDragMode('PAINT');
         setDragStart({ x: e.clientX, y: e.clientY, time: absTime, pitch, row });
@@ -557,14 +589,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                 if (!dr.moved) return n;
                 const free = e.altKey || !magnet;
                 const end = free ? absTime : snapTime(absTime);
-                const d = Math.max(free ? 0.02 : minLen, end - n.start);
+                const d = Math.max(free ? 0.02 : minLenAt(n.start), end - n.start);
                 len = d;
                 return { ...n, duration: d };
             }
             if (selectedNoteIds.has(n.id)) {
                 let newDuration = Math.max(0.02, n.duration + deltaTime);
                 const free = e.altKey || !magnet;
-                if (!free) newDuration = Math.max(minLen, snapTime(n.start + newDuration) - n.start);
+                if (!free) newDuration = Math.max(minLenAt(n.start), snapTime(n.start + newDuration) - n.start);
                 len = newDuration;
                 return { ...n, duration: newDuration };
             }
@@ -576,12 +608,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     else if (dragMode === 'PAINT' && paintRef.current) {
         const pr = paintRef.current;
         const step = grid;
-        const cell = Math.floor((clipStart + absTime) / step + 1e-9);
+        const cell = paintKey(clipStart + absTime);
         if (absTime >= 0 && !pr.cells.has(cell)) {
             pr.cells.add(cell);
             const raw = rows[row];
             const p = snapOn ? snapToScale(raw, keyRoot!, keyScale) : raw;
-            const [n] = paintNotes({ from: cell * step - clipStart, to: cell * step - clipStart, pitch: p, step, length: isDrumMode ? Math.min(grid, beatSec / 4) : (noteLen ?? grid), velocity: noteVel, existing: pr.base, slide: slideDraw && !isDrumMode });
+            const [n] = followMap
+              ? paintOnMap(cellTime(absTime), p, pr.base)
+              : paintNotes({ from: cell * step - clipStart, to: cell * step - clipStart, pitch: p, step, length: isDrumMode ? Math.min(grid, beatSec / 4) : (noteLen ?? grid), velocity: noteVel, existing: pr.base, slide: slideDraw && !isDrumMode });
             if (n) {
               pr.added = [...pr.added, n];
               updateNotes([...pr.base, ...pr.added]);
@@ -823,7 +857,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   // --- DÉPLACER LA SÉLECTION D'UNE CASE (← / →, Live) ---
   const nudge = (dir: number) => {
     if (!selectedNoteIds.size) return;
-    updateNotes((clip.notes || []).map(n => (selectedNoteIds.has(n.id) ? { ...n, start: Math.max(0, n.start + dir * grid) } : n)));
+    updateNotes((clip.notes || []).map(n => (selectedNoteIds.has(n.id) ? { ...n, start: Math.max(0, followMap ? snapTime(n.start + dir * cellLenAt(dir < 0 ? n.start - 1e-6 : n.start)) : n.start + dir * grid) } : n)));
   };
 
   // --- TRANSPOSE (inspired by Logic Pro) ---
@@ -1229,6 +1263,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const gridLabel = GRID_CHOICES.find(g => g.id === gridId)?.label || gridId;
   const TOGGLE = (on: boolean) => ({ 'aria-pressed': on });
   // Grille des temps : fond en dégradés (mesures, temps, cases), sans milliers de traits dans le DOM.
+  // Carte de tempo : traits calculés (SVG), une rampe resserre ou écarte les mesures et les cases.
+  const mapLines = useMemo(() => (followMap ? mapGridLines(followMap, clipStart, clipStart + contentWidth / zoomX, gridId, 5 / zoomX) : null), [followMap, clipStart, contentWidth, zoomX, gridId]);
   const gridBg = {
     backgroundImage: [
       `linear-gradient(to right, ${G.bar} 1px, transparent 1px)`,
@@ -1486,7 +1522,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              <input type="checkbox" className="w-4 h-4 accent-emerald-400" checked={stepFixedVel} onChange={e => setStepFixedVel(e.target.checked)} />Vélocité fixe (100)
            </label>
            <button type="button" onClick={() => { stepRef.current?.moveTo(0); setStepPos(0); }} className="h-7 [@media(pointer:coarse)]:h-11 px-2 rounded-md bg-white/5 hover:bg-white/10" title="Curseur au début du clip">↺ Début</button>
-           <span className="text-slate-400" role="status">Mesure {Math.floor(stepPos / ((60 / bpm) * 4)) + 1}, temps {(Math.floor(stepPos / (60 / bpm)) % 4) + 1} · joue une note ou un accord</span>
+           <span className="text-slate-400" role="status">{followMap
+             ? (() => { const a = mapBarBeat(followMap, clipStart), b = mapBarBeat(followMap, clipStart + stepPos); return `Mesure ${b.bar - a.bar + 1}, temps ${b.beat + 1}`; })()
+             : `Mesure ${Math.floor(stepPos / ((60 / bpm) * 4)) + 1}, temps ${(Math.floor(stepPos / (60 / bpm)) % 4) + 1}`} · joue une note ou un accord</span>
          </div>
        )}
 
@@ -1635,8 +1673,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
        <div className="flex-1 flex flex-col overflow-hidden">
           {/* RÈGLE : mesures, boucle, tête de lecture */}
           <div className="flex shrink-0">
-            <div className={`flex-shrink-0 ${sideW} pr-ruler border-r border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400`} title={`${Math.round(bpm)} BPM`}>{Math.round(bpm)} BPM</div>
-            <Ruler clipStart={clipStart} clipDuration={clip.duration} width={contentWidth} zoomX={zoomX} bpm={bpm} light={light} loop={loop} onSeek={onSeek} onSetLoop={onSetLoop} innerRef={rulerRef} height={touch ? 30 : 22} />
+            <div className={`flex-shrink-0 ${sideW} pr-ruler border-r border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400`} title={Math.round(bpmEnd) !== Math.round(bpm) ? `Tempo de ${Math.round(bpm)} à ${Math.round(bpmEnd)} BPM dans ce clip : la grille suit` : `${Math.round(bpm)} BPM`}>{Math.round(bpmEnd) !== Math.round(bpm) ? `${Math.round(bpm)}→${Math.round(bpmEnd)}` : `${Math.round(bpm)} BPM`}</div>
+            <Ruler clipStart={clipStart} clipDuration={clip.duration} width={contentWidth} zoomX={zoomX} bpm={bpm} light={light} loop={loop} onSeek={onSeek} onSetLoop={onSetLoop} innerRef={rulerRef} height={touch ? 30 : 22} map={followMap} />
           </div>
           <div className="flex-1 flex overflow-hidden relative" style={{ minHeight: '60%' }}>
 
@@ -1661,7 +1699,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                  <div style={{ width: contentWidth, height: totalRows * currentRowHeight, position: 'relative' }}>
                     {renderGridRows()}
                     {/* Temps, mesures, cases de la grille */}
-                    <div aria-hidden className="absolute inset-0 pointer-events-none" style={gridBg} />
+                    {mapLines ? (
+                      <svg aria-hidden data-nova-roll-grid-tempo="" data-nova-roll-zoom={zoomX} data-nova-roll-start={clipStart} className="absolute inset-0 pointer-events-none" width={contentWidth} height={totalRows * currentRowHeight} shapeRendering="crispEdges">
+                        {mapLines.bars.map((b, i) => (b.bar % 2 === 0 ? <rect key={b.bar} x={(b.time - clipStart) * zoomX} y={0} width={Math.max(0, ((mapLines.bars[i + 1]?.time ?? clipStart + contentWidth / zoomX) - b.time) * zoomX)} height="100%" fill={G.barShade} /> : null))}
+                        <path d={mapLines.subs.map(t => `M${((t - clipStart) * zoomX + 0.5).toFixed(2)} 0V${totalRows * currentRowHeight}`).join('')} stroke={G.sub} strokeWidth={1} />
+                        <path d={mapLines.beats.map(t => `M${((t - clipStart) * zoomX + 0.5).toFixed(2)} 0V${totalRows * currentRowHeight}`).join('')} stroke={G.beat} strokeWidth={1} />
+                        <path data-nova-roll-bars={mapLines.bars.map(b => ((b.time - clipStart) * zoomX).toFixed(2)).join(' ')} d={mapLines.bars.map(b => `M${((b.time - clipStart) * zoomX + 0.5).toFixed(2)} 0V${totalRows * currentRowHeight}`).join('')} stroke={G.bar} strokeWidth={1} />
+                      </svg>
+                    ) : <div aria-hidden className="absolute inset-0 pointer-events-none" style={gridBg} />}
                     {/* Fin du clip */}
                     <div aria-hidden className="absolute top-0 bottom-0 pointer-events-none" style={{ left: clip.duration * zoomX, right: 0, background: light ? 'rgba(15,23,42,0.06)' : 'rgba(0,0,0,0.28)', borderLeft: `2px solid ${light ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.25)'}` }} />
                     {/* Piste d'accords (V20) : notes de l'accord en cours surlignées */}

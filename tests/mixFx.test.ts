@@ -377,3 +377,48 @@ describe('Charge processeur (indicatif)', () => {
     }
   });
 });
+
+describe('Clé externe (side-chain, 22/10/2026) : chaque bande détecte dans la même bande de la clé', () => {
+  type KeyCore = { process: (a: Float32Array, b: Float32Array | null, c: Float32Array, d: Float32Array | null, n: number, kl?: Float32Array | null, kr?: Float32Array | null) => void };
+  /** Comme run(), avec une clé (null = pas de clé). */
+  function runKey(core: KeyCore, L: Float32Array, K: Float32Array | null) {
+    const n = L.length, oL = new Float32Array(n), oR = new Float32Array(n);
+    for (let i = 0; i < n; i += 128) {
+      const m = Math.min(128, n - i);
+      core.process(L.subarray(i, i + m), L.subarray(i, i + m), oL.subarray(i, i + m), oR.subarray(i, i + m), m, K ? K.subarray(i, i + m) : null, K ? K.subarray(i, i + m) : null);
+    }
+    return oL;
+  }
+  const lvl = (y: Float32Array, x: Float32Array) => db(rms(y, SR / 2, x.length) / rms(x, SR / 2, x.length));
+  const silence = (sec: number) => new Float32Array(Math.round(sec * SR));
+
+  it('multibande : sans clé = comme avant au bit près ; clé muette = rien ; clé grave = le grave se creuse ; clé aiguë = le grave intact', () => {
+    const P = { ...MB_DEFAULTS, bands: 3, x1: 200, x2: 4000, knee: 0, b1Thr: -30, b1Ratio: 8, b1Att: 1, b1Rel: 100 };
+    const x = sine(80, 0.3, 1.2);           // basse de la piste (bande 1), −10,5 dBFS
+    const mk = () => { const c = createMultibandCore(SR); c.setParams(P); return c; };
+    const [ref] = run(mk(), x);
+    expect(Array.from(runKey(mk(), x, null))).toEqual(Array.from(ref));      // chemin sans clé inchangé
+    expect(lvl(ref, x)).toBeLessThan(-10);                                    // la piste se comprime elle-même
+    expect(Math.abs(lvl(runKey(mk(), x, silence(1.2)), x))).toBeLessThan(0.05);   // clé muette : aucune réduction
+    const ducked = lvl(runKey(mk(), x, sine(60, 0.5, 1.2)), x);               // kick grave dans la clé
+    expect(ducked).toBeLessThan(-12);
+    expect(Math.abs(lvl(runKey(mk(), x, sine(8000, 0.5, 1.2)), x))).toBeLessThan(0.05);   // clé dans l'aigu : le grave ne bouge pas
+  });
+
+  it('EQ dynamique : sans clé = comme avant ; la cloche ne baisse que quand la clé passe dans sa bande', () => {
+    const P = { ...DYN_DEFAULTS, d1On: 1, d1Freq: 1000, d1Q: 2, d1Thr: -30, d1Range: -6, d1Att: 0.1 };
+    const x = sine(1000, 0.05, 1.2);        // −26 dBFS dans la bande : se déclenche seul
+    const mk = () => { const c = createDynEqCore(SR); c.setParams(P); return c; };
+    const [ref] = run(mk(), x);
+    expect(Array.from(runKey(mk(), x, null))).toEqual(Array.from(ref));
+    expect(Math.abs(lvl(runKey(mk(), x, silence(1.2)), x))).toBeLessThan(1e-6);   // clé muette : au bit près
+    expect(lvl(runKey(mk(), x, sine(1000, 0.5, 1.2)), x)).toBeCloseTo(-6, 0);     // voix forte dans la bande : −6 dB (plage)
+    expect(Math.abs(lvl(runKey(mk(), x, sine(100, 0.5, 1.2)), x))).toBeLessThan(0.05);   // clé hors bande : rien
+  });
+
+  it('déclarés comme effets à clé (fenêtre « Clé », câblage du moteur)', async () => {
+    const { supportsSidechain } = await import('../engine/sidechain');
+    expect(supportsSidechain('MBCOMP')).toBe(true);
+    expect(supportsSidechain('DYNEQ')).toBe(true);
+  });
+});

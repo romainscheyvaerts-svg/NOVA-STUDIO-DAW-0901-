@@ -6,7 +6,7 @@
  */
 import type { DAWState, TimeSignature } from '../types';
 import { tempoSignature, type TempoEvent } from './tempoMap';
-import { sanitizeFollow, followTempo, type TempoFollowWire, type FollowState, type TempoFollowReport } from './tempoFollow';
+import { sanitizeFollow, followTempo, keepAudioFor, isMidiClip, isWarpedClip, type TempoFollowWire, type FollowState, type TempoFollowReport } from './tempoFollow';
 
 /**
  * `follow` (L3, absent d'une ancienne version) : le changement déplace le
@@ -61,4 +61,42 @@ export function applyTempoOpFollowing<S extends FollowState>(state: S, op: Tempo
   if (tempoOpSig(tempoOpOf(state)) === tempoOpSig(op)) return { state, report: null };
   if (!op.follow) return { state: applyTempoOp(state, op), report: null };
   return followTempo(state, { bpm: op.bpm, timeSignature: op.timeSignature, tempoEvents: op.tempoEvents }, { keepAudio: op.follow.keepAudio, epoch: op.follow.id });
+}
+
+/**
+ * Annuler / rétablir un changement de tempo : l'option « garder les clips audio à leur place »
+ * du changement d'origine, retrouvée dans les deux états (un clip audio non calé qui a bougé :
+ * l'audio suivait ; aucun n'a bougé : il était gardé). Sans clip audio non calé : réglage du projet.
+ */
+export function undoKeepsAudio(present: Pick<FollowState, 'tracks' | 'tempoAudioMode'>, target: Pick<FollowState, 'tracks'>): boolean {
+  const before = new Map<string, number>();
+  target.tracks.forEach(t => t.clips.forEach(c => before.set(c.id, c.start)));
+  let seen = false;
+  for (const t of present.tracks) for (const c of t.clips) {
+    if (c.lock || isMidiClip(c) || isWarpedClip(c)) continue;
+    const s = before.get(c.id);
+    if (s === undefined) continue;
+    if (Math.abs(s - c.start) > 1e-9) return false;
+    seen = true;
+  }
+  return seen ? true : keepAudioFor(present);
+}
+
+/**
+ * Collaboration · annuler / rétablir (Ctrl+Z, Ctrl+Y) un changement de tempo (22/10/2026) :
+ * l'opération inverse part AVEC le suivi (`follow`, nouvel identifiant), comme le changement
+ * lui-même. Avant, l'annulation renvoyait le tempo seul : chez les autres, les clips des pistes que
+ * l'auteur ne possède pas restaient déplacés. Ici, l'auteur ne reprend pas l'instantané tel quel
+ * pour le contenu : il fait le MÊME calcul que les autres (utils/tempoFollow) depuis le même état,
+ * donc tout le monde arrive au même endroit (à la nanoseconde de l'instantané). Les réglages hors
+ * temps (nom, groupes…) viennent de l'instantané. Null : l'étape ne change pas le tempo.
+ */
+export function tempoHistoryMove<S extends FollowState>(present: S, restored: S, o: { epoch: string; keepAudio: boolean }): { op: TempoOp; state: S } | null {
+  const op = tempoOpOf(restored);
+  if (tempoOpSig(op) === tempoOpSig(tempoOpOf(present))) return null;
+  const f = followTempo(present, op, { keepAudio: o.keepAudio, epoch: o.epoch }).state;
+  return {
+    op: { ...op, follow: { id: o.epoch, keepAudio: o.keepAudio } },
+    state: { ...restored, tracks: f.tracks, markers: f.markers, ...(f.chords !== undefined ? { chords: f.chords } : {}), loopStart: f.loopStart, loopEnd: f.loopEnd },
+  };
 }

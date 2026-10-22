@@ -95,3 +95,26 @@ export const computePdc = (nodes: Map<string, PdcNode>): Map<string, PdcResult> 
   });
   return out;
 };
+
+/** Pré-roulement maximal (s) : au-delà, la lecture et l'export partent sans (latence anormale). */
+export const PREROLL_MAX_SECONDS = 2;
+
+/**
+ * Pré-roulement de latence (22/10/2026), MÊME règle en lecture et à l'export : un son posé
+ * avant la latence compensée (EQ à phase linéaire, limiteur à anticipation…) doit entrer
+ * dans les effets AVANT le point de départ, sinon son début est coupé. Le rendu (ou le
+ * transport) démarre `pre` secondes plus tôt ; on n'entend / ne garde qu'à partir de `from`.
+ *
+ * @param lat  latence totale de la session (max des latences compensées des pistes), s
+ * @param clips clips (début, durée) des pistes jouées
+ * @returns `pre` en secondes, arrondi à l'échantillon supérieur (0 = aucun pré-roulement)
+ */
+export const latencyPreroll = (lat: number, sampleRate: number, clips: Iterable<{ start: number; duration: number }>, from = 0): number => {
+  if (!(lat > 0) || lat > PREROLL_MAX_SECONDS || !(sampleRate > 0) || !(from >= 0)) return 0;
+  let needed = false;
+  // Un son qui commence avant from + lat (et n'est pas fini avant le début du pré-roulement).
+  for (const c of clips) if (c.start < from + lat - 1e-12 && c.start + c.duration > from - lat) { needed = true; break; }
+  if (!needed) return 0;
+  // Latences = nombres entiers d'échantillons : l'epsilon évite l'échantillon de trop (2048,0000001 → 2049).
+  return Math.ceil(lat * sampleRate - 1e-6) / sampleRate;
+};

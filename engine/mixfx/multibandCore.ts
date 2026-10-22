@@ -28,6 +28,10 @@
  * Sans clic : seuil, taux, gain de bande, contournement, solo, genou et sortie glissent
  * linéairement sur 256 échantillons ; les fréquences de coupure glissent (log) par
  * sous-blocs de 32 échantillons. Aucune allocation dans `process`. Latence nulle.
+ *
+ * Clé externe (side-chain, 22/10/2026) : `keyL` / `keyR` présents, chaque bande DÉTECTE dans la
+ * même bande de la clé (même banc de filtres, états à part) et compresse le son de la piste :
+ * le grave du beat qui se creuse sous le kick, sans toucher à ses aigus. Sans clé : inchangé.
  */
 
 export interface MultibandCoreParams { [k: string]: number | boolean | undefined }
@@ -43,7 +47,7 @@ export interface MultibandMeters {
 
 export interface MultibandCore {
   setParams(p: MultibandCoreParams): void;
-  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number): void;
+  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null): void;
   takeMeters(): MultibandMeters;
   reset(): void;
   /** Au repos (veille) : filtres vides (< 1e-12), aucune réduction possible, aucun glissement en cours. */
@@ -62,6 +66,8 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
   var C = new Float64Array(45);
   // 15 étages par canal : 0-1 LP1, 2-3 HP1, 4-5 LP2, 6-7 HP2, 8 AP2 (grave), 9-10 LP3, 11-12 HP3, 13 AP3 (grave), 14 AP3 (bande 2)
   var S = new Float64Array(15 * 2 * 4);
+  // États du même banc de filtres pour la clé externe (side-chain).
+  var KS = new Float64Array(15 * 2 * 4);
   var fCur = new Float64Array(3), fTgt = new Float64Array(3);
   var gliding = false;
   // --- réglages lissés : [cur, tgt, step, count] par réglage --------------------------
@@ -176,42 +182,47 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
   var BLK = 128;
   var X = new Float64Array(BLK), T1 = new Float64Array(BLK), HI = new Float64Array(BLK), H = new Float64Array(BLK);
   var BB = new Float64Array(2 * NB * BLK);
+  var KB = new Float64Array(2 * NB * BLK);
 
   // Un étage biquad DF-I sur len échantillons (coefficients et état en variables locales : rapide).
-  function stage(ci: number, si: number, src: Float64Array, so: number, dst: Float64Array, dof: number, len: number) {
+  function stage(ci: number, St: Float64Array, si: number, src: Float64Array, so: number, dst: Float64Array, dof: number, len: number) {
     var b0 = C[ci], b1 = C[ci + 1], b2 = C[ci + 2], a1 = C[ci + 3], a2 = C[ci + 4];
-    var x1 = S[si], x2 = S[si + 1], y1 = S[si + 2], y2 = S[si + 3];
+    var x1 = St[si], x2 = St[si + 1], y1 = St[si + 2], y2 = St[si + 3];
     for (var j = 0; j < len; j++) {
       var x = src[so + j];
       var y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
       x2 = x1; x1 = x; y2 = y1; y1 = y;
       dst[dof + j] = y;
     }
-    S[si] = x1; S[si + 1] = x2; S[si + 2] = y1; S[si + 3] = y2;
+    St[si] = x1; St[si + 1] = x2; St[si + 2] = y1; St[si + 3] = y2;
   }
 
-  // Banc de filtres d'un canal : X → 4 bandes dans BB (canal c).
-  function split(c: number, len: number) {
+  // Banc de filtres d'un canal : X → 4 bandes dans B (canal c), états St (son : S → BB ; clé : KS → KB).
+  function split(c: number, len: number, St: Float64Array, B: Float64Array) {
     var so = c * 60, o = c * NB * BLK;
-    stage(0, so + 4, X, 0, T1, 0, len); stage(0, so, T1, 0, BB, o, len);                 // LP1² → grave
-    stage(5, so + 12, X, 0, T1, 0, len); stage(5, so + 8, T1, 0, HI, 0, len);             // HP1²
-    stage(15, so + 20, HI, 0, T1, 0, len); stage(15, so + 16, T1, 0, BB, o + BLK, len);   // LP2² → bande 2
-    stage(20, so + 28, HI, 0, T1, 0, len); stage(20, so + 24, T1, 0, H, 0, len);          // HP2²
-    stage(25, so + 32, BB, o, BB, o, len);                                                 // AP2 (grave)
-    stage(30, so + 40, H, 0, T1, 0, len); stage(30, so + 36, T1, 0, BB, o + 2 * BLK, len); // LP3² → bande 3
-    stage(35, so + 48, H, 0, T1, 0, len); stage(35, so + 44, T1, 0, BB, o + 3 * BLK, len); // HP3² → bande 4
-    stage(40, so + 52, BB, o, BB, o, len);                                                 // AP3 (grave)
-    stage(40, so + 56, BB, o + BLK, BB, o + BLK, len);                                     // AP3 (bande 2)
-    if (bands === 3) { for (var j = 0; j < len; j++) { BB[o + 2 * BLK + j] += BB[o + 3 * BLK + j]; } }
+    stage(0, St, so + 4, X, 0, T1, 0, len); stage(0, St, so, T1, 0, B, o, len);                 // LP1² → grave
+    stage(5, St, so + 12, X, 0, T1, 0, len); stage(5, St, so + 8, T1, 0, HI, 0, len);           // HP1²
+    stage(15, St, so + 20, HI, 0, T1, 0, len); stage(15, St, so + 16, T1, 0, B, o + BLK, len);  // LP2² → bande 2
+    stage(20, St, so + 28, HI, 0, T1, 0, len); stage(20, St, so + 24, T1, 0, H, 0, len);        // HP2²
+    stage(25, St, so + 32, B, o, B, o, len);                                                    // AP2 (grave)
+    stage(30, St, so + 40, H, 0, T1, 0, len); stage(30, St, so + 36, T1, 0, B, o + 2 * BLK, len); // LP3² → bande 3
+    stage(35, St, so + 48, H, 0, T1, 0, len); stage(35, St, so + 44, T1, 0, B, o + 3 * BLK, len); // HP3² → bande 4
+    stage(40, St, so + 52, B, o, B, o, len);                                                    // AP3 (grave)
+    stage(40, St, so + 56, B, o + BLK, B, o + BLK, len);                                        // AP3 (bande 2)
+    if (bands === 3) { for (var j = 0; j < len; j++) { B[o + 2 * BLK + j] += B[o + 3 * BLK + j]; } }
   }
 
   var LN10_20 = Math.LN10 / 20, DB_PER_LN = 20 / Math.LN10;
 
-  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number) {
+  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     // Réglages posés avant le premier bloc (construction, export) : appliqués tout de suite.
     first = false;
     var right = inR || inL;
     var stereo = !!inR;
+    // Clé externe : la détection lit ses bandes (KB) ; clé mono = même bande des deux côtés.
+    var key = !!keyL;
+    var kStereo = key && !!keyR && keyR !== keyL;
+    var D = key ? KB : BB;
     var i = 0;
     while (i < n) {
       if (gliding) glideStep();
@@ -219,9 +230,15 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
       if (ramping > 0) updateLinLo();
       // --- banc de filtres, par étage sur tout le morceau de bloc ---
       for (var j = 0; j < len; j++) X[j] = inL[i + j];
-      split(0, len);
-      if (stereo) { for (var j2 = 0; j2 < len; j2++) X[j2] = right[i + j2]; split(1, len); }
+      split(0, len, S, BB);
+      if (stereo) { for (var j2 = 0; j2 < len; j2++) X[j2] = right[i + j2]; split(1, len, S, BB); }
       var oR = stereo ? NB * BLK : 0;
+      var oK = 0;
+      if (key) {
+        for (var j3 = 0; j3 < len; j3++) X[j3] = (keyL as Float32Array)[i + j3];
+        split(0, len, KS, KB);
+        if (kStereo) { for (var j4 = 0; j4 < len; j4++) X[j4] = (keyR as Float32Array)[i + j4]; split(1, len, KS, KB); oK = NB * BLK; }
+      } else oK = oR;
       for (var t = 0; t < len; t++, i++) {
         var xl = inL[i], xr = right[i];
         var axl = xl < 0 ? -xl : xl, axr = xr < 0 ? -xr : xr;
@@ -237,7 +254,8 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
         var yl = 0, yr = 0;
         for (var b = 0; b < bands; b++) {
           var sl = BB[b * BLK + t], sr = BB[oR + b * BLK + t];
-          var lv = sl < 0 ? -sl : sl, lr = sr < 0 ? -sr : sr;
+          var dl = D[b * BLK + t], dr = D[oK + b * BLK + t];
+          var lv = dl < 0 ? -dl : dl, lr = dr < 0 ? -dr : dr;
           if (lr > lv) lv = lr;
           var e = env[b];
           e += (lv - e) * (lv > e ? cA[b] : cR[b]);
@@ -272,7 +290,7 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
   }
 
   function reset() {
-    S.fill(0); env.fill(0); grNow.fill(0); grMax.fill(0); inPk = 0; outPk = 0;
+    S.fill(0); KS.fill(0); env.fill(0); grNow.fill(0); grMax.fill(0); inPk = 0; outPk = 0;
     // Réglages et coupures posés tout de suite (instance neuve).
     for (var q = 0; q < NP; q++) { Pc[q] = Pt[q]; Pn[q] = 0; }
     ramping = 0;

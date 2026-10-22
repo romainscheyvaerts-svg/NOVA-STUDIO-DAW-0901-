@@ -10,6 +10,9 @@
  *   niveau par bande (EQ dynamique), crêtes d'entrée / sortie.
  * - Veille des effets (engine/effectSleep) : le cœur signale quand il est au repos ; au
  *   réveil, il rattrape les blocs muets sautés (enveloppes en relâchement).
+ * - Clé externe (side-chain R7, 22/10/2026) : `sidechainInput` (2e entrée du worklet), câblée par
+ *   le moteur (engine/sidechain.ts) comme pour le Compresseur ; chaque bande détecte dans la
+ *   même bande de la clé. « Écouter la clé » : on n'entend que la clé.
  */
 import { createMultibandCore } from './multibandCore';
 import { createDynEqCore } from './dynEqCore';
@@ -35,7 +38,9 @@ const __allAp = ${JSON.stringify(ALL_AP)};
 class NovaMixFxProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return __allAp.map(d => ({ name: d.name, minValue: -1e5, maxValue: 1e5, defaultValue: d.defaultValue, automationRate: 'k-rate' }))
-      .concat([{ name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]);
+      .concat([{ name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' },
+        { name: '__keyOn', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
+        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -77,7 +82,16 @@ class NovaMixFxProcessor extends AudioWorkletProcessor {
     const inp = inputs[0];
     const iL = inp && inp[0] ? inp[0] : this.zero;
     const iR = inp && inp[1] ? inp[1] : null;
-    this.core.process(iL, iR, out[0], out[1] || null, n);
+    // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence, pas le son de la piste.
+    const useKey = parameters.__keyOn && parameters.__keyOn[0] >= 0.5;
+    const key = inputs[1];
+    const kL = useKey ? (key && key[0] ? key[0] : this.zero) : null;
+    const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
+    this.core.process(iL, iR, out[0], out[1] || null, n, kL, kR);
+    if (useKey && parameters.__keyListen && parameters.__keyListen[0] >= 0.5) {
+      out[0].set(kL.subarray(0, n));
+      if (out[1]) out[1].set(kR.subarray(0, n));
+    }
     if (++this.blocks >= 12) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
     const rest = this.core.atRest();
     if (rest !== this.rest) { this.rest = rest; this.port.postMessage({ rest }); }
@@ -96,8 +110,12 @@ const EMPTY_DYN: DynMeters = { gainNow: [0, 0, 0, 0], gainPeak: [0, 0, 0, 0], le
 export class MixFxNode {
   public input: GainNode;
   public output: GainNode;
+  /** Entrée de la clé de side-chain (R7), câblée par le moteur (engine/sidechain.ts). */
+  public readonly sidechainInput: GainNode;
   public readonly ready: Promise<void>;
   public readonly kind: MixFxKind;
+  private keyActive = false;
+  private keyListen = false;
   private ctx: BaseAudioContext;
   private worklet: AudioWorkletNode | null = null;
   private params: Record<string, number>;
@@ -115,6 +133,11 @@ export class MixFxNode {
     this.input.channelCount = 2;
     this.input.channelCountMode = 'explicit';
     this.input.channelInterpretation = 'speakers';
+    this.sidechainInput = ctx.createGain();
+    this.sidechainInput.channelCount = 2;
+    this.sidechainInput.channelCountMode = 'explicit';
+    this.sidechainInput.channelInterpretation = 'speakers';
+    this.keyListen = Number(params?.keyListen) >= 0.5;
     this.params = { ...MIXFX_DEFAULTS[kind], ...sanitizeMixFx(kind, params || {}) };
     this.ready = this.init();
   }
@@ -126,7 +149,7 @@ export class MixFxNode {
       const parameterData: Record<string, number> = {};
       for (const id of AUTO(this.kind)) parameterData[id] = +this.params[id];
       this.worklet = new AudioWorkletNode(this.ctx, PROC, {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,
         // Réglages passés à la construction : un message arriverait trop tard à l'export.
@@ -138,6 +161,8 @@ export class MixFxNode {
         if (Number.isFinite(d.inPeakDb)) { this.meters = d; this.metersAt = Date.now(); }
       };
       this.input.connect(this.worklet);
+      this.sidechainInput.connect(this.worklet, 0, 1);
+      this.applyKey();
       this.worklet.connect(this.output);
     } catch (e) {
       console.warn(`[NOVA ${this.kind}] AudioWorklet indisponible, effet contourné :`, e);
@@ -151,6 +176,7 @@ export class MixFxNode {
 
   public updateParams(p: Record<string, any>) {
     if (!p) return;
+    if (p.keyListen !== undefined) { const l = Number(p.keyListen) >= 0.5; if (l !== this.keyListen) { this.keyListen = l; this.applyKey(); } }
     const clean = sanitizeMixFx(this.kind, p);
     this.params = { ...this.params, ...clean };
     if (!this.worklet) return;
@@ -165,6 +191,24 @@ export class MixFxNode {
   }
 
   public getParams() { return { ...this.params }; }
+
+  /** Clé externe branchée (R7) : chaque bande détecte dans la clé. */
+  public setSidechainActive(on: boolean) {
+    if (on === this.keyActive) return;
+    this.keyActive = on;
+    this.applyKey();
+  }
+  public get sidechainActive() { return this.keyActive; }
+
+  private applyKey() {
+    if (!this.worklet) return;
+    const prm = this.worklet.parameters as any;
+    const now = this.ctx.currentTime;
+    try {
+      prm.get('__keyOn')?.setValueAtTime(this.keyActive ? 1 : 0, now);
+      prm.get('__keyListen')?.setValueAtTime(this.keyActive && this.keyListen ? 1 : 0, now);
+    } catch { /* contexte fermé */ }
+  }
 
   private resetCount = 0;
   /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
@@ -205,6 +249,7 @@ export class MixFxNode {
 
   public disconnect() {
     try { this.input.disconnect(); } catch { /* déjà débranché */ }
+    try { this.sidechainInput.disconnect(); } catch { /* idem */ }
     try { this.worklet?.disconnect(); } catch { /* idem */ }
     try { this.output.disconnect(); } catch { /* idem */ }
   }

@@ -166,6 +166,45 @@ export const RACK_AUTOMATABLE = [
   ...[1, 2, 3, 4].map(k => ({ id: `br${k}Level`, label: `Niveau de la branche ${k}`, min: LEVEL_OFF_DB, max: 12, unit: 'dB' })),
 ];
 
+/**
+ * Automation des effets des branches (22/10/2026) : le réglage `key` de l'effet `pluginId` d'une
+ * branche s'écrit « <id de l'effet>/<réglage> » dans la voie du rack (plugin::<rack>::<effet>/<réglage>).
+ * Le rack transmet à l'effet (AudioParam s'il en a un, sinon updateParams), en lecture comme à l'export.
+ */
+export const RACK_CHILD_SEP = '/';
+export const rackChildKey = (pluginId: string, key: string) => `${pluginId}${RACK_CHILD_SEP}${key}`;
+export function parseRackChildKey(key: string): { pluginId: string; key: string } | null {
+  const i = typeof key === 'string' ? key.indexOf(RACK_CHILD_SEP) : -1;
+  if (i <= 0 || i >= key.length - 1) return null;
+  return { pluginId: key.slice(0, i), key: key.slice(i + 1) };
+}
+
+/** Effet d'une branche (et sa branche, son rang). */
+export function findRackChild(p: Pick<RackParams, 'branches'>, pluginId: string): { plugin: PluginInstance; branch: RackBranch; index: number } | null {
+  for (let i = 0; i < (p.branches || []).length; i++) {
+    const plugin = p.branches[i].plugins.find(x => x.id === pluginId);
+    if (plugin) return { plugin, branch: p.branches[i], index: i };
+  }
+  return null;
+}
+
+/** Nom affiché d'un effet d'une branche (« Compresseur »). */
+export const rackChildName = (pl: Pick<PluginInstance, 'type' | 'name'>) => RACK_BUILTIN_FX.find(f => f.type === pl.type)?.name || pl.name || pl.type;
+
+export interface RackAutomatable { id: string; label: string; min: number; max: number; unit?: string }
+
+/**
+ * Réglages automatisables des effets des branches, pour l'éditeur d'automation :
+ * « Branche 1 · Compresseur · Seuil ». `listFor` donne ceux d'un type d'effet (registre, effets historiques).
+ */
+export function rackChildAutomatable(p: RackParams, listFor: (type: string) => RackAutomatable[]): RackAutomatable[] {
+  const out: RackAutomatable[] = [];
+  p.branches.forEach((b, i) => b.plugins.forEach(pl => {
+    for (const a of listFor(pl.type)) out.push({ ...a, id: rackChildKey(pl.id, a.id), label: `${branchLabel(p, i, b)} · ${rackChildName(pl)} · ${a.label}` });
+  }));
+  return out;
+}
+
 /** Remplace les réglages d'un effet d'une branche (fenêtre de l'effet, dans le rack). */
 export function withChildParams(p: RackParams, branchId: string, pluginId: string, params: Record<string, any>): RackParams {
   return { ...p, branches: p.branches.map(b => (b.id !== branchId ? b : { ...b, plugins: b.plugins.map(x => (x.id === pluginId ? { ...x, params: { ...x.params, ...params } } : x)) })) };
