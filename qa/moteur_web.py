@@ -197,6 +197,7 @@ LATENCE = r"""async (opts) => {
   const compensation = E.measureRecordLatency ? E.measureRecordLatency().total : null;
   E.startPlayback(0, tracks);
   if (!(await E.startRecording(0, 'voix-boucle'))) return { erreur: 'startRecording' };
+  if (opts.fige) { await __mw.sleep(1500); const W = await window.__novaAppModule('/engine/takeWriter.ts'); W.takeWriter().qaFreeze(opts.fige * 1000); }
   const series = [];
   const t0 = performance.now();
   while (performance.now() - t0 < dur * 1000) { await __mw.sleep(1000); if (opts.suivi) series.push({ t: Math.round((performance.now() - t0) / 1000), ctx: +ctx.currentTime.toFixed(2) }); }
@@ -213,7 +214,8 @@ LATENCE = r"""async (opts) => {
   const med = e.length ? [...e].sort((a, b) => a - b)[e.length >> 1] : null;
   const firstErr = errs.slice(0, 5).map(r => r.e), lastErr = errs.slice(-5).map(r => r.e);
   const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
-  return { sr, clics: N, trouves: errs.length, ecart_median_ech: med, ecart_median_ms: med === null ? null : +(med / sr * 1000).toFixed(2),
+  const h = E.getLastTakeHealth ? E.getLastTakeHealth() : null;
+  return { sr, clics: N, trouves: errs.length, secours_images: h ? h.rescued : null, perdues: h ? h.lost : null, ecart_median_ech: med, ecart_median_ms: med === null ? null : +(med / sr * 1000).toFixed(2),
     ecart_min_ech: e.length ? Math.min(...e) : null, ecart_max_ech: e.length ? Math.max(...e) : null,
     derive_ech: errs.length > 10 ? +((avg(lastErr) - avg(firstErr)).toFixed(1)) : null,
     compensation_ms: compensation === null ? null : +(compensation * 1000).toFixed(2), mesure,
@@ -232,6 +234,19 @@ def t_latence(p, res, calibrer):
     ok("latence : prise de la boucle relevée (clics retrouvés)", not r.get("erreur") and r.get("trouves", 0) >= 10, r)
     if calibrer and (r.get("mesure") or {}).get("ok"):
         ok("latence : latence mesurée par la boucle, prise calée à ±1 échantillon", r.get("ecart_median_ech") is not None and abs(r["ecart_median_ech"]) <= 1, r)
+    b.close()
+
+
+def t_latence_fige(p, res):
+    b, ctx, page, log = browser_page(p, "mw_latence_fige")
+    page_ready(page)
+    r = page.evaluate(LATENCE, {"n": 50, "step": 0.5, "calibrer": True, "suivi": False, "fige": 12})
+    r["erreurs_console"] = console_errors(log)
+    res["latence_ecrivain_fige"] = r
+    print("latence, écrivain figé 12 s :", json.dumps(r, ensure_ascii=False, default=str), flush=True)
+    ok("écrivain figé 12 s pendant la prise : les 50 clics à leur place (secours puis retour à l'anneau, 0 échantillon d'écart)",
+       not r.get("erreur") and r.get("trouves") == 50 and r.get("ecart_min_ech") == r.get("ecart_max_ech") and abs(r.get("ecart_median_ech") or 0) <= 1
+       and (r.get("secours_images") or 0) > 0 and (r.get("perdues") or 0) == 0, r)
     b.close()
 
 
@@ -590,6 +605,7 @@ def main():
                 elif t == "charge": t_charge(p, res, a.charge_min, a.fond_min)
                 elif t == "demarrage": t_demarrage(p, res, a.n)
                 elif t == "toucher": t_toucher(p, res)
+                elif t == "latence_fige": t_latence_fige(p, res)
                 else: print("test inconnu :", t)
             except Exception as e:
                 res.setdefault("exceptions", {})[t] = str(e)[:400]

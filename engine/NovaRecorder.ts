@@ -51,16 +51,20 @@ class NovaRecorder extends AudioWorkletProcessor {
     this.n = 0;
     this.allocs = 0;
     // Secours (anneau) : si l'écrivain ne vide plus l'anneau (Worker figé : page gelée par le
-    // navigateur), les échantillons passent par la page, comme l'ancien chemin. Sans retour : les
-    // positions restent simples (anneau = début de la prise, secours = la suite).
+    // navigateur, ou pas encore démarré), les échantillons passent par la page, comme l'ancien
+    // chemin. Retour à l'anneau dès qu'il est VIDE : la position du segment suivant (images depuis
+    // le début de la prise − images déjà passées par l'anneau) est publiée dans l'en-tête AVANT
+    // les images (octets 40 à 47), l'écrivain repose chaque morceau à sa place.
     this.rescue = false;
     this.pos = 0;
+    this.ringFrames = 0;
     this.rb = null; this.rn = 0; this.rpos = 0;
     if (this.mode === 'ring') {
       this.h = new Int32Array(o.ring.header);
       this.d = new Float32Array(o.ring.data);
       this.cap = o.ring.capacity;
       this.f64 = new Float64Array(o.ring.header, 32, 1);
+      this.off = new Float64Array(o.ring.header, 40, 1);
     } else if (this.mode === 'port') {
       this.size = o.pool.frames;
       this.free = [];
@@ -128,12 +132,18 @@ class NovaRecorder extends AudioWorkletProcessor {
   /** Bloc capté, quel que soit le chemin. inp = null : silence (horloge gardée). */
   write(inp, len, mono) {
     if (this.mode === 'ring') {
-      if (!this.rescue && ((Atomics.load(this.h, 0) - Atomics.load(this.h, 1)) | 0) > this.cap * 0.75) {
+      const pending = (Atomics.load(this.h, 0) - Atomics.load(this.h, 1)) | 0;
+      if (!this.rescue && pending > this.cap * 0.75) {
         this.rescue = true;
-        this.port.postMessage({ type: 'rescue-on', pos: this.pos });
+        this.rescues = (this.rescues || 0) + 1;
+        if (this.rescues === 1) this.port.postMessage({ type: 'rescue-on', pos: this.pos });
+      } else if (this.rescue && pending === 0) {
+        this.flushRescue();
+        this.rescue = false;
+        this.off[0] = this.pos - this.ringFrames;
       }
       if (this.rescue) this.rescueWrite(inp, len, mono);
-      else ringWrite(this.h, this.d, this.cap, this.kk, inp, len, mono);
+      else if (ringWrite(this.h, this.d, this.cap, this.kk, inp, len, mono)) this.ringFrames += len;
     } else this.portWrite(inp, len, mono);
     this.pos += len;
   }

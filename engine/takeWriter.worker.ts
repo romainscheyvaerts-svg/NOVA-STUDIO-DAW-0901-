@@ -33,7 +33,7 @@ interface Session {
   fwd: Float32Array[][]; fwdLen: number;
   first: number; frames: number; durable: number; failed: string | null;
   /** Position (images depuis le début de la prise) du 1er échantillon en attente d'écriture / de renvoi. */
-  pendPos: number; fwdPos: number;
+  pendPos: number; fwdPos: number; ringRead: number;
   writes: Promise<void>;
   eos: boolean; eosWait: (() => void) | null; allocs: number; portLost: number;
   drains: number; lastErr: string | null;
@@ -124,12 +124,15 @@ function forward(s: Session) {
   post({ type: 'chunk', id: s.id, first: s.first, pos: s.fwdPos, ch }, ch.map(c => c.buffer));
 }
 
-/** Échantillons reçus (un tableau par canal). */
-function take(s: Session, ch: Float32Array[]) {
+/** Échantillons reçus (un tableau par canal), à la position `pos` (images depuis le début de la prise). */
+function take(s: Session, ch: Float32Array[], pos = s.frames) {
   const n = ch[0]?.length || 0;
   if (!n) return;
-  if (!s.fwdLen) s.fwdPos = s.frames;
-  if (!s.pendLen) s.pendPos = s.frames;
+  // Segment non contigu (retour du secours) : ce qui attend part d'abord, à sa place.
+  if (s.fwdLen && s.fwdPos + s.fwdLen !== pos) forward(s);
+  if (s.pendLen && s.pendPos + s.pendLen !== pos) flushDurable(s);
+  if (!s.fwdLen) s.fwdPos = pos;
+  if (!s.pendLen) s.pendPos = pos;
   s.frames += n;
   for (let c = 0; c < s.k; c++) {
     const x = ch[c] || new Float32Array(n);
@@ -146,11 +149,15 @@ function drainRing(s: Session) {
   const r = s.ring;
   if (!r) return;
   if (s.first < 0 && Atomics.load(r.h, RING_STATE) > 0) s.first = new Float64Array(r.h.buffer, 32, 1)[0];
+  const off = new Float64Array(r.h.buffer, 40, 1);
   for (;;) {
+    // Décalage lu APRÈS l'index d'écriture (ringRead le charge) : il ne change que quand l'anneau est vide.
     const ch = ringRead(r.h, r.d, r.cap, s.k, r.cap);
     if (!ch) break;
     if (s.first < 0) s.first = new Float64Array(r.h.buffer, 32, 1)[0];
-    take(s, ch);
+    const pos = s.ringRead + off[0];
+    s.ringRead += ch[0].length;
+    take(s, ch, pos);
   }
 }
 
@@ -198,7 +205,7 @@ function begin(m: Begin, port: MessagePort | null) {
     pend: Array.from({ length: k }, () => []), pendLen: 0,
     fwd: Array.from({ length: k }, () => []), fwdLen: 0,
     first: -1, frames: 0, durable: 0, failed: null,
-    pendPos: 0, fwdPos: 0, writes: Promise.resolve(), eos: false, eosWait: null, allocs: 0, portLost: 0,
+    pendPos: 0, fwdPos: 0, ringRead: 0, writes: Promise.resolve(), eos: false, eosWait: null, allocs: 0, portLost: 0,
     drains: 0, lastErr: null,
   };
   sessions.set(s.id, s);
