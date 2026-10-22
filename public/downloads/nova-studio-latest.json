@@ -1,14 +1,14 @@
 {
-  "version": "1.5.12",
-  "url": "downloads/NovaStudioSetup-1.5.12.exe",
-  "sha256": "203e521d3dc7fa96a0821bd8186c183903d3b00a34900716ccf40029c08d0e55",
-  "size": 51250728,
-  "date": "2026-10-22T01:14:40+02:00",
+  "version": "1.5.13",
+  "url": "downloads/NovaStudioSetup-1.5.13.exe",
+  "sha256": "f8c687910f97f2f103cf3bdec9fbb49fdf369da81257d3a152b0b5c67cae4ed5",
+  "size": 51256226,
+  "date": "2026-10-22T02:56:42+02:00",
   "notes": [
-    "Tempo : le changer garde tes notes, clips et automation sur la grille ; rampes d'accélération ; option « garder les clips audio à leur place ».",
-    "MIDI vivant : arpège, accords et gamme forcée en direct, clips liés (modifier un motif modifie ses copies), LFO calés sur le tempo.",
-    "Mix pro : EQ centre/côtés et phase linéaire, racks d'effets parallèles, scènes de mix A/B/C/D, masteriser un EP ou un album.",
-    "Voix : réparer (plosives, clics de bouche, bourdonnement, saturation), éditeur spectral, éditer la voix par le texte, étirement haute qualité.",
-    "Pro : échange DAWproject, pistes épinglées et filtrées, macros, console sur un 2e écran, vidéo calée à l'image."
+    "Lecture avec un effet à latence (EQ phase linéaire, limiteur) : le début des sons n'est plus coupé.",
+    "Piano roll : la grille suit les rampes de tempo.",
+    "Collaboration : annuler un changement de tempo ramène tout le monde au même état.",
+    "Rack parallèle : les réglages des effets de ses branches s'automatisent.",
+    "Compresseur multibande et EQ dynamique : clé externe (side-chain), par exemple le kick qui creuse la basse."
   ]
 }
