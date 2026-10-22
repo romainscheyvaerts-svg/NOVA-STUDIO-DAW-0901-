@@ -71,6 +71,8 @@ const DrumKitBrowser: React.FC<DrumKitBrowserProps> = p => {
   };
 
   const ctx = async () => {
+    // Moteur lancé : pas d'attente (l'écoute d'un son au survol ou au clic partait ~29 ms plus tard).
+    if (audioEngine.ctx && audioEngine.ctx.state === 'running') return audioEngine.ctx;
     await p.ensureEngine?.();
     if (!audioEngine.ctx) throw new KitSoundError('decode', KIT_ERROR_TEXT.decode);
     if (audioEngine.ctx.state !== 'running') await audioEngine.ctx.resume().catch(() => {});
@@ -107,12 +109,10 @@ const DrumKitBrowser: React.FC<DrumKitBrowserProps> = p => {
         ['openhat', [14], 0.5], ['808', [0, 10], 0.85],
       ];
       const hits: { buffer: AudioBuffer; at: number; gain: number }[] = [];
-      for (const [role, steps, gain] of want) {
-        const sid = k.pads[role];
-        if (!sid) continue;
-        const buf = await loadKitSound(kitRef(sid), c, root ?? 0);
-        steps.forEach(si => hits.push({ buffer: buf, at: si * step, gain }));
-      }
+      // Les sons du kit se chargent EN MÊME TEMPS (avant : l'un après l'autre, 6 allers-retours réseau).
+      const roles = want.filter(([role]) => !!k.pads[role]);
+      const bufs = await Promise.all(roles.map(([role]) => loadKitSound(kitRef(k.pads[role]!), c, root ?? 0)));
+      roles.forEach(([, steps, gain], i) => steps.forEach(si => hits.push({ buffer: bufs[i], at: si * step, gain })));
       audioEngine.auditionBuffers(hits);
       setPlaying(id);
       if (playTimer.current) window.clearTimeout(playTimer.current);

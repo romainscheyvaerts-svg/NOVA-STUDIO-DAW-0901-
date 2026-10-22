@@ -205,7 +205,8 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
   }, [rec]);
   useEffect(() => () => { rec?.take.cancel(); }, [rec]);
 
-  const noteOn = (p: number) => { void ensureEngine().then(() => audioEngine.triggerTrackAttack(track.id, p, 0.85)); };
+  // Moteur lancé : la note sonne tout de suite (sans attendre resume(), ~29 ms par note avant).
+  const noteOn = (p: number) => { const c = audioEngine.ctx; if (c && c.state === 'running') audioEngine.triggerTrackAttack(track.id, p, 0.85); else void ensureEngine().then(() => audioEngine.triggerTrackAttack(track.id, p, 0.85)); };
   const noteOff = (p: number) => { audioEngine.triggerTrackRelease(track.id, p); };
   const noteOffStable = useRef(noteOff); noteOffStable.current = noteOff;
   const stableOff = React.useCallback((p: number) => noteOffStable.current(p), []);

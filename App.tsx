@@ -6478,6 +6478,10 @@ function Studio() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const handleSynthNoteOn = useCallback((trackId: string, pitch: number) => {
+    // Moteur déjà lancé : la touche sonne tout de suite (avant : ~29 ms d'attente de resume() à chaque
+    // note, et un tap très court pouvait relâcher la note AVANT son attaque : note qui reste tenue).
+    const c = audioEngine.ctx;
+    if (c && c.state === 'running') { audioEngine.triggerTrackAttack(trackId, pitch, 0.85); return; }
     void ensureAudioEngine().then(() => audioEngine.triggerTrackAttack(trackId, pitch, 0.85));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -12149,7 +12153,7 @@ function Studio() {
                      <>
                      {t.melodicSampler && !t.vstInstrument && (
                        <button type="button" onClick={() => openSamplerPanel(t.id)} data-testid="open-sampler-panel"
-                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé (Sampler de FL, Simpler de Live)"
+                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé"
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-amber-500/15 border-amber-400/50 text-amber-100 hover:bg-amber-500/25 shrink-0">
                          <i className="fas fa-wave-square mr-1" />{t.melodicSampler.sampleName || 'Sampler'}
                        </button>
