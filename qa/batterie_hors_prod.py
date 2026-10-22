@@ -205,6 +205,10 @@ BATTERIE = [
     # 22/10/2026 · restes 2 : rack parallèle, automation écrite en touchant un bouton dans la fenêtre d'un effet d'une branche
     # (Latch au clavier, Touch à la souris) : voie « <rack>::<effet>/<réglage> », valeur jouée par le moteur, Ctrl+Z en une étape.
     ("rack_automation_fenetre", []),
+    # 22/10/2026 · restes 2 : suiveur d'enveloppe (modulateur) : le niveau du Kick creuse le volume de la Basse (plage 60 %,
+    # attaque 5 ms, relâchement 80 ms) ; export de la basse seule = creux à chaque coup (≥ 6 dB), lecture = même courbe ;
+    # coupé, Ctrl+Z, sauvegarde + rechargement ; téléphone.
+    ("modulateurs_suiveur", []),
 ]
 
 

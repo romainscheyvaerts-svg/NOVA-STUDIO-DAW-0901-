@@ -42,6 +42,7 @@ import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
+import { setModulatorSourceResolver } from '../utils/modulators';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -440,6 +441,8 @@ export class AudioEngine {
   /** Dernières pistes reçues (brutes et vues par le moteur) : changement de mode de solo, bus d'écoute. */
   private lastRawTracks: Track[] = [];
   private lastViewTracks: Track[] = [];
+  /** Pistes du dernier rendu (source d'un suiveur d'enveloppe hors du projet ouvert). */
+  private lastRenderTracks: Track[] = [];
   private monitorUnsub: (() => void) | null = null;
   private appliedListenMode: MonitorSnapshot['listen'] = monitorStore.get().listen;
   /**
@@ -1582,6 +1585,7 @@ export class AudioEngine {
     if (!targetSampleRate) targetSampleRate = this.getProjectSampleRate();
     /** Pistes telles que reçues (pré-roll : le rendu est relancé avec elles). */
     const tracksIn = tracks;
+    this.lastRenderTracks = tracksIn;
     // Solo d'écoute AFL / PFL (utils/soloListen) : il ne touche jamais un rendu. Les solos
     // posés par l'appelant lui-même (stems, voix seules : options.soloIsDeliberate) restent.
     if (!options.soloIsDeliberate) tracks = tracksForRender(tracks, monitorStore.get().listen);
@@ -3438,6 +3442,11 @@ export class AudioEngine {
    */
   /** Pistes de la session telles que le moteur les joue (clés de side-chain des rendus VST, R10). */
   public getLiveTracks(): Track[] { return this.liveTracks || []; }
+
+  /** Piste source d'un suiveur d'enveloppe : projet ouvert, sinon pistes jouées, sinon dernier rendu. */
+  public modulatorSource(id: string): Track | undefined {
+    return this.lastRawTracks.find(t => t.id === id) || (this.liveTracks || []).find(t => t.id === id) || this.lastRenderTracks.find(t => t.id === id);
+  }
 
   public setLiveTracks(tracks: Track[]) {
     this.practiceRawTracks = tracks;
@@ -6109,3 +6118,7 @@ export class AudioEngine {
 }
 
 export const audioEngine = new AudioEngine();
+
+// Suiveur d'enveloppe (utils/modulators) : la source est cherchée dans le PROJET ENTIER, pas dans
+// les pistes rendues (export d'une piste, d'un stem : la basse reste creusée par la grosse caisse).
+setModulatorSourceResolver(id => audioEngine.modulatorSource(id));
