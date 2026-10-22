@@ -1,13 +1,12 @@
 {
-  "version": "1.5.14",
-  "url": "downloads/NovaStudioSetup-1.5.14.exe",
-  "sha256": "1195cd2d66f84e29196a80c895b236c95886d3cc9f15c9668d272d81bccd9035",
-  "size": 51267137,
-  "date": "2026-10-22T04:46:53+02:00",
+  "version": "1.5.15",
+  "url": "downloads/NovaStudioSetup-1.5.15.exe",
+  "sha256": "d75275671f46563da3b6fee5b59addbfc04c5569554c693e5a55ec18e8ee8368",
+  "size": 51281158,
+  "date": "2026-10-22T14:10:09+02:00",
   "notes": [
-    "Musiciens de séance : un batteur, un bassiste (808) et des claviers qui jouent tout seuls en suivant tes accords ; styles Trap, Drill UK, Drill FR, Boom bap, R&B, Afro ; intensité, complexité et remplissages par section.",
-    "Boucle avec un effet à latence : le début n'est plus coupé à chaque tour.",
-    "Automation : toucher un réglage d'un effet du rack parallèle l'écrit (Touch, Latch, Write).",
-    "Modulateurs : suiveur d'enveloppe (ex. le kick qui creuse le volume de la basse)."
+    "Fenêtres de plugins comme dans un vrai DAW : plus d'icône par plugin dans la barre des tâches, elles restent devant Nova et se réduisent avec lui.",
+    "Plugins plus rapides à ouvrir : Waves 4 fois plus vite, Auto-Tune 2 fois plus vite ; un projet de 12 plugins se charge en 3,5 s au lieu de 12.",
+    "Un plugin qui se fige ne bloque plus Nova Studio."
   ]
 }
