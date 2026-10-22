@@ -259,6 +259,7 @@ def scenario_pc(page, res):
     b = box(page)
     page.mouse.click(x_of(b, 20), lane_top(b, 0) + 100); page.wait_for_timeout(200)
     # --- Ligne de gain affichée (bouton) ; Alt+G la masque / la remet.
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-gain-line"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-gain-line").click(); page.wait_for_timeout(200)
     res["ligne_affichee"] = page.get_by_test_id("toggle-gain-line").get_attribute("aria-pressed")
     page.keyboard.press("Alt+g"); page.wait_for_timeout(150)
@@ -280,14 +281,19 @@ def scenario_pc(page, res):
     res["alt_clic_enleve"] = {"avant": n_avant, "apres": len(clip_state(page, "lead")[0]["pts"])}
     shot(page, "pc_01_ligne_de_gain_points")
     # --- Crayon (forme triangle) sur le clip, de 6,5 s à 8,5 s entre 0 et −12 dB.
+    qalib.ouvrir_menu_range(page, '[data-testid="tool-pencil"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("tool-pencil").click(); page.wait_for_timeout(150)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape").click(); page.wait_for_timeout(200)
     shot(page, "pc_02_formes_du_crayon")
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape-triangle"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape-triangle").click(); page.wait_for_timeout(150)
     drag(page, x_of(b, 6.5), y_line(b, 0, 0), x_of(b, 8.5), y_line(b, 0, -12), steps=24)
     res["apres_crayon_triangle"] = clip_state(page, "lead")[0]["pts"]
     # --- Crayon libre sur la ligne d'automation (volume) de la piste « Automation ».
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape").click(); page.wait_for_timeout(150)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape-free"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape-free").click(); page.wait_for_timeout(150)
     ly = lane_top(b, 2) + ZOOMV
     page.mouse.move(x_of(b, 2), ly + 15); page.mouse.down()
@@ -296,6 +302,7 @@ def scenario_pc(page, res):
     page.mouse.up(); page.wait_for_timeout(300)
     res["automation_crayon"] = st(page, "s => { const l = s.tracks.find(t => t.id === 'auto').automationLanes[0]; return { points: l.points.length, premier: l.points[0] && [+l.points[0].time.toFixed(2), +l.points[0].value.toFixed(3)], dernier: l.points.length && [+l.points[l.points.length-1].time.toFixed(2), +l.points[l.points.length-1].value.toFixed(3)] }; }")
     shot(page, "pc_03_crayon_clip_et_automation")
+    qalib.ouvrir_menu_range(page, '[data-testid="tool-pencil"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("tool-pencil").click(); page.wait_for_timeout(150)   # retour au Smart Tool
     # --- Nudge : clip sélectionné, Ctrl+Maj+↑ deux fois = +1 dB.
     page.mouse.click(x_of(b, 9.5), lane_top(b, 0) + 100); page.wait_for_timeout(200)
@@ -347,6 +354,7 @@ def scenario_pc(page, res):
     res["rendre_le_gain"] = {"clip_rendu": {k: rendu[k] for k in ("gain", "pts", "render")}, "ecart_max_rendu_vs_ligne": float(np.max(np.abs(x_rendu - after))),
                              "clip_revenu": {k: revenu[k] for k in ("gain", "render")}, "points_revenus": len(revenu["pts"]), "ecart_max_revenu": float(np.max(np.abs(x_revenu - after)))}
     # --- Boucle : mode Boucle, tirer le bord droit du clip (1 s → 5,5 s).
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-loop-trim"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-loop-trim").click(); page.wait_for_timeout(150)
     sans = render(page, "boucle", 7.0)
     drag(page, x_of(b, 2.0) - 2, lane_top(b, 1) + 2 + 0.8 * H, x_of(b, 5.5), lane_top(b, 1) + 2 + 0.8 * H, steps=20)
@@ -428,11 +436,14 @@ def scenario_clair(page, res):
       ed.patchClips('lead', { v: { gainPoints: [{ t: 1, db: 0 }, { t: 2.5, db: 0 }, { t: 3, db: -9 }, { t: 5, db: -9, curve: 0.5 }, { t: 6, db: 3 }, { t: 7, db: 3 }, { t: 7.5, db: -4 }] } });
     }""")
     b = box(page)
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-gain-line"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-gain-line").click(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-loop-trim"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-loop-trim").click(); page.wait_for_timeout(150)
     drag(page, x_of(b, 2.0) - 2, lane_top(b, 1) + 2 + 0.8 * H, x_of(b, 4.5), lane_top(b, 1) + 2 + 0.8 * H, steps=12)
     page.mouse.move(x_of(b, 6.5), y_line(b, 0, 3)); page.wait_for_timeout(300)
     shot(page, "clair_01_ligne_infos_boucle")
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape"]')  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape").click(); page.wait_for_timeout(200)
     shot(page, "clair_02_formes_du_crayon")
     close_overlays(page)
@@ -445,10 +456,15 @@ def scenario_clair(page, res):
 def scenario_tab(page, res):
     open_r5(page, "tab_00_projet")
     b = box(page)
+    qalib.ouvrir_menu_range(page, '[data-testid="toggle-gain-line"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("toggle-gain-line").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="tool-pencil"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("tool-pencil").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="pencil-shape-line"]', tap=True)  # « Outils ▾ » (barre allégée)
     page.get_by_test_id("pencil-shape-line").tap(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, '[data-testid="tool-pencil"]', tap=True)
     res["outils_au_doigt"] = page.evaluate("() => ['tool-pencil','pencil-shape','toggle-gain-line'].map(id => { const r = document.querySelector(`[data-testid=${id}]`).getBoundingClientRect(); return [id, Math.round(r.width), Math.round(r.height)]; })")
     cdp = page.context.new_cdp_session(page)
     x0, y0, x1, y1 = x_of(b, 2.0), y_line(b, 0, 0), x_of(b, 6.0), y_line(b, 0, -15)

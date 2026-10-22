@@ -32,6 +32,7 @@ import { allPaletteActions, type PaletteAction } from './utils/commandPalette';
 import { buildChatCatalog, catalogText, summarizeStateForChat, planChatCalls, compactHistory, CHAT_LIMITS } from './utils/chatTools';
 import type { ChatRunReport } from './components/ChatAssistant';
 import { dockItem, useDockFit } from './utils/dockFit';
+import ToolbarMenu from './components/ToolbarMenu';
 import SamplerHost from './components/SamplerHost';
 import SonsBeatHost from './components/SonsBeatHost';
 import { sonsBeatStore } from './utils/sonsBeatStore';
@@ -11521,34 +11522,67 @@ function Studio() {
               <div className="flex shrink-0 items-center gap-2">
                 {/* Mode simple : Pistes, Groupes, Temps, Session, Collaborer et Retours sont rangés (menu ☰,
                     Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
-                {!simpleMode && <>
-                <button type="button" data-testid="dock-track-list" {...dockItem(3)} aria-label="Liste des pistes" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
-                  title="Liste des pistes (« Track List ») : afficher / masquer, activer, dossiers, VCA"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
-                  <i data-dock-icon className="fas fa-list mr-1.5 text-[10px]" /><span data-dock-label>Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}</span>
-                </button>
-                <button type="button" data-testid="dock-groups" {...dockItem(2)} aria-label="Groupes" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
-                  title="Groupes (« Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
-                  <i data-dock-icon className="fas fa-object-group mr-1.5 text-[10px]" /><span data-dock-label>Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}</span>
-                </button>
-                <button type="button" data-testid="dock-time" {...dockItem(1)} aria-label="Insérer ou supprimer du temps" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
-                  title="Insérer / supprimer du temps (Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
-                  className="h-10 rounded-full border border-nv-line/15 bg-nv-raised px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
-                  <i data-dock-icon className="fas fa-arrows-alt-h mr-1.5 text-[10px]" /><span data-dock-label>Temps</span>
-                </button>
-                <button type="button" data-testid="dock-session" {...dockItem(1)} aria-label="Session : notes, clips, arrangements, versions" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
-                  title="Session : notes et commentaires (Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
-                  <i data-dock-icon className="fas fa-folder-open text-[10px] mr-1.5" aria-hidden="true" /><span data-dock-label>Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span>
-                </button>
-                </>}
+                {/* Mode avancé allégé (22/10/2026) : Pistes, Groupes, Temps et Session sont rangés dans « Session ▾ »
+                    (et Retours quand rien n'attend) ; un panneau ouvert, des pistes masquées ou des notes allument le bouton. */}
+                {!simpleMode && (() => {
+                  const hidden = state.tracks.filter(t => t.isHidden).length;
+                  const notes = notesCount(state);
+                  const reviewsShown = reviews.open || !!reviewCounts.open || !!reviewsWaiting;
+                  const openPanel = structurePanel === 'tracks' ? 'Pistes' : r12Panel?.panel === 'groups' ? 'Groupes' : sessionTab ? 'Session' : null;
+                  const lit = !!openPanel || hidden > 0 || !!state.groupSettings?.suspended;
+                  const row = (on: boolean) => `w-full min-h-10 [@media(pointer:coarse)]:min-h-12 px-2 rounded-lg flex items-center gap-2 text-left text-[12px] font-semibold transition-colors ${on ? 'bg-nv-accent/20 text-nv-ink' : 'hover:bg-white/5'}`;
+                  return (
+                    <ToolbarMenu testId="dock-session-menu" menuLabel="Session : pistes, groupes, temps, notes" width={300}
+                      ariaLabel={`Session : pistes, groupes, temps, notes${openPanel ? ` (${openPanel} ouvert)` : ''}`}
+                      title={`Session : liste des pistes, groupes, insérer / supprimer du temps, notes, clips, arrangements, versions${hidden ? ` · ${hidden} piste${hidden > 1 ? 's' : ''} masquée${hidden > 1 ? 's' : ''}` : ''}`}
+                      triggerProps={{ ...dockItem(3), 'aria-pressed': !!openPanel }}
+                      triggerClassName={`relative h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${lit ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}
+                      label={<>
+                        <i data-dock-icon className="fas fa-folder-open mr-1.5 text-[10px]" aria-hidden="true" />
+                        <span data-dock-label>{openPanel || 'Session'}{hidden ? ` · ${hidden} masquée${hidden > 1 ? 's' : ''}` : ''}{notes ? ` · 📝${notes}` : ''}</span>
+                        <i className="fas fa-chevron-up ml-1.5 text-[8px] opacity-70" aria-hidden="true" />
+                      </>}>
+                      {(close) => (<>
+                        <button type="button" data-testid="dock-track-list" aria-label="Liste des pistes" aria-pressed={structurePanel === 'tracks'}
+                          onClick={() => { close(); setStructurePanel(p => (p === 'tracks' ? null : 'tracks')); }}
+                          title="Liste des pistes (« Track List ») : afficher / masquer, activer, dossiers, VCA" className={row(structurePanel === 'tracks')}>
+                          <i className="fas fa-list w-5 text-center text-[11px]" aria-hidden="true" /><span className="flex-1">Liste des pistes</span>
+                          {hidden > 0 && <span className="text-[10px] text-slate-400">{hidden} masquée{hidden > 1 ? 's' : ''}</span>}
+                        </button>
+                        <button type="button" data-testid="dock-groups" aria-label="Groupes" aria-pressed={r12Panel?.panel === 'groups'}
+                          onClick={() => { close(); setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' })); }}
+                          title="Groupes (« Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)" className={row(r12Panel?.panel === 'groups')}>
+                          <i className="fas fa-object-group w-5 text-center text-[11px]" aria-hidden="true" /><span className="flex-1">Groupes</span>
+                          <span className="text-[10px] text-slate-400">{state.trackGroups.length ? state.trackGroups.length : ''}{state.groupSettings?.suspended ? ' ⏸ suspendus' : ''}</span>
+                        </button>
+                        <button type="button" data-testid="dock-time" aria-label="Insérer ou supprimer du temps"
+                          onClick={() => { close(); openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() }); }}
+                          title="Insérer / supprimer du temps (Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I" className={row(false)}>
+                          <i className="fas fa-arrows-alt-h w-5 text-center text-[11px]" aria-hidden="true" /><span className="flex-1">Insérer ou supprimer du temps</span><kbd className="text-[10px] font-mono text-slate-500">Ctrl+Alt+I</kbd>
+                        </button>
+                        <button type="button" data-testid="dock-session" aria-label="Session : notes, clips, arrangements, versions" aria-pressed={!!sessionTab}
+                          onClick={() => { close(); openSessionPanel(sessionTab ? null : 'notes'); }}
+                          title="Session : notes et commentaires (Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)" className={row(!!sessionTab)}>
+                          <i className="fas fa-folder-open w-5 text-center text-[11px]" aria-hidden="true" /><span className="flex-1">Notes, clips, arrangements, versions</span>
+                          {notes > 0 && <span className="text-[10px] text-slate-400">📝 {notes}</span>}
+                        </button>
+                        {!reviewsShown && (
+                          <button type="button" data-testid="dock-reviews" aria-pressed={false} aria-label="Commentaires et versions"
+                            onClick={() => { close(); reviews.openAt(null); }}
+                            title="Retours : commentaires horodatés sur la timeline (« 1:12 le s siffle »), versions du mix envoyées à l'artiste et validées" className={row(false)}>
+                            <span className="w-5 text-center" aria-hidden="true">💬</span><span className="flex-1">Retours : commentaires et versions</span>
+                          </button>
+                        )}
+                      </>)}
+                    </ToolbarMenu>
+                  );
+                })()}
                 {(!simpleMode || !!collab || remote.active || collabOpen) && <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen} {...dockItem(4)} aria-label="Collaborer"
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
                   <span data-dock-icon className="mr-1">{remote.active ? '🎧' : '👥'}</span><span data-dock-label>{remote.active ? `Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : (collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer')}</span>
                 </button>}
-                {(!simpleMode || reviews.open || !!reviewCounts.open || !!reviewsWaiting) && <button type="button" data-testid="dock-reviews" onClick={() => (reviews.open ? reviews.setOpen(false) : reviews.openAt(null))} aria-pressed={reviews.open} {...dockItem(3)}
+                {(reviews.open || !!reviewCounts.open || !!reviewsWaiting) && <button type="button" data-testid="dock-reviews" onClick={() => (reviews.open ? reviews.setOpen(false) : reviews.openAt(null))} aria-pressed={reviews.open} {...dockItem(3)}
                   aria-label={`Commentaires et versions${reviewCounts.open ? ` : ${reviewCounts.open} ouvert${reviewCounts.open > 1 ? 's' : ''}` : ''}`}
                   title="Retours : commentaires horodatés sur la timeline (« 1:12 le s siffle »), versions du mix envoyées à l'artiste et validées"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${reviews.open ? 'border-amber-300 bg-amber-400/25 text-white' : 'border-amber-400/40 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20'}`}>

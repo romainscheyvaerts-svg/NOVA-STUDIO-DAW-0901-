@@ -16,6 +16,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3435/")
 os.environ["QA_OUT"] = r"D:\1 WORK\CONTENU\nova-finitions"
 sys.path.insert(0, str(Path(__file__).parent))
 from qalib import OUT, Log, new_page, shot, save_log  # noqa
+import qalib  # noqa
 import protools_edition as pe  # noqa
 import modes_edition as me  # noqa
 from playwright.sync_api import sync_playwright
@@ -79,6 +80,7 @@ def scenario_grille(page, res):
     res["menu"] = page.evaluate("() => [...document.querySelectorAll('[data-grid-option]')].map(e => e.textContent.trim())")
     shot(page, "edition_10_menu_grille_ms_images")
     page.locator('[data-grid-option="ms:100"]').click(); page.wait_for_timeout(250)
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)  # « Édition ▾ » reste ouvert après un choix
     res["valeur"] = page.locator('[data-testid="grid-value"]').inner_text()
     me.place(page, "voix", {"B": {"start": 6.0}})
     me.drag_clip(page, box, 7.0, 0.737)
@@ -88,6 +90,7 @@ def scenario_grille(page, res):
     # Images (25 i/s) : 1 image = 40 ms.
     page.locator('[data-testid="grid-value"]').click(); page.wait_for_timeout(250)
     page.locator('[data-grid-option="fps:25"]').click(); page.wait_for_timeout(250)
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
     me.drag_clip(page, box, b["start"] + 1.0, 0.31)
     b2 = me.clip_of(page, "voix", "B")
     res["B_debut_images"] = b2["start"]

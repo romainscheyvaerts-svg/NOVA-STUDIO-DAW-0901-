@@ -16,7 +16,7 @@ import json, os, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-structure")
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3438/")
-from qalib import launch, new_page, OUT  # noqa: E402
+from qalib import launch, new_page, OUT, ouvrir_menu_range  # noqa: E402
 from scenarios import open_studio  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -118,7 +118,7 @@ def run_pc(b, theme, res):
     if theme == "dark":
         r["export_avant"] = pg.evaluate(EXPORT)
     # Liste des pistes : BACK B masquée et inactive → « Prête » en un clic.
-    pg.get_by_test_id("dock-track-list").click(); pg.wait_for_timeout(600)
+    ouvrir_menu_range(pg, "[data-testid=dock-track-list]"); pg.get_by_test_id("dock-track-list").click(); pg.wait_for_timeout(600)
     shot(pg, f"pc_{theme}_02_liste_des_pistes")
     pg.get_by_test_id("tracklist-filter-hidden").click(); pg.wait_for_timeout(300)
     shot(pg, f"pc_{theme}_03_liste_filtre_masquees")
@@ -193,6 +193,7 @@ def run_tab(b, theme, res):
         r["menu_appui_long"] = pg.get_by_test_id("structure-menu").count() > 0
         shot(pg, f"tab_{theme}_02_appui_long_effet")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(200)
+    ouvrir_menu_range(pg, "[data-testid=dock-track-list]", tap=True)
     dock = pg.get_by_test_id("dock-track-list")
     if dock.count():
         dock.click(); pg.wait_for_timeout(600)

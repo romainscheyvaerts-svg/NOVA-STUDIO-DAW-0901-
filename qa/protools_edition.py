@@ -188,10 +188,12 @@ def v1(page, res):
     page.mouse.move(x_of(box, 6.5) - 2, y); page.mouse.down(); page.mouse.move(x_of(box, 6.0), y, steps=5); page.mouse.up()
     page.wait_for_timeout(200)
     # --- PUNCH + pré-roll 1 mesure (menu ▾ de la barre de transport)
+    # Barre allégée (22/10/2026) : PUNCH et ses réglages sont dans « Options ▾ », à plat.
+    qalib.ouvrir_menu_range(page, "button[aria-label='Réglages du punch, du pré-roll et du post-roll']")
     page.get_by_role("button", name="PUNCH", exact=True).locator("visible=true").first.click(); page.wait_for_timeout(300)
     page.get_by_role("button", name="Réglages du punch, du pré-roll et du post-roll").first.click(); page.wait_for_timeout(300)
     shot(page, "v1_02_reglages_punch")
-    page.get_by_role("dialog", name="Réglages du punch").get_by_role("button", name="1 mes.").first.click(); page.wait_for_timeout(200)
+    page.locator("[role=dialog][aria-label='Réglages du punch'], [role=group][aria-label='Réglages du punch']").get_by_role("button", name="1 mes.").first.click(); page.wait_for_timeout(200)
     page.keyboard.press("Escape"); page.wait_for_timeout(200)
     res["punch_reglages"] = st(page, "s => s.punch")
     shot(page, "v1_03_zone_punch_regle")
@@ -242,7 +244,9 @@ def v1(page, res):
 
     # ===== QuickPunch : PUNCH coupé, QP activé, entrée à 3 s et sortie à 5 s pendant la lecture
     page.get_by_role("button", name="PUNCH", exact=True).locator("visible=true").first.click(); page.wait_for_timeout(200)
+    qalib.ouvrir_menu_range(page, "button[aria-label='Réglages du punch, du pré-roll et du post-roll']")
     page.get_by_role("button", name="QP", exact=True).locator("visible=true").first.click(); page.wait_for_timeout(200)
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
     box = canvas_box(page)
     page.mouse.click(x_of(box, 0) + 1, box["y"] + 12); page.wait_for_timeout(300)   # clic dans la règle à 0 s
     page.mouse.click(450, 650); page.wait_for_timeout(100)
@@ -400,7 +404,9 @@ def v2ui(page, res):
     res["courbe_sortie_A"] = clips_of(page, "voix")[0]["fo"]
     shot(page, "v2ui_05_courbe_en_S")
     # --- Nudge 10 ms au clavier sur B
+    qalib.ouvrir_menu_range(page, "#nova-nudge")  # « Édition ▾ » (barre allégée)
     page.select_option("#nova-nudge", "MS10"); page.wait_for_timeout(200)
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
     page.mouse.click(x_of(box, 6.0), y_low); page.wait_for_timeout(200)
     before = [c for c in clips_of(page, "voix") if c["id"] == "B"][0]["start"]
     page.keyboard.press("ArrowRight"); page.wait_for_timeout(150)

@@ -811,7 +811,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           )}
 
           <div className="hidden md:flex items-center space-x-2">
-            <button {...barItem('navigateur', 22)}
+            {/* Mode avancé allégé (22/10/2026) : navigateur → « Vue ▾ » ; annuler / rétablir, ouvrir, sauver,
+                importer, MIDI, partager, Master, réglages audio → menu ☰ (et Ctrl+Z, Ctrl+S, Ctrl+O, Ctrl+K).
+                Restent : Exporter, et les témoins utiles (PDC coupé, clavier MIDI branché). */}
+            {simple && <button {...barItem('navigateur', 22)}
               onClick={onToggleSidebar} 
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${isSidebarOpen ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
               title={isSidebarOpen ? "Masquer le navigateur" : "Afficher le navigateur"}
@@ -819,38 +822,18 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               aria-pressed={!!isSidebarOpen}
             >
               <i className="fas fa-columns text-xs"></i>
-            </button>
-             <div {...barItem('historique', 25)} className="flex items-center space-x-1 pr-1">
+            </button>}
+             {simple && <div {...barItem('historique', 25)} className="flex items-center space-x-1 pr-1">
                 <button onClick={onUndo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${canUndo ? 'bg-white/[0.05] hover:bg-white/10' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canUndo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-undo text-[10px]"></i></button>
                 <button onClick={onRedo} disabled={!canRedo} title="Rétablir (Ctrl+Y)" aria-label="Rétablir" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${canRedo ? 'bg-white/[0.05] hover:bg-white/10' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canRedo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-redo text-[10px]"></i></button>
-             </div>
+             </div>}
              
              {/* FILE ACTIONS GROUP */}
              <div className="flex items-center space-x-1 pr-1">
-                {/* OPEN / LOAD (mode simple : menu ☰, la session se sauvegarde toute seule) */}
-                {!simple && <button {...barItem('ouvrir', 16)} onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
-                    <i className="fas fa-folder-open text-[10px]"></i>
-                    <span {...barItem('libelle-ouvrir', 2)} className="text-[10px] font-bold tracking-wide">Ouvrir</span>
-                </button>}
-
-                {/* SAVE */}
-                {!simple && <button {...barItem('sauver', 17)} onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
-                    <i className="fas fa-save text-[10px]"></i>
-                    <span {...barItem('libelle-sauver', 2)} className="text-[10px] font-bold tracking-wide">Sauver</span>
-                </button>}
-
                 {/* ✨ NOUVEAU IMPORT AUDIO */}
-                {onImportAudio && !simple && (
+                {/* Champ de fichier caché : « Importer un fichier audio » du menu ☰ s'en sert. */}
+                {onImportAudio && (
                     <>
-                        <button {...barItem('import', 18)}
-                            onClick={() => audioImportInputRef.current?.click()}
-                            className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"
-                            title="Importer un fichier audio"
-                            aria-label="Importer un fichier audio"
-                        >
-                            <i className="fas fa-file-import text-[10px]"></i>
-                            <span {...barItem('libelle-import', 2)} className="text-[10px] font-bold tracking-wide">Import</span>
-                        </button>
                         <input
                             ref={audioImportInputRef}
                             type="file"
@@ -868,31 +851,26 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                     </>
                 )}
                 {/* Fichiers .mid et Capture MIDI (V25) */}
-                {!simple && <div {...barItem('midi-fichiers', 19)} className="flex"><MidiFileMenu /></div>}
              </div>
              
              {/* SHARE (Only if logged in) */}
-             {user && (
+             {user && simple && (
                  <button {...barItem('partager', 15)} onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span {...barItem('libelle-partager', 2)} className="text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
-             {/* MASTER NOVA (V15) */}
-             {onOpenMasterNova && !simple && <button {...barItem('master', 24)} onClick={onOpenMasterNova} data-nova-open-master="" title="Master Nova : mastering en un clic pour Spotify, Apple Music, YouTube… (comme le Mastering Assistant de Logic)" aria-label="Master Nova" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400 hover:text-black"><i className="fas fa-crown text-[10px]"></i><span {...barItem('libelle-master', 4)} className="text-[10px] font-bold tracking-wide">Master</span></button>}
-
              {/* EXPORT BUTTON */}
              <button {...barItem('exporter', 33)} onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span {...barItem('libelle-exporter', 4)} className="text-[10px] font-bold tracking-wide">Exporter</span></button>
              
-             {/* ENGINE BUTTON */}
-             {!simple && <button {...barItem('audio', 14)} onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span {...barItem('libelle-audio', 2)} className="text-[10px] font-bold tracking-wide">Audio</span></button>}
-             
              {/* PDC Toggle */}
-             {!simple && <button {...barItem('pdc', 20)} onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé.">
+             {/* PDC : témoin seulement quand il est COUPÉ (normalement toujours allumé ; le réglage est dans le menu ☰). */}
+             {!simple && !isDelayCompEnabled && <button {...barItem('pdc', 20)} onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé.">
                 <div className={`w-1.5 h-1.5 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`}></div>
-                <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
+                <span className="text-[9px] font-black uppercase tracking-wider">PDC coupé</span>
              </button>}
 
              {/* MIDI (R16) : clavier branché, clavier de l'ordinateur, mode de prise, MIDI Learn */}
-             {!simple && <button type="button" data-nova-midi-button="" onClick={openMidiPanel} {...barItem(midiDeviceName ? 'midi-clavier' : 'midi-absent', midiDeviceName ? 21 : 3)}
+             {/* MIDI : témoin quand un clavier est branché (il clignote aux notes) ; sinon menu ☰ → MIDI. */}
+             {!simple && (midiDeviceName || kbOn) && <button type="button" data-nova-midi-button="" onClick={openMidiPanel} {...barItem(midiDeviceName ? 'midi-clavier' : 'midi-absent', midiDeviceName ? 21 : 3)}
                className={`h-8 px-2 rounded-lg flex items-center justify-center gap-1.5 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : kbOn ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
                title={`MIDI : ${midiDeviceName ? `clavier « ${midiDeviceName} »` : 'aucun clavier MIDI détecté'}${kbOn ? ' · clavier de l’ordinateur actif (Ctrl+Maj+K)' : ''} · prise ${MODE_LABELS[midiPrefs.mode].label.toLowerCase()}. Clic : réglages MIDI, MIDI Learn.`}
                aria-label={midiDeviceName ? `MIDI : clavier ${midiDeviceName}` : 'Réglages MIDI'}>
@@ -910,7 +888,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {/* LUFS du master en direct (R11) : ouvre la fenêtre Loudness. */}
         {!simple && <div className="hidden lg:block"><LufsChip /></div>}
         {/* Section d'écoute (mono, Dim, volume d'écoute, AFL / PFL) : hors export. Pastilles visibles tant qu'un réglage est actif, même en mode simple. */}
-        {!simple && <div {...barItem('ecoute', 28)} className="hidden md:flex"><MonitorButton /></div>}
+        {/* Section d'écoute : dans « Options ▾ » ; ses réglages actifs restent affichés ici (MonitorBadges). */}
         <MonitorBadges className="shrink-0" />
         
         <div className="flex items-center space-x-2 md:space-x-3 px-3 md:px-4 py-1.5 rounded-2xl" style={{ backgroundColor: 'var(--bg-item)' }}>
@@ -918,27 +896,25 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-md shadow-black/30'}`} style={isPlaying ? { backgroundColor: 'var(--accent-neon)' } : undefined}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           {/* Lecture ralentie (R13) : 50 à 100 %, hauteur gardée. */}
-          {!simple && <PracticeSpeed className="hidden md:block" />}
+          {!simple && practiceSlow && <PracticeSpeed className="hidden md:block" />}
           {/* Mode simple : l'indicateur de charge n'apparaît que si l'ordinateur peine (OverloadBadge). */}
           {dspTracks && !simple ? <DspMeter tracks={dspTracks} onFreezeTrack={onDspFreezeTrack} safety={dspSafety || { isRecording, bridgeConnected: false }} compact={isMobileLayout} /> : <OverloadBadge />}
-          {onTogglePunch && !simple && (
-            <PunchControls foldPrio={27} punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
-              onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
+          {/* Punch / QuickPunch : réglages dans « Options ▾ » ; allumés, ils restent visibles ici (clic = couper). */}
+          {onTogglePunch && !simple && isPunchActive && (
+            <button type="button" onClick={onTogglePunch} aria-pressed data-testid="punch-active" data-nova-target="punch"
+              title="Punch-in / punch-out allumé : REC ne remplace que la zone rouge de la règle. Clic : couper le punch (réglages : Options ▾)."
+              className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider bg-red-500/25 text-red-300 border border-red-500/50">PUNCH</button>
+          )}
+          {onToggleQuickPunch && !simple && punch?.quickPunch && (
+            <button type="button" onClick={onToggleQuickPunch} aria-pressed data-testid="quickpunch-active"
+              title="QuickPunch allumé : pendant la lecture, REC entre et sort de l'enregistrement sans arrêter la musique. Clic : couper."
+              className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider bg-red-500/25 text-red-300 border border-red-500/50">QP</button>
           )}
           <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden ${simple ? '' : 'md:flex'} w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
-          {onOpenMetronome && !simple && (
-            <button {...barItem('metronome-reglages', 30)} type="button" onClick={onOpenMetronome} data-testid="open-metronome" aria-label="Réglages du métronome et du décompte"
-              title="Clic et décompte : son, volume, accent, prise seulement, sortie, décompte en mesures ou en temps, pré-roll (Click/Countoff Options)"
-              className="nova-hit-tactile hidden md:flex h-8 w-4 -ml-1.5 rounded-md items-center justify-center text-slate-500 hover:text-white">
-              <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
-            </button>
-          )}
-          {onOpenWarmup && !simple && (
-            <button {...barItem('voix-flow', 21)} type="button" onClick={onOpenWarmup} data-testid="open-warmup" aria-label="Voix et flow : échauffement et accordeur"
-              title="Voix et flow : échauffement de la voix et du flow (80 → 140 BPM), accordeur, progrès"
-              className="nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-slate-400 hover:text-white hover:bg-white/10">
-              <i className="fas fa-microphone-alt text-xs" aria-hidden="true"></i>
-            </button>
+          {/* Options rares (punch, clic et décompte, vitesse, écoute, voix et flow) : un seul menu. */}
+          {!simple && (
+            <TransportOptionsMenu punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
+              onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} onOpenMetronome={onOpenMetronome} onOpenWarmup={onOpenWarmup} />
           )}
           {guide && guide.count > 0 && onToggleGuide && onGuideLevel && (
             <div {...barItem('guide', 29)} className="hidden md:flex"><GuideControl count={guide.count} muted={guide.muted} level={guide.level} onToggle={onToggleGuide} onLevel={onGuideLevel} /></div>
@@ -1000,44 +976,16 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <i className="fas fa-sliders-h"></i> Mode avancé
           </button>
         ) : (
-        <div {...barItem('vues', 26)} className="hidden md:flex items-center space-x-1 rounded-xl p-1" style={{ backgroundColor: 'var(--bg-item)' }}>
-            <button onClick={() => onChangeView('ARRANGEMENT')} aria-pressed={currentView === 'ARRANGEMENT'} className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
-            <button onClick={() => onChangeView('MIXER')} aria-pressed={currentView === 'MIXER'} className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
-            <button onClick={() => onChangeView('AUTOMATION')} aria-pressed={currentView === 'AUTOMATION'} className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
-        </div>
+        <ViewMenu currentView={currentView} onChangeView={onChangeView} isSidebarOpen={isSidebarOpen} onToggleSidebar={isMobileLayout ? undefined : onToggleSidebar}
+          displayMode={isMobileLayout ? undefined : children} />
         )}
 
-        {/* SIGNALER UN BUG / UNE IDÉE : discret, toujours là (Ctrl+Maj+B) */}
-        <button
-            type="button"
-            onClick={() => openFeedback()}
-            data-nova-action="feedback"
-            {...barItem('feedback', 10)}
-            className={`nova-hit-tactile w-9 h-9 rounded-full hidden ${simple ? '' : 'sm:flex'} items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10`}
-            title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
-            aria-label="Signaler un bug ou proposer une idée"
-            style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
-        >
-            <i className="fas fa-comment-dots text-[13px]" aria-hidden="true"></i>
-        </button>
-
-        {/* THEME TOGGLE */}
-        {/* Sous 768 px, thème / compte / mode sont dans le menu : dans la barre ils
-            la faisaient déborder (déconnexion et mode hors de l'écran en 390 px). */}
-        {/* Mode simple : thème, tonalité, TAP et BPM sont dans le menu ☰ (le tempo du beat est réglé tout seul). */}
-        <button {...barItem('theme', 11)}
-            onClick={onToggleTheme}
-            className={`w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden ${simple ? '' : 'md:flex'} items-center justify-center transition-all`}
-            title="Changer le thème"
-            aria-label={currentTheme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
-            style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
-        >
-            <i className={`fas ${currentTheme === 'dark' ? 'fa-sun text-amber-400' : 'fa-moon text-slate-300'}`}></i>
-        </button>
+        {/* Signaler un bug (Ctrl+Maj+B) et thème : dans le menu ☰ (le thème aussi dans « Vue ▾ »). */}
 
         {/* TONALITÉ + SIGNATURE */}
         {!simple && <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} onClick={onOpenTempo} />}
-        {onTap && !simple && (
+        {/* Tap tempo : touche T (ou ☰ → TAP, fenêtre Tempo) ; le tempo tapé s'affiche ici pendant qu'on tape. */}
+        {onTap && !simple && tapBpm && (
           <button {...barItem('tap', 31)} type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="transport-tap"
             title="Tap tempo : tape au rythme de la prod (ou touche T, comme dans les studios pro). Le tempo s'affiche, « Tempo et mesure » pour l'appliquer."
             aria-label="Tap tempo"
@@ -1077,14 +1025,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {user && user.id !== 'guest' ? (
             <div {...barItem('compte', 12)} className="hidden md:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
                 <div title={`Connecté : ${user.email}`} data-testid="bar-account" className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
-                <button onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter" className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
+                {simple && <button onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter" className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>}
             </div>
         ) : (
             <button {...barItem('compte', 12)} onClick={onOpenAuth} aria-label="Connexion" title="Se connecter" className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 hidden md:flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
         )}
 
         {/* View Switcher for mobile/tablet injection from parent */}
-        {!simple && <div {...barItem('affichage', 13)} className="hidden md:block">{children}</div>}
         {/* Téléphone, mode simple : « Exporter » à un toucher (avant : menu ☰ puis Exporter). */}
         {simple && (
           <button type="button" onClick={onExportMix} data-testid="phone-export" title="Exporter ou partager ton morceau" aria-label="Exporter le mix"

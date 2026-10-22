@@ -403,6 +403,7 @@ def entrees(vp, res):
             open_project(page)
             page.wait_for_timeout(800)
             if not phone:
+                qalib.ouvrir_menu_range(page, "[data-testid=open-warmup]")  # « Options ▾ » (barre allégée)
                 btn = page.locator("[data-testid=open-warmup]")
                 vis = btn.count() > 0 and btn.first.is_visible()
                 if vis:

@@ -35,7 +35,8 @@ export const ToolsMoreMenu: React.FC<{ activeTool: EditorTool; setActiveTool: (t
   const shape = PENCIL_SHAPES.find(s => s.id === v.shape) || PENCIL_SHAPES[0];
   const inMenu = activeTool === 'SCRUB' || activeTool === 'ZOOM' || activeTool === 'DRAW';
   const icon = activeTool === 'SCRUB' ? 'fa-headphones' : activeTool === 'ZOOM' ? 'fa-magnifying-glass' : activeTool === 'DRAW' ? 'fa-pencil-alt' : 'fa-toolbox';
-  const lit = [v.line && 'ligne de gain', v.info && 'valeurs de gain', v.loopTrim && 'mode boucle', prefs.trimTce && 'Trim TCE'].filter(Boolean) as string[];
+  // Pastille : un réglage qui n'est pas celui d'origine (les bords des clips ne se comportent plus pareil, etc.).
+  const lit = [v.line && 'ligne de gain affichée', !v.info && 'valeurs de gain masquées', v.loopTrim && 'mode boucle', prefs.trimTce && 'Trim TCE'].filter(Boolean) as string[];
   return (
     <ToolbarMenu testId="tools-more" menuLabel="Autres outils" width={290}
       ariaLabel={inMenu ? `Outils : ${activeTool === 'DRAW' ? 'crayon' : activeTool === 'SCRUB' ? 'scrub' : 'zoom'} (actif)` : 'Autres outils'}
@@ -101,7 +102,7 @@ export const ToolsMoreMenu: React.FC<{ activeTool: EditorTool; setActiveTool: (t
   );
 };
 
-const selectClass = 'w-full h-9 [@media(pointer:coarse)]:h-11 bg-black/40 border border-white/10 rounded-lg px-2 text-[12px] text-slate-200 [[data-theme=light]_&]:bg-white [[data-theme=light]_&]:text-slate-800';
+const selectClass = 'w-full h-9 [@media(pointer:coarse)]:h-11 bg-black/40 border border-white/10 rounded-lg px-2 text-[12px] text-slate-300';
 
 export const EditMenu: React.FC<{ onSetNudge?: (u: NudgeUnit) => void }> = ({ onSetNudge }) => {
   const em = useEditMode();
@@ -113,7 +114,7 @@ export const EditMenu: React.FC<{ onSetNudge?: (u: NudgeUnit) => void }> = ({ on
     notify(chooseEditMode(m).message);
   };
   // États à ne jamais cacher : verrou Shuffle, fondu enchaîné auto, automation qui ne suit plus.
-  const flags = [em.shuffleLock && '🔒 Shuffle verrouillé', prefs.autoXfade && 'fondu enchaîné auto', prefs.automationFollowsEdit === false && "l'automation ne suit pas l'édition"].filter(Boolean) as string[];
+  const flags = [em.shuffleLock && '🔒 Shuffle verrouillé', !prefs.autoXfade && 'fondu enchaîné auto coupé', prefs.automationFollowsEdit === false && "l'automation ne suit pas l'édition"].filter(Boolean) as string[];
   return (
     <ToolbarMenu testId="grid-value" menuLabel="Édition : mode, grille, décalage, fondus" width={320}
       ariaLabel={`Édition : mode ${info.label}${gridRel ? ' relatif' : ''}, grille ${gridLabel(em.gridSize)} (valeur de grille)`}
@@ -128,7 +129,7 @@ export const EditMenu: React.FC<{ onSetNudge?: (u: NudgeUnit) => void }> = ({ on
         <span className="whitespace-nowrap"><i className="fas fa-th mr-1 text-[9px] text-slate-500" aria-hidden="true" />{gridLabel(em.gridSize)}</span>
         <i className="fas fa-chevron-down text-[8px] opacity-70" aria-hidden="true" />
         {em.shuffleLock && <i className="fas fa-lock absolute -top-1 -left-1 text-[8px] text-orange-300" aria-hidden="true" />}
-        {(prefs.autoXfade || prefs.automationFollowsEdit === false) && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-black/60" data-testid="edit-menu-lit" aria-hidden="true" />}
+        {(!prefs.autoXfade || prefs.automationFollowsEdit === false) && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-black/60" data-testid="edit-menu-lit" aria-hidden="true" />}
       </>}>
       {() => (<>
         <MenuSection title="Mode d'édition" first>

@@ -16,7 +16,7 @@ from pathlib import Path
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3443/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-r1-r3")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, shot, OUT, overflow_report  # noqa: E402
+from qalib import launch, new_page, shot, OUT, overflow_report, ouvrir_menu_range  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 # Outils du scénario R1 (ouvrir un projet .zip, WAV de test) sans lancer ce scénario.
 _r1 = (Path(__file__).parent / "r1_export.py").read_text(encoding="utf-8").split(MARK)[0]
@@ -164,7 +164,7 @@ with sync_playwright() as p:
     shot(page, "r2_04_piste_tempo_regle_pc")
 
     # --- Clic mesuré ---
-    page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(400)
+    ouvrir_menu_range(page, "[data-testid=open-metronome]"); page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(400)
     shot(page, "r2_05_fenetre_metronome_pc")
     page.get_by_test_id("metro-enabled").check()
     page.get_by_test_id("metro-sound-CLICK").click()
@@ -191,7 +191,7 @@ with sync_playwright() as p:
     res["clic_ecarts_ms"] = errs_ms
 
     # --- Décompte mesuré (2 mesures depuis la mesure 3 : 3/4 à 90) + clic « prise seulement » ---
-    page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(300)
+    ouvrir_menu_range(page, "[data-testid=open-metronome]"); page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(300)
     page.get_by_test_id("metro-countin-2").click()
     page.get_by_test_id("metro-mode-record").click()
     page.wait_for_timeout(200)
@@ -265,7 +265,7 @@ with sync_playwright() as p:
                 p2.locator("button:visible[aria-label='Ouvrir le menu']").first.click(); p2.wait_for_timeout(400)
                 p2.locator("button:visible", has_text="Clic et décompte").first.click(); p2.wait_for_timeout(400)
             else:
-                p2.get_by_test_id("open-metronome").click() if p2.get_by_test_id("open-metronome").is_visible() else None
+                (ouvrir_menu_range(p2, "[data-testid=open-metronome]"), p2.get_by_test_id("open-metronome").click()) if (p2.get_by_test_id("open-metronome").is_visible() or p2.get_by_test_id("transport-options").is_visible()) else None
                 p2.wait_for_timeout(400)
             shot(p2, f"r2_10_fenetre_metronome_{vp}")
             res[f"debordements_{vp}"] = overflow_report(p2)
@@ -277,7 +277,7 @@ with sync_playwright() as p:
     page.get_by_test_id("open-tempo").click(); page.wait_for_timeout(400)
     shot(page, "r2_11_fenetre_tempo_pc_clair")
     page.keyboard.press("Escape")
-    page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(400)
+    ouvrir_menu_range(page, "[data-testid=open-metronome]"); page.get_by_test_id("open-metronome").click(); page.wait_for_timeout(400)
     shot(page, "r2_12_fenetre_metronome_pc_clair")
     page.keyboard.press("Escape")
     res["erreurs_page"] = errs[:5]

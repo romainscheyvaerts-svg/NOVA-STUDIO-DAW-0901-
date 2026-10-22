@@ -265,7 +265,7 @@ export const GUIDES: Guide[] = [
     summary: 'Choisir la plateforme, analyser, appliquer sur le master.',
     steps: [
       { text: 'Ouvre « Master Nova ».', phone: 'Touche ☰ › « Plus d’outils » › « Master Nova ».', action: 'pal.masterNova',
-        target: ['[data-bar-item="master"]', tid('menu-master-nova'), MENU_PLUS, PHONE_MENU], done: { visible: '[role="dialog"][aria-label="Master Nova"]' } },
+        target: [tid('menu-master-nova'), MENU_PLUS, PHONE_MENU], done: { visible: '[role="dialog"][aria-label="Master Nova"]' } },
       { text: 'Dis où va ton morceau : Spotify, Apple, YouTube, Deezer, TikTok ou club.', target: '[data-nova-cible]' },
       { text: '« Analyser et masteriser », puis écoute.', target: '[data-nova-master-run]' },
       { text: '« Appliquer sur le master ».', target: '[data-nova-master-apply]' },
@@ -336,10 +336,10 @@ export const GUIDES: Guide[] = [
     summary: 'En ligne avec un compte, ou en fichier .zip sur ton appareil.',
     steps: [
       { text: 'Ouvre « Sauvegarder » (Ctrl+Maj+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
-        target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
+        target: [tid('menu-save'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
       { text: 'En ligne : « Emporter la session » (compte Make Music). Sans compte : « Fichier sur cet appareil (.zip) ».', target: tid('save-new-version-box'), manual: true },
       { text: 'Pour le retrouver : « Ouvrir un projet ».', phone: 'Touche ☰, puis « Ouvrir un projet ».', action: 'pal.open',
-        target: ['[data-bar-item="ouvrir"]', tid('menu-open-project'), PHONE_MENU], manual: true },
+        target: [tid('menu-open-project'), PHONE_MENU], manual: true },
     ],
     result: 'Ton projet est en sécurité ; NOVA garde aussi une sauvegarde automatique dans ce navigateur.',
     pitfalls: [
@@ -376,7 +376,7 @@ export const GUIDES: Guide[] = [
     summary: 'Mettre la session en ligne et l’ouvrir ailleurs par un lien ou un QR code.',
     steps: [
       { text: 'Ouvre « Sauvegarder » (Ctrl+Maj+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
-        target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-takehome') } },
+        target: [tid('menu-save'), PHONE_MENU], done: { visible: tid('save-takehome') } },
       { text: 'Touche « 🏠 Emporter la session (en ligne) ».', target: tid('save-takehome'), done: { visible: '[aria-labelledby="takehome-title"]' } },
       { text: '« Mettre la session en ligne ».', target: tid('takehome-sync'), done: { visible: tid('takehome-url') } },
       { text: 'Scanne le QR code, ou copie le lien et envoie-le (WhatsApp, e-mail).', target: tid('takehome-url'), manual: true },
@@ -561,8 +561,8 @@ export const GUIDES: Guide[] = [
     keywords: 'micro carte son interface entree latence retard decalage asio casque retour reglages audio branchement focusrite',
     summary: 'Choisir l’entrée micro et la sortie casque ; le retard est compensé tout seul.',
     steps: [
-      { text: 'Ouvre « Réglages audio » (en mode simple : ☰ › « Plus d’outils »).', phone: 'Touche ☰ › « Plus d’outils » › « Réglages audio ».', action: 'pal.audio',
-        target: ['[aria-label="Réglages audio"]', tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('audio-input-select') } },
+      { text: 'Ouvre « Réglages audio » (menu ☰ ; en mode simple : ☰ › « Plus d’outils »).', phone: 'Touche ☰ › « Plus d’outils » › « Réglages audio ».', action: 'pal.audio',
+        target: [tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('audio-input-select') } },
       { text: 'Choisis ton micro dans « Entrée (micro) » et ton casque dans « Sortie ».', target: tid('audio-input-select'), manual: true },
       { text: 'Fais une prise test : NOVA mesure le retard et recale tes prises tout seul.', action: 'nova.record', target: nt('rec'), done: { fact: 'isRecording' } },
     ],
@@ -581,7 +581,7 @@ export const GUIDES: Guide[] = [
     summary: 'Le bouton talkback d’une console : ta voix dans le casque de l’artiste, au clavier ou à la souris, et en direct en collaboration.',
     steps: [
       { text: 'Choisis le micro du talkback et la baisse de la musique (Réglages audio › Talkback).', action: 'pal.talkbackSettings',
-        target: ['[aria-label="Réglages audio"]', tid('menu-audio')], done: { visible: tid('talkback-settings') }, unless: 'inCollab' },
+        target: [tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('talkback-settings') }, unless: 'inCollab' },
       { text: 'Appui court sur N (ou « Talk » dans la barre) : ça reste ouvert, un 2e appui coupe.', action: 'nova.talkback', target: tid('transport-talkback') },
       { text: 'Ou maintiens N : tu parles tant que tu tiens, relâcher coupe.', target: tid('transport-talkback'), manual: true },
       { text: 'En collaboration, la même touche parle en direct ; « 🎙️ Nina te parle » s’affiche quand on te répond.', target: tid('transport-talkback'), manual: true, when: 'inCollab' },
@@ -618,8 +618,8 @@ export const GUIDES: Guide[] = [
     keywords: 'mise a jour maj update nouvelle version installer appli application windows logiciel programme automatique',
     summary: 'L’appli Windows se met à jour toute seule ; tu peux aussi chercher une nouvelle version tout de suite.',
     steps: [
-      { text: 'Ouvre « Réglages audio » (en mode simple : ☰ › « Plus d’outils »).', action: 'pal.audio',
-        target: ['[aria-label="Réglages audio"]', tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('app-update-settings') } },
+      { text: 'Ouvre « Réglages audio » (menu ☰ ; en mode simple : ☰ › « Plus d’outils »).', action: 'pal.audio',
+        target: [tid('menu-audio'), MENU_PLUS, PHONE_MENU], done: { visible: tid('app-update-settings') } },
       { text: 'Dans « Mises à jour de Nova Studio », clique « Rechercher maintenant ».', action: 'pal.appUpdate', target: tid('app-update-check') },
       { text: 'Quand « Nova Studio X.Y.Z est prête » s’affiche : « Redémarrer et mettre à jour », ou ferme simplement Nova Studio.', target: tid('app-update-apply'), manual: true },
     ],
@@ -688,7 +688,7 @@ export const GUIDES: Guide[] = [
     summary: 'Sirènes, gammes, diction, flow en rythme, et l’accordeur.',
     steps: [
       { text: 'Ouvre « Voix et flow ».', phone: 'Touche ☰ › « Plus d’outils » › « Échauffement voix et flow ».', action: 'pal.warmup',
-        target: [tid('open-warmup'), tid('menu-warmup'), MENU_PLUS, PHONE_MENU], done: { visible: tid('warmup-start-program') } },
+        target: [tid('open-warmup'), tid('transport-options'), tid('menu-warmup'), MENU_PLUS, PHONE_MENU], done: { visible: tid('warmup-start-program') } },
       { text: '« Démarrer l’échauffement » et suis le programme (onglet Accordeur pour la justesse).', target: tid('warmup-start-program') },
     ],
     result: 'Voix chaude, diction et flow prêts pour la prise.',
@@ -720,7 +720,7 @@ export const GUIDES: Guide[] = [
     summary: 'La section « Écoute » change ce que tu entends (mono, côtés, Dim, solo AFL / PFL), jamais l’export.',
     steps: [
       { text: 'Passe en mode avancé.', action: 'pal.simple', target: '[data-bar-item="vues"]', when: 'simple' },
-      { text: 'Ouvre « Écoute » en haut (icône casque).', phone: 'Touche ☰ : rubrique « Écoute ».', target: [tid('open-monitor'), tid('menu-monitor'), PHONE_MENU], hint: 'Sur un petit écran : menu ☰ › Écoute.', manual: true },
+      { text: 'Ouvre « Options » en haut, rubrique « Écoute ».', phone: 'Touche ☰ : rubrique « Écoute ».', target: [tid('transport-options'), tid('menu-monitor'), PHONE_MENU], hint: 'Sur un petit écran : menu ☰ › Écoute.', manual: true },
       { text: 'Touche « Mono » (Alt+M). Un son qui baisse ou disparaît trahit un souci de phase ou de largeur.', action: 'mon.mono', target: tid('monitor-matrix-mono') },
       { text: 'Mode de solo AFL ou PFL : le solo s’écoute seul, sans couper le mix.', target: tid('solo-listen-afl'), manual: true },
       { text: '« Dim » (Ctrl+Alt+D) baisse l’écoute de 20 dB ; les pastilles en haut rappellent ce qui est actif.', action: 'mon.dim', target: tid('monitor-dim') },

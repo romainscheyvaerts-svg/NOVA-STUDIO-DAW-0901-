@@ -251,6 +251,7 @@ def inge(b, theme):
     P.etape("console : inserts, effet ouvert, nouveau bus", console)
 
     def envois():
+        qalib.ouvrir_menu_range(pg, "button[aria-label='Envois de LEAD COUPLET']", piste=pg.evaluate("() => (window.__novaEdit.getState().tracks.find(t => t.name === 'LEAD COUPLET') || {}).id"))
         bouton(pg, "^Envois de LEAD COUPLET$").click(); pg.wait_for_timeout(500)
         P.ecran("envois")
         bouton(pg, "^Envois de LEAD COUPLET$").click(); pg.wait_for_timeout(300)
@@ -265,16 +266,20 @@ def inge(b, theme):
     def modes():
         out = {}
         for m in ("SHUF", "SLIP", "GRID", "SPOT"):
+            qalib.ouvrir_menu_range(pg, "[data-edit-mode]")  # « Édition ▾ » (barre allégée)
             loc = pg.locator("[data-edit-mode]").filter(has_text=re.compile(m))
             if loc.count():
                 loc.first.click(); pg.wait_for_timeout(250)
+                pg.keyboard.press("Escape"); pg.wait_for_timeout(100)
                 out[m] = pg.evaluate("() => window.__novaEditMode?.get().mode")
         P.ecran("mode_spot")
         rec = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
         pg.mouse.click(rec["x"] + rec["width"] + 40, rec["y"] + 60); pg.wait_for_timeout(700)
         P.ecran("spot_fenetre")
         pg.keyboard.press("Escape")
+        qalib.ouvrir_menu_range(pg, "[data-edit-mode]")
         pg.locator("[data-edit-mode]").filter(has_text=re.compile("SLIP")).first.click()
+        pg.keyboard.press("Escape")
         return out
     P.etape("modes d'édition Shuffle / Slip / Grid / Spot", modes)
 
@@ -294,7 +299,7 @@ def inge(b, theme):
     P.etape("justesse note par note", justesse)
 
     def master():
-        t = time.time(); pg.locator("[data-nova-open-master]").first.click(); pg.wait_for_timeout(900); P.chrono("master_nova", t)
+        t = time.time(); qalib.ouvrir_master_nova(pg); pg.wait_for_timeout(900); P.chrono("master_nova", t)
         P.ecran("master_nova")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
     P.etape("Master Nova", master)

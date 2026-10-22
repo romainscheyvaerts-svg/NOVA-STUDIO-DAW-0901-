@@ -192,7 +192,7 @@ def null_db(a, b):
 
 def open_session(page, tab="notes"):
     if page.get_by_test_id("session-panel").count() == 0:
-        page.get_by_test_id("dock-session").click(); page.wait_for_timeout(500)
+        qalib.ouvrir_menu_range(page, "[data-testid=dock-session]"); page.get_by_test_id("dock-session").click(); page.wait_for_timeout(500)
     page.get_by_test_id(f"session-tab-{tab}").click(); page.wait_for_timeout(400)
 
 
@@ -458,6 +458,7 @@ def scenario_notes(page):
     if page.get_by_test_id("strip-comment-lead").count() == 0:
         mod(page, "/utils/r21Bus.ts", "m => m.applyR21Silent(s => ({ ...s, currentView: 'MIXER' }))"); page.wait_for_timeout(900)
     strip = page.get_by_test_id("strip-comment-lead").inner_text() if page.get_by_test_id("strip-comment-lead").count() else ""
+    qalib.ouvrir_menu_range(page, "[data-testid=strip-comment-beat]", tranche="beat")
     page.get_by_test_id("strip-comment-beat").click(); page.wait_for_timeout(200)
     page.get_by_test_id("strip-comment-input-beat").fill("Beat du catalogue, -6 dB")
     page.get_by_test_id("strip-comment-input-beat").press("Enter"); page.wait_for_timeout(500)

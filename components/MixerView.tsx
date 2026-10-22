@@ -22,6 +22,8 @@ import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStruct
 import { sendSlots, shownTrackIds } from '../utils/trackStructure';
 import TrackMeter from './meters/TrackMeter';
 import StripHead from './meters/StripHead';
+import ToolbarMenu from './ToolbarMenu';
+import { stripOf } from '../engine/meters/channelStrip';
 import { MasterMonitorStrip } from './MonitorSection';
 import { useMonitor } from '../utils/monitorSection';
 import { loudnessPanel } from './meters/LoudnessPanel';
@@ -101,6 +103,30 @@ const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = (
       className={`mt-1 ${c ? 'h-10' : 'h-5'} shrink-0 w-full overflow-hidden rounded px-1 text-left text-[10px] leading-tight ${c ? 'bg-white/[0.04] text-slate-200 italic' : 'text-slate-500 hover:text-slate-300'}`}>
       <span className="line-clamp-3 break-words">{c || '+ commentaire'}</span>
     </button>
+  );
+};
+
+
+/** Tête de tranche : affichée si un réglage n'est pas neutre, sinon rangée dans un menu (avec le commentaire). */
+const StripHeadOrMenu: React.FC<{ track: Track; onUpdate: (t: Track) => void; isMaster?: boolean }> = ({ track, onUpdate, isMaster }) => {
+  const st = stripOf(track);
+  const set = st.phase || st.mono || Math.abs(st.trimDb) > 0.05 || Math.abs(st.width - 1) > 0.005;
+  if (set) return <StripHead track={track} onUpdate={onUpdate} />;
+  return (
+    <ToolbarMenu testId={`strip-more-${track.id}`} menuLabel={`Entrée de ${track.name}`} width={240}
+      ariaLabel={`Polarité, mono, trim, largeur${isMaster ? '' : ' et commentaire'} : ${track.name}`}
+      title={`Ø (polarité), mono, trim d'entrée, largeur stéréo${isMaster ? '' : ', commentaire'} : tout est neutre`}
+      triggerClassName="nova-hit-tactile w-full h-6 [@media(pointer:coarse)]:h-8 rounded border border-white/5 bg-black/30 [[data-theme=light]_&]:bg-nv-surface flex items-center justify-center gap-1.5 text-[9px] font-black text-slate-500 hover:text-white hover:border-white/20"
+      label={<><span>Ø · Trim · Larg.</span><i className="fas fa-chevron-down text-[7px]" aria-hidden="true" /></>}>
+      {() => (<>
+        <div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Entrée (avant les effets)</div>
+        <StripHead track={track} onUpdate={onUpdate} />
+        {!isMaster && <>
+          <div className="mt-2 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Commentaire</div>
+          <StripComment track={track} onUpdate={onUpdate} />
+        </>}
+      </>)}
+    </ToolbarMenu>
   );
 };
 
@@ -526,8 +552,10 @@ const ChannelStrip: React.FC<{
             <div className="mb-2"><OneKnobStrip track={track} allTracks={allTracks} onUpdate={onUpdate} projectKey={projectKey().key} projectScale={projectKey().scale} /></div>
         )}
 
-        {/* Tête de tranche (R11) : Ø, mono, trim d'entrée, largeur (avant les inserts). */}
-        <div className="mb-2"><StripHead track={track} onUpdate={onUpdate} /></div>
+        {/* Tête de tranche (R11) : Ø, mono, trim d'entrée, largeur (avant les inserts). Allégée (22/10/2026) :
+            réglée, elle reste affichée ; neutre, elle tient dans « Ø · Trim ▾ » avec le commentaire (même hauteur,
+            les faders restent alignés). */}
+        <div className="mb-2"><StripHeadOrMenu track={track} onUpdate={onUpdate} isMaster={isMaster} /></div>
 
         <div className="mb-2 flex flex-col items-center">
            <LivePanKnob track={track} onUpdate={onUpdate} />
@@ -587,7 +615,7 @@ const ChannelStrip: React.FC<{
                onDoubleClick={() => { if (!isMaster) setRenaming(true); }}>{trackDisplayName(track, allTracks)}</span>
            )}
         </div>
-        {!isMaster && <StripComment track={track} onUpdate={onUpdate} />}
+        {!isMaster && (track.comment ? <StripComment track={track} onUpdate={onUpdate} /> : <div className="mt-1 h-5 shrink-0" aria-hidden="true" />)}
       </div>
     </div>
   );

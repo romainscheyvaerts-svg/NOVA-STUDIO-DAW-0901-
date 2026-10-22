@@ -158,6 +158,7 @@ def main():
             page.evaluate("async () => { const { novaBridge } = await window.__novaAppModule('/services/NovaBridge.ts'); await novaBridge.connect(); await novaBridge.listPlugins(); }")
             # Piste « Voix lead » choisie, onglet VST, Melodyne.
             # (le projet choisit déjà la piste « Voix lead »)
+            import qalib as _q; _q.ouvrir_menu_range(page, "button[aria-label='Afficher le navigateur']")  # « Vue ▾ » (barre allégée)
             show = page.get_by_role("button", name="Afficher le navigateur")
             if show.count():
                 show.first.click(); page.wait_for_timeout(800)

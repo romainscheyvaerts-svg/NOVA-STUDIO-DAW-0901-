@@ -13,7 +13,7 @@ import json, math, os, random, re, struct, sys, time, wave
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("NOVA_URL", "http://localhost:3417/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-v14-v15")
-from qalib import launch, new_page, shot, overflow_report, BASE, OUT  # noqa: E402
+from qalib import launch, new_page, shot, overflow_report, BASE, OUT, ouvrir_master_nova  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -89,7 +89,7 @@ with sync_playwright() as p:
     if loop.count() and loop.first.get_attribute("aria-pressed") == "true":
         loop.first.click(); pg.wait_for_timeout(300)
 
-    pg.locator("[data-nova-open-master]").first.click(); pg.wait_for_timeout(800)
+    ouvrir_master_nova(pg); pg.wait_for_timeout(800)
     shot(pg, "v15_pc_01_master_nova")
     pg.locator(f"[data-nova-cible='{CIBLE}']").first.click()
     pg.locator("[data-nova-master-run]").first.click()

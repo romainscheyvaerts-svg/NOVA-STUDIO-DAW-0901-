@@ -129,7 +129,14 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
             </button>
           )}
         </div>
-        {settingsBody && <div className="rounded-lg border border-white/5 p-2 text-[11px] text-slate-300" role="group" aria-label="Réglages du punch">{settingsBody}</div>}
+        {settingsBody && (
+          <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Réglages du punch, du pré-roll et du post-roll"
+            title="Réglages du punch : durée du pré-roll et du post-roll (mesures ou secondes), crossfade aux bords"
+            className="w-full min-h-8 px-2 rounded-lg flex items-center gap-2 text-left text-[11px] font-semibold text-slate-300 hover:bg-white/5">
+            <i className={`fas ${open ? 'fa-chevron-down' : 'fa-chevron-right'} w-4 text-center text-[9px]`} aria-hidden="true" />Durées du pré-roll / post-roll, crossfade…
+          </button>
+        )}
+        {settingsBody && open && <div className="rounded-lg border border-white/5 p-2 text-[11px] text-slate-300" role="group" aria-label="Réglages du punch">{settingsBody}</div>}
       </div>
     );
   }
