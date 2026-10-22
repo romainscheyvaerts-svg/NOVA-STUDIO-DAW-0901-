@@ -2557,8 +2557,54 @@ const playheadLineRef = useRef<HTMLDivElement>(null);
 const overlayWidthRef = useRef(0);
 const isPlayingRef = useRef(isPlaying);
 isPlayingRef.current = isPlaying;
-const viewportWidthRef = useRef(viewportSize.width);
-viewportWidthRef.current = viewportSize.width;
+// Largeur VISIBLE des pistes (sans la colonne des en-têtes). Avant : toute la largeur, en-têtes
+// compris : la page ne tournait qu'à 1 408 px pour 1 265 px visibles, la tête de lecture
+// disparaissait à droite ~3,5 s sur chaque page (214 images sur 541 en 9 s de lecture).
+const viewportWidthRef = useRef(viewportSize.width - headerWidth);
+viewportWidthRef.current = Math.max(1, viewportSize.width - headerWidth);
+// Saut de la tête de lecture à l'arrêt (Entrée, Fin, repère, flèches, mesure suivante…) : la vue
+// suit si elle sortait de l'écran (avant : elle restait ailleurs, il fallait la chercher). Pas
+// pendant un geste de souris dans les pistes (clic, scrub), pour ne pas tirer la vue sous la main.
+const lastPlayheadRef = useRef<number | null>(null);
+const arrangePointerRef = useRef(false);
+const lastInputRef = useRef<'key' | 'pointer'>('pointer');
+useEffect(() => {
+    const down = (e: PointerEvent) => { lastInputRef.current = 'pointer'; arrangePointerRef.current = !!scrollContainerRef.current?.contains(e.target as Node); };
+    const up = () => { arrangePointerRef.current = false; };
+    const key = (e: KeyboardEvent) => {
+        lastInputRef.current = 'key';
+        // Entrée / Début / Fin : la vue montre la tête de lecture même si elle n'a pas bougé
+        // (déjà au début, mais la vue était ailleurs), comme Retour dans les DAW.
+        if (!isPlayingRef.current && matchShortcut(e, ['nova.home', 'nova.end'])) requestAnimationFrame(() => {
+            const sc = scrollContainerRef.current;
+            if (!sc) return;
+            const x = playheadStore.get() * zoomHRef.current, cw = viewportWidthRef.current || sc.clientWidth;
+            if (x < sc.scrollLeft || x > sc.scrollLeft + cw - 2) sc.scrollLeft = Math.max(0, x - cw * 0.25);
+        });
+    };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    window.addEventListener('keydown', key, true);
+    return () => {
+        window.removeEventListener('pointerdown', down, true);
+        window.removeEventListener('pointerup', up, true);
+        window.removeEventListener('pointercancel', up, true);
+        window.removeEventListener('keydown', key, true);
+    };
+}, []);
+// Piste choisie au clavier (↑ / ↓, P / ; en Keyboard Focus) : elle reste à l'écran (avant : ↓ ×15
+// laissait la piste sélectionnée 1 200 px sous le bas de la vue).
+useEffect(() => {
+    if (lastInputRef.current !== 'key' || !selectedTrackId) return;
+    const sc = scrollContainerRef.current;
+    const h = sc?.querySelector(`[data-track-header="${CSS.escape(selectedTrackId)}"]`) as HTMLElement | null;
+    if (!sc || !h) return;
+    const box = sc.getBoundingClientRect(), r = h.getBoundingClientRect();
+    const top = box.top + tracksTop, bottom = box.bottom - 14;
+    if (r.top < top) sc.scrollTop -= top - r.top;
+    else if (r.bottom > bottom) sc.scrollTop += Math.min(r.bottom - bottom, r.top - top);
+}, [selectedTrackId, tracksTop]);
 
 const drawPlayhead = useCallback(() => {
     const line = playheadLineRef.current;
@@ -2576,6 +2622,16 @@ const drawPlayhead = useCallback(() => {
         if (playheadX > viewStart + cw - cw * 0.12 || playheadX < viewStart) {
             autoScrollRef.current = true;
             scroll.scrollLeft = Math.max(0, playheadX - cw * 0.15);
+        }
+    }
+    const prevT = lastPlayheadRef.current;
+    lastPlayheadRef.current = t;
+    if (!isPlayingRef.current && prevT !== null && Math.abs(t - prevT) > 1e-6 && !arrangePointerRef.current) {
+        const x = t * zoomH;
+        const cw = viewportWidthRef.current || scroll.clientWidth;
+        if (x < scroll.scrollLeft || x > scroll.scrollLeft + cw - 2) {
+            autoScrollRef.current = true;
+            scroll.scrollLeft = Math.max(0, x - cw * 0.25);
         }
     }
 
