@@ -5,8 +5,8 @@ import { ProjectIO } from '../services/ProjectIO';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { TrackType } from '../types';
 import { makeDrumMachine } from '../utils/drumKits';
-import { addPattern, placePattern } from '../utils/drumPatterns';
-import { assignSample, padSampleKey } from '../utils/drumSamples';
+import { addPattern, ensurePatterns, placePattern, setStepParam } from '../utils/drumPatterns';
+import { assignSample, padSampleKey, setPadLayer } from '../utils/drumSamples';
 import { chopIntoPads, pointsToSlices, equalPoints } from '../utils/chop';
 import { makeBuffer } from './helpers/audio';
 import { makeState, makeTrack } from './helpers/fixtures';
@@ -32,6 +32,30 @@ function drumProject() {
   const drums = makeTrack({ id: 'track-drums', type: TrackType.DRUM_RACK, drumMachine: dm });
   return makeState([drums]);
 }
+
+describe('séquenceur pro et sampler de pad sauvés avec le projet (.zip)', () => {
+  it('réglages par pas, sampler du pad et couche perso (son compris) : relus à l’identique', async () => {
+    audioBufferRegistry.register(makeBuffer(1, 2205, 44100), padSampleKey('kick1'));
+    audioBufferRegistry.register(makeBuffer(1, 1102, 44100), padSampleKey('layer1'));
+    let dm = makeDrumMachine('trap');
+    dm = assignSample(dm, 'kick1', { name: 'Mon kick', duration: 0.05 }, { rowIndex: 0 })!.dm;
+    dm = setStepParam(setStepParam(setStepParam(dm, 0, 0, 'prob', 40), 0, 0, 'nudge', -12), 0, 0, 'gate', 2);
+    dm = setPadLayer(dm, 0, null, 'user:layer1', 'Couche', { id: 'layer1', info: { name: 'Couche', duration: 0.025 } });
+    dm = { ...dm, seed: 3, rows: dm.rows.map((r, i) => (i === 0 ? { ...r, shift: 10, smp: { ...r.smp, attack: 0.01, filterType: 'lp' as const, cutoff: 800, layerMode: 'rr' as const } } : r)) };
+    dm = addPattern(dm, { copyFrom: ensurePatterns(dm).activePattern });
+    const st = makeState([makeTrack({ id: 'track-drums', type: TrackType.DRUM_RACK, drumMachine: dm })]);
+    const blob = await ProjectIO.saveProject(st, []);
+    const zip = await JSZip.loadAsync(blob);
+    expect(Object.keys(zip.files)).toContain('audio/pad-layer1.wav');
+    audioBufferRegistry.clear();
+    const loaded = (await ProjectIO.loadProject(new File([blob], 'p.zip'))).tracks[0].drumMachine!;
+    expect(audioBufferRegistry.get(padSampleKey('layer1'))!.length).toBe(1102);
+    const strip = (d: typeof dm) => JSON.parse(JSON.stringify({ ...d, samples: Object.keys(d.samples || {}).sort() }));
+    expect(strip(loaded)).toEqual(strip(dm));
+    expect(loaded.rows[0].smp).toMatchObject({ attack: 0.01, filterType: 'lp', cutoff: 800, layerMode: 'rr', layers: [{ sound: 'user:layer1' }] });
+    expect(loaded.patterns![1].prob!.kick).toEqual(dm.patterns![1].prob!.kick);
+  });
+});
 
 describe('kit perso sauvé avec le projet', () => {
   it('un WAV par sample perso, relu à l\'ouverture ; motifs et placement intacts', async () => {

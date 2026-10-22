@@ -43,7 +43,8 @@ describe('R18 · pas : vélocité, pan, hauteur (Graph Editor)', () => {
     const dm = withKick(new Array(16).fill(0));
     expect(setStepParam(dm, 0, 3, 'vel', 90)).toBe(dm);
     expect(setStepParam(dm, 0, 3, 'pan', 5).rows[0].stepPan![3]).toBe(1);
-    expect(setStepParam(dm, 0, 3, 'pitch', -40).rows[0].stepPitch![3]).toBe(-12);
+    // Séquenceur pro (22/10/2026) : ±24 dt par pas (808 et percus accordées sur deux octaves).
+    expect(setStepParam(dm, 0, 3, 'pitch', -40).rows[0].stepPitch![3]).toBe(-24);
   });
 
   it('pan et hauteur suivent les motifs (A / B) et la suppression d’un pad', () => {

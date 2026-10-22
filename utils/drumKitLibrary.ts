@@ -15,7 +15,7 @@
  */
 import type { DrumMachine, DrumRow } from './drumKits';
 import { openKitContainer, KitCodecError } from './drumKitCodec';
-import { STEPS_PER_BAR } from './drumPatterns';
+import { mapPatternRecords, STEPS_PER_BAR } from './drumPatterns';
 import { MAX_PADS, userSampleId } from './drumSamples';
 
 export const KIT_REF_PREFIX = 'kit:';
@@ -343,7 +343,7 @@ export function applyKitDef(dm: DrumMachine, kit: KitDef, ix: KitIndex | null): 
     const prev = old.find(r => r.id === slot.id);
     const s = ix?.byId.get(sid);
     rows.push({
-      ...(prev ? { ...prev, start: undefined, end: undefined, fadeIn: undefined, fadeOut: undefined, reverse: undefined, slice: undefined } : {}),
+      ...(prev ? { ...prev, start: undefined, end: undefined, fadeIn: undefined, fadeOut: undefined, reverse: undefined, slice: undefined, smp: undefined } : {}),
       id: slot.id, name: padName(slot.name, s), sound: kitRef(sid),
       steps: prev ? [...prev.steps] : new Array(len).fill(0),
       ratchet: prev ? [...prev.ratchet] : new Array(len).fill(1),
@@ -357,11 +357,8 @@ export function applyKitDef(dm: DrumMachine, kit: KitDef, ix: KitIndex | null): 
     if (rows.length >= MAX_PADS) break;
     if (!ids.has(r.id) && userSampleId(r.sound)) { rows.push(r); ids.add(r.id); }
   }
-  const keep = <T,>(rec: Record<string, T> | undefined) => (rec ? Object.fromEntries(Object.entries(rec).filter(([k]) => ids.has(k))) : rec);
-  const patterns = dm.patterns?.map(p => ({
-    ...p, steps: keep(p.steps)!, ratchet: keep(p.ratchet)!,
-    ...(p.pan ? { pan: keep(p.pan) } : {}), ...(p.pitch ? { pitch: keep(p.pitch) } : {}),
-  }));
+  const keep = (rec: Record<string, number[]>) => Object.fromEntries(Object.entries(rec).filter(([k]) => ids.has(k)));
+  const patterns = dm.patterns?.map(p => mapPatternRecords(p, keep));
   const used = new Set(rows.map(r => userSampleId(r.sound)).filter(Boolean) as string[]);
   const samples = dm.samples ? Object.fromEntries(Object.entries(dm.samples).filter(([k]) => used.has(k))) : dm.samples;
   return { ...dm, kitId: `nova:${kit.id}`, rows, ...(patterns ? { patterns } : {}), ...(samples ? { samples } : {}) };
