@@ -30,7 +30,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
-import { visibleEnvelope } from '../utils/waveformPeaks';
+import { visibleEnvelope, visibleSamples } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
 import { linkCounts, isLinked } from '../utils/linkedClips';
@@ -77,6 +77,7 @@ import { dragRefusal, explainLockedDrag } from '../utils/clipLock';
 import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
+import { clampZoom, scrollForAnchor, sliderToZoom, zoomAnchor, zoomToSlider, SLIDER_STEPS, ZOOM_DEFAULT, type ZoomAnchor } from '../utils/arrangeZoom';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -280,7 +281,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     get: () => ({ ...zoomLayoutRef.current, scroll: scrollContainerRef.current?.scrollLeft ?? 0 }),
     set: (z) => {
       if (!z || typeof z !== 'object') return;
-      if (Number.isFinite(z.h)) setZoomH(Math.max(10, Math.min(300, z.h)));
+      if (Number.isFinite(z.h)) setZoomH(clampZoom(z.h, durationRef.current));
       if (Number.isFinite(z.v)) setZoomV(Math.max(40, Math.min(400, z.v)));
       if (Number.isFinite(z.scroll)) requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = z.scroll; });
     },
@@ -543,6 +544,31 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
    * du navigateur.
    */
   const pendingZoomAnchorRef = useRef<{ time: number; pointerX: number } | null>(null);
+  // Durée du contenu (bornes du zoom : la largeur défilante reste sous la limite de Chrome).
+  const durationRef = useRef(300);
+  const zoomHRef = useRef(zoomH);
+  zoomHRef.current = zoomH;
+  const headerWidthRef = useRef(headerWidth);
+  headerWidthRef.current = headerWidth;
+  /**
+   * Zoom horizontal ancré (utils/arrangeZoom) : sans ancre, la tête de lecture si elle est
+   * visible, sinon le milieu de la vue. Clavier, curseur, menus, outil Zoom et Ctrl+molette
+   * passent tous par ici.
+   */
+  const zoomTo = useCallback((next: number, anchor?: ZoomAnchor) => {
+    const el = scrollContainerRef.current;
+    const cur = zoomHRef.current;
+    const z = clampZoom(next, durationRef.current);
+    const hw = headerWidthRef.current;
+    const a = anchor || zoomAnchor({ playhead: playheadStore.get(), scrollLeft: el?.scrollLeft ?? 0, viewWidth: (el?.clientWidth ?? 800) - hw, zoom: cur });
+    if (z === cur) {
+      // Même zoom (borne atteinte, ou cadrage) : seul le défilement suit l'ancre.
+      if (el && anchor) { el.scrollLeft = scrollForAnchor(a, z); setScrollLeft(el.scrollLeft); }
+      return;
+    }
+    pendingZoomAnchorRef.current = { time: a.time, pointerX: a.px + hw };
+    setZoomH(z);
+  }, []);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -563,7 +589,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const timeUnderPointer = Math.max(0, (el.scrollLeft + pointerX - headerWidth) / zoomH);
 
       const factor = Math.exp(-e.deltaY * 0.0015);
-      const nextZoom = Math.min(300, Math.max(10, zoomH * factor));
+      const nextZoom = clampZoom(zoomH * factor, durationRef.current);
       if (nextZoom === zoomH) return;
 
       // Le repositionnement se fait apres le rendu (useLayoutEffect ci-dessous) :
@@ -694,9 +720,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     ] as any });
   };
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
+  durationRef.current = projectDuration;
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
-  useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
+  useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomTo, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + rowH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
   // B7 (mot trouvé dans les prises) : le temps et la piste visés à l'écran, sans bouger si déjà visibles.
@@ -1176,10 +1203,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     // Outil Zoom (Pro Tools : Zoomer, F5) : clic = zoom avant centré sur ce point, Alt+clic = zoom arrière.
     if (activeTool === 'ZOOM' && e.button === 0) {
         e.preventDefault();
-        const next = Math.max(10, Math.min(300, Math.round(zoomH * (e.altKey ? 0.5 : 2))));
-        const offsetPx = e.clientX - rect.left - headerWidth;
-        setZoomH(next);
-        requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = Math.max(0, time * next - offsetPx); });
+        zoomTo(zoomH * (e.altKey ? 0.5 : 2), { time, px: e.clientX - rect.left - headerWidth });
         return;
     }
     // Scrub audible (R17) : outil Scrubber (F9), ou Ctrl+glisser avec le Sélecteur / le haut du
@@ -1858,10 +1882,15 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
                     // on lit la portion miroir du buffer pour que la forme d'onde
                     // corresponde a ce qu'on entend.
-                    const env = visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    // Zoom à l'échantillon (< 1 échantillon par pixel) : la vraie onde, signée (passages à zéro).
+                    const sampleView = totalSamples / largeurPx < 1;
+                    const env = sampleView
+                        ? visibleSamples(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed)
+                        : visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    const lim = sampleView ? (v: number) => (v > 1 ? 1 : v < -1 ? -1 : v) : (v: number) => Math.min(1, v);
                     // Forme d'onde à l'échelle du gain du clip (écrêtée visuellement à 100 %).
                     const clipGain = clip.gain ?? 1;
-                    if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * clipGain);
+                    if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = lim(env[i] * clipGain);
                     const x0 = x + px0;
                     // Respirations baissées / supprimées (utils/breaths) : la forme d'onde
                     // montre le creux, et un trait violet en bas du clip les repère.
@@ -1882,9 +1911,31 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     // Ligne de gain (utils/clipGain) : la forme d'onde suit le gain dessiné.
                     if (clip.gainPoints?.length) {
                         const offG = clip.offset || 0;
-                        for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * envelopeGainAt(clip.gainPoints, offG + ((px0 + i + 0.5) / largeurPx) * clip.duration));
+                        for (let i = 0; i < n; i++) env[i] = lim(env[i] * envelopeGainAt(clip.gainPoints, offG + ((px0 + i + 0.5) / largeurPx) * clip.duration));
                     }
 
+                    if (sampleView) {
+                        // Ligne de zéro puis l'onde ; un point par échantillon dès 6 px d'écart.
+                        ctx.strokeStyle = cv.ink(0.18);
+                        ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(x0, Math.round(centerY) + 0.5); ctx.lineTo(x0 + n, Math.round(centerY) + 0.5); ctx.stroke();
+                        ctx.strokeStyle = waveColor;
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(x0, centerY - env[0] * amp);
+                        for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY - env[i] * amp);
+                        ctx.stroke();
+                        const pxPerSample = largeurPx / totalSamples;
+                        if (pxPerSample >= 6 && !clip.isReversed) {
+                            ctx.fillStyle = waveColor;
+                            const first = Math.ceil(px0 / pxPerSample - 0.5), last = Math.floor(px1 / pxPerSample - 0.5);
+                            for (let k = first; k <= last; k++) {
+                                const i = Math.round((k + 0.5) * pxPerSample - 0.5) - px0;
+                                if (i < 0 || i >= n) continue;
+                                ctx.fillRect(x0 + i - 1.5, centerY - env[i] * amp - 1.5, 3, 3);
+                            }
+                        }
+                    } else {
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
                     ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
                     ctx.beginPath();
@@ -1903,6 +1954,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     ctx.moveTo(x0, centerY + env[0] * amp);
                     for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY + env[i] * amp);
                     ctx.stroke();
+                    }
 
                     // Ligne centrale (0 dB)
                     ctx.strokeStyle = cv.ink(0.1);
@@ -2308,11 +2360,34 @@ const drawTimeline = useCallback(() => {
         // Numéros de mesure : un sur deux (ou moins) quand les mesures sont serrées.
         const bars = barsInRange(tempoMap, Math.max(0, startTime), endTime);
         const widthPx = bars.length > 1 ? timeToPixels(bars[1].time - bars[0].time) : 999;
-        const every = widthPx >= 24 ? 1 : widthPx >= 12 ? 2 : widthPx >= 6 ? 4 : 8;
+        // Au plus large (tout le morceau, 1 px/s), une mesure ne fait que 2 ou 3 px : 1 numéro sur 16 ou 32.
+        let every = 1;
+        while (every < 256 && widthPx * every < 26) every *= 2;
         for (const b of bars) {
             if (b.bar % every) continue;
             const x = timeToPixels(b.time) - scrollX;
             if (x >= -50) ctx.fillText((b.bar + 1).toString(), x + 4, 24);
+        }
+        // Au plus près (une mesure plus large que l'écran) : graduation en temps (min:s.ms), pour
+        // savoir où l'on est quand aucun numéro de mesure n'est à l'écran.
+        if (widthPx > w * 0.6) {
+            const steps = [1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001];
+            const step = [...steps].reverse().find(st => st * zoomH >= 110) ?? 1;
+            const t0 = Math.floor(Math.max(0, startTime) / step) * step;
+            const dec = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : step >= 0.001 ? 3 : 4;
+            ctx.save();
+            ctx.font = '600 9px Inter';
+            ctx.fillStyle = cv.ink(0.45);
+            ctx.strokeStyle = cv.ink(0.25);
+            for (let t = t0; t <= endTime + step; t += step) {
+                const x = Math.round(timeToPixels(t) - scrollX) + 0.5;
+                if (x < -60 || x > w + 10) continue;
+                const m = Math.floor(t / 60), sec = t - m * 60;
+                const label = `${m}:${sec.toFixed(dec).padStart(dec ? dec + 3 : 2, '0')}`;
+                ctx.beginPath(); ctx.moveTo(x, RULER_H - 6); ctx.lineTo(x, RULER_H); ctx.stroke();
+                ctx.fillText(label, x + 3, RULER_H - 6);
+            }
+            ctx.restore();
         }
         // Changement de tempo / de mesure : rappel discret dans la règle.
         ctx.save();
@@ -2844,8 +2919,11 @@ useEffect(() => {
         <div className="flex items-center space-x-3 shrink-0">
              <FollowPlayheadButton suspended={follow.suspended} onResume={follow.resume} />
              {!simple && <ChordLaneToggleButton />}
-             <i className="fas fa-search-plus text-[10px]"></i>
-             <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
+             <i className="fas fa-search-plus text-[10px]" aria-hidden="true"></i>
+             <input type="range" min="0" max={SLIDER_STEPS} step="1" value={zoomToSlider(zoomH)} onChange={(e) => zoomTo(sliderToZoom(parseInt(e.target.value, 10)))}
+               aria-label="Zoom horizontal" data-testid="zoom-slider"
+               title={`Zoom horizontal : de tout le morceau jusqu’à l’échantillon (Ctrl+molette sur les pistes, ${[shortcutHint('pt.zoomIn'), shortcutHint('pt.zoomOut')].filter(Boolean).join(' / ') || 'Ctrl+→ / Ctrl+←'} ; ${shortcutHint('pt.zoomSel') || 'Z'} = zoom sur la sélection)`}
+               className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
       {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
@@ -2868,6 +2946,7 @@ useEffect(() => {
       <div 
           ref={scrollContainerRef} 
           data-follow={follow.suspended ? "suspendu" : "actif"}
+          data-arrange-scroll="" data-zoom-h={zoomH} data-zoom-v={zoomV}
           className="flex-1 overflow-auto relative custom-scroll"
           onMouseDown={handleMouseDown}
           onDoubleClick={(e) => {
@@ -3177,7 +3256,7 @@ useEffect(() => {
           }} />;
       })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
-      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
+      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { zoomTo(ZOOM_DEFAULT); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
       {tceGhost && (() => {

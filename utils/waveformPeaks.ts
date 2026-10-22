@@ -92,6 +92,9 @@ export const visibleEnvelope = (
     const px = pxFrom + i;
     let a = startSample + Math.floor(px * spp);
     let b = Math.min(startSample + Math.floor((px + 1) * spp), len);
+    // Zoom à l'échantillon (moins d'un échantillon par pixel) : le pixel lit l'échantillon
+    // qu'il couvre (avant : case vide, la forme d'onde disparaissait au plus près).
+    if (b <= a) b = Math.min(a + 1, len);
     if (reversed) {
       const na = Math.max(0, len - b);
       const nb = Math.max(0, len - a);
@@ -112,6 +115,36 @@ export const visibleEnvelope = (
       }
     }
     out[i] = Math.min(1, peak * 1.3);
+  }
+  return out;
+};
+
+let scratchSigned = new Float32Array(2048);
+
+/**
+ * Zoom à l'échantillon (moins d'un échantillon par pixel) : valeur SIGNÉE (−1..1, × 1.3 comme
+ * l'enveloppe) au milieu de chaque pixel, interpolée entre deux échantillons. Le tracé devient
+ * une ligne qui passe par zéro : on coupe sur un passage à zéro, on voit un clic, comme dans
+ * les DAW. Mêmes paramètres que visibleEnvelope ; tableau réutilisé d'un appel à l'autre.
+ */
+export const visibleSamples = (
+  buffer: AudioBuffer, startSample: number, endSample: number,
+  widthPx: number, pxFrom: number, pxTo: number, reversed: boolean
+): Float32Array => {
+  const count = Math.max(0, pxTo - pxFrom);
+  if (scratchSigned.length < count) scratchSigned = new Float32Array(Math.ceil(count * 1.5));
+  const out = scratchSigned;
+  const data = buffer.getChannelData(0);
+  const len = data.length;
+  const spp = (endSample - startSample) / widthPx;
+  for (let i = 0; i < count; i++) {
+    let pos = startSample + (pxFrom + i + 0.5) * spp - 0.5;
+    if (reversed) pos = len - 1 - pos;
+    const i0 = Math.max(0, Math.min(len - 1, Math.floor(pos)));
+    const i1 = Math.min(len - 1, i0 + 1);
+    const f = Math.max(0, Math.min(1, pos - i0));
+    const v = (data[i0] * (1 - f) + data[i1] * f) * 1.3;
+    out[i] = v > 1 ? 1 : v < -1 ? -1 : v;
   }
   return out;
 };

@@ -150,9 +150,10 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.recallMarker', keys: ['numdec'], label: 'Aller au repère N : pavé « . », numéro, « . » (ou Entrée)', pt: 'Pavé . N .', category: 'Repères' }),
   g({ id: 'pt.restoreSelection', keys: ['ctrl+alt+z'], label: 'Restaurer la dernière sélection (plage et clips) ; encore une fois : revenir à l’autre', pt: 'Opt+Cmd+Z / Ctrl+Alt+Z (Restore Last Selection)', category: 'Édition' }),
   g({ id: 'pt.memoryWindow', keys: ['ctrl+5', 'ctrl+num5'], label: 'Liste des repères (Memory Locations)', pt: 'Ctrl+5 (pavé)', category: 'Repères' }),
-  g({ id: 'pt.zoomIn', keys: ['ctrl+]'], label: 'Zoom avant', pt: 'Ctrl+]', category: 'Zoom et affichage', command: 'zoomIn' }),
-  g({ id: 'pt.zoomOut', keys: ['ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[', category: 'Zoom et affichage', command: 'zoomOut' }),
-  g({ id: 'pt.zoomSel', keys: [], label: 'Zoom sur la sélection (clip ou plage)', pt: 'E en Keyboard Focus (Zoom Toggle)', category: 'Zoom et affichage', command: 'zoomToSelection' }),
+  // Ctrl+→ / Ctrl+← (Logic) : sur tous les claviers. Ctrl+] / Ctrl+[ demandent AltGr en AZERTY.
+  g({ id: 'pt.zoomIn', keys: ['ctrl+arrowright', 'ctrl+]'], label: 'Zoom avant (sur la tête de lecture si elle est à l’écran)', pt: 'Ctrl+] · Logic : Ctrl+→', category: 'Zoom et affichage', command: 'zoomIn' }),
+  g({ id: 'pt.zoomOut', keys: ['ctrl+arrowleft', 'ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[ · Logic : Ctrl+←', category: 'Zoom et affichage', command: 'zoomOut' }),
+  g({ id: 'pt.zoomSel', keys: ['z'], label: 'Zoom sur la sélection (plage, sinon clips, sinon tout le morceau) ; Z une 2e fois : retour à la vue d’avant', pt: 'E en Keyboard Focus (Zoom Toggle) · Logic et Live : Z', category: 'Zoom et affichage', command: 'zoomToSelection' }),
   g({ id: 'pt.heightUp', keys: ['ctrl+arrowup'], label: 'Pistes plus hautes', pt: 'Ctrl+↑ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightUp' }),
   g({ id: 'pt.heightDown', keys: ['ctrl+arrowdown'], label: 'Pistes plus basses', pt: 'Ctrl+↓ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightDown' }),
   // --- Modes d'édition (hooks/useEditModes, utils/editModes) -----------------------

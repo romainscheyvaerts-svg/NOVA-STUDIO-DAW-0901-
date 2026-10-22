@@ -7,6 +7,8 @@ import { requestBreaths } from '../utils/breathBus';
 import { playheadStore } from '../utils/playheadStore';
 import { fadeInTo, fadeOutTo, quickFades, trimEndTo, trimStartTo } from '../utils/clipKeyCommands';
 import { clampTrackHeight, stepTrackHeight } from '../utils/trackHeights';
+import { editSelectionStore } from '../utils/editSelection';
+import { clampZoom, fitRange, type ZoomAnchor } from '../utils/arrangeZoom';
 
 /**
  * Versions de base des commandes d'édition (raccourcis Pro Tools) pour
@@ -26,6 +28,8 @@ export interface ArrangementCommandContext {
   onEditClip?: (trackId: string, clipId: string, action: string, payload?: any) => void;
   zoomH: number;
   setZoomH: (z: number) => void;
+  /** Zoom ancré (tête de lecture visible, sinon milieu de la vue ; ou l'ancre donnée). */
+  zoomTo?: (z: number, anchor?: ZoomAnchor) => void;
   zoomV: number;
   setZoomV: (z: number) => void;
   bpm: number;
@@ -44,8 +48,8 @@ export function tracksOfSelection(tracks: Track[], selectedClipIds: Set<string>,
 export const selectTrackClipIds = (tracks: Track[], trackIds: string[]): Set<string> =>
   new Set(tracks.filter(t => trackIds.includes(t.id)).flatMap(t => t.clips.map(c => c.id)));
 
-const ZOOM_MIN = 10, ZOOM_MAX = 300;
-const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+/** Zoom précédent (Z une 2e fois revient au cadrage d'avant, comme Logic et Live). */
+interface SavedView { zoom: number; scroll: number; fitted: { zoom: number; scroll: number } }
 
 export function useArrangementCommands(ctx: ArrangementCommandContext) {
   const ref = useRef(ctx);
@@ -79,6 +83,15 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
     };
     const songEnd = () => Math.max(1, ...c().tracks.flatMap(t => t.clips.map(cl => cl.start + cl.duration)));
     const barSec = () => (4 * 60) / (c().bpm || 120);
+    const zoomTo = (z: number, anchor?: ZoomAnchor) => { const f = c().zoomTo; if (f) f(z, anchor); else c().setZoomH(clampZoom(z)); };
+    const scrollLeftNow = () => (document.querySelector('[data-arrange-scroll]') as HTMLElement | null)?.scrollLeft ?? 0;
+    /** Cadre [start, end] ; garde la vue d'avant pour le retour (Z une 2e fois). */
+    let saved: SavedView | null = null;
+    const frame = (start: number, end: number) => {
+      const f = fitRange(start, end, c().viewportWidth);
+      saved = { zoom: c().zoomH, scroll: scrollLeftNow(), fitted: f };
+      zoomTo(f.zoom, { time: f.scroll / f.zoom, px: 0 });
+    };
 
     return registerEditCommands({
       split: () => {
@@ -156,23 +169,34 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         say(`${ids.size} clip${ids.size > 1 ? 's' : ''} sélectionné${ids.size > 1 ? 's' : ''} sur ${names}.`);
         return true;
       },
-      zoomIn: () => { c().setZoomH(clampZoom(c().zoomH * 1.5)); },
-      zoomOut: () => { c().setZoomH(clampZoom(c().zoomH / 1.5)); },
-      // 1 = tout le morceau, 2 = 8 mesures, 3 = 4 mesures, 4 = 1 mesure, 5 = au plus près.
+      // Ancrés sur la tête de lecture (visible) ou le milieu de la vue : la vue ne saute plus ailleurs.
+      zoomIn: () => { zoomTo(c().zoomH * 1.5); },
+      zoomOut: () => { zoomTo(c().zoomH / 1.5); },
+      // 1 = tout le morceau, 2 = 8 mesures, 3 = 4 mesures, 4 = 1 mesure, 5 = au plus près
+      // (quelques millisecondes : les échantillons et les passages à zéro sont visibles).
       zoomPreset: (n: number) => {
         const w = Math.max(200, c().viewportWidth);
-        const span = n === 1 ? songEnd() * 1.05 : n === 2 ? barSec() * 8 : n === 3 ? barSec() * 4 : n === 4 ? barSec() : 0;
-        c().setZoomH(span > 0 ? clampZoom(w / span) : ZOOM_MAX);
-        if (n === 1) c().scrollTo?.(0);
+        if (n === 1) { const end = songEnd() * 1.03; zoomTo(w / end, { time: 0, px: 0 }); return; }
+        const span = n === 2 ? barSec() * 8 : n === 3 ? barSec() * 4 : n === 4 ? barSec() : 0.025;
+        zoomTo(w / span);
       },
+      // Zoom sur la sélection (Z, comme Logic et Live) : plage de temps, sinon clips sélectionnés,
+      // sinon tout le morceau. Z une 2e fois, sans avoir rien touché : retour à la vue d'avant.
       zoomToSelection: () => {
+        const now = { zoom: c().zoomH, scroll: scrollLeftNow() };
+        if (saved && Math.abs(now.zoom - saved.fitted.zoom) < 1e-6 * now.zoom && Math.abs(now.scroll - saved.fitted.scroll) < 2) {
+          const back = saved; saved = null;
+          zoomTo(back.zoom, { time: back.scroll / back.zoom, px: 0 });
+          return true;
+        }
+        const ts = editSelectionStore.get().time;
+        if (ts && ts.end > ts.start) { frame(ts.start, ts.end); return true; }
         const l = targets();
-        if (!l.length) return false;
-        const start = Math.min(...l.map(x => x.clip.start));
-        const end = Math.max(...l.map(x => x.clip.start + x.clip.duration));
-        const z = clampZoom(Math.max(200, c().viewportWidth) / Math.max(0.05, (end - start) * 1.1));
-        c().setZoomH(z);
-        c().scrollTo?.(Math.max(0, (start - (end - start) * 0.05) * z));
+        if (l.length) {
+          frame(Math.min(...l.map(x => x.clip.start)), Math.max(...l.map(x => x.clip.start + x.clip.duration)));
+          return true;
+        }
+        frame(0, songEnd());
         return true;
       },
       trackHeight: (px: number) => { c().setZoomV(clampTrackHeight(px)); },
