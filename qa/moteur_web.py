@@ -368,6 +368,7 @@ def t_charge(p, res, minutes, fond_min):
     # Onglet en arrière-plan : un autre onglet passe devant pendant fond_min minutes (au milieu).
     other = None
     phase = "avant"   # avant → fond → fini
+    suivi = []
     fond_debut = (total - fond_min * 60) / 2
     vis_fond = None
     while time.time() - t0 < total:
@@ -377,7 +378,13 @@ def t_charge(p, res, minutes, fond_min):
             vis_fond = page.evaluate("() => document.visibilityState")
             print(f"  arrière-plan à {el:.0f} s (page : {vis_fond})", flush=True)
             phase = "fond"
-        elif phase == "fond" and el >= fond_debut + fond_min * 60:
+        if int(el) % 60 < 5:
+            try:
+                st = page.evaluate("async () => { const { audioEngine: E } = await window.__novaAppModule('/engine/AudioEngine.ts'); const s = E.recSession; return s && s.ringStatus ? s.ringStatus() : null; }")
+                if st: suivi.append({"t": int(el), **st}); print(f"  {int(el)} s : anneau {st}", flush=True)
+            except Exception as e:
+                print("  état de l'anneau illisible :", str(e)[:120], flush=True)
+        if phase == "fond" and el >= fond_debut + fond_min * 60:
             page.bring_to_front(); other.close(); other = None
             print(f"  premier plan à {el:.0f} s", flush=True)
             phase = "fini"
@@ -386,7 +393,7 @@ def t_charge(p, res, minutes, fond_min):
     if other is not None:
         page.bring_to_front(); other.close()
     r = page.evaluate(CHARGE_STOP)
-    r["minutes"] = minutes; r["arriere_plan_min"] = fond_min; r["visibilite_en_arriere_plan"] = vis_fond
+    r["minutes"] = minutes; r["arriere_plan_min"] = fond_min; r["visibilite_en_arriere_plan"] = vis_fond; r["anneau"] = suivi
     r["erreurs_console"] = console_errors(log)
     res["charge"] = r
     print("charge :", json.dumps(r, ensure_ascii=False, default=str), flush=True)

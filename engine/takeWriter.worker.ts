@@ -35,6 +35,7 @@ interface Session {
   seq: Map<string, number>;
   writes: Promise<void>;
   eos: boolean; eosWait: (() => void) | null; allocs: number; portLost: number;
+  drains: number; lastErr: string | null;
 }
 
 const sessions = new Map<string, Session>();
@@ -144,9 +145,36 @@ function drainRing(s: Session) {
   }
 }
 
+function safeDrain(s: Session) {
+  try { drainRing(s); s.drains++; }
+  catch (e) {
+    // Jamais silencieux : la page le saura (santé de la prise) et l'anneau compte ce qui manque.
+    const msg = String((e as Error)?.message || e);
+    if (msg !== s.lastErr) { s.lastErr = msg; post({ type: 'warn', id: s.id, message: `lecture de l'anneau : ${msg}` }); }
+  }
+}
+
 function poll() {
-  for (const s of sessions.values()) if (s.ring) drainRing(s);
+  for (const s of sessions.values()) if (s.ring) safeDrain(s);
   if (![...sessions.values()].some(s => s.ring) && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+/**
+ * Réveil par le fil audio (comme le SetEvent du moteur natif) : le worklet fait Atomics.notify sur
+ * l'index d'écriture à chaque morceau publié ; on attend dessus (Atomics.waitAsync, 100 ms au plus),
+ * sans dépendre d'un minuteur. Le minuteur de 25 ms reste en secours.
+ */
+async function wakeLoop(s: Session) {
+  const r = s.ring!;
+  const wa = (Atomics as any).waitAsync as ((a: Int32Array, i: number, v: number, t: number) => { async: boolean; value: Promise<string> | string }) | undefined;
+  if (typeof wa !== 'function') return;
+  while (sessions.get(s.id) === s) {
+    try {
+      const res = wa(r.h, 0, Atomics.load(r.h, 0), 100);
+      if (res.async) await res.value;
+    } catch { await new Promise(t => setTimeout(t, 25)); }
+    safeDrain(s);
+  }
 }
 
 function begin(m: Begin, port: MessagePort | null) {
@@ -162,6 +190,7 @@ function begin(m: Begin, port: MessagePort | null) {
     fwd: Array.from({ length: k }, () => []), fwdLen: 0,
     first: -1, frames: 0, durable: 0, failed: null,
     seq: new Map(), writes: Promise.resolve(), eos: false, eosWait: null, allocs: 0, portLost: 0,
+    drains: 0, lastErr: null,
   };
   sessions.set(s.id, s);
   if (s.targets.length) void openDb().catch(() => { /* signalé à la 1re écriture */ });
@@ -182,12 +211,13 @@ function begin(m: Begin, port: MessagePort | null) {
     };
   }
   if (s.ring && !pollTimer) pollTimer = setInterval(poll, 25);
+  if (s.ring) void wakeLoop(s);
 }
 
 async function end(id: string) {
   const s = sessions.get(id);
   if (!s) { post({ type: 'ended', id, frames: 0, durable: 0, lost: 0, error: 'prise inconnue' }); return; }
-  if (s.ring) drainRing(s);
+  if (s.ring) safeDrain(s);
   if (s.port && !s.eos) await new Promise<void>(r => { s.eosWait = r; setTimeout(r, 3000); });
   forward(s);
   flushDurable(s);
@@ -205,4 +235,8 @@ self.onmessage = (e: MessageEvent) => {
   if (m.type === 'begin') begin(m as Begin, e.ports?.[0] || null);
   else if (m.type === 'end') void end(m.id);
   else if (m.type === 'ping') post({ type: 'pong', sessions: sessions.size, polling: !!pollTimer });
+  else if (m.type === 'status') {
+    const s = sessions.get(m.id);
+    post({ type: 'status', id: m.id, frames: s?.frames ?? null, durable: s?.durable ?? null, drains: s?.drains ?? null, err: s?.lastErr ?? s?.failed ?? null, polling: !!pollTimer });
+  }
 };

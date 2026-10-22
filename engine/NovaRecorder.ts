@@ -210,6 +210,16 @@ export class NovaRecorderSession {
   public writerWarning: string | null = null;
   private writer: TakeWriterClient | null = null;
   private writerId = '';
+  private ringHeader: Int32Array | null = null;
+  private ringCap = 0;
+
+  /** Anneau (prise en cours) : images publiées, en attente, perdues ; null hors anneau partagé. */
+  ringStatus(): { written: number; pending: number; lost: number; capacity: number } | null {
+    const h = this.ringHeader;
+    if (!h) return null;
+    const w = Atomics.load(h, 0), r = Atomics.load(h, 1);
+    return { written: w >>> 0, pending: (w - r) | 0, lost: Atomics.load(h, 2), capacity: this.ringCap };
+  }
 
   /**
    * `keepClock: false` : ancien comportement (blocs sans entrée sautés), pour la mesure seulement.
@@ -222,6 +232,7 @@ export class NovaRecorderSession {
     const writer = opts.writer || null;
     const ring = writer && canShareMemory() ? createTakeRing(Math.max(1, k), ctx.sampleRate) : null;
     this.transport = writer ? (ring ? 'ring' : 'port') : 'post';
+    if (ring) { this.ringHeader = new Int32Array(ring.header); this.ringCap = ring.capacity; }
     const transportOpts = ring ? { ring: { header: ring.header, data: ring.data, capacity: ring.capacity } }
       : writer ? { pool: { frames: 2048, count: 48 } } : {};
     const po = { ...(k > 0 ? { channels: k } : {}), ...(opts.keepClock === false ? { keepClock: false } : {}), ...transportOpts };

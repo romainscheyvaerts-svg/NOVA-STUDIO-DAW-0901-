@@ -64,7 +64,10 @@ export function ringWrite(h: Int32Array, d: Float32Array, cap: number, k: number
       else for (let i = 0; i < len; i++) d[base + ((w + i) & m)] = 0;
     }
   }
-  Atomics.store(h, 0, (w + len) | 0);
+  const nw = (w + len) | 0;
+  Atomics.store(h, 0, nw);
+  // Réveil de l'écrivain tous les 2048 images (~43 ms à 48 kHz) : pas un appel système par bloc.
+  if ((nw & 2047) < len) Atomics.notify(h, 0);
   return true;
 }
 
