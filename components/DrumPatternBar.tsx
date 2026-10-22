@@ -71,7 +71,7 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
       {/* Banque de motifs */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5" role="tablist" aria-label="Motifs de batterie">
         <span className="shrink-0 text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-0.5"
-          title="Motifs de batterie : comme les Patterns de FL Studio. Chaque motif a ses propres pas ; place-les dans le morceau juste en dessous.">Motifs</span>
+          title="Motifs de batterie : chaque motif a ses propres pas ; place-les dans le morceau juste en dessous.">Motifs</span>
         {patterns.map(p => (
           renaming === p.id ? (
             <input key={p.id} autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={commitRename}
@@ -89,9 +89,9 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
           )
         ))}
         <button type="button" onClick={() => onChange(addPattern(dm))} disabled={patterns.length >= MAX_PATTERNS}
-          title="Nouveau motif vide (comme « New pattern » dans FL Studio)" className={btn}><i className="fas fa-plus mr-1" />Motif</button>
+          title="Nouveau motif vide" className={btn}><i className="fas fa-plus mr-1" />Motif</button>
         <button type="button" onClick={() => onChange(duplicatePattern(dm, active.id))} disabled={patterns.length >= MAX_PATTERNS}
-          title="Dupliquer le motif affiché pour en faire une variante (comme « Clone pattern » dans FL Studio)" className={btn}><i className="far fa-clone mr-1" />Dupliquer</button>
+          title="Dupliquer le motif affiché pour en faire une variante" className={btn}><i className="far fa-clone mr-1" />Dupliquer</button>
         <button type="button" onClick={() => startRename(active.id)} title="Renommer le motif (Couplet, Refrain…)" aria-label="Renommer le motif" className={btn}><i className="fas fa-pen" /></button>
         <button type="button" onClick={() => setColors(v => !v)} aria-expanded={colors} title="Couleur du motif" aria-label="Couleur du motif" className={btn}><i className="fas fa-palette" /></button>
         <button type="button" onClick={() => onChange(deletePattern(dm, active.id))} disabled={patterns.length <= 1}
@@ -110,7 +110,7 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
       <div>
         <div className="flex flex-wrap items-center gap-1.5 mb-1">
           <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-auto"
-            title="Placement : comme la Playlist de FL Studio. Peins les mesures avec le motif choisi (glisse le doigt) ; touche une mesure déjà peinte pour la rendre muette.">
+            title="Placement : peins les mesures avec le motif choisi (glisse le doigt) ; touche une mesure déjà peinte pour la rendre muette.">
             Dans le morceau <span className="normal-case font-normal text-slate-500">· peins avec « {active.name} »</span>
           </span>
           <button type="button" onClick={() => onChange({ ...dm, song: new Array(totalBars).fill(active.id) })} className={btn}

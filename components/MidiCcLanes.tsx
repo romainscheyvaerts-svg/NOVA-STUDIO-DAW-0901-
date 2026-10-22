@@ -168,7 +168,7 @@ const MidiCcLanes: React.FC<Props> = ({ notes, cc, duration, zoomX, width, sideW
     <div className="h-[30%] max-sm:h-[26%] min-h-[96px] border-t border-white/10 bg-nv-surface flex relative z-30" data-nova-cc-lanes="">
       <div className={`flex-shrink-0 border-r border-white/10 bg-nv-bg ${sideWidth} p-1 flex flex-col gap-1 overflow-y-auto no-scrollbar`}>
         <select aria-label="Couloir affiché" value={lane} onChange={e => { setLane(e.target.value); setDraft(null); }} data-nova-cc-select=""
-          title="Couloir : vélocité, pitch bend, modulation, sustain, expression ou un autre CC (couloirs de contrôleurs, Event editor de FL)"
+          title="Couloir : vélocité, pitch bend, modulation, sustain, expression ou un autre CC"
           className="w-full h-7 [@media(pointer:coarse)]:h-11 shrink-0 rounded bg-black/40 border border-white/15 text-[9px] text-white px-0.5">
           {lanes.map(k => <option key={k} value={k} title={k === VELOCITY_LANE ? 'Vélocité' : ccLabel(k)}>{k === VELOCITY_LANE ? 'Vélocité' : ccShortLabel(k)}{k !== VELOCITY_LANE && (cc?.[k]?.length || 0) > 0 ? ' •' : ''}</option>)}
         </select>

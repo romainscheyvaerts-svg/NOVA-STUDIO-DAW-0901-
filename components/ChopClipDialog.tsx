@@ -161,7 +161,7 @@ const ChopClipDialog: React.FC<Props> = ({ target, tracks, bpm, isMobile, setSta
         id: `sl-${i}-${Date.now().toString(36)}`, pitch: sliceNote(i, 48), start: s.start * dur, duration: (s.end - s.start) * dur, velocity: 1,
       }));
       createSamplerTrack({ name: `Tranches ${clip.name || ''}`.trim(), settings, notes, start: clip.start, duration: clip.duration, afterTrackId: track.id });
-      notify(`✂️ ${slices.length} tranches de « ${clip.name || 'Clip'} » sur les notes ${noteName(48)} à ${noteName(48 + slices.length - 1)} d’un sampler, avec un clip MIDI qui rejoue l’original : déplace les notes pour remixer (comme Slicex de FL ou « Slice to MIDI » de Live).`);
+      notify(`✂️ ${slices.length} tranches de « ${clip.name || 'Clip'} » sur les notes ${noteName(48)} à ${noteName(48 + slices.length - 1)} d’un sampler, avec un clip MIDI qui rejoue l’original : déplace les notes pour remixer.`);
     } else {
       const st = getState();
       const dm0 = (st.tracks.find(t => t.id === 'track-drums')?.drumMachine as DrumMachine | undefined) || makeDrumMachine('empty');
@@ -199,9 +199,9 @@ const ChopClipDialog: React.FC<Props> = ({ target, tracks, bpm, isMobile, setSta
         <div className="p-3 flex flex-col gap-3 overflow-y-auto">
           <div className="flex flex-wrap items-center gap-2">
             {seg(mode, [
-              ['transients', 'Attaques', 'Une tranche par attaque (transitoire), comme Slicex de FL ou le mode « Transient » de Simpler'],
-              ['grid', 'Grille', 'Une tranche par division de la mesure au tempo du projet (« Beat » dans Simpler, « Auto-slice » de FL)'],
-              ['equal', 'Égales', 'N tranches de même longueur (« Region » dans Simpler)'],
+              ['transients', 'Attaques', 'Une tranche par attaque (transitoire)'],
+              ['grid', 'Grille', 'Une tranche par division de la mesure au tempo du projet'],
+              ['equal', 'Égales', 'N tranches de même longueur'],
             ], v => setMode(v as Mode), 'Découper')}
             {mode === 'transients' && (
               <label className="flex items-center gap-2 text-[12px] text-nv-muted" title="Plus haut : trouve aussi les attaques faibles">
@@ -228,8 +228,8 @@ const ChopClipDialog: React.FC<Props> = ({ target, tracks, bpm, isMobile, setSta
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[12px] text-nv-muted">Vers</span>
             {seg(dest, [
-              ['notes', 'Notes (sampler)', 'Une tranche par note d’un sampler, à partir de C3, avec un clip MIDI qui rejoue l’original (Live : Slice to New MIDI Track · Logic : Quick Sampler en Slice)'],
-              ['pads', 'Pads (batterie)', 'Une tranche par pad de la boîte à rythmes, avec le motif « Découpe » (FL : Slicex / Fruity Slicer)'],
+              ['notes', 'Notes (sampler)', 'Une tranche par note d’un sampler, à partir de C3, avec un clip MIDI qui rejoue l’original'],
+              ['pads', 'Pads (batterie)', 'Une tranche par pad de la boîte à rythmes, avec le motif « Découpe »'],
             ], v => setDest(v as 'notes' | 'pads'), 'Vers')}
             <label className="flex items-center gap-2 text-[12px] text-nv-muted ml-auto">
               <input type="checkbox" checked={muteOriginal} onChange={e => setMuteOriginal(e.target.checked)} className="w-5 h-5 accent-pink-500" />Couper le clip d’origine

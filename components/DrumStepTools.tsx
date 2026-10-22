@@ -96,7 +96,7 @@ export const KitBar: React.FC<{
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="kit-bar">
-      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-1" title="Kits perso : les sons et réglages de tes pads, réutilisables d'un projet à l'autre (preset de Drum Rack dans Live, kit du Channel Rack dans FL)">Mes kits</span>
+      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-1" title="Kits perso : les sons et réglages de tes pads, réutilisables d'un projet à l'autre">Mes kits</span>
       {naming ? (
         <form className="flex items-center gap-1" onSubmit={e => { e.preventDefault(); void confirmName(); }}>
           <input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={40} aria-label="Nom du kit" data-testid="kit-name"
@@ -140,9 +140,9 @@ export const KitBar: React.FC<{
 // ===== Éditeur de graphe (FL : Graph Editor) =====
 
 const PARAMS: { id: StepParam; label: string; hint: string }[] = [
-  { id: 'vel', label: 'Vélocité', hint: 'Force de chaque pas (Graph Editor de FL Studio, Velocity dans Live)' },
-  { id: 'pan', label: 'Pan', hint: 'Panoramique de chaque pas, ajouté à celui du pad (Pan du Graph Editor de FL)' },
-  { id: 'pitch', label: 'Hauteur', hint: 'Hauteur de chaque pas en demi-tons, ajoutée à l’accordage du pad (Pitch du Graph Editor de FL)' },
+  { id: 'vel', label: 'Vélocité', hint: 'Force de chaque pas' },
+  { id: 'pan', label: 'Pan', hint: 'Panoramique de chaque pas, ajouté à celui du pad' },
+  { id: 'pitch', label: 'Hauteur', hint: 'Hauteur de chaque pas en demi-tons, ajoutée à l’accordage du pad' },
 ];
 
 export const StepGraph: React.FC<{
@@ -201,7 +201,7 @@ export const StepGraph: React.FC<{
           );
         })}
       </div>
-      <p className="mt-1 text-[10px] text-slate-500">Glisse sur les barres pour régler chaque pas allumé (comme le Graph Editor de FL Studio).</p>
+      <p className="mt-1 text-[10px] text-slate-500">Glisse sur les barres pour régler chaque pas allumé.</p>
     </div>
   );
 };
@@ -226,14 +226,14 @@ export const RowTiming: React.FC<{ dm: DrumMachine; rowIndex: number; onChange: 
               className={`h-10 px-2.5 text-[12px] font-bold ${(row.rate || '16') === r.id ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{r.label}</button>
           ))}
         </div>
-        <div className="flex items-center gap-1" title="Longueur de la rangée en pas : plus courte que le motif, elle boucle toute seule (polymétrie, comme les longueurs de rangée de Bitwig ou de la Drum Machine de Logic)">
+        <div className="flex items-center gap-1" title="Longueur de la rangée en pas : plus courte que le motif, elle boucle toute seule">
           <span className="text-[12px] text-slate-400">Longueur</span>
           <button type="button" onClick={() => onChange(setRowLength(dm, rowIndex, Math.max(1, len - 1)))} aria-label="Raccourcir la rangée d'un pas" className="nova-hit w-9 h-10 rounded-lg bg-white/10 text-white">−</button>
           <span className="min-w-[44px] text-center text-[12px] font-black text-white tabular-nums" data-testid="row-len">{len}</span>
           <button type="button" onClick={() => onChange(setRowLength(dm, rowIndex, Math.min(full, len + 1)))} aria-label="Allonger la rangée d'un pas" className="nova-hit w-9 h-10 rounded-lg bg-white/10 text-white">+</button>
           {row.len ? <button type="button" onClick={() => onChange(setRowLength(dm, rowIndex, 0))} className="h-10 px-2 text-[11px] text-cyan-300">tout le motif</button> : null}
         </div>
-        <label className="flex items-center gap-2 text-[12px] text-slate-400" title="Swing de cette rangée seulement (le reste garde le swing global), comme le swing par canal de FL Studio">
+        <label className="flex items-center gap-2 text-[12px] text-slate-400" title="Swing de cette rangée seulement (le reste garde le swing global)">
           Swing
           <input type="range" min={-0.05} max={0.6} step={0.05} value={typeof row.swing === 'number' ? row.swing : -0.05}
             onChange={e => { const v = parseFloat(e.target.value); edit({ swing: v < 0 ? undefined : v }); }} className="w-24 accent-cyan-400" aria-label="Swing de la rangée" />

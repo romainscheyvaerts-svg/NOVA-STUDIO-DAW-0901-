@@ -37,9 +37,9 @@ export interface DrumPattern {
 /** Résolution d'une rangée : 1/16, 1/32, triolets de croches (1/8 T) ou de doubles-croches (1/16 T). */
 export type StepRate = '16' | '32' | '8t' | '16t';
 export const STEP_RATES: { id: StepRate; label: string; perBar: number; hint: string }[] = [
-  { id: '16', label: '1/16', perBar: 16, hint: 'Doubles-croches : la grille classique de FL Studio.' },
+  { id: '16', label: '1/16', perBar: 16, hint: 'Doubles-croches : la grille classique du beatmaking.' },
   { id: '32', label: '1/32', perBar: 32, hint: 'Triples-croches : hi-hats trap très rapides.' },
-  { id: '16t', label: '1/16 T', perBar: 24, hint: 'Triolets de doubles-croches (rolls drill, comme la grille « triplet » de FL Studio et Live).' },
+  { id: '16t', label: '1/16 T', perBar: 24, hint: 'Triolets de doubles-croches (rolls drill).' },
   { id: '8t', label: '1/8 T', perBar: 12, hint: 'Triolets de croches : sensation ternaire.' },
 ];
 /** Pas par mesure d'une rangée. */
@@ -330,7 +330,7 @@ const rep = (four: number[]) => [...four, ...four, ...four, ...four];
 
 export const GROOVES: GrooveDef[] = [
   { id: 'none', name: 'Droit', hint: 'Sans groove : tout tombe pile sur la grille.', timing: rep([0, 0, 0, 0]), velocity: rep([1, 1, 1, 1]) },
-  { id: 'mpc', name: 'MPC 16e', hint: 'Swing de double-croches façon MPC 60 (66 %), comme les grooves « MPC » du Groove Pool d\'Ableton.', timing: rep([0, 0.33, 0, 0.33]), velocity: rep([1, 0.78, 0.92, 0.78]) },
+  { id: 'mpc', name: 'Swing 16e', hint: 'Swing de double-croches à l’ancienne (66 %) : le groove boom bap des boîtes à rythmes classiques.', timing: rep([0, 0.33, 0, 0.33]), velocity: rep([1, 0.78, 0.92, 0.78]) },
   { id: 'shuffle', name: 'Shuffle', hint: 'Croches ternaires (sensation triolet), boom bap et R&B.', timing: rep([0, 0.25, 0.67, 0.5]), velocity: rep([1, 0.7, 0.86, 0.7]) },
   { id: 'laidback', name: 'En arrière', hint: 'Caisse claire et contretemps un peu en retard : groove posé, façon Dilla.', timing: [0, 0.1, 0.05, 0.12, 0.14, 0.1, 0.05, 0.12, 0, 0.1, 0.05, 0.12, 0.14, 0.1, 0.05, 0.12], velocity: rep([1, 0.8, 0.9, 0.8]) },
   { id: 'push', name: 'En avant', hint: 'Contretemps légèrement en avance : drill, afro, énergie qui pousse.', timing: rep([0, -0.08, -0.04, -0.1]), velocity: rep([1, 0.85, 0.95, 0.88]) },

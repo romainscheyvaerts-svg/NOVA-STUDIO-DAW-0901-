@@ -92,7 +92,7 @@ const PadSampleTools: React.FC<Props> = ({ dm, rowIndex, onChange, onAudition, s
         <input ref={fileRef} data-nova-pad-file="" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
           onChange={e => { void importFile(e.target.files?.[0]); e.target.value = ''; }} />
         <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={btn}
-          title="Mets TON son sur ce pad (comme glisser un sample dans le Drum Rack d'Ableton). Tu peux aussi glisser un fichier sur le nom du pad.">
+          title="Mets TON son sur ce pad. Tu peux aussi glisser un fichier sur le nom du pad.">
           <i className="fas fa-file-import mr-1" />{busy ? 'Chargement…' : 'Ton son'}
         </button>
         <button type="button" onClick={() => setClipsOpen(v => !v)} aria-expanded={clipsOpen} disabled={!sessionClips.length} className={btn}
@@ -101,7 +101,7 @@ const PadSampleTools: React.FC<Props> = ({ dm, rowIndex, onChange, onAudition, s
         </button>
         {src && (
           <button type="button" onClick={() => onChop({ buffer: src, name: info?.name || row.name })} className={btn}
-            title="Découper ce son en tranches sur des pads (comme Slicex dans FL Studio ou Simpler en mode Slice dans Ableton)">
+            title="Découper ce son en tranches sur des pads">
             <i className="fas fa-cut mr-1" />Découper
           </button>
         )}
@@ -133,12 +133,12 @@ const PadSampleTools: React.FC<Props> = ({ dm, rowIndex, onChange, onAudition, s
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => edit({ reverse: !row.reverse })} aria-pressed={!!row.reverse}
-          title="Jouer le son à l'envers (comme « Reverse » dans le sampler de canal de FL Studio)"
+          title="Jouer le son à l'envers"
           className={`nova-hit h-9 px-3 rounded-lg text-[11px] font-black ${row.reverse ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>
           <i className="fas fa-backward mr-1" />Reverse
         </button>
         <label className="flex items-center gap-1.5 text-[11px] text-slate-300"
-          title="Groupe de choke : les pads d'un même groupe se coupent (le hi-hat fermé coupe l'ouvert), comme les Choke groups du Drum Rack d'Ableton ou le « Cut by » de FL Studio">
+          title="Groupe de choke : les pads d'un même groupe se coupent (le hi-hat fermé coupe l'ouvert)">
           Choke
           <select value={row.choke || 0} onChange={e => edit({ choke: parseInt(e.target.value, 10) || undefined })}
             className="h-9 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[11px] text-white">

@@ -68,9 +68,9 @@ type Status = 'idle' | 'countin' | 'recording' | 'analyzing' | 'ready' | 'empty'
 const notify = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
 const isPhone = () => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
 const TITLES: Record<ConvertMode, { title: string; tip: string; icon: string }> = {
-  melody: { title: 'Fredonne → MIDI', icon: 'fa-microphone-lines', tip: 'Ta mélodie chantée ou fredonnée devient des notes MIDI (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic).' },
-  drums: { title: 'Batterie → MIDI', icon: 'fa-drum', tip: 'Une boucle de batterie devient un motif : kick, snare / clap et hi-hat (comme Convert Drums to MIDI d’Ableton Live).' },
-  harmony: { title: 'Harmonie → MIDI', icon: 'fa-guitar', tip: 'Les accords d’un sample ou d’un beat deviennent des accords MIDI (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic).' },
+  melody: { title: 'Fredonne → MIDI', icon: 'fa-microphone-lines', tip: 'Ta mélodie chantée ou fredonnée devient des notes MIDI.' },
+  drums: { title: 'Batterie → MIDI', icon: 'fa-drum', tip: 'Une boucle de batterie devient un motif : kick, snare / clap et hi-hat.' },
+  harmony: { title: 'Harmonie → MIDI', icon: 'fa-guitar', tip: 'Les accords d’un sample ou d’un beat deviennent des accords MIDI.' },
 };
 const GRID_CHOICES = [{ v: 1, label: '1/4' }, { v: 0.5, label: '1/8' }, { v: 0.25, label: '1/16' }];
 
@@ -510,9 +510,9 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
             {(!simple || showSettings) && (
               <div className="mb-3 space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                 <Slider label={key ? `Caler sur la gamme (${keyLabelFr(key.root, key.scale)}${key.guessed ? ', devinée sur ta mélodie' : ''})` : 'Caler sur la gamme (gamme inconnue)'} value={scaleAmt} onChange={setScaleAmt} disabled={!key}
-                  hint="0 % : la note la plus proche de ce que tu chantes ; 100 % : toujours une note de la gamme (comme le Scale de Live ou la gamme du Flex Pitch de Logic)." testId="hum-scale" />
+                  hint="0 % : la note la plus proche de ce que tu chantes ; 100 % : toujours une note de la gamme." testId="hum-scale" />
                 <div className="flex items-end gap-2">
-                  <div className="flex-1"><Slider label="Caler sur la grille" value={gridAmt} onChange={setGridAmt} hint="0 % : ton timing exact ; 100 % : pile sur la grille (quantification, comme le Quantize de Logic et Live)." testId="hum-grid" /></div>
+                  <div className="flex-1"><Slider label="Caler sur la grille" value={gridAmt} onChange={setGridAmt} hint="0 % : ton timing exact ; 100 % : pile sur la grille." testId="hum-grid" /></div>
                   <div className="flex gap-1 pb-0.5" role="radiogroup" aria-label="Pas de grille">
                     {GRID_CHOICES.map(g => (
                       <button key={g.v} type="button" role="radio" aria-checked={gridBeats === g.v} onClick={() => setGridBeats(g.v)}
@@ -692,7 +692,7 @@ export const HumQuickButtons: React.FC<{ onOpen?: () => void; compact?: boolean 
         const i = humInstrument(id);
         return (
           <button key={id} type="button" onClick={() => open(id)} data-hum={id}
-            title={`Fredonne ta mélodie (ou prends ta dernière prise) : elle devient ${id === '808' ? 'une ligne de 808' : 'un piano'} (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic).`}
+            title={`Fredonne ta mélodie (ou prends ta dernière prise) : elle devient ${id === '808' ? 'une ligne de 808' : 'un piano'}.`}
             className="min-h-11 px-3 rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-100 text-[12px] font-black hover:bg-fuchsia-500/20 flex-1">
             {i.emoji} Fredonne → {i.label}
           </button>

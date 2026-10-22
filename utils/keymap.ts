@@ -276,15 +276,15 @@ export const KEYMAP: ShortcutDef[] = [
 
   // --- Piano roll ouvert (components/PianoRoll) : passe avant les raccourcis globaux ---
   pr({ id: 'pr.close', keys: ['escape'], label: 'Fermer le piano roll' }),
-  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Mute Notes (Ctrl+M) · FL : Alt+M' }),
+  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)' }),
   pr({ id: 'pr.delete', keys: ['delete', 'backspace'], label: 'Effacer les notes sélectionnées' }),
   pr({ id: 'pr.selectAll', keys: ['ctrl+a'], label: 'Sélectionner toutes les notes' }),
-  pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite', pt: 'FL : Ctrl+B · Live : Ctrl+D' }),
+  pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite' }),
   pr({ id: 'pr.up', keys: ['arrowup'], label: 'Transposer d’un demi-ton vers le haut' }),
   pr({ id: 'pr.down', keys: ['arrowdown'], label: 'Transposer d’un demi-ton vers le bas' }),
   pr({ id: 'pr.octUp', keys: ['ctrl+arrowup'], label: 'Transposer d’une octave vers le haut' }),
   pr({ id: 'pr.octDown', keys: ['ctrl+arrowdown'], label: 'Transposer d’une octave vers le bas' }),
-  pr({ id: 'pr.quantize', keys: ['q'], label: 'Quantifier les notes (sélection, sinon tout le clip)', pt: 'Alt+0 (Quantize) · FL : Ctrl+Alt+Q · Live : Ctrl+U' }),
+  pr({ id: 'pr.quantize', keys: ['q'], label: 'Quantifier les notes (sélection, sinon tout le clip)' }),
   pr({ id: 'pr.humanize', keys: ['h'], label: 'Humaniser (petits décalages de temps et de vélocité)' }),
   // Piano roll pro (15/10/2026) : presse-papiers, déplacement à la grille, glissés, outils (lettres de FL Studio).
   pr({ id: 'pr.copy', keys: ['ctrl+c'], label: 'Copier les notes sélectionnées' }),
@@ -292,12 +292,12 @@ export const KEYMAP: ShortcutDef[] = [
   pr({ id: 'pr.paste', keys: ['ctrl+v'], label: 'Coller les notes à la tête de lecture' }),
   pr({ id: 'pr.left', keys: ['arrowleft'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la gauche' }),
   pr({ id: 'pr.right', keys: ['arrowright'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la droite' }),
-  pr({ id: 'pr.slide', keys: ['s'], label: 'Glissé : bascule les notes sélectionnées (sinon, les prochaines notes posées glissent)', pt: 'FL : Slide' }),
-  pr({ id: 'pr.toolDraw', keys: ['p'], label: 'Outil crayon', pt: 'FL : P' }),
-  pr({ id: 'pr.toolPaint', keys: ['b'], label: 'Outil pinceau (peindre des notes à la suite)', pt: 'FL : B' }),
-  pr({ id: 'pr.toolSelect', keys: ['e'], label: 'Outil sélection', pt: 'FL : E' }),
-  pr({ id: 'pr.toolSlice', keys: ['c'], label: 'Outil couteau (couper une note)', pt: 'FL : C' }),
-  pr({ id: 'pr.toolErase', keys: ['d'], label: 'Outil gomme', pt: 'FL : D' }),
+  pr({ id: 'pr.slide', keys: ['s'], label: 'Glissé : bascule les notes sélectionnées (sinon, les prochaines notes posées glissent)' }),
+  pr({ id: 'pr.toolDraw', keys: ['p'], label: 'Outil crayon' }),
+  pr({ id: 'pr.toolPaint', keys: ['b'], label: 'Outil pinceau (peindre des notes à la suite)' }),
+  pr({ id: 'pr.toolSelect', keys: ['e'], label: 'Outil sélection' }),
+  pr({ id: 'pr.toolSlice', keys: ['c'], label: 'Outil couteau (couper une note)' }),
+  pr({ id: 'pr.toolErase', keys: ['d'], label: 'Outil gomme' }),
 
   // --- Clavier MIDI de l'ordinateur (piano roll, bouton « Clavier » allumé) -------
   ...MIDI_KEYBOARD_SHORTCUTS,

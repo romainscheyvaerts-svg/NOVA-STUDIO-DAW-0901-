@@ -34,8 +34,8 @@ const has = (id: string) => !!audioBufferRegistry.get(id);
 
 const AlgoHelp: Record<ElasticInfo['algo'], { label: string; title: string }> = {
   auto: { label: 'Auto', title: 'NOVA écoute le son et choisit : voix seule → moteur voix ; beat, sample, accords → moteur polyphonique (choix automatique de l’algorithme).' },
-  voice: { label: 'Voix', title: 'Voix seule (PSOLA, comme la justesse note par note) : timbre naturel, pas d’effet « chipmunk » (Monophonic · Logic : Flex Pitch · Live : Tones).' },
-  poly: { label: 'Beat / sample', title: 'Son polyphonique (beat entier, sample, accords) : vocodeur de phase avec attaques nettes (Polyphonic · Logic : Polyphonic · Live : Complex Pro · FL : Pro mode).' },
+  voice: { label: 'Voix', title: 'Voix seule (PSOLA, comme la justesse note par note) : timbre naturel, pas d’effet « chipmunk ».' },
+  poly: { label: 'Beat / sample', title: 'Son polyphonique (beat entier, sample, accords) : vocodeur de phase avec attaques nettes.' },
 };
 
 const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState, onClose, simple = false }) => {
@@ -150,7 +150,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">{simple ? 'Changer la tonalité' : 'Transposer / étirer le clip'}</h2>
-            <p className="text-[11px] text-nv-muted" title="Logic : Flex Pitch · Live : Transpose et Warp · FL : Pitch et Stretch du clip">
+            <p className="text-[11px] text-nv-muted">
               {resolved.length > 1 ? `${resolved.length} clips` : `« ${first!.elastic?.sourceName || first!.name} »`} · la hauteur change, pas le tempo. L'original est gardé.
             </p>
           </div>
@@ -172,7 +172,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
           <input type="range" min={-12} max={12} step={1} value={semis} onChange={e => setSemis(Number(e.target.value))} aria-label="Demi-tons" data-testid="transpose-semitones"
             title="−12 à +12 demi-tons (une octave de chaque côté)" className="w-full accent-cyan-500" />
           {!simple && (
-            <label className="flex items-center gap-2 text-[11px]" title="Réglage fin, au cent près (100 cents = 1 demi-ton) : accorder un sample sur le beat (Live : Detune · ailleurs : Fine).">
+            <label className="flex items-center gap-2 text-[11px]" title="Réglage fin, au cent près (100 cents = 1 demi-ton) : accorder un sample sur le beat.">
               <span className="w-16 text-nv-muted">Cents</span>
               <input type="range" min={-50} max={50} step={1} value={cents} onChange={e => setCents(Number(e.target.value))} aria-label="Cents" data-testid="transpose-cents" className="flex-1 accent-cyan-500" />
               <input type="number" min={-50} max={50} value={cents} onChange={e => setCents(Math.max(-50, Math.min(50, Math.round(Number(e.target.value) || 0))))} aria-label="Cents (valeur)"
@@ -191,14 +191,14 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
                     className={`flex-1 min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg px-2 text-[12px] font-bold ${algo === a ? 'bg-cyan-500 text-black' : 'text-nv-muted hover:bg-nv-accent/10'}`}>{AlgoHelp[a].label}</button>
                 ))}
               </div>
-              <label className="flex items-center gap-2 text-[12px] min-h-[36px]" title="Garder le timbre (formants) : la voix reste la même personne, juste plus haut ou plus bas. Décoché : effet « chipmunk » / voix grave, comme un disque accéléré (Logic : Formant · Live : Formants de Complex Pro · Melodyne : formants).">
+              <label className="flex items-center gap-2 text-[12px] min-h-[36px]" title="Garder le timbre (formants) : la voix reste la même personne, juste plus haut ou plus bas. Décoché : effet « chipmunk » / voix grave, comme un disque accéléré.">
                 <input type="checkbox" checked={formants} onChange={e => { setFormants(e.target.checked); setFormantsTouched(true); }} data-testid="transpose-formants" className="h-4 w-4 accent-cyan-500" />
                 Garder le timbre (formants)
               </label>
             </div>
 
             <div className="rounded-xl bg-nv-well p-3 space-y-2">
-              <label className="flex items-center gap-2 text-[12px]" title="Durée du clip, hauteur inchangée (Trim TCE · Logic : Flex Time · Live : Warp · FL : Stretch). Plus rapide : tire le bord du clip avec Alt.">
+              <label className="flex items-center gap-2 text-[12px]" title="Durée du clip, hauteur inchangée. Plus rapide : tire le bord du clip avec Alt.">
                 <span className="w-16 text-nv-muted">Durée</span>
                 <input type="range" min={50} max={200} step={0.5} value={Math.min(200, Math.max(50, pct))} onChange={e => setRatio(Number(e.target.value) / 100)} aria-label="Durée en pourcentage" data-testid="transpose-stretch" className="flex-1 accent-cyan-500" />
                 <input type="number" min={MIN_STRETCH * 100} max={MAX_STRETCH * 100} step={0.1} value={pct} onChange={e => setRatio(Math.max(MIN_STRETCH, Math.min(MAX_STRETCH, (Number(e.target.value) || 100) / 100)))}
@@ -210,7 +210,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
                 <input type="number" min={30} max={300} step={0.01} value={sampleBpm} placeholder="BPM" onChange={e => { setSampleBpm(e.target.value); setEstimated(false); }} aria-label="Tempo du sample (BPM)" data-testid="transpose-sample-bpm"
                   className="w-20 rounded-lg border border-nv-line bg-nv-panel px-2 py-1 text-right text-[12px] tabular-nums" />
                 <button type="button" onClick={fitTempo} className={`${btn} flex-1`} data-testid="transpose-fit-tempo"
-                  title="Cale le sample sur le tempo du projet, sans changer sa hauteur (Live : Warp · Logic : Smart Tempo)">
+                  title="Cale le sample sur le tempo du projet, sans changer sa hauteur">
                   <i className="fas fa-clock mr-1.5" />Caler sur {Math.round(bpm * 100) / 100} BPM
                 </button>
               </div>

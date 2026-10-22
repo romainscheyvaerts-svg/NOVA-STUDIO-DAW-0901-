@@ -82,7 +82,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
               <input type="range" min={0} max={1} step={0.01} value={settings.volume} onChange={e => onChange({ volume: Number(e.target.value) })} className="w-full h-8" aria-label="Volume du clic" />
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center gap-2 text-[12px] font-bold" title="Le premier temps de chaque mesure plus fort et plus aigu (Accented ; Logic : Mesure / Temps)">
+              <label className="flex items-center gap-2 text-[12px] font-bold" title="Le premier temps de chaque mesure plus fort et plus aigu">
                 <input type="checkbox" checked={settings.accentDownbeat} onChange={e => onChange({ accentDownbeat: e.target.checked })} className="w-5 h-5" />
                 Accent sur le 1er temps
               </label>
@@ -96,7 +96,7 @@ const MetronomeDialog: React.FC<Props> = ({ open, onClose, settings, onChange, c
               <span className="text-[11px] font-bold text-nv-muted">Quand</span>
               <div className="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Quand le clic sonne">
                 <button type="button" role="radio" aria-checked={settings.mode !== 'record'} onClick={() => onChange({ mode: 'always' })} className={chip(settings.mode !== 'record')}
-                  title="Le clic sonne à la lecture et pendant la prise (Logic : clic en lecture)">Lecture et prise</button>
+                  title="Le clic sonne à la lecture et pendant la prise">Lecture et prise</button>
                 <button type="button" role="radio" aria-checked={settings.mode === 'record'} onClick={() => onChange({ mode: 'record' })} className={chip(settings.mode === 'record')}
                   data-testid="metro-mode-record" title="Le clic ne sonne que pendant l'enregistrement (Only During Record)">Prise seulement</button>
               </div>

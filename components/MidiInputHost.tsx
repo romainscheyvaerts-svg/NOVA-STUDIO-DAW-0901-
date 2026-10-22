@@ -194,7 +194,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
           )}
           <label className="flex items-center gap-2 text-[12px] min-h-10">
             <input type="checkbox" className="w-5 h-5 accent-cyan-400" checked={kbOn} onChange={e => computerKeyboardStore.setOn(e.target.checked)} />
-            <span><b>Clavier de l’ordinateur</b> <span className="text-nv-muted">(Ctrl+Maj+K) : les lettres jouent sur la piste {target ? `« ${target.name} »` : 'MIDI sélectionnée'}, sans ouvrir le piano roll (Computer MIDI Keyboard de Live, Typing keyboard de FL)</span></span>
+            <span><b>Clavier de l’ordinateur</b> <span className="text-nv-muted">(Ctrl+Maj+K) : les lettres jouent sur la piste {target ? `« ${target.name} »` : 'MIDI sélectionnée'}, sans ouvrir le piano roll</span></span>
           </label>
           <label className="flex items-center gap-2 text-[12px] min-h-10" title="MIDI Thru. La piste armée (sinon la piste MIDI sélectionnée) joue ce que tu joues, tout de suite.">
             <input type="checkbox" className="w-5 h-5 accent-cyan-400" checked={prefs.thru} onChange={e => midiInput.setPrefs({ thru: e.target.checked })} />
@@ -216,7 +216,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
               <button type="button" role="radio" aria-checked={prefs.loopStyle === 'takes'} data-nova-loop-style="takes" onClick={() => midiInput.setPrefs({ loopStyle: 'takes' })} className={chip(prefs.loopStyle === 'takes')}
                 title="Chaque tour devient une prise ; la dernière complète joue, les autres restent muettes en dessous pour comparer (Loop Record)">Une prise par tour</button>
               <button type="button" role="radio" aria-checked={prefs.loopStyle === 'merge'} data-nova-loop-style="merge" onClick={() => midiInput.setPrefs({ loopStyle: 'merge' })} className={chip(prefs.loopStyle === 'merge')}
-                title="Chaque tour s’ajoute au précédent : kick au 1er tour, snare au 2e, charley au 3e (FL : Overdub en boucle, Live : MIDI Overdub)">Tout fusionner</button>
+                title="Chaque tour s’ajoute au précédent : kick au 1er tour, snare au 2e, charley au 3e">Tout fusionner</button>
             </div>
           )}
           <label className="flex items-center gap-2 text-[12px] min-h-10" title="Input Quantize. Les débuts de notes vont sur la grille pendant l’enregistrement.">
@@ -255,7 +255,7 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
 
         {/* MIDI Learn */}
         <section className="space-y-2">
-          <div className="text-[11px] font-black uppercase tracking-widest text-nv-muted">MIDI Learn <span className="normal-case font-normal">· un bouton de ton clavier pilote un réglage (FL : Link to controller, Live : MIDI Map)</span></div>
+          <div className="text-[11px] font-black uppercase tracking-widest text-nv-muted">MIDI Learn <span className="normal-case font-normal">· un bouton de ton clavier pilote un réglage</span></div>
           <div className="flex flex-wrap gap-2">
             <select aria-label="Piste du réglage" value={learnTrack?.id || ''} onChange={e => { setLearnTrackId(e.target.value); setLearnWhat('volume'); }}
               className="h-10 rounded-lg bg-nv-well border border-nv-line px-2 text-[12px] text-nv-ink flex-1 min-w-[8rem]">
