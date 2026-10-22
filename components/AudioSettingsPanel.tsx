@@ -15,6 +15,8 @@ import { MonitorVolume, SoloListenChoice } from './MonitorSection';
 import TalkbackSettings from './TalkbackSettings';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
 import { rateLabel } from '../utils/projectRate';
+import { dspMonitor } from '../engine/dspMonitor';
+import { canShareMemory } from '../engine/takeRing';
 
 /**
  * R14 / R15 · Enregistrement multipiste : armement (plusieurs pistes ou une seule),
@@ -102,6 +104,23 @@ const MultitrackSettings: React.FC = () => {
   );
 };
 
+/**
+ * État du moteur en une ligne : coupures du son sur la dernière minute (sous-régimes mesurés par le
+ * navigateur), où s'écrivent les prises, et la dernière prise si des images y manquent.
+ */
+const EngineHealth: React.FC = () => {
+  const [under, setUnder] = useState(() => dspMonitor.getState().underrunsPerMin);
+  useEffect(() => dspMonitor.subscribe(st => setUnder(st.underrunsPerMin)), []);
+  const take = audioEngine.getLastTakeHealth();
+  const lost = take && take.lost > 0 ? ` · dernière prise : ${(take.lost / take.sampleRate).toFixed(2).replace('.', ',')} s perdues` : '';
+  return (
+    <p className="text-[10px] text-slate-500 leading-snug" data-testid="etat-moteur">
+      {under > 0 ? <span className="text-amber-300">{under} coupure{under > 1 ? 's' : ''} du son (1 min)</span> : 'Aucune coupure du son'}
+      {' · '}prises enregistrées au fil de l'eau{canShareMemory() ? '' : ' (mode compatible)'}{lost}
+    </p>
+  );
+};
+
 /** Latence mesurée en direct + réglage fin du recalage des prises. */
 const LatencyCompensation: React.FC = () => {
   const [lat, setLat] = useState<{ ms: number; mode: string } | null>(() => {
@@ -153,6 +172,7 @@ const LatencyCompensation: React.FC = () => {
           className="w-full accent-emerald-400" aria-label="Réglage fin du recalage des prises (ms)" />
         <span className="flex justify-between text-[10px] text-slate-500"><span>− voix plus tard</span><span>+ voix plus tôt</span></span>
       </label>
+      <EngineHealth />
     </div>
   );
 };

@@ -2383,6 +2383,20 @@ export class AudioEngine {
       stream = await navigator.mediaDevices.getUserMedia({ audio: base });
     }
     const track = stream.getAudioTracks()[0];
+    // Micro débranché (casque USB, carte son) : NOVA rouvre l'entrée choisie, sinon celle de Windows,
+    // comme la sortie (outputDeviceWatch). Pendant une prise : la prise continue (silence à la place,
+    // horloge gardée) et l'entrée est rouverte juste après.
+    track?.addEventListener('ended', () => {
+      if (this.activeMonitorStream !== stream) return;
+      const say = (m: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: m })); } catch { /* */ } };
+      if (this.recordingTrackId || this.recSession) {
+        this.inputLostDuringTake = true;
+        say('🎙️ Micro débranché pendant la prise : elle continue (en silence) ; NOVA rouvre le micro dès l’arrêt.');
+        return;
+      }
+      say('🎙️ Micro débranché : NOVA passe sur le micro disponible (celui de Windows si le tien n’est plus là).');
+      void this.refreshInputSource();
+    });
     let channels = 0;
     try { channels = Number((track?.getSettings() as any)?.channelCount) || 0; } catch { /* */ }
     try { const max = Number((track as any)?.getCapabilities?.()?.channelCount?.max); if (max > 0) this.browserMaxChannels = max; } catch { /* */ }
@@ -2396,6 +2410,9 @@ export class AudioEngine {
     try { oldSrc?.disconnect(); } catch { /* */ }
     if (oldStream && oldStream !== stream) this.stopInputStream(oldStream);
   }
+
+  /** Le micro a disparu pendant une prise : rouvert à l'arrêt. */
+  private inputLostDuringTake = false;
 
   /** Plus aucune piste armée : le micro est fermé (le flux de la carte, partagé, reste). */
   private closeInputSource() {
@@ -3162,6 +3179,7 @@ export class AudioEngine {
 
     const { channels, firstFrame } = await session.stop(src);
     try { input?.dispose(); } catch { /* */ }
+    if (this.inputLostDuringTake) { this.inputLostDuringTake = false; void this.refreshInputSource(); }
     // Santé de la prise (Réglages audio, QA) : chemin des échantillons, images écrites durablement, perdues.
     const wr = session.writerReport;
     this.lastTakeHealth = { at: Date.now(), transport: session.transport, frames: channels?.[0]?.length || 0, durable: wr?.durable ?? null, lost: wr?.lost ?? 0, allocs: wr?.allocs ?? 0, error: wr?.error || session.writerWarning || null, sampleRate: ctx.sampleRate };
