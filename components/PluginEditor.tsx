@@ -27,6 +27,7 @@ import { getRegisteredPlugin } from '../engine/pluginRegistry';
 import PresetMenu from './PresetMenu';
 import SidechainPanel from './SidechainPanel';
 import { supportsSidechain } from '../engine/sidechain';
+import { getPluginWindowOffset, setPluginWindowOffset } from '../utils/pluginWindowPos';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -44,12 +45,22 @@ interface PluginEditorProps {
   onOpenPlugin?: (trackId: string, plugin: PluginInstance) => void;
   /** Toutes les pistes (side-chain : choix de la clé, R7). */
   allTracks?: Track[];
+  /** Fenêtre gardée ouverte (punaise ou Maj+clic) : le prochain effet s'ouvre dans une autre fenêtre. */
+  kept?: boolean;
+  /** Position de départ (fenêtres en cascade). */
+  initialOffset?: { x: number; y: number };
+  /** Fenêtre de devant : la seule que ferme Échap (vrai par défaut). */
+  escapeActive?: boolean;
+  /** Nombre de fenêtres d'effet ouvertes (« Tout fermer » à partir de 2). */
+  openCount?: number;
+  /** Punaise : garder / ne plus garder la fenêtre ouverte (position actuelle transmise). */
+  onToggleKeep?: (offset: { x: number; y: number }) => void;
+  /** Fermer toutes les fenêtres d'effet (Maj+Échap). */
+  onCloseAll?: () => void;
 }
 
-/** Position de la fenêtre d'effet (gardée d'un effet à l'autre pendant la session). */
-let windowOffset = { x: 0, y: 0 };
 
-const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin, allTracks }) => {
+const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin, allTracks, kept = false, initialOffset, escapeActive = true, openCount = 1, onToggleKeep, onCloseAll }) => {
   // Rappel STABLE vers le projet : App en recrée un à chaque rendu ; les effets qui
   // remontent leurs réglages dans un useEffect([params, onParamsChange]) bouclaient
   // à l'infini (Saturation : « Maximum update depth exceeded », NOVA planté).
@@ -62,30 +73,58 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   const pos = chain.findIndex(p => p.id === plugin.id);
   const prev = pos > 0 ? chain[pos - 1] : null;
   const next = pos >= 0 && pos < chain.length - 1 ? chain[pos + 1] : null;
-  // Échap ferme la fenêtre (sauf pendant une saisie).
+  // Échap ferme la fenêtre de devant (sauf pendant une saisie) ; Maj+Échap ferme toutes les fenêtres d'effet.
+  // Écouté à la capture : traité une seule fois, avant le « Échap ferme la fenêtre du dessus » général
+  // de l'appli (qui, avec plusieurs fenêtres, se rejouait sur la suivante). Un menu ou une boîte de
+  // dialogue ouverts par-dessus gardent leur Échap.
   useEffect(() => {
+    if (!escapeActive) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (e.key === 'Escape' && !(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) onClose();
+      if (e.key !== 'Escape' || e.defaultPrevented || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))) return;
+      if (t?.closest?.('[role="menu"], [role="dialog"], [aria-modal="true"], [role="listbox"]')) return;
+      if (Array.from(document.querySelectorAll('[role="menu"], [aria-modal="true"]')).some(el => el.getClientRects().length > 0)) return;
+      e.preventDefault();
+      if (e.shiftKey && onCloseAll) onCloseAll(); else onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  // Déplacement par la barre du haut (G18 : fenêtre flottante).
-  const [offset, setOffset] = useState(windowOffset);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose, onCloseAll, escapeActive]);
+  // Déplacement par la barre du haut (G18 : fenêtre flottante). La fenêtre du moment garde sa
+  // place d'un effet à l'autre ; les fenêtres gardées ouvertes ont chacune la leur (cascade).
+  const [offset, setOffset] = useState(initialOffset || getPluginWindowOffset());
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
   const startDrag = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button, a, input, select')) return;
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY, o = offset;
     const move = (ev: PointerEvent) => {
       const next = { x: o.x + ev.clientX - sx, y: Math.max(-window.innerHeight / 2 + 80, o.y + ev.clientY - sy) };
-      windowOffset = next; setOffset(next);
+      if (!kept) setPluginWindowOffset(next);
+      setOffset(next);
     };
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
   const [nodeInstance, setNodeInstance] = useState<any>(null);
+  // Toujours à l'écran (cascade, écran plus petit, façade qui grandit) : la barre reste sous la barre
+  // de transport, le bas et les côtés ne sortent pas de l'écran.
+  const shellRef = useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    if (isMobile) return;
+    const el = shellRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let dx = 0, dy = 0;
+    if (r.bottom > vh - 4) dy = vh - 4 - r.bottom;
+    if (r.top + dy < 120) dy = 120 - r.top;
+    if (r.right > vw - 4) dx = vw - 4 - r.right;
+    if (r.left + dx < 4) dx = 4 - r.left;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) setOffset(o => ({ x: o.x + dx, y: o.y + dy }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeInstance]);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -312,7 +351,6 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   const sidechainBar = (compact?: boolean) => (track && onUpdateTrack && allTracks && supportsSidechain(plugin.type)
     ? <SidechainPanel plugin={live} track={track} tracks={allTracks} onUpdateTrack={onUpdateTrack} onUpdateParams={stableUpdateParams} onReloaded={() => setUiKey(k => k + 1)} compact={compact} />
     : null);
-  const hasKeyBar = !!(track && onUpdateTrack && allTracks && supportsSidechain(plugin.type));
 
   if (isMobile) {
     return mobileShell(
@@ -324,7 +362,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   }
 
   return (
-    <div className={`nova-sombre relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
+    <div ref={shellRef} className={`nova-sombre relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
       style={isMobile ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}>
       {/* Header Bar (poignée de déplacement) */}
       <div onPointerDown={isMobile ? undefined : startDrag} title={isMobile ? undefined : 'Glisse la barre pour déplacer la fenêtre'}
@@ -338,8 +376,9 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
                 <i className="fas fa-power-off text-[10px]" />
               </button>
             )}
-            <span className="min-w-0 text-[12px] font-bold text-white"><PluginName plugin={live} showDetail /></span>
-            {track && <span className="hidden sm:inline shrink-0 text-[11px] text-slate-400">sur <b className="text-slate-200">{track.name}</b>{chain.length > 1 && pos >= 0 ? ` · ${pos + 1}/${chain.length}` : ''}</span>}
+            {/* Barre étroite (petite façade, boutons en plus) : nom et piste se raccourcissent au lieu de se chevaucher. */}
+            <span className="block min-w-[5.5rem] truncate text-[12px] font-bold text-white"><PluginName plugin={live} showDetail /></span>
+            {track && <span className="hidden sm:block min-w-0 truncate text-[11px] text-slate-400" title={`sur ${track.name}`}>sur <b className="text-slate-200">{track.name}</b>{chain.length > 1 && pos >= 0 ? ` · ${pos + 1}/${chain.length}` : ''}</span>}
             {!live.isEnabled && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px] font-bold text-amber-300">Bypass</span>}
          </div>
          <div className="flex shrink-0 items-center gap-1">
@@ -352,6 +391,19 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
                className="w-8 h-8 rounded-full bg-white/5 text-slate-300 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"><i className="fas fa-chevron-right text-xs" /></button>
            </>
          )}
+         {onToggleKeep && (
+           <button type="button" onClick={() => onToggleKeep(offsetRef.current)} aria-pressed={kept} data-testid="plugin-keep"
+             aria-label={kept ? 'Ne plus garder cette fenêtre ouverte' : 'Garder cette fenêtre ouverte'}
+             title={kept ? 'Fenêtre gardée ouverte : clic pour qu’elle redevienne la fenêtre du moment' : 'Garder cette fenêtre ouverte : le prochain effet s’ouvrira à côté (Maj+clic sur un effet fait pareil)'}
+             className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${kept ? 'bg-cyan-500/30 text-cyan-200' : 'bg-white/5 text-slate-400 hover:bg-white/15 hover:text-white'}`}>
+             <i className="fas fa-thumbtack text-xs" aria-hidden="true" />
+           </button>
+         )}
+         {onCloseAll && openCount > 1 && (
+           <button type="button" onClick={onCloseAll} data-testid="plugin-close-all" title={`Tout fermer : les ${openCount} fenêtres d’effet (Maj+Échap)`}
+             aria-label="Tout fermer"
+             className="h-8 shrink-0 whitespace-nowrap rounded-full bg-white/5 px-2.5 text-[11px] font-bold text-slate-300 hover:bg-white/15 hover:text-white"><i className="fas fa-times mr-1 text-[10px]" aria-hidden="true" />{openCount}</button>
+         )}
          <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="nova-hit w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 text-slate-500 hover:text-white transition-all flex items-center justify-center">
             <i className="fas fa-times text-xs"></i>
          </button>
@@ -359,8 +411,9 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       </div>
       
       {/* Container */}
-      {/* Effet à clé (R7) : la fenêtre ne dépasse pas l'écran (la barre du haut reste visible), le contenu défile. */}
-      <div className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'} ${hasKeyBar ? 'max-h-[calc(100dvh-5.5rem)] overflow-y-auto' : ''}`}>
+      {/* La fenêtre ne dépasse jamais l'écran (la barre du haut reste visible), le contenu défile : sur un écran
+          de 900 px, le bas de l'Égaliseur (canal, aide) était coupé et inatteignable (audit mix 22/10). */}
+      <div data-plugin-body="" className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px] max-h-[calc(100dvh-8.5rem)] overflow-y-auto overscroll-contain'}`}>
         {sidechainBar()}
         <div key={uiKey}>{renderPluginUI()}</div>
       </div>

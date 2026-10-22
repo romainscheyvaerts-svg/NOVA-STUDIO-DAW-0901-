@@ -146,7 +146,7 @@ export const pluginStateHelp = (p: PluginInstance): string => {
     : s === 'bypass' ? 'Bypass : le son passe sans traitement ; l’effet reste chargé et sa latence reste compensée.'
       : 'Actif.';
   const ara = isAraInsert(p) ? ' Insert ARA : le plugin lit les clips de la piste et son éditeur s’ouvre en bas de la fenêtre Édition. Sur un poste sans le plugin (collaboration), la piste joue son rendu, fait à la sauvegarde.' : '';
-  return `${base}${ara} Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
+  return `${base}${ara} Clic : ouvrir · Maj+clic : ouvrir dans une fenêtre de plus · Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
 };
 
 /** Ctrl+clic / Ctrl+Alt+clic sur un effet. Renvoie vrai si le clic est traité. */

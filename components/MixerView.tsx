@@ -262,7 +262,7 @@ const ChannelStrip: React.FC<{
   allTracks: Track[],
   onUpdate: (t: Track) => void, 
   isMaster?: boolean, 
-  onOpenPlugin?: (trackId: string, p: PluginInstance) => void,
+  onOpenPlugin?: (trackId: string, p: PluginInstance, opts?: { keep?: boolean }) => void,
   onToggleBypass?: (trackId: string, pluginId: string) => void,
   onRemovePlugin?: (trackId: string, pluginId: string) => void,
   onDropPlugin?: (trackId: string, type: PluginType, metadata?: any) => void,
@@ -297,9 +297,10 @@ const ChannelStrip: React.FC<{
   const { shown: shownInserts, hidden: hiddenInserts } = splitInserts(track.plugins, insertRows);
   
 
+  // Maj+clic : l'effet s'ouvre dans une fenêtre de plus (les autres restent ouvertes).
   const handleFXClick = (e: React.MouseEvent | React.TouchEvent, p: PluginInstance) => {
     e.stopPropagation();
-    onOpenPlugin?.(track.id, p);
+    onOpenPlugin?.(track.id, p, { keep: 'shiftKey' in e && e.shiftKey });
   };
 
   const handleEmptySlotClick = (e: React.MouseEvent | React.TouchEvent) => {
@@ -756,7 +757,7 @@ const VirtualStrip: React.FC<{
 const MixerView: React.FC<{ 
   tracks: Track[], 
   onUpdateTrack: (t: Track) => void, 
-  onOpenPlugin?: (tid: string, p: PluginInstance) => void, 
+  onOpenPlugin?: (tid: string, p: PluginInstance, opts?: { keep?: boolean }) => void, 
   onToggleBypass?: (tid: string, pid: string) => void, 
   onRemovePlugin?: (tid: string, pid: string) => void, 
   onDropPluginOnTrack?: (tid: string, type: PluginType, metadata?: any) => void, 
