@@ -2303,7 +2303,14 @@ function Studio() {
       // redémarrait alors que l'enregistreur continuait : prise décalée).
       if (stateRef.current.isRecording) {
         // QuickPunch : Espace sort de l'enregistrement ET arrête la lecture.
-        if (punchRecRef.current?.quick) { await quickPunchOutRef.current?.(true); return; }
+        // Retour au début de la prise, comme un STOP (R refait la prise d'un geste).
+        if (punchRecRef.current?.quick) {
+          await quickPunchOutRef.current?.(true);
+          const back = recStartRef.current ?? playheadStore.get();
+          audioEngine.seekTo(back, stateRef.current.tracks, false);
+          setState(prev => ({ ...prev, isPlaying: false, currentTime: back, isRecording: false }));
+          return;
+        }
         await toggleRecordRef.current?.(); return;
       }
       await ensureAudioEngine();
@@ -2920,7 +2927,15 @@ function Studio() {
     // QuickPunch (comme dans Pro Tools) : pendant la lecture, REC entre dans
     // l'enregistrement et en ressort sans arrêter la lecture.
     if (currentState.isRecording && punchRecRef.current?.quick) { await quickPunchOutRef.current?.(false); return; }
-    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch && !isMidiRecordTrack(currentState.tracks.find(t => t.isTrackArmed))) { await quickPunchIn(); return; }
+    // REC pendant la lecture (sans zone de punch ni boucle) : la prise part TOUT DE SUITE, là où on
+    // en est (punch à la volée, comme Logic / Cubase). Avant : un décompte cliquait par-dessus le beat
+    // qui jouait, puis la lecture sautait en arrière au point d'appui (~3 s plus tôt).
+    const onTheFly = currentState.isPlaying && !(currentState.punch?.enabled && hasPunchZone(currentState.punch))
+      && !(currentState.isLoopActive && currentState.loopEnd - currentState.loopStart >= 0.5)
+      && (() => { try { return localStorage.getItem('nova_headphones') !== null; } catch { return true; } })();
+    const armedNow = currentState.tracks.find(t => t.isTrackArmed);
+    const midiRec = isMidiRecordTrack(armedNow) || (!armedNow && isMidiRecordTrack(currentState.tracks.find(t => t.id === currentState.selectedTrackId)));
+    if (!currentState.isRecording && currentState.isPlaying && (currentState.punch?.quickPunch || onTheFly) && !midiRec) { await quickPunchIn(); return; }
 
     if (currentState.isRecording) {
         audioEngine.stopAll();
