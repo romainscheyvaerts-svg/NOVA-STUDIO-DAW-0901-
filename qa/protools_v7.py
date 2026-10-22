@@ -62,7 +62,7 @@ def row_box(page):
 def clip_point(page, t):
     """Point écran d'un instant t (s) sur la bande des clips de la piste Voix."""
     hb = row_box(page)
-    zoom = float(page.locator('input[type=range][max="300"]').first.input_value())
+    zoom = float(page.locator('[data-arrange-scroll]').first.get_attribute("data-zoom-h"))  # px/s (curseur logarithmique depuis le 22/10)
     return hb["x"] + hb["width"] + t * zoom, hb["y"] + hb["height"] * 0.55
 
 
@@ -213,7 +213,7 @@ def run():
             check("↓ / ↑ : change de piste", sel1 == "back" and sel2 == "voix", f"{sel1}, {sel2}")
 
             # --- Keyboard Focus : T zoom avant, R zoom arrière (sans enregistrer)
-            zoom = lambda: float(page.locator('input[type=range][max="300"]').first.input_value())
+            zoom = lambda: float(page.locator('[data-arrange-scroll]').first.get_attribute("data-zoom-h"))
             z0 = zoom()
             press(page, "Control+Alt+1", 400)
             badge = page.locator('[data-testid="keyboard-focus-badge"]').count()
