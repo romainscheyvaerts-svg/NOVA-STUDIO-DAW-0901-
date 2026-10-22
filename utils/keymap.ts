@@ -80,6 +80,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off (avec une plage sélectionnée : boucler cette plage)', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
   nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Aucun (Logic : Capture as Recording)', category: 'Transport' }),
   nova({ id: 'nova.keepTake', keys: ['ctrl+alt+p'], label: '📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste, pour choisir à la fin)', pt: 'Noter la prise (Ctrl+Alt+Démarrer+1…5, Démarrer réservée à Windows) · Copy Selection to Main Playlist', category: 'Transport' }),
+  // Jeter la prise en cours (comme le Ctrl+. des studios) : rien n'est gardé, retour au début, R pour la refaire.
+  nova({ id: 'nova.discardTake', keys: ['ctrl+.', 'ctrl+numdec'], label: '🗑️ Jeter la prise en cours : rien n’est gardé (aucun couloir), retour au début pour la refaire', pt: 'Ctrl+. pendant l’enregistrement', category: 'Transport' }),
   nova({ id: 'nova.guide', keys: ['g'], label: 'Couper / rallumer la piste guide', category: 'Transport' }),
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
   nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),

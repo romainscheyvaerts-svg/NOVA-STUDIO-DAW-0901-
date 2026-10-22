@@ -83,6 +83,9 @@ BATTERIE = [
     # de fin de prise, Ctrl+Alt+P, clip glissé), écoute, « Mettre sur la piste », comp depuis une ligne, export sans les
     # prises gardées, sauvegarde + rechargement ; bureau 1600 × 900 et téléphone 390 × 844, sombre et clair.
     ("prises_gardees", []),
+    # 22/10/2026 (audit séance voix) : modèle de Romain → REC sur la piste REC, 10 prises d'affilée nommées
+    # « Couplet 1 · Prise N », pré-roll sans dérive, Ctrl+. jette la prise, R pendant la lecture = départ immédiat.
+    ("seance_rec", []),
     ("playlist_glisser", []),
     # 21/10/2026 : 🎧 outils d'écoute d'un ingé de mix : mono (−6 dB), côtés, Dim −20 dB, coupure, volume d'écoute
     # (mesurés sur la sortie d'écoute ET le master), solo AFL / PFL (bus, VCA), export identique au bit près, Ø à

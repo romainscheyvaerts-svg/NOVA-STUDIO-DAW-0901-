@@ -25,6 +25,7 @@ import {
 } from '../types';
 import { TEMPLATE_ACCESS_GROUPS, privateLabel } from '../config/templateAccess';
 import { NEW_PROJECT_RATE, ProjectRate, sanitizeRate } from './projectRate';
+import { autoRecordTarget } from './recordTarget';
 import { BUILTIN_LABEL_FR, builtinFor, resolveVst, VstCandidate } from './vstMatch';
 
 export const TEMPLATE_FORMAT = 'novatemplate';
@@ -493,7 +494,9 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
   if (report.waitingBridge) report.messages.push(`${report.waitingBridge} effet${report.waitingBridge > 1 ? 's' : ''} VST attend${report.waitingBridge > 1 ? 'ent' : ''} le pont VST : ${report.waitingBridge > 1 ? 'ils se chargeront' : 'il se chargera'} dès que le pont sera connecté (appli Windows Nova Studio).`);
   if (report.enabled) report.messages.push(`${report.enabled} effet${report.enabled > 1 ? 's' : ''} désactivé${report.enabled > 1 ? 's' : ''} dans le modèle ${report.enabled > 1 ? 'ont été activés' : 'a été activé'}.`);
 
-  const firstVoice = tracks.find(t => t.type === TrackType.AUDIO && t.id !== 'instrumental');
+  // Piste sélectionnée à l'ouverture : celle où REC enregistre (REC, Voix lead…), jamais une
+  // piste inactive du dossier beat (modèle de Romain : KICK, et le 1er REC échouait).
+  const firstVoice = autoRecordTarget(tracks, null) || tracks.find(t => t.type === TrackType.AUDIO && t.id !== 'instrumental');
   const state: DAWState = {
     id: opts.projectId || `proj-${Date.now().toString(36)}`,
     name: (opts.name || tpl.name || 'Projet').slice(0, 80),

@@ -394,6 +394,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Bord de région en cours de déplacement (début ou fin) : règle aussi la vitesse du prompteur.
   const regionDragRef = useRef<{ marker: Marker; edge: 'START' | 'END' } | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  // Repère posé au clavier (K) à l'arrêt : son nom s'ouvre tout de suite (App.tsx).
+  useEffect(() => {
+    const on = (e: Event) => { const id = (e as CustomEvent<string>).detail; if (typeof id === 'string') setEditingMarkerId(id); };
+    window.addEventListener('nova:rename-marker', on);
+    return () => window.removeEventListener('nova:rename-marker', on);
+  }, []);
 
   // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
   // Écran tactile en vue PC (iPad paysage) : boutons espacés au pas de 40 px,

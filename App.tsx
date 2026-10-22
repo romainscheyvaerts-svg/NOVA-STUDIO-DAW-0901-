@@ -201,7 +201,7 @@ import { structureBus, StructurePanel } from './utils/structureBus';
 import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
 import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp, editGroupsStore } from './utils/editGroups';
 import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates, inputWidth } from './utils/multiRecord';
-import { placeTake, trimToPlan } from './utils/multiTake';
+import { placeTake, takeSection, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked, takeGroupMates } from './utils/takeGroups';
 import type { TakeResult, TakeJournalMeta, TakeJournalLike } from './engine/AudioEngine';
 import { LiveRef, LiveTakeAssembly, LiveTakeSender, LT_SEGMENT_SEC, SegmentCutter, nextOrder, sanitizeLiveRef, withoutLive } from './utils/liveTake';
@@ -302,7 +302,7 @@ const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayo
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
-  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake'] as const;
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake', 'nova.discardTake'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import { useControlSurface } from './hooks/useControlSurface';
@@ -342,7 +342,7 @@ import { signUpMakeMusic } from './services/makeMusicSignup';
 import { cloudRoute, MM_CLOUD_NOTICE, LOGIN_CLOUD_NOTICE } from './utils/cloudAccount';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
-import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
+import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds, recordReturnPoint } from './utils/punch';
 import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/trackPlaylists';
 import { useProToolsEcarts } from './hooks/useProToolsEcarts';
 import { useProToolsEcarts2 } from './hooks/useProToolsEcarts2';
@@ -353,6 +353,7 @@ import { compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import type { KeptZoneApi } from './components/KeptTakesZone';
 import { clearKept, clipAsTake, colorKept, dropSlivers, isKept, keepAside, keptCount, keptMetas, lastTakeNumber, rateKept, unkeep } from './utils/keptTakes';
+import { autoRecordTarget } from './utils/recordTarget';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 const ImportTempoCard = lazyQuiet(() => import('./components/ImportTempoCard'));
 import { useImportTempo } from './hooks/useImportTempo';
@@ -1435,7 +1436,10 @@ function Studio() {
   // Chaque annonce a son identifiant : la même phrase deux fois de suite
   // (« Aucun blanc à retirer ici ») était avalée la seconde fois.
   const [aiNotice, setAiNotice] = useState<{ text: string; id: number } | null>(null);
+  // Heure de la dernière annonce : une annonce secondaire (sauvegarde auto) n'écrase pas celle d'une prise.
+  const lastNoticeAtRef = useRef(0);
   const setAiNotification = useCallback((text: string | null) => {
+    if (text) lastNoticeAtRef.current = Date.now();
     setAiNotice(text ? { text, id: Date.now() + Math.random() } : null);
   }, []);
   // « Feat à distance » (défini plus bas avec la collaboration) : jamais de prise sur
@@ -2302,7 +2306,14 @@ function Studio() {
       // redémarrait alors que l'enregistreur continuait : prise décalée).
       if (stateRef.current.isRecording) {
         // QuickPunch : Espace sort de l'enregistrement ET arrête la lecture.
-        if (punchRecRef.current?.quick) { await quickPunchOutRef.current?.(true); return; }
+        // Retour au début de la prise, comme un STOP (R refait la prise d'un geste).
+        if (punchRecRef.current?.quick) {
+          await quickPunchOutRef.current?.(true);
+          const back = recStartRef.current ?? playheadStore.get();
+          audioEngine.seekTo(back, stateRef.current.tracks, false);
+          setState(prev => ({ ...prev, isPlaying: false, currentTime: back, isRecording: false }));
+          return;
+        }
         await toggleRecordRef.current?.(); return;
       }
       await ensureAudioEngine();
@@ -2379,6 +2390,10 @@ function Studio() {
     }
     const recWall = rec?.wall || Date.now();
     const stamp = Date.now().toString(36);
+    // Nommage automatique d'après la section (repère « Couplet 2 ») : « Couplet 2 · Prise 3 ».
+    const section = first ? (rec?.loop
+      ? takeSection(stateRef.current.markers, rec.loop.start, rec.loop.end)
+      : takeSection(stateRef.current.markers, rec?.in ?? first.clip.start, rec?.out ?? first.clip.start + first.clip.duration)) : null;
     const placed = new Map<string, ReturnType<typeof placeTake>>();
     setState(produce(draft => {
       draft.isRecording = false;
@@ -2390,7 +2405,7 @@ function Studio() {
         if (!track) continue;
         const p = placeTake(track as Track, clip, {
           rec: rec ? { in: rec.in, out: rec.out, isPunch: rec.isPunch, loop: rec.loop, wall: rec.wall } : null,
-          xfade, takeGain, cleaned: cleaned && r === first ? cleaned.clips : null, group, wall: recWall, stamp,
+          xfade, takeGain, cleaned: cleaned && r === first ? cleaned.clips : null, group, wall: recWall, stamp, section,
         });
         track.clips = p.clips as any;
         track.takeMeta = p.takeMeta;
@@ -2425,7 +2440,7 @@ function Studio() {
     const names = (ids: string[]) => ids.map(id => `« ${stateRef.current.tracks.find(t => t.id === id)?.name || id} »`).join(', ');
     if (p0.loopCount) {
       setTakeLanesOpen(prev => ({ ...prev, ...Object.fromEntries(trackIds.map(id => [id, true])) }));
-      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.${bridgeNote ? ` ${bridgeNote}.` : ''}`);
+      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (${p0.takeName})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends ${p0.activeName ? `« ${p0.activeName} »` : `la Prise ${p0.activeTake}`}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.${bridgeNote ? ` ${bridgeNote}.` : ''}`);
       return first;
     }
     const mutedOld = [...placed.values()].reduce((s, p) => s + p.mutedOld, 0);
@@ -2871,9 +2886,8 @@ function Studio() {
       const ctRaw = collabRecTargetRef.current?.(st.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
-      const sel = st.tracks.find(t => t.id === st.selectedTrackId);
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
+        : autoRecordTarget(st.tracks, st.selectedTrackId);
       if (!target) { setNoArmedTrackError(true); setTimeout(() => setNoArmedTrackError(false), 2000); return; }
       if (!(await armForRecording(target.id))) return;
       if (ct?.note) setAiNotification(ct.note);
@@ -2916,7 +2930,15 @@ function Studio() {
     // QuickPunch (comme dans Pro Tools) : pendant la lecture, REC entre dans
     // l'enregistrement et en ressort sans arrêter la lecture.
     if (currentState.isRecording && punchRecRef.current?.quick) { await quickPunchOutRef.current?.(false); return; }
-    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch && !isMidiRecordTrack(currentState.tracks.find(t => t.isTrackArmed))) { await quickPunchIn(); return; }
+    // REC pendant la lecture (sans zone de punch ni boucle) : la prise part TOUT DE SUITE, là où on
+    // en est (punch à la volée, comme Logic / Cubase). Avant : un décompte cliquait par-dessus le beat
+    // qui jouait, puis la lecture sautait en arrière au point d'appui (~3 s plus tôt).
+    const onTheFly = currentState.isPlaying && !(currentState.punch?.enabled && hasPunchZone(currentState.punch))
+      && !(currentState.isLoopActive && currentState.loopEnd - currentState.loopStart >= 0.5)
+      && (() => { try { return localStorage.getItem('nova_headphones') !== null; } catch { return true; } })();
+    const armedNow = currentState.tracks.find(t => t.isTrackArmed);
+    const midiRec = isMidiRecordTrack(armedNow) || (!armedNow && isMidiRecordTrack(currentState.tracks.find(t => t.id === currentState.selectedTrackId)));
+    if (!currentState.isRecording && currentState.isPlaying && (currentState.punch?.quickPunch || onTheFly) && !midiRec) { await quickPunchIn(); return; }
 
     if (currentState.isRecording) {
         audioEngine.stopAll();
@@ -2961,11 +2983,10 @@ function Studio() {
       const ctRaw = collabRecTargetRef.current?.(currentState.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
-      const selected = currentState.tracks.find(t => t.id === currentState.selectedTrackId);
+      // Piste voix sélectionnée, sinon la piste REC du projet (utils/recordTarget) : jamais une
+      // piste inactive, masquée, ni celle du beat.
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(selected)
-        ? selected
-        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
+        : autoRecordTarget(currentState.tracks, currentState.selectedTrackId);
       if (!target) {
         setNoArmedTrackError(true);
         setTimeout(() => setNoArmedTrackError(false), 2000);
@@ -3033,7 +3054,9 @@ function Studio() {
       playAt = ci.endsAt ?? undefined;
     }
     if (success) {
-      recStartRef.current = startAt;
+      // Retour après la prise : le point d'enregistrement, pas le début du pré-roll (sinon chaque
+      // reprise reculait du pré-roll : 10 s → 8 s → 6 s avec 2 s de pré-roll).
+      recStartRef.current = recordReturnPoint(plan);
       track('rec_started', { role: getVocalRole(armedTrack), punch: !!punchRecRef.current });
       audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
       if (stateRef.current.metronome.enabled) metronomeService.start(startAt);
@@ -3081,6 +3104,51 @@ function Studio() {
     try { await handleToggleRecordInner(); } finally { recBusyRef.current = false; }
   }, [handleToggleRecordInner]);
   toggleRecordRef.current = handleToggleRecord;
+
+  /**
+   * 🗑️ Jeter la prise en cours (Ctrl+., comme dans les DAW de studio) : l'artiste rate sa
+   * première phrase, l'ingé jette la prise sans rien laisser derrière (ni couloir, ni
+   * numéro de prise consommé, ni ancienne prise coupée) et revient au début : R pour la
+   * refaire. Avant : STOP puis Ctrl+Z (2 gestes), ou une prise ratée de plus dans les couloirs.
+   */
+  const discardTakeRef = useRef<() => Promise<void>>(async () => {});
+  discardTakeRef.current = async () => {
+    if (countInBeat !== null) { countInCancelRef.current = true; setAiNotification('🗑️ Décompte annulé : rien n’a été enregistré.'); return; }
+    const st = stateRef.current;
+    if (!st.isRecording) {
+      setAiNotification(st.tracks.some(t => lastTakeNumber(t as Track) !== null)
+        ? '🗑️ Ctrl+. jette la prise PENDANT qu’elle s’enregistre. Pour enlever la dernière prise enregistrée : Ctrl+Z.'
+        : '🗑️ Ctrl+. jette la prise pendant qu’elle s’enregistre (rien n’est gardé).');
+      return;
+    }
+    const rec = punchRecRef.current;
+    punchRecRef.current = null;
+    if (rec) rec.stopping = true;
+    metronomeService.stop();
+    audioEngine.stopAll();
+    if (midiInput.isRecording) {
+      try { midiInput.stopRecording(); } catch { /* rien à garder */ }
+      midiRecMetaRef.current = null;
+    } else {
+      const results = await audioEngine.stopRecordingAll();
+      // Prise envoyée en direct (collaboration) : annulée chez les autres aussi.
+      try { ltFinishRef.current?.(results, []); } catch (e) { console.warn('[Prise en direct] prise jetée', e); }
+    }
+    const st2 = stateRef.current;
+    // Punch : la boucle avait été suspendue pendant la prise.
+    audioEngine.setLoop(st2.isLoopActive, st2.loopStart, st2.loopEnd);
+    const back = recStartRef.current ?? playheadStore.get();
+    audioEngine.seekTo(back, st2.tracks, false);
+    setState(produce(draft => { draft.isRecording = false; draft.isPlaying = false; draft.recStartTime = null; draft.currentTime = back; }));
+    track('rec_discarded', {});
+    setAiNotification('🗑️ Prise jetée : rien n’a été gardé (aucun couloir, aucun numéro de prise utilisé). Retour au début : R pour la refaire.');
+  };
+  // Bouton « 🗑️ Jeter » du bandeau de la piste pendant la prise.
+  useEffect(() => {
+    const on = () => { void discardTakeRef.current(); };
+    window.addEventListener('nova:discard-take', on);
+    return () => window.removeEventListener('nova:discard-take', on);
+  }, []);
 
   // ===== Prise MIDI armée (R16) : clavier MIDI / clavier de l'ordinateur → piste MIDI armée
   const midiRecMetaRef = useRef<{ trackId: string; loop: { start: number; end: number } | null; isPunch: boolean; startAt: number } | null>(null);
@@ -3130,7 +3198,7 @@ function Studio() {
     midiRecMetaRef.current = { trackId, loop, isPunch: plan.isPunch, startAt };
     // La prise écoute dès maintenant (une note jouée un poil avant le 1er temps est gardée).
     midiInput.startRecording({ trackId, anchor: (playAt ?? ((audioEngine.ctx?.currentTime ?? 0) + 0.01)) - startAt, recStart: startAt, loop, keepFrom, keepTo: loop ? null : plan.keepTo });
-    recStartRef.current = startAt;
+    recStartRef.current = recordReturnPoint(plan);
     punchRecRef.current = plan.isPunch ? { in: plan.keepFrom, out: plan.keepTo, isPunch: true, autoStopAt: plan.autoStopAt } : null;
     audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
     midiInput.setAnchor(audioEngine.getPlaybackOrigin());
@@ -4551,7 +4619,22 @@ function Studio() {
       switch (id) {
         // Lecture / pause : la touche ne doit ni défiler la page ni re-déclencher le bouton qui a le focus.
         case 'nova.play': e.preventDefault(); if (e.repeat) return; spaceDown = e.code === 'Space'; handleTogglePlay(); return;
-        case 'nova.undo': e.preventDefault(); undo(); return;
+        case 'nova.undo': {
+          e.preventDefault();
+          // Ctrl+Z juste après une prise : on dit laquelle est partie (l'annonce « Prise 11 enregistrée »
+          // restait affichée, on ne savait pas si l'annulation avait pris la prise ou autre chose).
+          const before = new Map(stateRef.current.tracks.map(t => [t.id, listLanes(t as Track)]));
+          undo();
+          setTimeout(() => {
+            const gone: string[] = [];
+            for (const t of stateRef.current.tracks) {
+              const now = new Set(listLanes(t as Track).map(l => l.n));
+              for (const l of before.get(t.id) || []) if (!now.has(l.n)) gone.push(l.name);
+            }
+            if (gone.length) setAiNotification(`↩️ ${gone.length > 1 ? `${gone.length} prises retirées (${gone.slice(0, 3).join(', ')}${gone.length > 3 ? '…' : ''})` : `${gone[0]} retirée`} — Ctrl+Y pour ${gone.length > 1 ? 'les' : 'la'} remettre.`);
+          }, 60);
+          return;
+        }
         case 'nova.redo': e.preventDefault(); redo(); return;
         case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
         // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
@@ -4563,6 +4646,8 @@ function Studio() {
         // 📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste).
         case 'nova.keepTake': e.preventDefault(); if (e.repeat) return; keepLastTakeAsideRef.current(); return;
         case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
+        // 🗑️ Jeter la prise en cours (Ctrl+.) : rien n'est gardé, retour au début.
+        case 'nova.discardTake': e.preventDefault(); if (e.repeat) return; void discardTakeRef.current(); return;
         // Couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
         case 'nova.guide':
           if (isKeyboardFocus() || !stateRef.current.tracks.some(t => t.isGuide)) return;
@@ -4604,7 +4689,23 @@ function Studio() {
         }
         // Tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
         case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
-        case 'nova.marker': e.preventDefault(); handleAddMarkerHere(now()); return;
+        case 'nova.marker': {
+          e.preventDefault();
+          const before = new Set(stateRef.current.markers.map(m => m.id));
+          const running = audioEngine.getIsPlaying() || stateRef.current.isRecording;
+          handleAddMarkerHere(now());
+          // À l'arrêt, le nom s'ouvre tout de suite (tape « Couplet 2 », Entrée) : avant, clic droit
+          // → Renommer → taper → Entrée. Pendant la lecture, le repère se pose sans prendre le clavier.
+          if (!running) {
+            const open = (tries: number) => {
+              const m = stateRef.current.markers.find(x => !before.has(x.id));
+              if (m) window.dispatchEvent(new CustomEvent('nova:rename-marker', { detail: m.id }));
+              else if (tries > 0) setTimeout(() => open(tries - 1), 30);
+            };
+            setTimeout(() => open(10), 0);
+          }
+          return;
+        }
         case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
         case 'nova.palette': e.preventDefault(); setPaletteOpen(v => !v); return;
         case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
@@ -4910,7 +5011,7 @@ function Studio() {
       const t = draft.tracks.find(x => x.id === trackId);
       if (t) t.clips = compTakeInZone(t as Track, n, zone);
     }));
-    setAiNotification(`🎚️ Prise ${n} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
+    setAiNotification(`🎚️ ${takeName(stateRef.current.tracks.find(x => x.id === trackId), n)} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
   }, [setState]);
 
   // ===== Couloirs de prises (V4) et comp à la souris (V5) ==========================
@@ -5001,7 +5102,7 @@ function Studio() {
     }));
     breakHistory();
     setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, removedIds)), 0);
-    setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
+    setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — ${r.replacedBy.map(k => takeName(t, k)).join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
   }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
 
   // ===== 📌 Prises gardées (utils/keptTakes) : zone au-dessus de la piste =============
@@ -5530,7 +5631,8 @@ function Studio() {
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (r) afterVersionSaved(r.versionId);
-      if (!autosaveNotified.current) {
+      // Une annonce récente (« Prise 1 enregistrée », « 3 prises en boucle ») reste lisible : celle-ci attend.
+      if (!autosaveNotified.current && Date.now() - lastNoticeAtRef.current > 8000) {
         autosaveNotified.current = true;
         // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
         if (!named) setAiNotification("💾 Sauvegarde automatique active sur cet appareil, prises comprises : rien n'est perdu, même après un plantage.");
@@ -10875,6 +10977,7 @@ function Studio() {
         a('Voix', 'pal.textEdit', '📝 Éditer la voix par le texte (effacer un mot, découper par phrase)', () => openNovaWindow('voice-text-edit', { targets: t ? [t] : [] }), { keywords: 'texte transcription paroles mot mots effacer supprimer couper découper phrase respiration silence corriger éditer text based editing whisper', disabledReason: t ? undefined : 'Sélectionne d’abord un clip voix transcrit (clic dessus).' }),
         a('Voix', 'pal.spectral', '🎨 Éditeur spectral (effacer un bruit précis)', () => openNovaWindow('spectral-editor', { targets: t ? [t] : [] }), { keywords: 'spectre spectral spectrogramme éditeur toux sonnerie téléphone chaise bruit effacer peindre zone fréquence spectral repair', disabledReason: t ? undefined : 'Sélectionne d’abord un clip audio (clic dessus).' })]; })(),
       a('Voix', 'nova.keepTake', '📌 Garder la dernière prise de côté (prises gardées, pour choisir à la fin)', () => { keepLastTakeAsideRef.current(); }, { keys: k('nova.keepTake'), pt: 'Playlists : noter / mettre de côté une prise', keywords: 'garder prise côté pin épingler playlist prises gardées favori meilleure take keep', disabledReason: st.tracks.some(t => lastTakeNumber(t as Track) !== null) ? undefined : 'Enregistre d’abord une prise.' }),
+      a('Voix', 'nova.discardTake', '🗑️ Jeter la prise en cours (rien n’est gardé, retour au début)', () => { void discardTakeRef.current(); }, { keys: k('nova.discardTake'), keywords: 'jeter prise annuler prise ratée rater recommencer refaire discard abandonner poubelle', disabledReason: st.isRecording ? undefined : 'Seulement pendant une prise (pour la dernière prise enregistrée : Ctrl+Z).' }),
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
