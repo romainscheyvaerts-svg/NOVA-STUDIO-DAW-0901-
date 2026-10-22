@@ -1,10 +1,11 @@
 /**
  * Web Audio minimal pour Node : un AudioBuffer (canaux Float32) et un
- * AudioContext qui sait créer des buffers et décoder les WAV PCM 16 bits
- * écrits par services/AudioUtils (audioBufferToWav / wavOf).
+ * AudioContext qui sait créer des buffers et décoder les WAV écrits par
+ * services/AudioUtils (audioBufferToWav / wavOf / wav16Of) : PCM 16 et 24 bits,
+ * flottant 32 bits (sons de projet sans perte, audit de nuit 22/10/2026).
  *
  * Volontairement strict : le décodeur lit les vrais en-têtes RIFF et refuse
- * tout ce qui n'est pas du PCM 16 bits, pour qu'un WAV mal écrit fasse
+ * tout autre format (et tout en-tête incohérent), pour qu'un WAV mal écrit fasse
  * échouer le test au lieu d'être « décodé » par complaisance.
  */
 
@@ -59,6 +60,8 @@ const readTag = (v: DataView, off: number) =>
   String.fromCharCode(v.getUint8(off), v.getUint8(off + 1), v.getUint8(off + 2), v.getUint8(off + 3));
 
 export interface ParsedWav {
+  /** 1 = PCM entier, 3 = IEEE flottant. */
+  format: number;
   numChannels: number;
   sampleRate: number;
   byteRate: number;
@@ -80,8 +83,9 @@ export function parseWavHeader(ab: ArrayBuffer): ParsedWav {
     const size = v.getUint32(off + 4, true);
     if (id === 'fmt ') {
       const format = v.getUint16(off + 8, true);
-      if (format !== 1) throw new Error(`Format WAV non PCM (${format})`);
+      if (format !== 1 && format !== 3) throw new Error(`Format WAV ni PCM ni flottant (${format})`);
       fmt = {
+        format,
         numChannels: v.getUint16(off + 10, true),
         sampleRate: v.getUint32(off + 12, true),
         byteRate: v.getUint32(off + 16, true),
@@ -98,18 +102,26 @@ export function parseWavHeader(ab: ArrayBuffer): ParsedWav {
   throw new Error('Bloc data introuvable');
 }
 
-/** Décodage WAV PCM 16 bits -> FakeAudioBuffer (comme decodeAudioData). */
+/** Décodage WAV (PCM 16 / 24 bits, flottant 32 bits) -> FakeAudioBuffer (comme decodeAudioData). */
 export function decodeWav(ab: ArrayBuffer): AudioBuffer {
   const h = parseWavHeader(ab);
-  if (h.bitsPerSample !== 16) throw new Error(`Seul le PCM 16 bits est géré (${h.bitsPerSample})`);
-  if (h.blockAlign !== h.numChannels * 2) throw new Error('blockAlign incohérent');
+  const ok = (h.format === 1 && (h.bitsPerSample === 16 || h.bitsPerSample === 24)) || (h.format === 3 && h.bitsPerSample === 32);
+  if (!ok) throw new Error(`Profondeur non gérée (format ${h.format}, ${h.bitsPerSample} bits)`);
+  const bytes = h.bitsPerSample / 8;
+  if (h.blockAlign !== h.numChannels * bytes) throw new Error('blockAlign incohérent');
+  if (h.byteRate !== h.sampleRate * h.blockAlign) throw new Error('byteRate incohérent');
   const frames = h.dataSize / h.blockAlign;
   if (!Number.isInteger(frames) || frames < 1) throw new Error('Taille de données incohérente');
   const v = new DataView(ab, h.dataOffset, h.dataSize);
   const b = new FakeAudioBuffer({ numberOfChannels: h.numChannels, length: frames, sampleRate: h.sampleRate });
   for (let c = 0; c < h.numChannels; c++) {
     const d = b.getChannelData(c);
-    for (let i = 0; i < frames; i++) d[i] = v.getInt16((i * h.numChannels + c) * 2, true) / 32768;
+    for (let i = 0; i < frames; i++) {
+      const at = (i * h.numChannels + c) * bytes;
+      if (h.format === 3) d[i] = v.getFloat32(at, true);
+      else if (bytes === 2) d[i] = v.getInt16(at, true) / 32768;
+      else { const k = (v.getUint8(at) | (v.getUint8(at + 1) << 8) | (v.getInt8(at + 2) << 16)); d[i] = k / 8388608; }
+    }
   }
   return b as unknown as AudioBuffer;
 }

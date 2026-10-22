@@ -100,7 +100,8 @@ export async function pushSession(
   opts: { force?: boolean; name?: string } = {},
 ): Promise<PushResult> {
   onProgress?.(3, 'Préparation de la session…');
-  const blob = await ProjectIO.saveProject(state, ownedInstrumentIds);
+  // Séance en ligne : sons en 16 bits (taille et trafic), sans perte de cycle en cycle (services/AudioUtils).
+  const blob = await ProjectIO.saveProject(state, ownedInstrumentIds, { audio: 16 });
   const zip = await JSZip.loadAsync(blob);
   const projectText = await zip.file('project.json')!.async('string');
   const manifest: Manifest = { format: 1, project: JSON.parse(projectText), files: {} };

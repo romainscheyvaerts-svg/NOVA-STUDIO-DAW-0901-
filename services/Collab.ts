@@ -1,6 +1,6 @@
 import { catalogSupabase } from './supabase';
 import { call, sha1, CHUNK, CloudLink } from './SessionCloud';
-import { wavOf } from './AudioUtils';
+import { wav16Of } from './AudioUtils';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { padSampleKey } from '../utils/drumSamples';
 import { samplerBufferKey } from '../utils/melodicSampler';
@@ -630,7 +630,8 @@ export async function uploadBuffers(link: CloudLink, bufferIds: string[], onProg
     if (done) { out[id] = done; continue; }
     const buf = audioBufferRegistry.get(id);
     if (!buf) continue;
-    const bytes = new Uint8Array(await wavOf(buf).arrayBuffer());
+    // Collaboration : 16 bits (taille et trafic), arrondi sans perte de cycle en cycle (services/AudioUtils).
+    const bytes = new Uint8Array(await wav16Of(buf).arrayBuffer());
     const parts: string[] = [];
     for (let off = 0; off < bytes.length; off += CHUNK) {
       const part = bytes.subarray(off, Math.min(bytes.length, off + CHUNK));
