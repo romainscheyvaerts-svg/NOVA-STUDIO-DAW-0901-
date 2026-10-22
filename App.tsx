@@ -70,6 +70,7 @@ import { dailyChallengeId } from './utils/dailyChallenge';
 import { detectSections, sectionColor } from './utils/songSections';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge, BridgePlugin, SeparationResult } from './services/NovaBridge';
+import { vstMenuEntries, vstMetadata } from './utils/vstMenu';
 import { cascadeAfter, setPluginWindowOffset } from './utils/pluginWindowPos';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
@@ -12121,9 +12122,12 @@ function Studio() {
       </Suspense>
       
       {addPluginMenu && <AddEffectMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)}
-        effects={[...AVAILABLE_FX_MENU, ...araMenuPlugins().map((p, i) => ({ id: `ara:${i}`, name: p.name, icon: 'fa-wand-magic-sparkles', cat: 'Voix', kind: 'ARA, insert de piste', also: 'ara melodyne vocalign justesse alignement insert piste' }))]}
+        effects={[...AVAILABLE_FX_MENU, ...araMenuPlugins().map((p, i) => ({ id: `ara:${i}`, name: p.name, icon: 'fa-wand-magic-sparkles', cat: 'Voix', kind: 'ARA, insert de piste', also: 'ara melodyne vocalign justesse alignement insert piste' })),
+          // VST du PC (appli Windows, pont prêt) : proposés ici aussi, rangés par éditeur (utils/vstMenu).
+          ...(novaBridge.isConnected() ? vstMenuEntries(novaBridge.getCachedPlugins()) : [])]}
         onPick={(id) => {
           if (id.startsWith('ara:')) { const p = araMenuPlugins()[Number(id.slice(4))]; if (p) handleAddPluginFromContext(addPluginMenu.trackId, 'VST3', araInsertMetadata(p), { openUI: true }); return; }
+          if (id.startsWith('vst:')) { const e = vstMenuEntries(novaBridge.getCachedPlugins()).find(v => v.id === id); if (e) handleAddPluginFromContext(addPluginMenu.trackId, 'VST3', vstMetadata(e.plugin), { openUI: true }); return; }
           handleAddPluginFromContext(addPluginMenu.trackId, id as PluginType, {}, { openUI: true });
         }} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}

@@ -8,14 +8,14 @@ import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
 import { AutotuneVstSettings } from './AutotuneVstPanel';
 import { groupVstPlugins, variantLabel } from '../utils/vstGroups';
+import { vstMetadata } from '../utils/vstMenu';
+import { fxPrefs, useFxPrefs, vstFxId } from '../utils/fxFavorites';
 
 /** Exécutable du pont (asset de release GitHub, comme le pont ASIO). */
 export const VST_BRIDGE_DOWNLOAD_URL = '/downloads/NovaVSTBridge.exe';
 
-/** Métadonnées enregistrées dans plugin.params à l'ajout d'un VST3. */
-export const vstMetadata = (p: BridgePlugin) => ({
-  name: p.name, vendor: p.vendor, uid: p.uid, localPath: p.path, pluginName: p.pluginName || undefined,
-});
+/** Métadonnées enregistrées dans plugin.params à l'ajout d'un VST3 (utils/vstMenu). */
+export { vstMetadata };
 
 /** Bloc « pont pas lancé » : explications simples + bouton de connexion. */
 export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact }) => {
@@ -95,6 +95,9 @@ const VstBrowserTab: React.FC<{
   const [plugins, setPlugins] = useState<BridgePlugin[]>(() => novaBridge.getCachedPlugins());
   const [searchTerm, setSearchTerm] = useState('');
   const [showInstruments, setShowInstruments] = useState(false);
+  // Favoris / récents (partagés avec le menu « Ajouter un effet » des tranches).
+  const prefs = useFxPrefs();
+  const [only, setOnly] = useState<'all' | 'fav' | 'recent'>('all');
   const [loadingList, setLoadingList] = useState(false);
   const connected = bridge.status === 'connected';
 
@@ -121,6 +124,7 @@ const VstBrowserTab: React.FC<{
 
   const add = (p: BridgePlugin) => {
     // Groupe (WaveShell de Waves) pas encore déplié : il ne se charge pas tel quel.
+    if (!isUnreadShell(p)) fxPrefs.noteUsed(vstFxId(p));
     if (isUnreadShell(p)) {
       try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: unreadShellText(!!lecture) })); } catch { /* hors navigateur */ }
       return;
@@ -147,7 +151,16 @@ const VstBrowserTab: React.FC<{
       .filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q));
   }, [plugins, searchTerm, showInstruments]);
   // Une ligne par plugin (les variantes Waves mono / stéréo… regroupées), toute la liste affichée.
-  const rows = useMemo(() => groupVstPlugins(filtered), [filtered]);
+  const allRows = useMemo(() => groupVstPlugins(filtered), [filtered]);
+  // Une ligne est favorite / récente si l'une de ses variantes l'est.
+  const rowIds = (r: { main: BridgePlugin; variants: BridgePlugin[] }) => [r.main, ...r.variants].map(vstFxId);
+  const rows = useMemo(() => {
+    if (only === 'all') return allRows;
+    const ids = only === 'fav' ? prefs.favorites : prefs.recents;
+    const hit = allRows.filter(r => rowIds(r).some(id => ids.includes(id)));
+    // Récents : du plus récent au plus ancien.
+    return only === 'recent' ? hit.sort((a, b) => Math.min(...rowIds(a).map(i => ids.indexOf(i)).filter(i => i >= 0)) - Math.min(...rowIds(b).map(i => ids.indexOf(i)).filter(i => i >= 0))) : hit;
+  }, [allRows, only, prefs]);
 
   if (!connected) return <div className="p-4"><BridgeConnectPanel /></div>;
 
@@ -187,8 +200,17 @@ const VstBrowserTab: React.FC<{
           Instruments
         </label>
       </div>
+      <div className="flex gap-1" role="group" aria-label="Afficher">
+        {([['all', 'Tous'], ['fav', '★ Favoris'], ['recent', 'Récents']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setOnly(k)} aria-pressed={only === k} data-testid={`vst-only-${k}`}
+            className={`h-7 rounded-full px-2.5 text-[10px] font-bold border ${only === k ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-100' : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'}`}>{label}</button>
+        ))}
+      </div>
       {rows.length > 0 && (
         <p data-testid="vst-count" className="text-[10px] text-slate-500">{rows.length} plugin{rows.length > 1 ? 's' : ''}{searchTerm.trim() ? ' trouvés' : ''}</p>
+      )}
+      {rows.length === 0 && only !== 'all' && filtered.length > 0 && (
+        <p className="text-[11px] text-slate-500">{only === 'fav' ? 'Aucun favori : clique sur l’étoile d’un plugin pour le retrouver ici (et en tête du menu « Ajouter un effet » des tranches).' : 'Aucun plugin utilisé récemment.'}</p>
       )}
       {rows.map(({ key, name, main: p, variants }) => (
         <div
@@ -204,7 +226,7 @@ const VstBrowserTab: React.FC<{
           className="w-full p-3 bg-white/[0.02] border border-white/5 rounded-lg flex items-center space-x-3 transition-all cursor-pointer active:cursor-grabbing hover:bg-white/[0.04]"
         >
           <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xs shrink-0"><i className="fas fa-plug"></i></div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-xs font-bold text-white truncate">{name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
@@ -223,6 +245,14 @@ const VstBrowserTab: React.FC<{
               </div>
             )}
           </div>
+          {(() => { const fav = rowIds({ main: p, variants }).some(id => prefs.favorites.includes(id)); return (
+            <button type="button" onClick={(e) => { e.stopPropagation(); const ids = rowIds({ main: p, variants }); const on = ids.filter(id => prefs.favorites.includes(id)); if (on.length) on.forEach(id => fxPrefs.toggleFavorite(id)); else fxPrefs.toggleFavorite(vstFxId(p)); }}
+              onKeyDown={(e) => e.stopPropagation()} aria-pressed={fav} data-vst-star={name}
+              aria-label={fav ? `Retirer ${name} des favoris` : `Mettre ${name} en favori`} title={fav ? 'Retirer des favoris' : 'Mettre en favori (en tête du menu « Ajouter un effet » des tranches)'}
+              className={`w-8 h-8 shrink-0 rounded-md flex items-center justify-center text-xs ${fav ? 'text-amber-300' : 'text-slate-600 hover:text-amber-200'}`}>
+              <i className={`${fav ? 'fas' : 'far'} fa-star`} aria-hidden="true" />
+            </button>
+          ); })()}
         </div>
       ))}
       {filtered.length === 0 && (
