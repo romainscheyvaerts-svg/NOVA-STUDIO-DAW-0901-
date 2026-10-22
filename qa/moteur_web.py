@@ -217,7 +217,7 @@ def t_latence(p, res, calibrer):
     print("latence :", json.dumps(r, ensure_ascii=False, default=str), flush=True)
     ok("latence : prise de la boucle relevée (clics retrouvés)", not r.get("erreur") and r.get("trouves", 0) >= 10, r)
     if calibrer and (r.get("mesure") or {}).get("ok"):
-        ok("latence : latence mesurée par la boucle, prise calée à ±1 échantillon", abs(r.get("ecart_median_ech") or 99) <= 1, r)
+        ok("latence : latence mesurée par la boucle, prise calée à ±1 échantillon", r.get("ecart_median_ech") is not None and abs(r["ecart_median_ech"]) <= 1, r)
     b.close()
 
 
@@ -367,21 +367,26 @@ def t_charge(p, res, minutes, fond_min):
     t0 = time.time()
     # Onglet en arrière-plan : un autre onglet passe devant pendant fond_min minutes (au milieu).
     other = None
+    phase = "avant"   # avant → fond → fini
     fond_debut = (total - fond_min * 60) / 2
+    vis_fond = None
     while time.time() - t0 < total:
         el = time.time() - t0
-        if other is None and fond_min > 0 and el >= fond_debut:
+        if phase == "avant" and fond_min > 0 and el >= fond_debut:
             other = ctx.new_page(); other.goto("about:blank"); other.bring_to_front()
-            vis = page.evaluate("() => document.visibilityState")
-            print(f"  arrière-plan à {el:.0f} s (page : {vis})", flush=True)
-        if other is not None and el >= fond_debut + fond_min * 60:
-            page.bring_to_front(); other.close(); other = False
+            vis_fond = page.evaluate("() => document.visibilityState")
+            print(f"  arrière-plan à {el:.0f} s (page : {vis_fond})", flush=True)
+            phase = "fond"
+        elif phase == "fond" and el >= fond_debut + fond_min * 60:
+            page.bring_to_front(); other.close(); other = None
             print(f"  premier plan à {el:.0f} s", flush=True)
+            phase = "fini"
         time.sleep(5)
     cdp.send("Emulation.setCPUThrottlingRate", {"rate": 1})
-    if other: page.bring_to_front()
+    if other is not None:
+        page.bring_to_front(); other.close()
     r = page.evaluate(CHARGE_STOP)
-    r["minutes"] = minutes; r["arriere_plan_min"] = fond_min
+    r["minutes"] = minutes; r["arriere_plan_min"] = fond_min; r["visibilite_en_arriere_plan"] = vis_fond
     r["erreurs_console"] = console_errors(log)
     res["charge"] = r
     print("charge :", json.dumps(r, ensure_ascii=False, default=str), flush=True)
