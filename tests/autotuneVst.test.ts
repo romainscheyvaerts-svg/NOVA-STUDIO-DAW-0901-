@@ -154,7 +154,8 @@ describe('réglage de la gamme par introspection (paramètres réels)', () => {
 
   it('Auto-Tune Pro : styles (retune, humanize, Flex-Tune, dosage) et qualité maximale', () => {
     const drill = resolveAutotuneSettings('Auto-Tune Pro', ATP, { root: 0, scale: 'MINOR', speed: 0.25, humanize: 0.3, mix: 0.5, lowLatency: false });
-    expect(get(drill, 'retune_speed_ms')!.real).toBe(25);
+    // Même allure que Nova Tune (22/10/2026) : speed 0,25 → demi-vie 300 × 0,25² × ln 2 = 13 ms (avant : speed × 100 = 25 ms).
+    expect(get(drill, 'retune_speed_ms')!.real).toBe(13);
     expect(get(drill, 'humanize')!.real).toBe(30);
     expect(get(drill, 'flex_tune')!.real).toBe(25);
     expect(get(drill, 'wet_dry_mix')!.real).toBe(50);

@@ -95,6 +95,7 @@ describe('Harmoniseur : degrés de la gamme → notes exactes (±1 cent)', () =>
 
 import { AutoTuneNode } from '../plugins/AutoTunePlugin';
 import { installMiniWebAudio, MiniOfflineAudioContext } from './helpers/miniWebAudio';
+import { speedFromRetuneMs } from '../utils/tuneSpeed';
 
 async function autotune(sr: number, x: Float32Array, p: Record<string, any>) {
   const restore = installMiniWebAudio();
@@ -126,10 +127,12 @@ describe('Nova Tune : notes cibles calées sur La = 440 Hz, gamme du projet', ()
     }
   }, 300_000);
 
-  it('vitesse affichée (ms) = constante de temps de la correction (63 % du chemin en ce temps), ±10 %', async () => {
+  // Convention d'affichage du 22/10/2026 (utils/tuneSpeed.ts) : ms affichés = demi-vie de l'écart,
+  // comme la référence du marché mesurée en boîte noire (avant : constante de temps, 63 %).
+  it('vitesse affichée (ms) = demi-vie de la correction (moitié du chemin en ce temps), ±10 %', async () => {
     const sr = 48000;
     for (const ms of [25, 75, 150]) {
-      const speed = Math.sqrt(ms / 300);
+      const speed = speedFromRetuneMs(ms);
       const f0 = hz(57.4), x = vowel(f0, 1.4, sr);
       const { y, lat } = await autotune(sr, x, { speed, scale: 'CHROMATIC', rootKey: 0 });
       // Écart à la note (cents) au fil du temps : fondamentale isolée (passe-bas 300 Hz), passages
@@ -151,8 +154,8 @@ describe('Nova Tune : notes cibles calées sur La = 440 Hz, gamme du projet', ()
       let sx = 0, sy = 0, sxx = 0, sxy = 0;
       for (const [t, d] of fit) { const l = Math.log(d); sx += t; sy += l; sxx += t * t; sxy += t * l; }
       const n = fit.length, slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-      const tau = -1000 / slope;
-      metro('Nova Tune', `vitesse ${ms} ms : constante de temps mesurée de la correction (40 cents)`, ms, tau, 'ms', ms * 0.1, undefined, 1);
+      const half = -1000 * Math.LN2 / slope;
+      metro('Nova Tune', `vitesse ${ms} ms : demi-vie mesurée de la correction (40 cents)`, ms, half, 'ms', ms * 0.1, undefined, 1);
     }
   }, 300_000);
 

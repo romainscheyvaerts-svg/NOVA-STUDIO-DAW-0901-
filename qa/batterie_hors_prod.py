@@ -259,6 +259,8 @@ BATTERIE = [
     # 23/10/2026 · boîte à rythmes et piano roll au doigt (téléphone 390, iPad 820) : pas de 44 px, toucher, glisser
     # pour peindre, appui long = menu, barre du piano roll sans défilement, pincer pour zoomer, cibles ≥ 32 px.
     ("beat_doigt", []),
+    # 22/10/2026 : Nova Tune (fenêtre sobre, réglages avancés repliés, préréglages sourcés, notes cibles), bureau et téléphone.
+    ("nova_tune", []),
 ]
 
 
