@@ -1213,7 +1213,9 @@ function Studio() {
 
   // Charger le dernier backup automatique au démarrage si connecté
   const [showBackupRecovery, setShowBackupRecovery] = useState(false);
-  const [pendingBackup, setPendingBackup] = useState<any>(null);
+  /** Date de la sauvegarde en ligne proposée ; le projet n'est téléchargé que si on la restaure. */
+  const [pendingBackup, setPendingBackup] = useState<number | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
   
   useEffect(() => {
     if (showLanding) return; // Pas encore entré dans le studio
@@ -1221,10 +1223,13 @@ function Studio() {
     
     const checkForBackup = async () => {
       try {
-        const backup = await supabaseManager.loadLatestAutoBackup();
-        if (backup) {
-          console.log("[AutoBackup] Backup récent trouvé, proposer restauration...");
-          setPendingBackup(backup);
+        // Studio entré avec un projet (fichier, version, beat, modèle) : on ne propose jamais de le
+        // remplacer. Avant, la fenêtre arrivait 1 s après CHAQUE ouverture, et le projet entier
+        // (tous ses sons) était téléchargé rien que pour la proposer.
+        if (hasWorthKeeping(stateRef.current)) return;
+        const at = await supabaseManager.latestAutoBackupDate();
+        if (at && !hasWorthKeeping(stateRef.current)) {
+          setPendingBackup(at);
           setShowBackupRecovery(true);
         }
       } catch (e) {
@@ -12301,28 +12306,36 @@ function Studio() {
                   <i className="fas fa-clock-rotate-left text-amber-400 text-xl"></i>
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-white">Backup trouvé !</h3>
-                  <p className="text-xs text-slate-500">Votre travail précédent a été récupéré</p>
+                  <h3 className="text-lg font-black text-white">Sauvegarde en ligne trouvée</h3>
+                  <p className="text-xs text-slate-500">{formatAgo(pendingBackup)}</p>
                 </div>
               </div>
               <p className="text-sm text-slate-400">
-                Nous avons trouvé une sauvegarde automatique de votre session précédente. 
-                Voulez-vous restaurer ce projet ?
+                Ton compte garde une sauvegarde automatique de ta séance précédente. La rouvrir ?
               </p>
             </div>
             
             <div className="p-4 bg-black/20 space-y-3">
               <button
-                onClick={() => {
-                  handleLoadProject(pendingBackup);
-                  setShowBackupRecovery(false);
-                  setPendingBackup(null);
-                  setAiNotification("✅ Backup restauré avec succès !");
+                disabled={backupBusy}
+                onClick={async () => {
+                  setBackupBusy(true);
+                  try {
+                    const backup = await supabaseManager.loadLatestAutoBackup();
+                    if (!backup) throw new Error('introuvable');
+                    if (await handleLoadProject(backup)) setAiNotification('✅ Séance rouverte depuis la sauvegarde en ligne.');
+                  } catch (e) {
+                    setAiNotification(`❌ La sauvegarde en ligne n'a pas pu être rouverte : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')}`);
+                  } finally {
+                    setBackupBusy(false);
+                    setShowBackupRecovery(false);
+                    setPendingBackup(null);
+                  }
                 }}
                 className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2"
               >
                 <i className="fas fa-check"></i>
-                Restaurer le backup
+                {backupBusy ? 'Téléchargement…' : 'Rouvrir la séance'}
               </button>
               
               <button
@@ -12333,7 +12346,7 @@ function Studio() {
                 className="w-full py-3 px-4 bg-white/5 border border-white/10 text-slate-400 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
               >
                 <i className="fas fa-times"></i>
-                Ignorer et commencer un nouveau projet
+                Non, projet vide
               </button>
             </div>
           </div>
