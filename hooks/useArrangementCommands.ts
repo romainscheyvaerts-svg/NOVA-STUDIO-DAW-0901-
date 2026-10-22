@@ -8,6 +8,7 @@ import { playheadStore } from '../utils/playheadStore';
 import { fadeInTo, fadeOutTo, quickFades, trimEndTo, trimStartTo } from '../utils/clipKeyCommands';
 import { clampTrackHeight, fitTrackHeight, stepTrackHeight } from '../utils/trackHeights';
 import { editSelectionStore } from '../utils/editSelection';
+import { planDuplicate } from '../utils/duplicateClips';
 import { clampZoom, fitRange, type ZoomAnchor } from '../utils/arrangeZoom';
 
 /**
@@ -105,11 +106,17 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         list.forEach(({ trackId, clip }) => edit(trackId, clip.id, 'SPLIT', { time: t }));
         return list.length > 0;
       },
-      duplicate: () => { const l = targets(); l.forEach(({ trackId, clip }) => edit(trackId, clip.id, 'DUPLICATE')); return l.length > 0; },
+      // En bloc après la sélection ; les copies deviennent la sélection (utils/duplicateClips).
+      duplicate: () => {
+        const plan = planDuplicate(targets());
+        plan.forEach(p => edit(p.trackId, p.clipId, 'DUPLICATE', { start: p.start, id: p.id }));
+        if (plan.length) c().setSelectedClipIds(new Set(plan.map(p => p.id)));
+        return plan.length > 0;
+      },
       copy: () => { const l = targets(); if (l[0]) edit(l[0].trackId, l[0].clip.id, 'COPY'); return l.length > 0; },
       cut: () => { const l = targets(); l.forEach(({ trackId, clip }) => edit(trackId, clip.id, 'CUT')); return l.length > 0; },
       paste: () => {
-        const target = c().selectedClip?.trackId || c().selectedTrackId;
+        const target = c().selectedTrackId || c().selectedClip?.trackId;
         if (!target) return false;
         edit(target, '', 'PASTE', { time: playheadStore.get() });
         return true;

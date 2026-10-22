@@ -223,7 +223,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   }, [isRenaming]);
 
+  // Échap pendant le renommage : le blur qui suit ne valide pas le nom tapé.
+  const escapedRef = useRef(false);
   const handleNameSubmit = () => {
+    if (escapedRef.current) { escapedRef.current = false; setIsRenaming(false); return; }
     setIsRenaming(false);
     if (newName.trim() && newName !== track.name) {
       onUpdate({ ...track, name: newName });
@@ -563,7 +566,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onBlur={handleNameSubmit}
-                onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNameSubmit();
+                  // Échap : on garde l'ancien nom et on ferme (avant : le champ restait ouvert).
+                  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); escapedRef.current = true; setTimeout(() => { escapedRef.current = false; }, 0); setNewName(track.name); setIsRenaming(false); }
+                }}
                 className="bg-black/60 border border-cyan-500/50 rounded px-1 text-[10px] font-black uppercase text-white outline-none w-full"
               />
             ) : (

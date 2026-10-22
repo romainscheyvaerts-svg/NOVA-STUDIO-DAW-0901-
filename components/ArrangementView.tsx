@@ -78,6 +78,7 @@ import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
 import { multiShiftFor, planMultiShift } from '../utils/multiClipMove';
+import { planDuplicate } from '../utils/duplicateClips';
 import { isCompactHeight } from '../utils/trackHeights';
 import { clampZoom, scrollForAnchor, sliderToZoom, zoomAnchor, zoomToSlider, SLIDER_STEPS, ZOOM_DEFAULT, type ZoomAnchor } from '../utils/arrangeZoom';
 
@@ -482,7 +483,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
 
       if (id === 'nova.paste') {
-        const target = sel?.trackId || selectedTrackId;
+        // Sur la piste choisie en dernier (clic sur son nom ou sur un de ses clips), comme le curseur
+        // d'édition des DAW. Avant : la piste du clip sélectionné passait avant, le collage partait ailleurs.
+        const target = selectedTrackId || sel?.trackId;
         if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: playheadStore.get() }); }
         return;
       }
@@ -506,7 +509,19 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
           setSelectedClip(null); setSelectedClipIds(new Set());
           return;
-        case 'nova.duplicate': e.preventDefault(); cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DUPLICATE')); return;
+        case 'nova.duplicate': {
+          e.preventDefault();
+          // En bloc après la sélection, puis les copies deviennent la sélection (Ctrl+D encore = à la suite).
+          const found = cibles.map(c => ({ trackId: c.trackId, clip: tracks.find(tr => tr.id === c.trackId)?.clips.find(x => x.id === c.clipId) })).filter((x): x is { trackId: string; clip: Clip } => !!x.clip);
+          const plan = planDuplicate(found);
+          plan.forEach(p => onEditClip?.(p.trackId, p.clipId, 'DUPLICATE', { start: p.start, id: p.id }));
+          if (plan.length) {
+            setSelectedClipIds(new Set(plan.map(p => p.id)));
+            const first = found[0];
+            setSelectedClip({ trackId: plan[0].trackId, clip: { ...first.clip, id: plan[0].id, start: plan[0].start } });
+          }
+          return;
+        }
         case 'nova.delete':
           e.preventDefault();
           cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DELETE'));
@@ -1445,6 +1460,9 @@ const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickCli
 
 const handleMouseMove = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
+    // Glisser contre un bord : la vue défile toute seule (edgeScroll, plus bas).
+    lastMoveRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey };
+    if (edgeRafRef.current === null && edgeScrollActive() && edgeStep(e.clientX) !== 0) edgeRafRef.current = requestAnimationFrame(edgeTick);
     const rect = scrollContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
@@ -1776,7 +1794,56 @@ const handleMouseMove = (e: React.MouseEvent) => {
     }
 };
 
+// --- Défilement automatique aux bords pendant un glisser (tour « édition et navigation ») ---
+// Avant : tirer un clip, un bord, une plage ou un rectangle contre le bord de la vue ne faisait
+// rien défiler (il fallait dézoomer pour aller plus loin), et sortir de la zone des pistes, le
+// bouton encore appuyé, lâchait le clip là où il était. Maintenant la vue défile d'autant plus
+// vite qu'on s'approche du bord (ou qu'on le dépasse) et le geste continue hors de la zone.
+const lastMoveRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean } | null>(null);
+const edgeRafRef = useRef<number | null>(null);
+const moveHandlerRef = useRef<(e: any) => void>(() => {});
+const upHandlerRef = useRef<() => void>(() => {});
+const EDGE_DRAGS: DragAction[] = ['MOVE', 'TRIM_START', 'TRIM_END', 'TCE_START', 'TCE_END', 'RANGE', 'SCRUB'];
+function edgeScrollActive(): boolean {
+    const a = dragActionRef.current;
+    return (!!a && EDGE_DRAGS.includes(a)) || !!marqueeOriginRef.current || !!rangeDragRef.current || !!loopDragRef.current;
+}
+/** Pas de défilement (px par image) selon la distance au bord des pistes ; 0 loin des bords. */
+function edgeStep(clientX: number): number {
+    const sc = scrollContainerRef.current;
+    if (!sc) return 0;
+    const r = sc.getBoundingClientRect();
+    const left = r.left + headerWidthRef.current, right = r.left + sc.clientWidth;
+    const zone = 40;
+    const speed = (d: number) => Math.round(Math.min(80, 3 + Math.pow(Math.min(2.5, d / zone), 2) * 24));
+    if (clientX > right - zone) return speed(clientX - (right - zone));
+    if (clientX < left + zone && sc.scrollLeft > 0 && clientX > r.left - 400) return -speed(left + zone - clientX);
+    return 0;
+}
+function edgeTick() {
+    edgeRafRef.current = null;
+    const ev = lastMoveRef.current, sc = scrollContainerRef.current;
+    if (!ev || !sc || !edgeScrollActive()) return;
+    const step = edgeStep(ev.clientX);
+    if (!step) return;
+    const before = sc.scrollLeft;
+    sc.scrollLeft = Math.max(0, before + step);
+    if (sc.scrollLeft !== before) moveHandlerRef.current(ev);
+    if (edgeRafRef.current === null) edgeRafRef.current = requestAnimationFrame(edgeTick);
+}
+// Bouton toujours appuyé hors de la zone des pistes : le geste continue (et se termine au lâcher).
+useEffect(() => {
+    const inside = (t: EventTarget | null) => !!t && !!scrollContainerRef.current?.contains(t as Node);
+    const mv = (e: MouseEvent) => { if (!inside(e.target) && (e.buttons & 1) && edgeScrollActive()) moveHandlerRef.current(e); };
+    const up = (e: MouseEvent) => { if (!inside(e.target) && edgeScrollActive()) upHandlerRef.current(); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+}, []);
+
 const handleMouseUp = () => {
+    if (edgeRafRef.current !== null) { cancelAnimationFrame(edgeRafRef.current); edgeRafRef.current = null; }
+    lastMoveRef.current = null;
     // 📌 Clip de prise lâché dans la zone des prises gardées de sa piste.
     const keptDrop = keptDropRef.current;
     if (keptDrop) {
@@ -1845,6 +1912,9 @@ const handleMouseUp = () => {
     groupMatesRef.current = [];
     setMarquee(null);
 };
+
+moveHandlerRef.current = handleMouseMove;
+upHandlerRef.current = handleMouseUp;
 
 const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean, zoomH: number, isHovered = false) => {
     if (x + w < 0 || x > ctx.canvas.width) return;
@@ -3038,7 +3108,7 @@ useEffect(() => {
           }} 
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
-          onMouseLeave={handleMouseUp} 
+          onMouseLeave={(e) => { if (!((e.buttons & 1) && edgeScrollActive())) handleMouseUp(); }} 
           onPointerDown={(e) => {
             if (e.pointerType === 'mouse') return;
             // Pas d'événements souris « de compatibilité » en double après le doigt.

@@ -2101,7 +2101,8 @@ function Studio() {
         // payload.start permet de deposer la copie a un endroit precis
         // (Alt+glisser laisse une copie a la position d'origine).
         // Copie indépendante (sans lien) : « Dupliquer en copie liée » est à part (DUPLICATE_LINKED).
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...unlinked(newClips[idx]), id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
+        // Juste après le clip (sans trou : une boucle dupliquée reste dans le temps) ; payload.id : l'appelant sélectionne la copie.
+        case 'DUPLICATE': if(idx > -1) newClips.push({ ...unlinked(newClips[idx]), id: payload?.id || `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration) }); break;
         // L3 · Copie liée d'un motif MIDI (utils/linkedClips), posée juste après (ou à payload.start).
         case 'DUPLICATE_LINKED': if (idx > -1) newClips = duplicateLinked(newClips, clipId, { start: payload?.start }).clips; break;
         case 'MAKE_UNIQUE': if (idx > -1) newClips[idx] = makeUnique(newClips[idx]); break;
