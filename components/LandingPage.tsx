@@ -23,6 +23,8 @@ import { useSimpleMode } from '../utils/simpleMode';
 import { isMakeMusicDisplay } from '../utils/accountDisplay';
 import OnlineSessionsList from './OnlineSessionsList';
 import DesktopUpdateCard from './DesktopUpdateCard';
+import RecentProjectsList from './RecentProjectsList';
+import type { RecentProject } from '../utils/recentProjects';
 
 interface LandingPageProps {
   user: User | null;
@@ -50,6 +52,8 @@ interface LandingPageProps {
   onOpenQuickMaster?: () => void;
   /** Compte Make Music seulement : ouvrir une de ses séances en ligne (« Charger Projet »). */
   onOpenOnlineSession?: (link: string) => void;
+  /** « Charger Projet » : projets récents de cet appareil (et du disque de Nova Studio), un clic pour rouvrir. */
+  onOpenRecent?: (p: RecentProject) => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
@@ -63,6 +67,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   savedSession,
   onResumeSession,
   onOpenVersions,
+  onOpenRecent,
   onLogin,
   onLogout,
   onOpenTemplates,
@@ -711,6 +716,12 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             <div className="p-4 space-y-4">
+              {/* Projets récents de cet appareil : un clic (avant : seule la dernière séance se rouvrait). */}
+              {onOpenRecent && (
+                <div className="-mx-4 max-h-72 overflow-y-auto" data-testid="landing-recents">
+                  <RecentProjectsList hideWhenEmpty title="Récents sur cet appareil" onOpen={p => { setShowLoadModal(false); onOpenRecent(p); }} />
+                </div>
+              )}
               {/* Charger depuis fichier local */}
               <button
                 onClick={() => { setShowLoadModal(false); handleOpenLocalProject(); }}

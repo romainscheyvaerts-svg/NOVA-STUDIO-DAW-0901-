@@ -4,6 +4,8 @@ import { User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { messageClair } from '../utils/friendlyError';
 import OnlineSessionsList from './OnlineSessionsList';
+import RecentProjectsList from './RecentProjectsList';
+import type { RecentProject } from '../utils/recentProjects';
 
 interface LoadProjectModalProps {
   isOpen: boolean;
@@ -17,22 +19,28 @@ interface LoadProjectModalProps {
   onOpenOnlineSession?: (link: string) => void;
   /** « Nouveau projet depuis un modèle » (Session Templates). */
   onOpenTemplates?: () => void;
+  /** « Récents » : les projets gardés sur cet appareil (et le disque de Nova Studio), un clic pour rouvrir. */
+  onOpenRecent?: (p: RecentProject) => void;
+  currentProjectId?: string | null;
 }
 
 const LoadProjectModal: React.FC<LoadProjectModalProps> = ({ 
-  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates, makeMusicEmail, onOpenOnlineSession
+  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates, makeMusicEmail, onOpenOnlineSession, onOpenRecent, currentProjectId
 }) => {
   // Sans compte, les projets en ligne sont inaccessibles : on ouvre d'abord le fichier de l'appareil.
   // Invité (« guest ») : pas de compte, comme sans utilisateur.
   const signedIn = !!user && user.id !== 'guest';
   // Compte Make Music seulement : l'onglet « Mon compte (en ligne) » liste ses séances en ligne.
   const mmOnly = !signedIn && !!makeMusicEmail && !!onOpenOnlineSession;
-  const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>(() => (signedIn || mmOnly ? 'CLOUD' : 'LOCAL'));
+  // Récents d'abord (comme « Ouvrir récent ») : rien à chercher, rien à télécharger.
+  const firstTab = (): 'RECENT' | 'CLOUD' | 'LOCAL' => (onOpenRecent ? 'RECENT' : signedIn || mmOnly ? 'CLOUD' : 'LOCAL');
+  const [activeTab, setActiveTab] = useState<'RECENT' | 'CLOUD' | 'LOCAL'>(firstTab);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   // Liste en ligne illisible (réseau, serveur) : on le dit, au lieu de « aucun projet ».
   const [loadError, setLoadError] = useState<string | null>(null);
-  useEffect(() => { if (isOpen) setActiveTab(signedIn || mmOnly ? 'CLOUD' : 'LOCAL'); }, [isOpen, signedIn, mmOnly]);
+  useEffect(() => { if (isOpen) setActiveTab(firstTab()); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, signedIn, mmOnly]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -100,7 +108,14 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
         )}
 
         {/* Tabs */}
-        <div className="flex border-b border-white/5 bg-black/20 shrink-0">
+        <div className="flex border-b border-white/5 bg-black/20 shrink-0" role="tablist">
+            {onOpenRecent && (
+              <button type="button" role="tab" aria-selected={activeTab === 'RECENT'} data-testid="load-tab-recent"
+                onClick={() => setActiveTab('RECENT')}
+                className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'RECENT' ? 'bg-white/5 text-emerald-300 border-b-2 border-emerald-300' : 'text-slate-500 hover:text-slate-300'}`}>
+                <i className="fas fa-clock-rotate-left mr-2"></i> Récents
+              </button>
+            )}
             <button 
                 onClick={() => setActiveTab('CLOUD')}
                 className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'CLOUD' ? 'bg-white/5 text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
@@ -118,6 +133,12 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
         {/* Content */}
         <div className="flex-1 overflow-hidden relative">
             
+            {/* --- RÉCENTS --- */}
+            {activeTab === 'RECENT' && onOpenRecent && (
+                <RecentProjectsList currentProjectId={currentProjectId} onOpen={p => { onClose(); onOpenRecent(p); }}
+                  onEmpty={() => setActiveTab(signedIn || mmOnly ? 'CLOUD' : 'LOCAL')} />
+            )}
+
             {/* --- CLOUD TAB --- */}
             {activeTab === 'CLOUD' && (
                 <div className="h-full flex flex-col">
@@ -150,7 +171,7 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-2">
                             <i className="fas fa-folder-open text-3xl text-slate-600 mb-1" aria-hidden="true"></i>
                             <p className="text-[13px] font-bold text-slate-300">Aucun projet en ligne pour l’instant</p>
-                            <p className="text-[12px] text-slate-400 max-w-xs">Dans ton projet, « Sauvegarder » (Ctrl+S) › « Sauvegarder » : il apparaîtra ici. Un fichier .zip ? Onglet « Fichier sur l'ordinateur ».</p>
+                            <p className="text-[12px] text-slate-400 max-w-xs">Dans ton projet, « Sauvegarder » (Ctrl+Maj+S) › « Sauvegarder » : il apparaîtra ici. Un fichier .zip ? Onglet « Fichier sur l'ordinateur ».</p>
                         </div>
                     ) : (
                         <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-2">

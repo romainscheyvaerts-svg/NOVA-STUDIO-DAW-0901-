@@ -330,6 +330,11 @@ export class RecoveryStore {
     return out.sort((a, b) => b.savedAt - a.savedAt);
   }
 
+  /** Identifiants des versions présentes (clés seules : rapide, aucun JSON relu). */
+  async versionIds(): Promise<number[]> {
+    return ((await this.db.keys(VERSIONS)) as number[]).map(Number);
+  }
+
   /** Change le commentaire d'une version nommée (ou en fait une version nommée). */
   async annotate(id: number, patch: { comment?: string; versionNumber?: number }): Promise<boolean> {
     const v = await this.db.get<VersionRecord>(VERSIONS, id);

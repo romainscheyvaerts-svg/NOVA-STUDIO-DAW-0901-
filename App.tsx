@@ -287,6 +287,7 @@ import DesktopUpdateCard from './components/DesktopUpdateCard';
 import { requestDesktopUpdateCheck, useDesktopBusyProbe } from './utils/appUpdate';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
+import { rememberRecent, type RecentProject } from './utils/recentProjects';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
 import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
 import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
@@ -1068,6 +1069,27 @@ function Studio() {
     } finally {
       setRecovering(false);
     }
+  };
+
+  /**
+   * « Ouvrir un projet › Récents » : la dernière version de ce projet (appareil, ou disque de
+   * Nova Studio remis d'abord sur l'appareil). Le projet ouvert garde d'abord ses modifications.
+   */
+  const openRecentProject = async (p: RecentProject) => {
+    setIsLoadMenuOpen(false);
+    if (!showLanding) { try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ } }
+    let note = '';
+    try {
+      if (p.source === 'disque' && !(await recoveryStore().getRecord(p.versionId))) {
+        const r = await importFromDisk(diskBackendRef.current, recoveryStore(), p.projectId, p.versionId);
+        note = r.missing.length ? ` — ${r.missing.length} son(s) introuvable(s) sur le disque` : ' — relu sur le disque';
+      }
+    } catch (e) {
+      console.warn('[Récents] lecture sur le disque', e);
+      setAiNotification(`❌ « ${p.name} » n'a pas pu être relu sur le disque. Ses versions sont dans Documents › Nova Studio › Projets.`);
+      return;
+    }
+    await recoverSession(p.versionId, { takes: false, label: `« ${p.name} » rouvert (enregistré ${savedAgo(p.savedAt)})${note}` });
   };
 
   const handleResumeSession = async () => {
@@ -5552,6 +5574,8 @@ function Studio() {
       });
       lastSavedSigRef.current = sig;
       if (r) lastSavedReasonRef.current = named ? 'named' : reason;
+      // « Ouvrir un projet › Récents » : ce projet passe en tête (index léger, sans relire les versions).
+      if (r) rememberRecent({ projectId: st.id, name: st.name || 'Session', savedAt: r.versionId, versionId: r.versionId, tracks: snap.tracks, takes: snap.takes, beatTitle: snap.beatTitle });
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (r) afterVersionSaved(r.versionId);
@@ -10834,6 +10858,7 @@ function Studio() {
         savedSession={savedSessionMeta}
         onResumeSession={handleResumeSession}
         onOpenVersions={savedSessionMeta ? () => setVersionsOpen(true) : undefined}
+        onOpenRecent={p => { void openRecentProject(p); }}
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
         onOpenTemplates={() => setTemplatesModal('browse')}
@@ -11651,7 +11676,8 @@ function Studio() {
           try { await autosaveNowRef.current?.('restore', true); } catch { /* */ }
           void recoverSession(v.id, { takes: false, label: `Version du ${new Date(v.savedAt).toLocaleString('fr-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} restaurée (ta version d'avant reste dans l'historique)` });
         }} />
-      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} makeMusicEmail={makeMusicAccount?.email ?? null} onOpenOnlineSession={openOnlineSession} />}
+      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} makeMusicEmail={makeMusicAccount?.email ?? null} onOpenOnlineSession={openOnlineSession}
+        onOpenRecent={p => { void openRecentProject(p); }} currentProjectId={state.id} />}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
