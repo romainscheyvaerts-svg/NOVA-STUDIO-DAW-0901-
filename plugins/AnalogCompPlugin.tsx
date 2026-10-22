@@ -18,7 +18,6 @@ interface Props { node: any; initialParams: Record<string, any>; onParamsChange:
 
 const fr = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
 const signed = (v: number, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + fr(Math.abs(v), d);
-const msText = (ms: number) => (ms >= 1000 ? `${fr(ms / 1000, ms >= 10000 ? 0 : 1)} s` : `${fr(ms, ms < 10 ? 1 : 0)} ms`);
 
 function interp(x: number, xs: number[], ys: number[]) {
   if (!xs?.length) return NaN;
@@ -47,10 +46,12 @@ export function formatAnalog(kind: string, spec: AnalogParamSpec, v: number): st
     case 'pos': {
       if (spec.id === 'input' && prof.inGainDb) return `${fr(v)} · gain ${signed(interp(v, prof.inKnob, prof.inGainDb))} dB`;
       if (spec.id === 'output' && prof.outGainDb) return `${fr(v)} · ${signed(interp(v, prof.outKnob, prof.outGainDb))} dB`;
-      const knob = spec.id === 'attack' ? prof.attKnob : (prof.relKnob || [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-      const t = spec.id === 'attack' ? prof.attT63Ms : spec.id === 'release' ? prof.relT63Ms : null;
-      const ms = t ? interp(v, knob, t) : NaN;
-      return Number.isFinite(ms) ? `${fr(v)} · ≈ ${msText(ms)}` : fr(v);
+      // Attaque / relâchement : position du bouton seulement. Les temps « ≈ x ms » affichés avant le
+      // 22/10/2026 étaient ceux de l'appareil d'ORIGINE (tables du labo), pas ceux du modèle NOVA :
+      // mesurés sur NOVA, ils s'en écartaient de 14 à 100 % et la cellule à plusieurs constantes de
+      // temps n'a pas UN temps par position (tests/metrologieCompresseurs.test.ts). Les infobulles
+      // donnent les extrêmes mesurés sur NOVA.
+      return fr(v);
     }
     default: return fr(v, spec.step >= 1 ? 0 : 1);
   }

@@ -3,7 +3,8 @@
  *  - Mid / Side par bande : bande sur les côtés seulement → le centre ne bouge pas (< −100 dB),
  *    et inversement ; bande à gauche → la droite est intacte AU BIT PRÈS ; bandes neutres en
  *    Mid / Side → sortie = entrée au bit près ;
- *  - phase naturelle du cœur = courbes des filtres du navigateur (formules du Web Audio) ;
+ *  - phase naturelle du cœur = courbes des filtres du navigateur (formules du Web Audio, Q traduit
+ *    dans l'unité du navigateur comme pour l'égaliseur classique : engine/eqQ.ts) ;
  *  - phase linéaire : réponse impulsionnelle symétrique (phase plate < 1°), latence EXACTE de D
  *    échantillons, module = celui de la phase naturelle (± 0,25 dB de 60 Hz à 18 kHz), chaîne
  *    neutre = retard pur au bit près, matrice complète (gauche + centre) = convolution directe ;
@@ -12,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createEqProCore, eqLinearLatencySamples, eqProNeeded, type EqProBand } from '../engine/eqLinearCore';
+import { eqNativeQ } from '../engine/eqQ';
 
 const SR = 48000;
 const db = (x: number) => 20 * Math.log10(Math.max(1e-30, x));
@@ -137,7 +139,8 @@ describe('EQ pro : Mid / Side par bande, phase naturelle', () => {
       const x = sine(f, 0.25, 24000);
       const [oL] = run(c, x, x);
       const meas = db(rms(oL, 12000) / rms(x, 12000));
-      expect(Math.abs(meas - webAudioDb(type, f0, g, q, f))).toBeLessThan(0.05);
+      // Le filtre du navigateur reçoit le Q dans SON unité (convention v2, engine/eqQ.ts) : même courbe que l'égaliseur classique.
+      expect(Math.abs(meas - webAudioDb(type, f0, g, eqNativeQ(type, q, f0, SR), f))).toBeLessThan(0.05);
     }
   });
 

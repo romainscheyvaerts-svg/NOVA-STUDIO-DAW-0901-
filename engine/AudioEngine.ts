@@ -4633,7 +4633,7 @@ export class AudioEngine {
       case 'DEESSER': node = new DeEsserNode(ctx); break;
       case 'DENOISER': node = new DenoiserNode(ctx); break;
       case 'PROEQ12':
-        const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: 1.0, isEnabled: true, isSolo: false })) };
+        const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: i === 0 || i === 11 ? Math.SQRT1_2 : 1.0, isEnabled: true, isSolo: false })), qVersion: 2 };
         const eqParams = plugin.params && plugin.params.bands ? plugin.params : eqDefaultParams;
         node = new ProEQ12Node(ctx, eqParams as any);
         break;

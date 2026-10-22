@@ -134,6 +134,13 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
   var kOver: number[] | null = null, kGr: number[] | null = null, holdN = 0, age = 0;
   var relMs = 100, relScale = 1;
   var LE = 1, reqBuf = new Float64Array(MAX_LA + 4), reqLnBuf = new Float64Array(MAX_LA + 4), reqPos = 0, grS = 1, cSlow = 0, slowGr = 0;
+  // Plancher « brickwall » (métrologie du 22/10/2026) : avec grScale < 1, une part de la réduction est
+  // confiée aux bandes, mais le gain final ne dépasse JAMAIS celui qui tient le plafond (sinon les
+  // crêtes partaient dans l'écrêtage de sécurité : +1,3 dBTP mesurés sous −0,1 dBTP affichés).
+  // File du minimum glissant de la demande brickwall seule, puis moyenne glissante sur L (comme le gain).
+  var reqBwBuf = new Float64Array(MAX_LA + 4);
+  var dbVal = new Float64Array(DQ), dbIdx = new Float64Array(DQ), dbHead = 0, dbLen = 0;
+  var boxBw = new Float64Array(MAX_LA + 2), boxBwSum = 0;
   // coude tabulé (pas de 0,02 dB) : gain et ln(gain) sans exponentielle par échantillon
   var KSTEP = 0.02, kO0 = 0, kTpMin = 0, kG = new Float64Array(1), kLn = new Float64Array(1);
   var mGr = 1, mOut = 0, mIn = 0;
@@ -170,6 +177,10 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
       var bv = lnMode ? lnRel : relGain;
       for (var i = 0; i < boxBuf.length; i++) boxBuf[i] = bv;
       boxSum = bv * L; boxPos = 0;
+      // Plancher brickwall : repart « sans réduction » (il ne fait que plafonner, jamais relâcher).
+      var bw0 = lnMode ? 0 : 1;
+      for (var ib2 = 0; ib2 < boxBw.length; ib2++) boxBw[ib2] = bw0;
+      boxBwSum = bw0 * L;
     }
     // avec le coude doux (gain qui suit l'onde, mesuré sur l'original), le relâchement descend sous la milliseconde
     var rel = Math.max(p.kneeOverDb && p.kneeOverDb.length >= 2 ? 0.02 : 1, Math.min(2000, +p.releaseMs || 100));
@@ -182,7 +193,10 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
     ph = os > 1 ? phases(os) : [];
     // Marge interne : les crêtes situées ENTRE deux points suréchantillonnés
     // (très aigus) dépassent l'estimation d'au plus quelques centièmes de dB.
-    detLin = ceilLin * (os >= 8 ? 0.9977 : os >= 4 ? 0.9886 : os >= 2 ? 0.9441 : 1);
+    // ×8 : même marge qu'à ×4. La précision est limitée par l'interpolateur (32 points), pas par la
+    // finesse de la grille : avec 0,9977 (−0,02 dB), un bruit rose poussé sortait à −0,95 dBTP
+    // (mesure ITU-R BS.1770-4) sous un plafond de −1 dBTP (métrologie du 22/10/2026).
+    detLin = ceilLin * (os >= 4 ? 0.9886 : os >= 2 ? 0.9441 : 1);
     inGainTarget = Math.pow(10, Math.max(-24, Math.min(36, +p.inputGainDb || 0)) / 20);
   }
 
@@ -191,6 +205,7 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
     dqHead = 0; dqLen = 0;
     relGain = 1; age = 0; for (var i = 0; i < boxBuf.length; i++) boxBuf[i] = lnMode ? 0 : 1; boxSum = lnMode ? 0 : L; boxPos = 0;
     reqBuf.fill(1); reqLnBuf.fill(0); reqPos = 0; slowGr = 0; lnRel = 0;
+    reqBwBuf.fill(1); dbHead = 0; dbLen = 0; for (var ib = 0; ib < boxBw.length; ib++) boxBw[ib] = lnMode ? 0 : 1; boxBwSum = lnMode ? 0 : L;
     dlL.fill(0); dlR.fill(0); dlC.fill(ceilLin); dlPos = 0; counter = 0;
     inGain = inGainTarget;
   }
@@ -221,6 +236,8 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
       }
       // 2. Gain requis pour l'intervalle [m, m+1].
       var req = tp > detLin ? detLin / tp : 1, lnReq = 0;
+      // Plancher (grScale) : marge supplémentaire de 0,1 dB, le gain y varie très vite (modulation = crêtes en plus).
+      var reqBw = tp > detLin * 0.9886 ? detLin * 0.9886 / tp : 1;
       if (kOver && kGr) {
         // coude doux mesuré : réduction selon le dépassement du plafond (jamais moins que le brickwall)
         if (tp > kTpMin) {
@@ -239,9 +256,9 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
       if (LE < LA) {
         // anticipation effective plus courte : la demande est retardée de LA − LE (latence inchangée)
         var RB = reqBuf.length;
-        reqBuf[reqPos] = req; reqLnBuf[reqPos] = lnReq;
+        reqBuf[reqPos] = req; reqLnBuf[reqPos] = lnReq; reqBwBuf[reqPos] = reqBw;
         var rdp = (reqPos - (LA - LE) + RB) % RB;
-        req = reqBuf[rdp]; lnReq = reqLnBuf[rdp];
+        req = reqBuf[rdp]; lnReq = reqLnBuf[rdp]; reqBw = reqBwBuf[rdp];
         reqPos = (reqPos + 1) % RB;
       }
       while (dqLen > 0 && dqVal[(dqHead + dqLen - 1) % DQ] >= req) dqLen--;
@@ -250,6 +267,12 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
       var W = LE + 2 * HALF + 1;
       while (dqLen > 0 && dqIdx[dqHead] <= counter - W) { dqHead = (dqHead + 1) % DQ; dqLen--; }
       var held = dqVal[dqHead], heldLn = dqLn[dqHead];
+      // Même file pour la demande brickwall seule (plancher de grScale).
+      while (dbLen > 0 && dbVal[(dbHead + dbLen - 1) % DQ] >= reqBw) dbLen--;
+      var tailB = (dbHead + dbLen) % DQ;
+      dbVal[tailB] = reqBw; dbIdx[tailB] = counter; dbLen++;
+      while (dbLen > 0 && dbIdx[dbHead] <= counter - W) { dbHead = (dbHead + 1) % DQ; dbLen--; }
+      var heldBw = dbVal[dbHead];
       counter++;
 
       // 4. Relâchement (le gain remonte doucement, jamais au-dessus du minimum).
@@ -260,6 +283,9 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
         else if (age < holdN) age++;
         else lnRel += (heldLn - lnRel) * relCoef;
         // 5. Moyenne glissante sur L (des ln : rampe d'attaque géométrique, toujours ≤ la demande à la crête)
+        var lnBw = heldBw < 1 ? Math.log(heldBw) : 0;
+        boxBwSum += lnBw - boxBw[boxPos];
+        boxBw[boxPos] = lnBw;
         boxSum += lnRel - boxBuf[boxPos];
         boxBuf[boxPos] = lnRel;
         boxPos++; if (boxPos >= L) boxPos = 0;
@@ -272,6 +298,9 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
             grl -= (1 - grS) * (slowGr < grl ? slowGr : grl);
           } else grl *= grS;
           gln = -grl;
+          // Plancher : jamais moins de réduction que le brickwall (plafond tenu en crête vraie).
+          var glnBw = boxBwSum / L;
+          if (glnBw < gln) gln = glnBw;
         }
         g = gln < 0 ? Math.exp(gln) : 1;
       } else {
@@ -280,6 +309,8 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
         else if (kOver) relGain += (held - relGain) * relCoef; // coude doux : retour vers la demande EN COURS
         else { var up = relGain + (1 - relGain) * relCoef; relGain = held < up ? held : up; }
         // 5. Moyenne glissante sur L.
+        boxBwSum += heldBw - boxBw[boxPos];
+        boxBw[boxPos] = heldBw;
         boxSum += relGain - boxBuf[boxPos];
         boxBuf[boxPos] = relGain;
         boxPos++; if (boxPos >= L) boxPos = 0;
@@ -293,6 +324,9 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
             grd -= (1 - grS) * sl;
           } else grd *= grS;
           g = Math.exp(-grd);
+          // Plancher : jamais moins de réduction que le brickwall.
+          var gBw = boxBwSum / L;
+          if (gBw < g) g = gBw;
         }
       }
 

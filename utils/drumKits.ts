@@ -314,7 +314,8 @@ export function padFxPlugins(r: DrumRow): { id: string; name: string; type: 'PRO
     Object.assign(bands[1], { type: 'lowshelf', frequency: 100, gain: m.eqLow, q: 0.71, isEnabled: !!m.eqLow });
     Object.assign(bands[4], { type: 'peaking', frequency: 1000, gain: m.eqMid, q: 0.9, isEnabled: !!m.eqMid });
     Object.assign(bands[8], { type: 'highshelf', frequency: 8000, gain: m.eqHigh, q: 0.71, isEnabled: !!m.eqHigh });
-    out.push({ id: `${r.id}-eq`, name: 'EQ', type: 'PROEQ12', isEnabled: true, latency: 0, params: { isEnabled: true, masterGain: 1, bands } });
+    // qVersion 2 : Q en convention v2 (engine/eqQ.ts), largeur de la cloche exacte.
+    out.push({ id: `${r.id}-eq`, name: 'EQ', type: 'PROEQ12', isEnabled: true, latency: 0, params: { isEnabled: true, masterGain: 1, qVersion: 2, bands } });
   }
   if (m.comp > 0) {
     // Compression « punch » : attaque lente qui laisse passer le transitoire,

@@ -12,7 +12,7 @@
  * (Side = (G−D)/2), gauche, droite. Bandes en série, dans l'ordre 1 → 12.
  *
  * 1) Phase naturelle (minimum) : chaque bande est un biquad aux formules du Web Audio
- *    (mêmes courbes que l'égaliseur classique, Q en dB pour les coupe-bas / coupe-haut),
+ *    (mêmes courbes que l'égaliseur classique, Q en convention v2 : engine/eqQ.ts),
  *    calculé en double précision, forme directe I. Une bande Mid / Side encode, filtre le
  *    canal visé, puis décode : G = M + S, D = M − S. Une bande neutre (cloche / étagère à
  *    0 dB, bande coupée) n'est PAS calculée : la sortie est l'entrée au bit près (et
@@ -108,15 +108,50 @@ export function createEqProCore(sampleRate: number): EqProCore {
   function clamp(x: number, a: number, b: number) { return x < a ? a : x > b ? b : x; }
   function isGainType(t: number) { return t <= 2; }
 
-  /** Coefficients normalisés (b0, b1, b2, a1, a2) d'un biquad du Web Audio, dans `o` à partir de `k`. */
+  /**
+   * Q « numérique » d'une cloche / encoche : copie exacte de `eqDigitalQ` (engine/eqQ.ts, ce cœur
+   * est sérialisé dans le worklet et ne peut rien importer) : largeur mesurée = largeur affichée.
+   */
+  function digitalQ(q: number, f0: number) {
+    var Q = clamp(q, 0.0001, 1000), nyq = SR / 2;
+    var t0 = Math.tan(Math.PI * f0 / SR);
+    var ob = Math.sqrt(1 + 1 / (4 * Q * Q)) - 1 / (2 * Q);
+    var fh = f0 / ob;
+    var uLow = Math.tan(Math.PI * f0 * ob / SR) / t0;
+    if (fh >= nyq) return uLow / (1 - uLow * uLow);
+    var target = 2 * Math.asinh(1 / (2 * Q));
+    var lo = 1e-15, hi = 1 - 1e-15, u = ob;
+    for (var it = 0; it < 80; it++) {
+      var A1 = Math.atan(t0 / u), A2 = Math.atan(u * t0);
+      var g = Math.log(A1) - Math.log(A2) - target;
+      if (Math.abs(g) < 1e-13) break;
+      if (g > 0) lo = u; else hi = u;
+      var d = -t0 / ((u * u + t0 * t0) * A1) - t0 / ((1 + u * u * t0 * t0) * A2);
+      var nu = u - g / d;
+      if (!(nu > lo && nu < hi)) nu = 0.5 * (lo + hi);
+      u = nu;
+    }
+    var qEx = u / (1 - u * u);
+    if (fh <= 0.75 * nyq) return qEx;
+    var t = clamp((nyq - fh) / (0.25 * nyq), 0, 1);
+    var w = t * t * (3 - 2 * t);
+    return Math.exp(w * Math.log(qEx) + (1 - w) * Math.log(uLow / (1 - uLow * uLow)));
+  }
+
+  /**
+   * Coefficients normalisés (b0, b1, b2, a1, a2) d'une bande, dans `o` à partir de `k` : formules
+   * du Web Audio, Q en convention v2 (engine/eqQ.ts : Q linéaire des coupe-bas / haut, largeur
+   * compensée des cloches et encoches) — mêmes courbes que l'égaliseur classique.
+   */
   function coefs(type: number, f: number, g: number, q: number, o: Float64Array, k: number) {
     var f0 = clamp(f, 10, SR * 0.495);
     var w0 = 2 * Math.PI * f0 / SR, cw = Math.cos(w0), sw = Math.sin(w0);
     var Q = Math.max(0.0001, q);
+    if (type === 0 || type === 5) Q = digitalQ(Q, f0);
     var A = Math.pow(10, g / 40);
     var b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0, al = 0;
     if (type === 3 || type === 4) {
-      al = sw / (2 * Math.pow(10, Q / 20));
+      al = sw / (2 * Q);
       if (type === 4) { b0 = (1 - cw) / 2; b1 = 1 - cw; } else { b0 = (1 + cw) / 2; b1 = -(1 + cw); }
       b2 = b0; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al;
     } else if (type === 5) {

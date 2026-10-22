@@ -136,7 +136,7 @@ export const TIMEFX_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const DJFILTER_SPECS: V21ParamSpec[] = [
-  { id: 'filter', label: 'Filtre', min: -1, max: 1, step: 0.01, unit: '', hint: 'Un seul bouton : à gauche passe-bas (le son s\'étouffe), à droite passe-haut (les basses disparaissent), au centre rien. Comme le filtre d\'une table de mixage DJ, l\'Auto Filter de Live ou le DJ Filter de Logic.' },
+  { id: 'filter', label: 'Filtre', min: -1, max: 1, step: 0.01, unit: '', hint: 'Un seul bouton : à gauche passe-bas (le son s\'étouffe), à droite passe-haut (les basses disparaissent), au centre rien. Comme le filtre d\'une table de mixage DJ. Sans résonance, la fréquence affichée est le point à −3 dB ; avec résonance, c\'est le sommet qui siffle.' },
   { id: 'resonance', label: 'Résonance', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Accentue la fréquence de coupure : le balayage « siffle » davantage.' },
   { id: 'slope', label: 'Pente', min: 12, max: 24, step: 12, unit: 'dB/oct', hint: '12 dB/octave = doux ; 24 dB/octave = net, comme un filtre DJ.' },
   { id: 'output', label: 'Sortie', min: -24, max: 12, step: 0.5, unit: 'dB', hint: 'Volume après le filtre (dB).' },
@@ -157,11 +157,11 @@ export const DJFILTER_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const LOFI_SPECS: V21ParamSpec[] = [
-  { id: 'lowCut', label: 'Coupe-bas', min: 20, max: 2000, step: 1, unit: 'Hz', hint: 'Retire les graves : 300 à 600 Hz pour un téléphone ou un talkie-walkie.' },
-  { id: 'highCut', label: 'Coupe-haut', min: 1000, max: 20000, step: 10, unit: 'Hz', hint: 'Retire les aigus : 3 400 Hz = téléphone, 5 000 Hz = radio AM, 9 000 Hz = cassette.' },
+  { id: 'lowCut', label: 'Coupe-bas', min: 20, max: 2000, step: 1, unit: 'Hz', hint: 'Retire les graves (−3 dB pile à la fréquence, 24 dB/oct) : 300 à 600 Hz pour un téléphone ou un talkie-walkie.' },
+  { id: 'highCut', label: 'Coupe-haut', min: 1000, max: 20000, step: 10, unit: 'Hz', hint: 'Retire les aigus (−3 dB pile à la fréquence, 24 dB/oct) : 3 400 Hz = téléphone, 5 000 Hz = radio AM, 9 000 Hz = cassette.' },
   { id: 'drive', label: 'Saturation', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Grain léger d\'un petit haut-parleur. Pour une vraie saturation, utilise plutôt « Saturation ».' },
-  { id: 'bits', label: 'Résolution', min: 2, max: 16, step: 1, unit: 'bits', hint: 'Bitcrush : moins de bits = son granuleux (Bitcrusher de Logic, Redux de Live). 16 = intact.' },
-  { id: 'rate', label: 'Échantillonnage', min: 1000, max: 48000, step: 50, unit: 'Hz', hint: 'Réduction de fréquence d\'échantillonnage : son métallique de vieux sampler (SP-1200 ≈ 26 kHz, téléphone 8 kHz). 48 000 = intact.' },
+  { id: 'bits', label: 'Résolution', min: 2, max: 16, step: 1, unit: 'bits', hint: 'Bitcrush : moins de bits = son granuleux. 16 = intact.' },
+  { id: 'rate', label: 'Échantillonnage', min: 1000, max: 48000, step: 50, unit: 'Hz', hint: 'Réduction de fréquence d\'échantillonnage : son métallique de vieux sampler (vieux sampler hip-hop ≈ 26 kHz, téléphone 8 kHz). 48 000 = intact.' },
   { id: 'noise', label: 'Souffle', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Ajoute un souffle de bande / de ligne.' },
   { id: 'mix', label: 'Dosage', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Part du son traité (100 % = effet complet).' },
   { id: 'output', label: 'Sortie', min: -24, max: 12, step: 0.5, unit: 'dB', hint: 'Volume après l\'effet (dB) : un son filtré paraît moins fort.' },
@@ -176,7 +176,7 @@ export const LOFI_PRESETS: V21Preset[] = [
   { id: 'bitcrush', name: 'Bitcrush 8 bits', hint: '8 bits à 11 kHz : son de console rétro, granuleux.', params: { bits: 8, rate: 11025, lowCut: 20, highCut: 20000, drive: 0, noise: 0, mix: 1, output: 0 } },
   { id: 'talkie', name: 'Talkie-walkie', hint: 'Très étroit et saturé, avec du souffle.', params: { bits: 8, rate: 8000, lowCut: 700, highCut: 2800, drive: 0.6, noise: 0.2, mix: 1, output: 5 } },
   { id: 'megaphone', name: 'Mégaphone', hint: 'Médium agressif et saturé, sans bitcrush.', params: { bits: 16, rate: 48000, lowCut: 500, highCut: 4000, drive: 0.7, noise: 0, mix: 1, output: 3 } },
-  { id: 'sp1200', name: 'Sampler 12 bits (SP-1200)', hint: '12 bits à 26 kHz : le grain des samplers hip-hop des années 90.', params: { bits: 12, rate: 26040, lowCut: 20, highCut: 13000, drive: 0.15, noise: 0, mix: 1, output: 0 } },
+  { id: 'sp1200', name: 'Sampler 12 bits (années 90)', hint: '12 bits à 26 kHz : le grain des samplers hip-hop des années 90.', params: { bits: 12, rate: 26040, lowCut: 20, highCut: 13000, drive: 0.15, noise: 0, mix: 1, output: 0 } },
 ];
 
 // ---------------------------------------------------------------------------
@@ -229,11 +229,11 @@ export const GATEFX_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const GATE_SPECS: V21ParamSpec[] = [
-  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la détection (le son lui-même, ou la clé externe) dépasse ce seuil (Threshold d’un expandeur/gate de studio).' },
+  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la crête détectée (le son lui-même, ou la clé externe) atteint ce seuil (dBFS) ; la porte se referme environ 4 dB plus bas (hystérésis : pas de battement autour du seuil).' },
   { id: 'range', label: 'Plage', min: 0, max: 80, step: 1, unit: 'dB', hint: 'Combien la porte baisse le son quand elle est fermée : 80 dB = silence, 6 à 12 dB = expandeur doux (garde un peu de respiration).' },
-  { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
-  { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après le dernier passage au-dessus du seuil : évite qu’elle claque sur une fin de note.' },
-  { id: 'release', label: 'Fermeture', min: 1, max: 1000, step: 1, unit: 'ms', hint: 'Temps de fermeture : court = coupe sèche (gate rythmique au kick), long = fondu naturel.' },
+  { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture (constante de temps : 63 % de l’ouverture) : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
+  { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après que la crête détectée repasse sous le seuil : évite qu’elle claque sur une fin de note. La détection retombe en 10 ms : après une coupure nette, compter environ 11,5 ms de plus par tranche de 10 dB au-dessus du seuil.' },
+  { id: 'release', label: 'Fermeture', min: 1, max: 1000, step: 1, unit: 'ms', hint: 'Temps de fermeture (constante de temps : 63 % de la fermeture) : court = coupe sèche (gate rythmique au kick), long = fondu naturel.' },
 ];
 
 export const DEFAULT_GATE = { threshold: -40, range: 80, attack: 0.5, hold: 20, release: 80, isEnabled: true };

@@ -65,6 +65,13 @@ export const DEESSER_DEFAULTS: DeEsserParams = {
   detection: 'RELATIVE', relThreshold: -6, listen: 0,
 };
 
+/**
+ * Seuil ABSOLU : écart mesuré (22/10/2026, tests/metrologieCompresseurs.test.ts) entre la valeur du bouton
+ * et la crête d'un sinus au centre de la bande qui déclenche (≈ +6 dB à 44,1 et 48 kHz) : la détection
+ * absolue lit l'énergie lissée de la bande sur l'échelle de l'ancien de-esser, pas un niveau crête.
+ */
+export const DEESS_ABS_SINE_OFFSET_DB = 6;
+
 /** Réduction maximale (dB) pour une valeur du bouton « Réduction » (0..1). */
 export const deesserMaxRangeDb = (r: number) => (r > 0 ? 4 + 14 * Math.max(0, Math.min(1, r)) : 0);
 
@@ -277,6 +284,8 @@ export class DeEsserNode {
 
   /** Retard ajouté (s) : aucun (pas d'anticipation), déclaré au PDC. */
   public get latency(): number { return 0; }
+  /** Fréquence d'échantillonnage du moteur (courbe de la fenêtre). */
+  public get sampleRate(): number { return this.ctx.sampleRate; }
 
   /** Valeurs fixes des réglages automatisables (bornées). */
   private apValues(): Record<string, number> {
@@ -433,6 +442,7 @@ const DeEsserScreen: React.FC<{ node: DeEsserNode; params: DeEsserParams }> = ({
       const ctx = cv?.getContext('2d');
       if (!cv || !ctx) return;
       const p = paramsRef.current;
+      const sr = Number(node?.sampleRate) > 0 ? Number(node.sampleRate) : 48000;
       const w = cv.width, h = cv.height;
       ctx.clearRect(0, 0, w, h);
       const fmin = 1000, fmax = 20000, top = 26, dbMax = 20;
@@ -457,7 +467,9 @@ const DeEsserScreen: React.FC<{ node: DeEsserNode; params: DeEsserParams }> = ({
         ctx.beginPath();
         for (let i = 0; i <= w; i += 2) {
           const f = fmin * Math.pow(fmax / fmin, i / w);
-          const y = yOf(deesserResponseDb(f, p, g));
+          // Fréquence d'échantillonnage RÉELLE du moteur : à 44,1 kHz la cloche n'a pas la même forme
+          // qu'à 48 kHz près des aigus (avant le 22/10/2026 l'écran dessinait toujours la courbe à 48 kHz).
+          const y = yOf(deesserResponseDb(f, p, g, sr));
           if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
         }
         ctx.stroke();
@@ -546,8 +558,8 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
               hint={help('Sensibilité', 'Seuil relatif : plus la valeur est haute, plus le de-esser attrape de « s » (6 dB conseillé).')} />
           ) : (
             <Knob key="abs" paramId="threshold" label="Seuil" size="M" cap="silver" arc={DS_ACCENT} min={-60} max={0} step={0.5} value={params.threshold} defaultValue={-25}
-              onChange={v => apply({ threshold: v })} format={v => `${fr(v, 0)} dB`} ticks={11}
-              hint={help('Seuil', 'Niveau de la zone des « s » au-delà duquel le de-esser agit.')} />
+              onChange={v => apply({ threshold: v })} format={v => `${fr(v, 0)} dB · sinus ≈ ${fr(v + DEESS_ABS_SINE_OFFSET_DB, 0)} dBFS`} ticks={11}
+              hint={help('Seuil', `Niveau de la zone des « s » au-delà duquel le de-esser agit (énergie lissée de la bande, échelle des anciennes versions). Repère mesuré : un sinus au centre de la bande déclenche quand sa crête est ${fr(DEESS_ABS_SINE_OFFSET_DB, 0)} dB au-dessus de ce seuil.`)} />
           )}
           <Knob paramId="reduction" label="Réduction" size="M" cap="silver" arc={DS_ACCENT} min={0} max={1} step={0.01} value={params.reduction} defaultValue={0.6}
             onChange={v => apply({ reduction: v })} format={v => `${Math.round(v * 100)} % · ${fr(deesserMaxRangeDb(v), 0)} dB max`} ticks={11}

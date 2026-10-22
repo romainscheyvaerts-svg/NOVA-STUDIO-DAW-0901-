@@ -19,7 +19,15 @@
  * (1 dB de dépassement = 1 dB de gain, genou doux de 3 dB), sans jamais la dépasser :
  *   plage < 0 : atténuation (le niveau de la bande est tenu au seuil, au plus |plage| dB) ;
  *   plage > 0 : renfort quand la bande dépasse le seuil (au plus plage dB).
- * Détecteur crête stéréo couplé, attaque / relâchement par bande. Latence nulle.
+ * Détecteur crête stéréo couplé par bande : crête p = max(|b|, p relâchée en « relâchement ») ;
+ * niveau e monte vers p en « attaque » et suit p dès qu'elle redescend. Sur un son tenu, e = la
+ * crête dans la bande : le seuil affiché est le vrai seuil (±0,05 dB). (Avant le 22/10/2026 : un
+ * pôle à deux vitesses sur |b|, calé SOUS la crête : −0,8 dB à 5 / 100 ms, jusqu'à −15 dB.)
+ *
+ * Largeur : Q = celle du passe-bande de la bande (−3 dB, ce qu'on entend avec « Écouter »),
+ * avec préwarping de la largeur (RBJ) : exacte jusque dans l'aigu (avant : 36 % plus étroite à
+ * 10 kHz). La cloche appliquée a, à mi-gain (dB), un Q de Q / √g (g = gain linéaire au centre) :
+ * elle se resserre quand elle creuse, s'élargit quand elle renforce. Latence nulle.
  *
  * Sans clic : seuil, plage, marche/arrêt, écoute et sortie glissent sur 256 échantillons ;
  * fréquence et Q glissent (log) par sous-blocs de 32 échantillons. Aucune allocation dans
@@ -70,7 +78,7 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
   var Pc = new Float64Array(NP), Pt = new Float64Array(NP), Ps = new Float64Array(NP);
   var Pn = new Int32Array(NP);
   var ramping = 0;
-  var env = new Float64Array(NB);
+  var env = new Float64Array(NB), pk = new Float64Array(NB);
   var cA = new Float64Array(NB), cR = new Float64Array(NB);
   var linLo = new Float64Array(NB);
   var gNow = new Float64Array(NB), gPk = new Float64Array(NB);
@@ -85,7 +93,11 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
   function design(b: number) {
     var fc = clamp(fCur[b], 20, SR * 0.45);
     var w0 = 2 * Math.PI * fc / SR, cw = Math.cos(w0), sw = Math.sin(w0);
-    var al = sw / (2 * clamp(qCur[b], 0.1, 40)), a0 = 1 + al;
+    // Largeur en octaves du passe-bande de Q analogique donné, préwarpée (RBJ) : −3 dB exacts à toute fréquence.
+    var q = clamp(qCur[b], 0.1, 40);
+    var xq = 1 / (2 * q), bwOct = 2 / Math.LN2 * Math.log(xq + Math.sqrt(xq * xq + 1));
+    var hv = Math.LN2 / 2 * bwOct * w0 / sw;
+    var al = sw * (Math.exp(hv) - Math.exp(-hv)) / 2, a0 = 1 + al;
     B0[b] = al / a0; A1[b] = -2 * cw / a0; A2[b] = (1 - al) / a0;
   }
 
@@ -204,8 +216,11 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
           }
           var lv = dl < 0 ? -dl : dl, lr = dr < 0 ? -dr : dr;
           if (lr > lv) lv = lr;
+          var p1 = pk[b];
+          p1 = lv > p1 ? lv : p1 + (lv - p1) * cR[b];
+          pk[b] = p1;
           var e = env[b];
-          e += (lv - e) * (lv > e ? cA[b] : cR[b]);
+          e = p1 > e ? e + (p1 - e) * cA[b] : p1;
           env[b] = e;
           var gdb = 0;
           var range = Pc[b * 4 + 1];
@@ -243,15 +258,16 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
     }
     for (var z = 0; z < NB; z++) {
       if (env[z] < 1e-30) env[z] = 0;
+      if (pk[z] < 1e-30) pk[z] = 0;
       // Bande au repos (coupée ou plage 0 dB, plus écoutée) : filtre remis à zéro ; elle repartira
       // d'un état propre, en fondu (marche ou plage qui glissent depuis 0).
       var idle = (Pc[z * 4 + 2] === 0 && Pn[z * 4 + 2] === 0) || (Pc[z * 4 + 1] === 0 && Pn[z * 4 + 1] === 0);
-      if (idle && Pc[z * 4 + 3] === 0 && Pn[z * 4 + 3] === 0) { for (var s = 0; s < 8; s++) { S[z * 8 + s] = 0; KS[z * 8 + s] = 0; } env[z] = 0; gNow[z] = 0; }
+      if (idle && Pc[z * 4 + 3] === 0 && Pn[z * 4 + 3] === 0) { for (var s = 0; s < 8; s++) { S[z * 8 + s] = 0; KS[z * 8 + s] = 0; } env[z] = 0; pk[z] = 0; gNow[z] = 0; }
     }
   }
 
   function reset() {
-    S.fill(0); KS.fill(0); env.fill(0); gNow.fill(0); gPk.fill(0); inPk = 0; outPk = 0;
+    S.fill(0); KS.fill(0); env.fill(0); pk.fill(0); gNow.fill(0); gPk.fill(0); inPk = 0; outPk = 0;
     for (var q = 0; q < NP; q++) { Pc[q] = Pt[q]; Pn[q] = 0; }
     ramping = 0;
     for (var b = 0; b < NB; b++) { fCur[b] = fTgt[b]; qCur[b] = qTgt[b]; design(b); }
@@ -277,19 +293,20 @@ export function createDynEqCore(sampleRate: number): DynEqCore {
     atRest: function () {
       if (ramping > 0 || gliding) return false;
       for (var i = 0; i < S.length; i++) { var v = S[i]; if (v > 1e-12 || v < -1e-12) return false; }
-      for (var b = 0; b < NB; b++) if (env[b] > linLo[b] * 0.5 || gNow[b] !== 0) return false;
+      for (var b = 0; b < NB; b++) if (env[b] > linLo[b] * 0.5 || pk[b] > linLo[b] * 0.5 || gNow[b] !== 0) return false;
       return true;
     },
     catchUp: function (K: number) {
       var blocks = Math.floor(K / 128);
       for (var b = 0; b < NB; b++) {
-        var e = env[b];
-        for (var k = 0; k < blocks && e !== 0; k++) {
-          if (k < 512) { for (var j = 0; j < 128; j++) e += (0 - e) * cR[b]; }
-          else e *= Math.pow(1 - cR[b], 128);
+        var p = pk[b], e = env[b];
+        for (var k = 0; k < blocks && (p !== 0 || e !== 0); k++) {
+          if (k < 512) { for (var j = 0; j < 128; j++) { p += (0 - p) * cR[b]; e = p > e ? e + (p - e) * cA[b] : p; } }
+          else { p *= Math.pow(1 - cR[b], 128); e = p > e ? e + (p - e) * (1 - Math.pow(1 - cA[b], 128)) : p; }
+          if (p < 1e-30) p = 0;
           if (e < 1e-30) e = 0;
         }
-        env[b] = e;
+        pk[b] = p; env[b] = e;
       }
     },
   };

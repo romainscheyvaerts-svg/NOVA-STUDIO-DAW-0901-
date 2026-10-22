@@ -173,6 +173,8 @@ export class MixFxNode {
 
   /** Latence ajoutée (s) : aucune. */
   public get latency(): number { return 0; }
+  /** Fréquence d'échantillonnage du contexte (courbes et coupures affichées = celles du son). */
+  public get sampleRate(): number { return this.ctx.sampleRate; }
 
   public updateParams(p: Record<string, any>) {
     if (!p) return;

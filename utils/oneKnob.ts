@@ -121,7 +121,8 @@ function insertIndex(plugins: PluginInstance[], type: PluginType): number {
 /** Neutre d'un égaliseur ajouté : bandes à 0 dB, coupe-bas 80 Hz. */
 function neutralEq(): Params {
   const freqs = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
-  return { masterGain: 1, bands: freqs.map((frequency, id) => ({ id, type: id === 0 ? 'highpass' : id === 11 ? 'lowpass' : 'peaking', frequency, gain: 0, q: id === 0 || id === 11 ? 0.71 : 1, isEnabled: id === 0, isSolo: false })) };
+  // Q en convention v2 (engine/eqQ.ts) : 0,7071 = Butterworth, coupe-bas à −3 dB pile à 80 Hz.
+  return { masterGain: 1, qVersion: 2, bands: freqs.map((frequency, id) => ({ id, type: id === 0 ? 'highpass' : id === 11 ? 'lowpass' : 'peaking', frequency, gain: 0, q: id === 0 || id === 11 ? Math.SQRT1_2 : 1, isEnabled: id === 0, isSolo: false })) };
 }
 
 export interface OneKnobOptions {

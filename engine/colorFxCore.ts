@@ -132,7 +132,12 @@ export function createLofiCore(sampleRate: number) {
   let driveK = 1, q = 0, step = 1, noiseAmp = 0, outG = 1, mix = 1;
   const design = () => {
     hp = P.lowCut > 25 ? [coefs('hp', P.lowCut, 0.5412), coefs('hp', P.lowCut, 1.3066)] : [off, off];
-    lp = P.highCut < 19500 && P.highCut < sr * 0.45 ? [coefs('lp', P.highCut, 0.5412), coefs('lp', P.highCut, 1.3066)] : [off, off];
+    // Le coupe-haut passe DEUX fois (avant l'échantillonneur et après) : deux Butterworth d'ordre 4 en
+    // série font −6 dB à leur fréquence. Mesuré (22/10/2026) : « 3 400 Hz » coupait à −3 dB vers
+    // 3 040 Hz. Chaque passe est donc calée plus haut (transformée bilinéaire exacte) pour que
+    // l'ensemble soit à −3 dB PILE à la fréquence affichée : x = (√2 − 1)^(1/8) = 0,8957.
+    const lpF = Math.atan(Math.tan(Math.PI * Math.min(P.highCut, sr * 0.45) / sr) / Math.pow(Math.SQRT2 - 1, 0.125)) * sr / Math.PI;
+    lp = P.highCut < 19500 && P.highCut < sr * 0.45 ? [coefs('lp', lpF, 0.5412), coefs('lp', lpF, 1.3066)] : [off, off];
     driveK = 1 + 6 * Math.max(0, Math.min(1, P.drive || 0));
     const bits = Math.max(1, Math.min(16, P.bits || 16));
     q = bits >= 16 ? 0 : Math.pow(2, bits - 1);
