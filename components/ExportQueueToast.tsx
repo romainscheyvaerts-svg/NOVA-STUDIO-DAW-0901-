@@ -9,12 +9,17 @@ export function reportLine(job: ExportJob): string {
   if (!r) return '';
   const files = job.result!.files.length;
   const head = files > 1 ? `${files} fichiers · ` : '';
-  if (!Number.isFinite(r.lufs)) return `${head}crête vraie max ${fmt(r.truePeak)} dBTP`;
+  // Crête au-dessus de 0 dBTP : le fichier sature (WAV entier, MP3, lecteurs). Avant : seulement le chiffre.
+  const sature = r.truePeak > 0.05
+    ? ` · ⚠️ Ça sature (crête au-dessus de 0) : réexporte avec « Volume › Au plus fort sans saturer » ou baisse le master de ${fmt(Math.ceil((r.truePeak + 1) * 10) / 10)} dB`
+    : '';
+  // Stems / voix seules (pas de réglage de volume final) : c'est la piste ou le bus qui est trop fort.
+  if (!Number.isFinite(r.lufs)) return `${head}crête vraie max ${fmt(r.truePeak)} dBTP${r.truePeak > 0.05 ? ' · ⚠️ Un fichier sature (crête au-dessus de 0) : baisse la piste ou le bus concerné' : ''}`;
   const t = r.target;
   const cible = t && Number.isFinite(t.lufs)
     ? (t.limitedByPeak ? ` · cible ${t.label} (${fmt(t.lufs, 0)} LUFS) non atteinte : crêtes trop hautes, passe le Master Nova` : ` · cible ${t.label} atteinte`)
     : '';
-  return `${head}${fmt(r.lufs)} LUFS · crête vraie ${fmt(r.truePeak)} dBTP · LRA ${fmt(r.lra)} LU${cible}`;
+  return `${head}${fmt(r.lufs)} LUFS · crête vraie ${fmt(r.truePeak)} dBTP · LRA ${fmt(r.lra)} LU${cible}${sature}`;
 }
 
 /**

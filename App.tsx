@@ -153,6 +153,7 @@ const MOBILE_PAGES = [MobileArrangementPage, MobileTracksPage, MobileMixerPage, 
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
+import { safeFileName } from './utils/exportNaming';
 import { stripSilenceFromClip, StripSilenceResult } from './utils/stripSilence';
 import { findVocalMixStyle, suggestVocalMixStyle, VOCAL_MIX_STYLES } from './utils/vocalPresets';
 import { runVoiceChatAction, lufsOfSource } from './utils/voiceChatActions';
@@ -1806,7 +1807,7 @@ function Studio() {
       setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
       
       // Télécharger le fichier (feuille de partage sur téléphone)
-      await saveBlob(zipBlob, `${n || 'NovaProject'}.novaproj.zip`);
+      await saveBlob(zipBlob, `${safeFileName(n, 'Projet NOVA')}.novaproj.zip`);
       
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
       setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
