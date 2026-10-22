@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parent.parent
 DESKTOP = Path(os.environ.get("NOVA_DESKTOP_SRC") or ROOT / "desktop")
 VENV_PY = Path(os.environ.get("NOVA_DESKTOP_PY", r"D:\1 WORK\CODE\NOVA-153-wt\desktop\venv\Scripts\python.exe"))
 UI_DIR = os.environ.get("NOVA_DESKTOP_UI_DIR_TEST", r"D:\1 WORK\CODE\NOVA-153-wt\desktop\build\ui-bundle")
+# SDK WebView2 (desktop\vendor, ignoré par git) : une copie de travail neuve (intégration, correctifs) n'a pas
+# le lien vers celui de NOVA-153-wt ; sans lui l'appli s'arrêtait au démarrage (« appli arrêtée (code 1) »).
+WV2_DIR = os.environ.get("NOVA_DESKTOP_WEBVIEW2_DIR_TEST", r"D:\1 WORK\CODE\NOVA-153-wt\desktop\vendor\webview2")
 OFFSCREEN = "-24000,-24000,1400,900"
 
 u32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -123,6 +126,8 @@ class App:
             env["NOVA_DESKTOP_URL"] = url
         elif ui_dir:
             env["NOVA_DESKTOP_UI_DIR"] = ui_dir
+        if not (DESKTOP / "vendor" / "webview2" / "Microsoft.Web.WebView2.Core.dll").is_file():
+            env["NOVA_DESKTOP_WEBVIEW2_DIR"] = WV2_DIR
         if offline:
             env["NOVA_DESKTOP_EXTRA_ARGS"] = "--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=127.0.0.1;localhost"
         env.update(extra_env or {})

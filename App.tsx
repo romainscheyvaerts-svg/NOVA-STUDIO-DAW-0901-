@@ -18,6 +18,7 @@ const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m 
 import { setUiBusyProbe } from './utils/uiFrame';
 import { lazyQuiet, lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
 import { detectHeadphones } from './utils/headphoneDetect';
+import WindowLoading from './components/WindowLoading';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
@@ -4872,10 +4873,17 @@ function Studio() {
           e.preventDefault();
           const before = new Set(stateRef.current.markers.map(m => m.id));
           const running = audioEngine.getIsPlaying() || stateRef.current.isRecording;
+          const selNow = editSelectionStore.get().time;
+          const keepsRange = !!selNow && selLength(selNow) >= 0.01;
           handleAddMarkerHere(now());
           // À l'arrêt, le nom s'ouvre tout de suite (tape « Couplet 2 », Entrée) : avant, clic droit
           // → Renommer → taper → Entrée. Pendant la lecture, le repère se pose sans prendre le clavier.
-          if (!running) {
+          // Jamais quand :
+          // - K est rejoué par une macro, la palette ou le chat (événement non « isTrusted ») : le champ
+          //   gardait le clavier après la macro et Ctrl+Z annulait la frappe du nom au lieu de la macro ;
+          // - le repère garde une PLAGE (« Sélection N », rappel au pavé . N .) : le pavé et Ctrl+5
+          //   s'écrivaient dans le nom au lieu de rappeler la plage. Renommer reste au clic droit.
+          if (!running && e.isTrusted && !keepsRange) {
             const open = (tries: number) => {
               const m = stateRef.current.markers.find(x => !before.has(x.id));
               if (m) window.dispatchEvent(new CustomEvent('nova:rename-marker', { detail: m.id }));
@@ -8515,8 +8523,9 @@ function Studio() {
   }
   /** Le talkback a un sens ici : en collaboration (les deux rôles), ou en mode avancé (studio). */
   const talkAvailable = !!collab || !talkSimple;
-  const talkPress = useCallback(() => talkLatchRef.current!.press('key'), []);
-  const talkRelease = useCallback(() => talkLatchRef.current!.release('key'), []);
+  // Heures de la touche (event.timeStamp) : court / maintenu jugé sur l'appui réel, pas sur le rendu qui suit.
+  const talkPress = useCallback((at?: number) => talkLatchRef.current!.press('key', at), []);
+  const talkRelease = useCallback((at?: number) => talkLatchRef.current!.release('key', at), []);
   useTalkbackKey(talkAvailable, talkPress, talkRelease);
   /** Bouton (barre, panneau Collaboration, écran de l'artiste, cabine) : même comportement que la touche. */
   const talkButton = useCallback((down: boolean) => { const l = talkLatchRef.current!; if (down) l.press('button'); else l.release('button'); }, []);
@@ -12575,7 +12584,12 @@ function Studio() {
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => { setIsAudioSettingsOpen(false); setAudioSettingsFocus(undefined); }} focusSection={audioSettingsFocus} />}
-      {cueMixesOpen && <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />}
+      {/* Sa propre attente : « Mixes casque : chargement… » tout de suite, Échap annule (components/WindowLoading). */}
+      {cueMixesOpen && (
+        <Suspense fallback={<WindowLoading label="Mixes casque" closeLabel="Fermer les mixes casque" onClose={() => setCueMixesOpen(false)} />}>
+          <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />
+        </Suspense>
+      )}
       <AutotuneVstManager />
       </Suspense>
       

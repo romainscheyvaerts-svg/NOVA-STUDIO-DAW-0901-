@@ -10,8 +10,14 @@ import { isTypingTarget } from '../utils/padKeys';
  *
  * Jamais pendant la saisie dans un champ texte ; ni quand la batterie ou le piano roll
  * (data-nova-transport) prennent les lettres pour jouer des pads / des notes.
+ *
+ * `at` : l'heure où la touche a VRAIMENT été enfoncée / relâchée (`event.timeStamp`, même
+ * horloge que `performance.now()`), pas l'heure où le gestionnaire tourne. L'appui fait
+ * redessiner tout le studio avant que le relâchement ne soit traité : sur un PC chargé
+ * (séance lourde, autre logiciel), un appui court de 110 ms était lu comme « maintenu »
+ * (> 300 ms entre les deux gestionnaires) et le talkback se refermait au lieu de rester ouvert.
  */
-export function useTalkbackKey(enabled: boolean, onPress: () => void, onRelease: () => void) {
+export function useTalkbackKey(enabled: boolean, onPress: (at?: number) => void, onRelease: (at?: number) => void) {
   const cb = useRef({ onPress, onRelease });
   cb.current = { onPress, onRelease };
   useEffect(() => {
@@ -28,15 +34,15 @@ export function useTalkbackKey(enabled: boolean, onPress: () => void, onRelease:
       if (document.querySelector('[data-nova-transport]')) return;
       e.preventDefault();
       held = e.code || e.key;
-      cb.current.onPress();
+      cb.current.onPress(e.timeStamp);
     };
     const up = (e: KeyboardEvent) => {
       if (!held || (e.code || e.key) !== held) return;
       held = null;
       e.preventDefault();
-      cb.current.onRelease();
+      cb.current.onRelease(e.timeStamp);
     };
-    const lost = () => { if (held) { held = null; cb.current.onRelease(); } };
+    const lost = () => { if (held) { held = null; cb.current.onRelease(performance.now()); } };
     const hidden = () => { if (document.visibilityState === 'hidden') lost(); };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -47,7 +53,7 @@ export function useTalkbackKey(enabled: boolean, onPress: () => void, onRelease:
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', lost);
       document.removeEventListener('visibilitychange', hidden);
-      if (held) { held = null; cb.current.onRelease(); }
+      if (held) { held = null; cb.current.onRelease(performance.now()); }
     };
   }, [enabled]);
 }

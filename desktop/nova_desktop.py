@@ -109,7 +109,11 @@ def resource(*parts: str) -> str:
 
 
 def webview2_dir() -> str:
-    return resource("webview2") if FROZEN else os.path.join(HERE, "vendor", "webview2")
+    """SDK WebView2 : livré dans l'appli ; en développement desktop\\vendor\\webview2 (build.py),
+    ou NOVA_DESKTOP_WEBVIEW2_DIR (copie de travail sans vendor : tests de l'appli)."""
+    if FROZEN:
+        return resource("webview2")
+    return os.environ.get("NOVA_DESKTOP_WEBVIEW2_DIR") or os.path.join(HERE, "vendor", "webview2")
 
 
 def bundled_ui_dir() -> str:
@@ -909,6 +913,10 @@ class UiState:
 
 def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = None) -> None:
     wv2 = webview2_dir()
+    if not os.path.isfile(os.path.join(wv2, "Microsoft.Web.WebView2.Core.dll")):
+        # Sans ce message, l'appli s'arrêtait (code 1) avec « Nova Studio fermé » pour seul journal.
+        raise FileNotFoundError(f"SDK WebView2 introuvable dans {wv2} : en développement, lancer build.py "
+                                "(ou lier desktop\\vendor, ou NOVA_DESKTOP_WEBVIEW2_DIR)")
     os.environ["PATH"] = wv2 + os.pathsep + os.environ.get("PATH", "")
     import clr  # pythonnet (.NET Framework 4.x, présent sur tout Windows 10/11)
     clr.AddReference("System.Windows.Forms")
@@ -2019,6 +2027,12 @@ def main() -> int:
         supervisor.start()
     try:
         run_window(url, url_mode, updater)
+    except BaseException as e:
+        if not isinstance(e, (KeyboardInterrupt, SystemExit)):
+            # Arrêt au démarrage (SDK absent, WebView2 refusé…) : la raison dans app.log, pas seulement
+            # sur une console que l'appli installée n'a pas.
+            log.exception("la fenêtre de Nova Studio n'a pas pu s'ouvrir")
+        raise
     finally:
         if supervisor:
             supervisor.stop()

@@ -45,6 +45,25 @@ describe('jouer une macro', () => {
     expect(t.get().past.length).toBe(5);
   });
 
+  it('historique « une étape par geste » : chaque commande rejouée compte comme un geste, la macro reste UNE étape', async () => {
+    // Les raccourcis d'une macro sont rejoués en touches simulées : trackUserActions (utils/undoHistory)
+    // y voit 5 gestes distincts. Hors groupe = 5 étapes ; dans le groupe de la macro = une seule.
+    let h: UndoHistory<S> = { past: [], present: { n: 0, log: [] }, future: [] };
+    let action = 0;
+    const set = (fn: (s: S) => S) => { h = recordChange(h, fn(h.present), 1000, { debounceMs: 300, limit: 256, clean: s => s, user: { action, gesture: false } }); };
+    const acts: PaletteAction[] = ['marker', 'barNext', 'marker2', 'mute', 'barNext2'].map(id => ({ id, label: id, group: 'Édition', run: () => { action++; set(s => ({ n: s.n + 1, log: [...s.log, id] })); } }));
+    for (const express of [false, true]) {
+      h = { past: [], present: { n: 0, log: [] }, future: [] };
+      const r = await playSteps(acts.map(a => a.id), acts, { begin: () => { h = openUndoGroup(h); }, end: () => { h = closeUndoGroup(h); } }, { express });
+      expect(r.ran.length).toBe(5);
+      expect(h.past.length).toBe(1);
+      expect(h.past[0].n).toBe(0);
+    }
+    h = { past: [], present: { n: 0, log: [] }, future: [] };
+    for (const a of acts) a.run();
+    expect(h.past.length).toBe(5);
+  });
+
   it("express : les 5 commandes d'un coup (une étape), sans attendre l'écran entre elles", async () => {
     const s = studio();
     const r = await playSteps(['split', 'fade', 'norm', 'dup', 'nudge'], s.actions, s.hooks, { express: true });
