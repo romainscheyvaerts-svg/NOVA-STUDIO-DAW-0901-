@@ -7,6 +7,11 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.15
+- Fenêtres de plugins comme dans un vrai DAW : plus d'icône par plugin dans la barre des tâches, elles restent devant Nova et se réduisent avec lui.
+- Plugins plus rapides à ouvrir : Waves 4 fois plus vite, Auto-Tune 2 fois plus vite ; un projet de 12 plugins se charge en 3,5 s au lieu de 12.
+- Un plugin qui se fige ne bloque plus Nova Studio.
+
 ## 1.5.14
 - Musiciens de séance : un batteur, un bassiste (808) et des claviers qui jouent tout seuls en suivant tes accords ; styles Trap, Drill UK, Drill FR, Boom bap, R&B, Afro ; intensité, complexité et remplissages par section.
 - Boucle avec un effet à latence : le début n'est plus coupé à chaque tour.
