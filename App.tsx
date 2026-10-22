@@ -942,7 +942,9 @@ function Studio() {
     (async () => {
       const crashed = previousSessionCrashed();
       let device: VersionMeta | null = null;
-      try { device = await recoveryStore().latest(); } catch { /* stockage indisponible */ }
+      // Après un plantage : la dernière version du projet qui était OUVERT (pas la plus récente de
+      // l'appareil : un autre projet enregistré juste avant, en changeant de projet, était proposé).
+      try { device = (crashed?.projectId ? await recoveryStore().latest(crashed.projectId) : null) || await recoveryStore().latest(); } catch { /* stockage indisponible */ }
       // Nova Studio : la sauvegarde est aussi sur le disque. On propose la plus récente des deux
       // (le stockage de l'appli a pu être vidé ; ou la dernière version n'a été écrite qu'ici).
       let latest = device;
@@ -952,7 +954,7 @@ function Studio() {
             if (!live) return;
             await new Promise(r => setTimeout(r, 250));
           }
-          const pick = pickMostRecent(device, await latestOnDisk(diskBackendRef.current));
+          const pick = pickMostRecent(device, await latestOnDisk(diskBackendRef.current, crashed?.projectId));
           if (pick) { latest = pick.meta; latestSourceRef.current = pick.source; }
           if (!device && pick?.source === 'disque') setLandingNotice(EVICTED_DESKTOP_MESSAGE);
         } catch (e) { console.warn('[Disque] Lecture des projets impossible', e); }
