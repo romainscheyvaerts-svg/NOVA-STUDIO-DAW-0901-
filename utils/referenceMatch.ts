@@ -158,33 +158,6 @@ export function biquadCoeffs(band: EqBand, sampleRate: number): Biquad {
   return { b0: c0, b1: c1, b2: c2, a1: c3, a2: c4 };
 }
 
-/** Ancien modèle (Q des coupe-bas en dB, cloches sans compensation) : gardé pour mémoire, non utilisé. */
-export function biquadCoeffsLegacy(band: EqBand, sampleRate: number): Biquad {
-  const f = clamp(band.freq, 1, sampleRate / 2 - 1);
-  const w0 = 2 * Math.PI * f / sampleRate, cw = Math.cos(w0), sw = Math.sin(w0);
-  const A = Math.pow(10, band.gainDb / 40);
-  let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
-  if (band.type === 'peaking') {
-    const al = sw / (2 * Math.max(1e-4, band.q));
-    b0 = 1 + al * A; b1 = -2 * cw; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cw; a2 = 1 - al / A;
-  } else if (band.type === 'lowshelf' || band.type === 'highshelf') {
-    // Web Audio : plateaux sans Q (pente S = 1).
-    const al = sw / 2 * Math.SQRT2, sA = 2 * Math.sqrt(A) * al;
-    if (band.type === 'lowshelf') {
-      b0 = A * ((A + 1) - (A - 1) * cw + sA); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - sA);
-      a0 = (A + 1) + (A - 1) * cw + sA; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - sA;
-    } else {
-      b0 = A * ((A + 1) + (A - 1) * cw + sA); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - sA);
-      a0 = (A + 1) - (A - 1) * cw + sA; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - sA;
-    }
-  } else {
-    // Passe-haut Web Audio : Q en dB.
-    const al = sw / (2 * Math.pow(10, band.q / 20));
-    b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = (1 + cw) / 2; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al;
-  }
-  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
-}
-
 /** Réponse en amplitude (dB) d'un filtre à la fréquence f. */
 export function biquadMagDb(c: Biquad, f: number, sampleRate: number): number {
   const w = 2 * Math.PI * f / sampleRate;
