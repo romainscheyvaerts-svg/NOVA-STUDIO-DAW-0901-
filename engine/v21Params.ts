@@ -229,11 +229,11 @@ export const GATEFX_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const GATE_SPECS: V21ParamSpec[] = [
-  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la détection (le son lui-même, ou la clé externe) dépasse ce seuil (Threshold d’un expandeur/gate de studio).' },
+  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la crête détectée (le son lui-même, ou la clé externe) atteint ce seuil (dBFS) ; la porte se referme environ 4 dB plus bas (hystérésis : pas de battement autour du seuil).' },
   { id: 'range', label: 'Plage', min: 0, max: 80, step: 1, unit: 'dB', hint: 'Combien la porte baisse le son quand elle est fermée : 80 dB = silence, 6 à 12 dB = expandeur doux (garde un peu de respiration).' },
-  { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
-  { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après le dernier passage au-dessus du seuil : évite qu’elle claque sur une fin de note.' },
-  { id: 'release', label: 'Fermeture', min: 1, max: 1000, step: 1, unit: 'ms', hint: 'Temps de fermeture : court = coupe sèche (gate rythmique au kick), long = fondu naturel.' },
+  { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture (constante de temps : 63 % de l’ouverture) : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
+  { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après que la crête détectée repasse sous le seuil : évite qu’elle claque sur une fin de note. La détection retombe en 10 ms : après une coupure nette, compter environ 11,5 ms de plus par tranche de 10 dB au-dessus du seuil.' },
+  { id: 'release', label: 'Fermeture', min: 1, max: 1000, step: 1, unit: 'ms', hint: 'Temps de fermeture (constante de temps : 63 % de la fermeture) : court = coupe sèche (gate rythmique au kick), long = fondu naturel.' },
 ];
 
 export const DEFAULT_GATE = { threshold: -40, range: 80, attack: 0.5, hold: 20, release: 80, isEnabled: true };
