@@ -1801,16 +1801,20 @@ function Studio() {
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       setSaveState(s => ({ ...s, progress: 40, message: 'Création du fichier ZIP...' }));
       
-      // Utiliser ProjectIO pour créer un ZIP avec les audios
-      const zipBlob = await ProjectIO.saveProject(baked, ownedIds);
+      // « Sauvegarder sous » un autre nom : le projet prend ce nom (dans le .zip ET dans le studio).
+      // Avant, le fichier s'appelait « Client v3 » mais se rouvrait sous l'ancien nom.
+      const name = n.trim() || baked.name || 'Session';
+      const zipBlob = await ProjectIO.saveProject({ ...baked, name }, ownedIds);
+      if (name !== stateRef.current.name) setState(prev => ({ ...prev, name }));
       
       setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
       
       // Télécharger le fichier (feuille de partage sur téléphone)
-      await saveBlob(zipBlob, `${safeFileName(n, 'Projet NOVA')}.novaproj.zip`);
+      const file = `${safeFileName(name, 'Projet NOVA')}.novaproj.zip`;
+      await saveBlob(zipBlob, file);
       
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
-      setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
+      setAiNotification(`✅ « ${file} » créé, audio compris. Pour le rouvrir : Ctrl+O › « Fichier sur l'ordinateur », ou glisse-le sur le studio.`);
       hasUnsavedChangesRef.current = false;
       void autosaveNowRef.current?.('manual', true);
     } catch (e: any) {
