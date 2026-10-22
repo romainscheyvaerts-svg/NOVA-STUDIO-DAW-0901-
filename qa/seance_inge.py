@@ -507,7 +507,13 @@ def run(page, log, ch, files):
     ch.start("Mixer", "Envoi : la 2e back vers « Reverb longue »", protools="Clic sur l'envoi › glisser le niveau : 2 gestes")
     who = target or "backs"
     lane_y(page, who)
-    sb = reachable(ch, f"[data-track-header='{who}'] button[aria-label^='Envois de']", "Envois")
+    # Barre allégée (22/10/2026) : les envois sont rangés dans le menu « ⋯ » de la piste (un clic de plus).
+    sel_env = f"[data-track-header='{who}'] button[aria-label^='Envois de'], [data-toolbar-menu='track-more-{who}'] button[aria-label^='Envois de']"
+    if not page.locator(sel_env).locator("visible=true").count():
+        more = page.locator(f"[data-testid=track-more-{who}]").locator("visible=true")
+        if more.count():
+            ch.click(more.first, "⋯ de la piste"); page.wait_for_timeout(300)
+    sb = reachable(ch, sel_env, "Envois")
     lv0 = app_state(page, f"s => ((s.tracks.find(t => t.id === '{who}') || {{}}).sends || []).find(x => x.id === 'send-verb-long')?.level ?? null")
     if sb:
         ch.click(sb, "Envois")

@@ -124,7 +124,17 @@ def run(page, log, ch):
     ch.press("Control+a")
     q = visible_first(page, f"{PR} button[aria-label='Quantifier la sélection'], {PR} button[title^='Quantifier']")
     if q: ch.click(q, "Quantifier")
-    else: ch.fail("Quantifier introuvable")
+    else:
+        # Piano roll pratique (22/10/2026) : barre épurée, « Quantifier » est rangé dans « Outils ▾ » (et sur Q).
+        m = visible_first(page, f"{PR} [data-nova-roll-menu-btn=outils]")
+        if m:
+            ch.click(m, "Outils ▾")
+            page.wait_for_timeout(250)
+            it = page.locator("[data-nova-roll-menu=liste-outils] [role=menuitem]", has_text=re.compile(r"^\s*Quantifier")).locator("visible=true").first
+            if it.count(): ch.click(it, "Quantifier")
+            else: ch.fail("Quantifier introuvable dans « Outils ▾ »")
+        else:
+            ch.fail("Quantifier introuvable")
     ch.end()
 
     ch.start("808", "Fermer le piano roll (Échap)", protools="Fermer la fenêtre MIDI Editor : Ctrl+W / Échap")

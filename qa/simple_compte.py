@@ -37,6 +37,7 @@ Cas :
   NOVA_URL=http://127.0.0.1:3428/ PYTHONIOENCODING=utf-8 python qa/simple_compte.py [cas ...]
 Sorties : D:\\1 WORK\\CONTENU\\nova-153\\simple-compte\\qa (captures + simple_compte.json)
 """
+import datetime
 import json
 import os
 import re
@@ -82,6 +83,15 @@ HDR = {"access-control-allow-origin": "*", "access-control-allow-headers": "*", 
 STATE_JS = """() => { const s = window.__novaEdit && window.__novaEdit.getState(); if (!s) return null;
   return s.tracks.map(t => ({ id: t.id, name: t.name, type: t.type, inst: !!t.instrumentId, bus: /^(bus-|send-|master)/.test(t.id) || t.type === 'BUS' || t.type === 'MASTER' })); }"""
 
+
+
+# Séance en ligne gratuite : fin dans 4 jours À PARTIR D'AUJOURD'HUI (avant : date fixe du 20/10/2026, passée le
+# 21 : l'appli disait à raison « plus gardée en ligne » et le scénario échouait).
+_FIN = datetime.datetime.now(datetime.timezone.utc).replace(hour=18, minute=0, second=0, microsecond=0) + datetime.timedelta(days=4)
+EXPIRE_ISO = _FIN.strftime("%Y-%m-%dT%H:%M:%SZ")
+_MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+_FIN_LOCALE = _FIN.astimezone()
+FIN_TEXTE = f"gardée jusqu'au {_FIN_LOCALE.day} {_MOIS[_FIN_LOCALE.month - 1]}"
 
 def run_case(p, case, vp, theme):
     log = Log(f"simple_compte_{case}")
@@ -205,7 +215,7 @@ def run_case(p, case, vp, theme):
             seen["list_mine"] += 1
             rows = [
                 {"id": "a1b2c3d4-0000-4000-8000-000000000001", "link": "a1b2c3d4-0000-4000-8000-000000000001." + "k" * 32, "name": "Mon son du mardi",
-                 "version": 3, "updated_at": "2026-10-15T18:00:00Z", "updated_from": "iPad", "expires_at": "2026-10-20T18:00:00Z", "days_left": 4,
+                 "version": 3, "updated_at": "2026-10-15T18:00:00Z", "updated_from": "iPad", "expires_at": EXPIRE_ISO, "days_left": 4,
                  "unlimited": False, "expired": False},
                 {"id": "a1b2c3d4-0000-4000-8000-000000000002", "link": None, "name": "Ancienne (effacée)", "expired": True},
             ]
@@ -432,7 +442,7 @@ def run_case(p, case, vp, theme):
             check("accueil « Charger Projet » : ses projets en ligne Make Music (plus « Connectez-vous »)",
                   ok and items.count() == 1 and "Mon son du mardi" in items.first.inner_text() and "Connectez-vous" not in page.locator("body").inner_text(),
                   items.count())
-            check("projet en ligne gratuit : la date de fin est dite", ok and "gardée jusqu'au 20 octobre" in items.first.inner_text(), items.first.inner_text() if ok else "")
+            check("projet en ligne gratuit : la date de fin est dite", ok and FIN_TEXTE in items.first.inner_text(), items.first.inner_text() if ok else "")
             snap("1_accueil_projets_en_ligne")
             page.keyboard.press("Escape")
             page.goto(BASE, wait_until="domcontentloaded")

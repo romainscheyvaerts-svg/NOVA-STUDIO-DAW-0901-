@@ -277,7 +277,9 @@ def scenario_tab_menus(browser, log):
         ok("tab · menu de l'effet refermé (Échap)", page.locator('[data-testid="structure-menu"]').locator("visible=true").count() == 0)
         # Un toucher simple sur l'effet l'ouvre toujours (le clic du lever n'est avalé qu'après un appui long).
         chip.tap(); page.wait_for_timeout(900)
-        editor = page.get_by_text("Rend le volume de la voix", exact=False).locator("visible=true")
+        # La fenêtre du Compresseur (sa façade) ; son texte d'aide au repos n'est plus un bon repère : au doigt,
+        # la ligne d'info montre le réglage touché, et sur 1024 × 768 elle est sous le bord de l'écran.
+        editor = page.locator('[data-nova-plugin="COMPRESSOR"]').locator("visible=true")
         # Fenêtre d'effet chargée à la demande : sur une machine très chargée, son code peut
         # mettre plus de 0,9 s à arriver (« Chargement… »). On attend la fenêtre (15 s au plus)
         # avant de juger, et avant de continuer : ouverte en retard, elle recouvrait les pistes
