@@ -335,7 +335,7 @@ export const GUIDES: Guide[] = [
     keywords: 'sauvegarder sauver enregistrer projet ouvrir rouvrir charger retrouver fichier zip version perdu',
     summary: 'En ligne avec un compte, ou en fichier .zip sur ton appareil.',
     steps: [
-      { text: 'Ouvre « Sauvegarder » (Ctrl+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
+      { text: 'Ouvre « Sauvegarder » (Ctrl+Maj+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
         target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-new-version-box') } },
       { text: 'En ligne : « Emporter la session » (compte Make Music). Sans compte : « Fichier sur cet appareil (.zip) ».', target: tid('save-new-version-box'), manual: true },
       { text: 'Pour le retrouver : « Ouvrir un projet ».', phone: 'Touche ☰, puis « Ouvrir un projet ».', action: 'pal.open',
@@ -375,7 +375,7 @@ export const GUIDES: Guide[] = [
     keywords: 'emporter session autre appareil telephone ordi maison qr code lien en ligne continuer reprendre cloud',
     summary: 'Mettre la session en ligne et l’ouvrir ailleurs par un lien ou un QR code.',
     steps: [
-      { text: 'Ouvre « Sauvegarder » (Ctrl+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
+      { text: 'Ouvre « Sauvegarder » (Ctrl+Maj+S).', phone: 'Touche ☰, puis « Sauvegarder ».', action: 'nova.save',
         target: ['[data-bar-item="sauver"]', tid('menu-save'), PHONE_MENU], done: { visible: tid('save-takehome') } },
       { text: 'Touche « 🏠 Emporter la session (en ligne) ».', target: tid('save-takehome'), done: { visible: '[aria-labelledby="takehome-title"]' } },
       { text: '« Mettre la session en ligne ».', target: tid('takehome-sync'), done: { visible: tid('takehome-url') } },

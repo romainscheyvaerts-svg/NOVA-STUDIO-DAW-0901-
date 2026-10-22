@@ -790,6 +790,10 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             core.ProcessFailed += self.on_process_failed
             core.ContextMenuRequested += self.on_context_menu
             core.WebMessageReceived += self.on_web_message
+            try:  # titre de la fenêtre = projet ouvert (barre des tâches, Alt+Tab), comme un logiciel de studio
+                core.DocumentTitleChanged += self.on_title_changed
+            except Exception:
+                pass
             # Anti-enregistrement d'écran (capture_guard.py) : fenêtre exclue des captures et
             # logiciels d'enregistrement signalés au DAW (admins : le DAW coupe la protection).
             self.capture_protect(True)
@@ -1401,6 +1405,14 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             self.allow_close = True
             try:
                 self.form.BeginInvoke(Action(self.form.Close))
+            except Exception:
+                pass
+
+        def on_title_changed(self, sender, args):
+            """« Mon son — Nova Studio » quand un projet est ouvert ; sinon « Nova Studio » (accueil, pages du site)."""
+            try:
+                t = str(self.core.DocumentTitle or "").strip()
+                self.form.Text = t[:120] if t.endswith(" — " + APP_NAME) else APP_NAME
             except Exception:
                 pass
 

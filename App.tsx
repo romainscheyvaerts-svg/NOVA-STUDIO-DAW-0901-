@@ -301,7 +301,7 @@ const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
 const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
-const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
+const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.quickSave', 'nova.save', 'nova.open', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
@@ -1332,6 +1332,8 @@ function Studio() {
    * jusqu'à 15 s de travail (une version toutes les 15 s) partaient avec le changement.
    */
   const flushCurrentProjectRef = useRef<() => Promise<void>>(async () => {});
+  /** Ctrl+S : enregistré tout de suite, sans fenêtre (défini avec la sauvegarde automatique). */
+  const quickSaveRef = useRef<() => Promise<void>>(async () => {});
   const unsavedMountRef = useRef(false);
 
 
@@ -4531,7 +4533,11 @@ function Studio() {
         const btn = topOverlayClose();
         if (btn) { e.preventDefault(); btn.click(); return; }
       }
-      if (isTypingTarget(e.target)) return;
+      if (isTypingTarget(e.target)) {
+        // Ctrl+S en tapant un nom, un commentaire… : le projet est enregistré (jamais « Enregistrer la page » du navigateur).
+        if (isShortcut(e, 'nova.quickSave')) { e.preventDefault(); if (!e.repeat) void quickSaveRef.current(); }
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
       if (!mod && blockingOverlay()) return;
@@ -4564,7 +4570,10 @@ function Studio() {
         case 'nova.play': e.preventDefault(); if (e.repeat) return; spaceDown = e.code === 'Space'; handleTogglePlay(); return;
         case 'nova.undo': e.preventDefault(); undo(); return;
         case 'nova.redo': e.preventDefault(); redo(); return;
+        // Ctrl+S : enregistré tout de suite, sans fenêtre ; Ctrl+Maj+S : « Sauvegarder… » ; Ctrl+O : ouvrir.
+        case 'nova.quickSave': e.preventDefault(); if (e.repeat) return; void quickSaveRef.current(); return;
         case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
+        case 'nova.open': e.preventDefault(); setIsLoadMenuOpen(true); return;
         // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
         case 'nova.export': e.preventDefault(); void handleExportMix(); return;
         // Importer un son (Pro Tools : Ctrl+Maj+I, Import Audio) : le sélecteur de fichiers du PC.
@@ -5504,6 +5513,8 @@ function Studio() {
   const autosaveBusy = useRef(false);
   const autosavePending = useRef<VersionReason | null>(null);
   const lastSavedSigRef = useRef<unknown[] | null>(null);
+  /** Raison de la dernière version écrite (Ctrl+S répété sans changement : rien de réécrit). */
+  const lastSavedReasonRef = useRef<VersionReason | null>(null);
   const purgeTakesAfterSaveRef = useRef(false);
   // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
   const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
@@ -5538,6 +5549,7 @@ function Studio() {
         },
       });
       lastSavedSigRef.current = sig;
+      if (r) lastSavedReasonRef.current = named ? 'named' : reason;
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (r) afterVersionSaved(r.versionId);
@@ -5563,6 +5575,27 @@ function Studio() {
   }, [user]);
   const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
+  quickSaveRef.current = async () => {
+    const st = stateRef.current;
+    if (showLanding) return;
+    if (!projectTabLock().canSave()) {
+      setAiNotification('🔒 Ce projet est ouvert dans un autre onglet : c’est lui qui l’enregistre. Touche « Travailler ici » pour enregistrer depuis cet onglet.');
+      return;
+    }
+    if (!hasWorthKeeping(st)) { setAiNotification('Rien à enregistrer pour l’instant : le projet est encore vide.'); return; }
+    for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
+    // Ctrl+S répété sans rien changer : la version « enregistrée » existe déjà, rien n'est réécrit.
+    const already = lastSavedReasonRef.current === 'manual' && sameSignature(projectSignature(st), lastSavedSigRef.current);
+    const ok = already || await autosaveNow('manual', true);
+    if (!ok) {
+      setAiNotification('❌ Enregistrement impossible sur cet appareil (stockage plein ou indisponible). Fais un fichier .zip : Ctrl+Maj+S › « Fichier sur cet appareil ».');
+      return;
+    }
+    hasUnsavedChangesRef.current = false;
+    const at = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+    const where = isNovaDesktop() && diskMirrorRef.current.available() ? 'dans Documents › Nova Studio › Projets' : 'sur cet appareil';
+    setAiNotification(`💾 « ${st.name || 'Session'} » enregistré à ${at}, ${where}. Autre nom, .zip ou en ligne : Ctrl+Maj+S.`);
+  };
   flushCurrentProjectRef.current = async () => {
     // Sauvegarde en cours : on l'attend (sinon l'écriture demandée partirait sur le NOUVEAU projet).
     for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
@@ -5612,6 +5645,12 @@ function Studio() {
     }
     wasRecordingRef.current = state.isRecording;
   }, [state.isRecording, showLanding]);
+  // Titre de l'onglet / de la fenêtre = projet ouvert (barre des tâches, Alt+Tab, comme un logiciel de studio ;
+  // Nova Studio le reprend pour sa fenêtre). Avant : le même titre pour toutes les séances.
+  const baseTitleRef = useRef<string>(typeof document !== 'undefined' ? document.title : 'Nova Studio');
+  useEffect(() => {
+    document.title = showLanding ? baseTitleRef.current : `${(state.name || 'Session').trim() || 'Session'} — Nova Studio`;
+  }, [showLanding, state.name]);
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === 'hidden' && !showLanding) void autosaveNow('close'); };
     document.addEventListener('visibilitychange', onHide);
@@ -10850,8 +10889,9 @@ function Studio() {
       a('Transport', 'nova.play', 'Lecture / pause', () => handleTogglePlay(), { keys: k('nova.play'), pt: 'Barre d’espace' }),
       // Fichier et livraison
       a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer', primary: true }),
-      a('Fichier', 'nova.save', 'Sauvegarder le projet', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer save' }),
-      a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { pt: 'Open Session (Ctrl+O)', keywords: 'charger load open' }),
+      a('Fichier', 'nova.quickSave', 'Enregistrer maintenant (sans fenêtre)', () => { void quickSaveRef.current(); }, { keys: k('nova.quickSave'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer sauvegarder save vite' }),
+      a('Fichier', 'nova.save', 'Sauvegarder le projet… (autre nom, .zip, en ligne, nouvelle version)', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save As (Ctrl+Maj+S)', keywords: 'enregistrer sous save as copie zip' }),
+      a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { keys: k('nova.open'), pt: 'Open Session (Ctrl+O)', keywords: 'charger load open récents' }),
       a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
