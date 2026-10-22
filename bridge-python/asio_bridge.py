@@ -1327,18 +1327,18 @@ class ASIOBridgeServer:
     
     async def _handle_open_control_panel(self, client_id: str, data: dict):
         """
-        Ouvrir le panneau de configuration du driver ASIO
-        
-        Lance un processus séparé qui:
-        1. Initialise COM en mode STA
-        2. Crée une fenêtre cachée (HWND)
-        3. Charge le driver ASIO via CoCreateInstance
-        4. Appelle init(hwnd) puis controlPanel()
-        5. Exécute un message pump Windows pour le dialogue
+        Ouvrir le panneau de configuration du driver ASIO (processus séparé : COM en STA,
+        fenêtre cachée, init(hwnd) puis controlPanel(), boucle de messages tant que le panneau
+        est ouvert ; voir asio_control_panel.py).
+
+        Réponse immédiate : avant, le pont attendait 1 s fixe avant de répondre, et pendant
+        cette seconde il ne lisait plus RIEN de ce client (messages ni audio de lecture envoyé
+        à la carte) : un trou dans le son si on ouvrait le panneau pendant la lecture. Un
+        panneau qui échoue au démarrage est signalé ensuite par un 2e CONTROL_PANEL_RESULT.
         """
         device_name = self.config.device_name or ""
         logger.info(f"🎛️ Ouverture du panneau de contrôle ASIO: {device_name}")
-        
+
         if not device_name:
             await self._send(client_id, {
                 "action": "CONTROL_PANEL_RESULT",
@@ -1347,82 +1347,66 @@ class ASIOBridgeServer:
                 "error": "Aucun driver ASIO sélectionné"
             })
             return
-        
+
         try:
             import subprocess
-            
-            # Chemin vers le script autonome
+
             script_path = os.path.join(os.path.dirname(__file__), "asio_control_panel.py")
-            
-            logger.info(f"   Lancement du script: {script_path}")
-            logger.info(f"   Driver: {device_name}")
-            
-            # Lancer dans un processus séparé (non-bloquant)
-            # Le processus gère son propre COM, HWND et message pump
+            logger.info(f"   Lancement du script: {script_path} (driver : {device_name})")
+            # Le processus gère son propre COM, HWND et message pump. Aucune console (CREATE_NO_WINDOW).
             process = subprocess.Popen(
                 [sys.executable, script_path, device_name],
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
             )
-            
             logger.info(f"   ✅ Processus lancé (PID: {process.pid})")
-            
-            # Attendre un court moment pour voir si le processus démarre correctement
-            await asyncio.sleep(1.0)
-            
-            # Vérifier si le processus est toujours actif
-            if process.poll() is not None:
-                # Le processus s'est terminé, lire la sortie
-                output = process.stdout.read() if process.stdout else ""
-                logger.warning(f"   Le processus s'est terminé avec code: {process.returncode}")
-                if output:
-                    for line in output.strip().split('\n'):
-                        logger.info(f"   [subprocess] {line}")
-                
-                await self._send(client_id, {
-                    "action": "CONTROL_PANEL_RESULT",
-                    "success": process.returncode == 0,
-                    "device": device_name,
-                    "error": f"Process exited with code {process.returncode}" if process.returncode != 0 else None
-                })
-            else:
-                # Le processus est en cours (le dialogue est probablement ouvert)
-                logger.info(f"   ✅ Panneau ASIO en cours d'affichage (PID: {process.pid})")
-                
-                # Lire la sortie en arrière-plan
-                def _log_subprocess_output():
-                    try:
-                        for line in process.stdout:
-                            line = line.strip()
-                            if line:
-                                logger.info(f"   [asio-panel] {line}")
-                    except:
-                        pass
-                
-                log_thread = threading.Thread(target=_log_subprocess_output, daemon=True)
-                log_thread.start()
-                
-                await self._send(client_id, {
-                    "action": "CONTROL_PANEL_RESULT",
-                    "success": True,
-                    "device": device_name,
-                    "error": None
-                })
-            
+
+            def _log_subprocess_output():
+                try:
+                    for line in process.stdout:
+                        line = line.strip()
+                        if line:
+                            logger.info(f"   [asio-panel] {line}")
+                except Exception:
+                    pass
+
+            threading.Thread(target=_log_subprocess_output, name="asio-panel-log", daemon=True).start()
+            await self._send(client_id, {
+                "action": "CONTROL_PANEL_RESULT",
+                "success": True,
+                "device": device_name,
+                "error": None
+            })
+            self._panel_watch = asyncio.ensure_future(self._watch_control_panel(client_id, process, device_name))
         except Exception as e:
             logger.error(f"   ❌ Erreur: {e}")
-            import traceback
-            traceback.print_exc()
-            
             await self._send(client_id, {
                 "action": "CONTROL_PANEL_RESULT",
                 "success": False,
                 "device": device_name,
-                "error": str(e)
+                "error": f"Panneau du pilote impossible à ouvrir : {e}"
             })
-    
+
+    async def _watch_control_panel(self, client_id: str, process, device_name: str, grace_s: float = 1.5):
+        """Panneau arrêté en échec juste après son lancement : on le dit au client (sans bloquer)."""
+        t0 = time.time()
+        while time.time() - t0 < grace_s:
+            if process.poll() is not None:
+                break
+            await asyncio.sleep(0.05)
+        code = process.poll()
+        if code not in (None, 0):
+            logger.warning(f"   Le panneau ASIO s'est arrêté (code {code})")
+            await self._send(client_id, {
+                "action": "CONTROL_PANEL_RESULT",
+                "success": False,
+                "device": device_name,
+                "error": "Le panneau du pilote ne s'est pas ouvert (pilote occupé ou introuvable)."
+            })
+
     async def _handle_hello(self, client_id: str, data: dict):
         """Le client annonce sa version du protocole binaire (2 = blocs horodatés, sorties multiples)."""
         try:
