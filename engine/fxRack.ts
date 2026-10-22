@@ -210,6 +210,61 @@ export function withChildParams(p: RackParams, branchId: string, pluginId: strin
   return { ...p, branches: p.branches.map(b => (b.id !== branchId ? b : { ...b, plugins: b.plugins.map(x => (x.id === pluginId ? { ...x, params: { ...x.params, ...params } } : x)) })) };
 }
 
+const RACK_LEVEL_KEY = /^br([1-4])Level$/;
+
+/**
+ * Valeur fixe d'un réglage du rack lu dans ses réglages : niveau d'une branche (« br1Level ») ou
+ * réglage d'un effet d'une branche (« <effet>/<réglage> »). undefined : pas un réglage imbriqué.
+ */
+export function rackNestedValue(params: any, key: string): number | undefined {
+  const lv = RACK_LEVEL_KEY.exec(key);
+  const ck = lv ? null : parseRackChildKey(key);
+  if (!lv && !ck) return undefined;
+  const p = sanitizeRack(params || {});
+  const v = lv ? p.branches[+lv[1] - 1]?.level : findRackChild(p, ck!.pluginId)?.plugin.params?.[ck!.key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+/** Réglages du rack avec une nouvelle valeur fixe pour un réglage imbriqué (null : pas un réglage imbriqué). */
+export function withRackNestedValue(params: any, key: string, value: number): RackParams | null {
+  const lv = RACK_LEVEL_KEY.exec(key);
+  const ck = lv ? null : parseRackChildKey(key);
+  if (!lv && !ck) return null;
+  const p = sanitizeRack(params || {});
+  if (lv) return { ...p, branches: p.branches.map((b, i) => (i === +lv[1] - 1 ? { ...b, level: value } : b)) };
+  const hit = findRackChild(p, ck!.pluginId);
+  return hit ? withChildParams(p, hit.branch.id, ck!.pluginId, { [ck!.key]: value }) : p;
+}
+
+/**
+ * Écriture d'automation depuis la fenêtre du rack (Touch / Latch / Write, 22/10/2026) : réglages
+ * numériques changés dans les effets des branches (« <effet>/<réglage> ») et niveaux des branches
+ * (« brNLevel »), avec leur valeur d'avant. `structurel` : autre changement (effet ajouté, retiré,
+ * contourné, branche coupée, division…), qui reste un réglage ordinaire du projet.
+ */
+export function rackAutomationChanges(prev: any, next: any): { changes: { key: string; value: number; before: number }[]; structurel: boolean } {
+  const a = sanitizeRack(prev || {}), b = sanitizeRack(next || {});
+  const changes: { key: string; value: number; before: number }[] = [];
+  let structurel = rackStructureKey(a) !== rackStructureKey(b) || a.branches.length !== b.branches.length;
+  if (structurel) return { changes, structurel };
+  b.branches.forEach((nb, i) => {
+    const ob = a.branches[i];
+    if (ob.id !== nb.id || !!ob.mute !== !!nb.mute || !!ob.solo !== !!nb.solo || ob.name !== nb.name) structurel = true;
+    if (ob.level !== nb.level) changes.push({ key: `br${i + 1}Level`, value: nb.level, before: ob.level });
+    nb.plugins.forEach((np, k) => {
+      const op = ob.plugins[k];
+      const keys = new Set([...Object.keys(op.params || {}), ...Object.keys(np.params || {})]);
+      keys.forEach(key => {
+        const ov = op.params?.[key], nv = np.params?.[key];
+        if (ov === nv) return;
+        if (typeof ov === 'number' && typeof nv === 'number' && Number.isFinite(nv)) changes.push({ key: rackChildKey(np.id, key), value: nv, before: ov });
+        else structurel = true;
+      });
+    });
+  });
+  return { changes, structurel };
+}
+
 /** Change la division : le nombre de branches suit (branches gardées dans l'ordre, effets compris). */
 export function withMode(p: RackParams, mode: RackMode, bandCount = p.bandCount): RackParams {
   const n = branchCountFor(mode, bandCount, p.branches.length);

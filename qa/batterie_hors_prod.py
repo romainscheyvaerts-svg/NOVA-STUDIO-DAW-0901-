@@ -202,6 +202,9 @@ BATTERIE = [
     # NOVA) : chaque tour commence entier (grosse caisse dès son 1er échantillon, 43 premières ms = son sec), rien d'après la
     # fin de boucle ne s'entend, chaque tour = export de la même zone au bit près (44,1 / 48 kHz).
     ("pdc_boucle_lecture", []),
+    # 22/10/2026 · restes 2 : rack parallèle, automation écrite en touchant un bouton dans la fenêtre d'un effet d'une branche
+    # (Latch au clavier, Touch à la souris) : voie « <rack>::<effet>/<réglage> », valeur jouée par le moteur, Ctrl+Z en une étape.
+    ("rack_automation_fenetre", []),
 ]
 
 

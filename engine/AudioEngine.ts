@@ -4069,7 +4069,10 @@ export class AudioEngine {
     if (parsePluginParam(param)) {
       // Écriture : ce qui était programmé d'avance sur le réglage ne doit pas reprendre la main.
       const a = this.pluginAutoParam(trackId, param);
-      if (a && this.ctx) { try { a.ap.cancelScheduledValues(this.ctx.currentTime); } catch { /* */ } }
+      // La valeur écrite est posée sur le réglage lui-même : la fenêtre de l'effet l'a souvent déjà
+      // passée à l'effet (réglage fixe identique → plus rien n'était posé après l'annulation, le son
+      // restait figé sur la 1re valeur du geste, mesuré dans le rack parallèle).
+      if (a && this.ctx) { try { const now = this.ctx.currentTime; a.ap.cancelScheduledValues(now); a.ap.setTargetAtTime(value, now, 0.01); } catch { /* */ } }
       this.applyPluginAutomation(trackId, param, value);
       return;
     }

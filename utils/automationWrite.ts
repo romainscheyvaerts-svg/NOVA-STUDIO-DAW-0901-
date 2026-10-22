@@ -1,4 +1,5 @@
 import type { AutomationCurveType, AutomationLane, AutomationPoint, Track } from '../types';
+import { parseRackChildKey, rackNestedValue, withRackNestedValue } from '../engine/fxRack';
 
 /**
  * Modes d'automation façon Pro Tools (Off, Read, Touch, Latch, Write, Trim) :
@@ -164,8 +165,10 @@ export const paramSpec = (name: string, sample?: number): ParamSpec => {
   const p = parsePluginParam(name);
   const v = typeof sample === 'number' && Number.isFinite(sample) ? sample : 0;
   if (p) {
+    // Effet d'une branche du rack (« <effet>/<réglage> ») : la course suit le réglage, pas l'id de l'effet.
+    const key = parseRackChildKey(p.key)?.key ?? p.key;
     for (const [re, lo, hi] of PLUGIN_RANGES) {
-      if (re.test(p.key) && v >= lo && v <= hi) return { min: lo, max: hi, kind: 'linear' };
+      if (re.test(key) && v >= lo && v <= hi) return { min: lo, max: hi, kind: 'linear' };
     }
   }
   const lo = Math.min(0, v * 2);
@@ -202,7 +205,10 @@ export const staticParamValue = (track: Track, name: string): number | null => {
   }
   const p = parsePluginParam(name);
   if (p) {
-    const v = (track.plugins || []).find(pl => pl.id === p.pluginId)?.params?.[p.key];
+    const pl = (track.plugins || []).find(x => x.id === p.pluginId);
+    // Rack parallèle : niveau d'une branche, réglage d'un effet d'une branche (rangés dans ses branches).
+    const nested = pl?.type === 'FXRACK' ? rackNestedValue(pl.params, p.key) : undefined;
+    const v = nested ?? pl?.params?.[p.key];
     return typeof v === 'number' && Number.isFinite(v) ? v : null;
   }
   return null;
@@ -218,7 +224,11 @@ export const withStaticParamValue = (track: Track, name: string, value: number):
   }
   const p = parsePluginParam(name);
   if (p) {
-    return { ...track, plugins: (track.plugins || []).map(pl => pl.id === p.pluginId ? { ...pl, params: { ...pl.params, [p.key]: value } } : pl) };
+    return { ...track, plugins: (track.plugins || []).map(pl => {
+      if (pl.id !== p.pluginId) return pl;
+      const rack = pl.type === 'FXRACK' ? withRackNestedValue(pl.params, p.key, value) : null;
+      return { ...pl, params: rack ? { ...pl.params, ...rack } : { ...pl.params, [p.key]: value } };
+    }) };
   }
   return track;
 };
