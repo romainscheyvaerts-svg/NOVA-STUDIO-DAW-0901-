@@ -4671,7 +4671,23 @@ function Studio() {
         }
         // Tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
         case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
-        case 'nova.marker': e.preventDefault(); handleAddMarkerHere(now()); return;
+        case 'nova.marker': {
+          e.preventDefault();
+          const before = new Set(stateRef.current.markers.map(m => m.id));
+          const running = audioEngine.getIsPlaying() || stateRef.current.isRecording;
+          handleAddMarkerHere(now());
+          // À l'arrêt, le nom s'ouvre tout de suite (tape « Couplet 2 », Entrée) : avant, clic droit
+          // → Renommer → taper → Entrée. Pendant la lecture, le repère se pose sans prendre le clavier.
+          if (!running) {
+            const open = (tries: number) => {
+              const m = stateRef.current.markers.find(x => !before.has(x.id));
+              if (m) window.dispatchEvent(new CustomEvent('nova:rename-marker', { detail: m.id }));
+              else if (tries > 0) setTimeout(() => open(tries - 1), 30);
+            };
+            setTimeout(() => open(10), 0);
+          }
+          return;
+        }
         case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
         case 'nova.palette': e.preventDefault(); setPaletteOpen(v => !v); return;
         case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
