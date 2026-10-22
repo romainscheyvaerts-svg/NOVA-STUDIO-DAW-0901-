@@ -12,7 +12,7 @@
  *
  * Chaque mesure est notée dans le journal du banc (tests/helpers/metro.ts).
  */
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { createMeterCore } from '../engine/meters/meterCore';
 import { LoudnessMeter, correlationOf } from '../engine/meters/loudness';
 import { meterBank } from '../engine/meters/meterBank';
@@ -21,7 +21,7 @@ import { octaveSmooth, SPECTRUM_SINE_DB } from '../engine/meters/spectrum';
 import { integratedLufs, truePeakDb } from '../utils/loudness';
 import { loudnessRangeOf, lufsOf } from '../utils/audioMeasure';
 import { installMiniWebAudio, MiniOfflineAudioContext } from './helpers/miniWebAudio';
-import { dB, flushMetroLog, metro } from './helpers/metro';
+import { assertMetro, dB, flushMetroLog, metro } from './helpers/metro';
 
 const RATES = [44100, 48000];
 
@@ -53,6 +53,8 @@ function live(L: Float32Array, R: Float32Array, sr: number, opt = { loudness: tr
 }
 
 afterAll(() => flushMetroLog('metres'));
+// Chaque mesure hors tolérance fait échouer le test, après avoir tout mesuré (rapport complet).
+afterEach(() => assertMetro());
 
 describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
   for (const sr of RATES) {
@@ -61,9 +63,9 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
         const x = tone(sr, 20, 1000, lvl);
         const r = live(x, x, sr);
         const m = r.lm.momentary(), s = r.lm.shortTerm(), I = r.lm.integrated();
-        expect(metro('LUFS momentané (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, m, 'LUFS', 0.1)).toBe(true);
-        expect(metro('LUFS court terme (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, s, 'LUFS', 0.1)).toBe(true);
-        expect(metro('LUFS intégré (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, I, 'LUFS', 0.1)).toBe(true);
+        metro('LUFS momentané (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, m, 'LUFS', 0.1);
+        metro('LUFS court terme (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, s, 'LUFS', 0.1);
+        metro('LUFS intégré (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, I, 'LUFS', 0.1);
       }
     });
     it(`${sr} Hz : cas 3, 4, 5 (portillons) — intégré = −23,0 ±0,1 LU`, () => {
@@ -74,7 +76,7 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
       ];
       for (const [name, x] of cases) {
         const I = live(x, x, sr).lm.integrated();
-        expect(metro('LUFS intégré (direct)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1)).toBe(true);
+        metro('LUFS intégré (direct)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1);
       }
     });
     it(`${sr} Hz : LRA Tech 3342 (cas 1 à 4) ±1 LU`, () => {
@@ -86,7 +88,7 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
       ];
       for (const [name, x, want] of cases) {
         const lra = live(x, x, sr).lm.lra();
-        expect(metro('LRA (direct)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1)).toBe(true);
+        metro('LRA (direct)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1);
       }
     });
   }
@@ -103,7 +105,7 @@ describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
       ];
       for (const [name, x] of cases) {
         const I = integratedLufs(buf(x, x, sr));
-        expect(metro('LUFS intégré (export)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1)).toBe(true);
+        metro('LUFS intégré (export)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1);
         expect(Math.abs(lufsOf([x, x], sr) - I)).toBeLessThan(1e-9);
       }
     });
@@ -115,7 +117,7 @@ describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
       ];
       for (const [name, x, want] of cases) {
         const lra = loudnessRangeOf([x, x], sr);
-        expect(metro('LRA (export)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1)).toBe(true);
+        metro('LRA (export)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1);
       }
     });
     it(`${sr} Hz : LRA de l'export pondéré K comme la norme (graves forts puis aigus, même niveau crête)`, () => {
@@ -124,13 +126,13 @@ describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
       const x = cat(tone(sr, 20, 60, -20), tone(sr, 20, 3000, -20));
       const ref = live(x, x, sr).lm.lra();
       const lra = loudnessRangeOf([x, x], sr);
-      expect(metro('LRA (export)', `60 Hz puis 3 kHz à −20 dBFS, ${sr} Hz (référence = mètre direct)`, ref, lra, 'LU', 1)).toBe(true);
+      metro('LRA (export)', `60 Hz puis 3 kHz à −20 dBFS, ${sr} Hz (référence = mètre direct)`, ref, lra, 'LU', 1);
     });
     it(`${sr} Hz : crête vraie de l'export (×4, 16 coefficients) ±0,1 dB`, () => {
       for (const [f, ph] of [[sr / 4, Math.PI / 4], [sr / 6, 0.3], [997, 1.1], [15000, 0.7]] as [number, number][]) {
         const x = soft(tone(sr, 1, f, -1, ph), sr);
         const tp = truePeakDb(buf(x, x, sr));
-        expect(metro('Crête vraie (export)', `sinus ${Math.round(f)} Hz −1 dBFS, ${sr} Hz`, -1, tp, 'dBTP', 0.1)).toBe(true);
+        metro('Crête vraie (export)', `sinus ${Math.round(f)} Hz −1 dBFS, ${sr} Hz`, -1, tp, 'dBTP', 0.1);
       }
     });
   }
@@ -142,15 +144,15 @@ describe('Crête échantillon et crête vraie en direct (master ×4/16, pistes �
       const x = soft(tone(sr, 1, sr / 4, -6, Math.PI / 4), sr);
       const m = live(x, x, sr);
       const t = live(x, x, sr, { loudness: false, tpTaps: 8, tpGate: true } as any);
-      expect(metro('Crête échantillon (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6 - 3.0103, dB(m.pk), 'dBFS', 0.1)).toBe(true);
-      expect(metro('Crête vraie master (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(m.tp), 'dBTP', 0.1)).toBe(true);
-      expect(metro('Crête vraie piste (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(t.tp), 'dBTP', 0.1)).toBe(true);
+      metro('Crête échantillon (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6 - 3.0103, dB(m.pk), 'dBFS', 0.1);
+      metro('Crête vraie master (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(m.tp), 'dBTP', 0.1);
+      metro('Crête vraie piste (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(t.tp), 'dBTP', 0.1);
     });
     it(`${sr} Hz : sinus 997 Hz, fs/6, 15 kHz, quelle que soit la phase : crête vraie ±0,1 dB`, () => {
       for (const f of [997, sr / 6, 15000]) for (const ph of [0, 0.4, 1.3]) {
         const x = soft(tone(sr, 0.5, f, -3, ph), sr);
         const m = live(x, x, sr);
-        expect(metro('Crête vraie master (direct)', `sinus ${Math.round(f)} Hz phase ${ph}, ${sr} Hz`, -3, dB(m.tp), 'dBTP', 0.1)).toBe(true);
+        metro('Crête vraie master (direct)', `sinus ${Math.round(f)} Hz phase ${ph}, ${sr} Hz`, -3, dB(m.tp), 'dBTP', 0.1);
       }
     });
   }
@@ -168,10 +170,10 @@ describe('Corrélation de phase', () => {
       const core = createMeterCore(sr, {}); core.process(L, R, L.length); const t = core.take();
       return correlationOf(t.lr, t.sumL, t.sumR);
     };
-    expect(metro('Corrélation', 'G = D', 1, corr(s, s), '', 0.01)).toBe(true);
-    expect(metro('Corrélation', 'G = −D', -1, corr(s, neg), '', 0.01)).toBe(true);
-    expect(metro('Corrélation', 'sinus / cosinus (90°)', 0, corr(s, c), '', 0.01)).toBe(true);
-    expect(metro('Corrélation', 'deux bruits indépendants', 0, corr(n1, n2), '', 0.05)).toBe(true);
+    metro('Corrélation', 'G = D', 1, corr(s, s), '', 0.01);
+    metro('Corrélation', 'G = −D', -1, corr(s, neg), '', 0.01);
+    metro('Corrélation', 'sinus / cosinus (90°)', 0, corr(s, c), '', 0.01);
+    metro('Corrélation', 'deux bruits indépendants', 0, corr(n1, n2), '', 0.05);
   });
 });
 
@@ -213,7 +215,7 @@ describe('Vumètre de la console (MeterBank) : référence et balistique, au ryt
         const s = scaleById(sid);
         const v = vuRun(sr, tone(sr, 3, 1000, lvl));
         const shown = meterMainDb(s, v.peak[0], v.rms[0]) - s.refDb;
-        expect(metro(`Vumètre ${s.label}`, `sinus 1 kHz ${lvl} dBFS (régime établi), ${sr} Hz`, 0, shown, s.id === 'vu' ? 'VU' : 'dB', 0.1)).toBe(true);
+        metro(`Vumètre ${s.label}`, `sinus 1 kHz ${lvl} dBFS (régime établi), ${sr} Hz`, 0, shown, s.id === 'vu' ? 'VU' : 'dB', 0.1);
         expect(scaleReading(s, meterMainDb(s, v.peak[0], v.rms[0]))).toMatch(/^[−+]?0,[01]$/);
       }
     });
@@ -232,7 +234,7 @@ describe('Vumètre de la console (MeterBank) : référence et balistique, au ryt
         const d0 = Math.pow(10, (r0 - final) / 20), d1 = Math.pow(10, (r1 - final) / 20);
         if (t1 > 0 && d1 >= 0.99) { t99 = d1 === d0 ? t1 : t0 + (t1 - t0) * (0.99 - d0) / (d1 - d0); break; }
       }
-      expect(metro('Vumètre VU', `montée à 99 %, sinus −18 dBFS, ${sr} Hz`, 300, t99, 'ms', 30, undefined, 0)).toBe(true);
+      metro('Vumètre VU', `montée à 99 %, sinus −18 dBFS, ${sr} Hz`, 300, t99, 'ms', 30, undefined, 0);
       expect(Math.pow(10, (at(300) - final) / 20)).toBeGreaterThan(0.97);
       expect(s.ballistics).toBe('rms');
     });
@@ -260,9 +262,9 @@ describe('Analyseur de spectre du master : niveau et fréquence d’un sinus', (
         while (b < sm.length - 1 && sm[b + 1] >= sm[k0] - 0.1) b++;
         const fRead = Math.sqrt(a * b) * sr / an.fftSize;
         const level = sm[k0] + SPECTRUM_SINE_DB;
-        expect(metro('Analyseur de spectre', `niveau, sinus ${f} Hz −12 dBFS, 1/${Math.round(1 / frac)} oct, ${sr} Hz`, -12, level, 'dBFS', 0.1)).toBe(true);
+        metro('Analyseur de spectre', `niveau, sinus ${f} Hz −12 dBFS, 1/${Math.round(1 / frac)} oct, ${sr} Hz`, -12, level, 'dBFS', 0.1);
         const cents = 1200 * Math.log2(fRead / f);
-        expect(metro('Analyseur de spectre', `fréquence, sinus ${f} Hz, 1/${Math.round(1 / frac)} oct, ${sr} Hz`, 0, cents, 'cents', 25, cents, 1)).toBe(true);
+        metro('Analyseur de spectre', `fréquence, sinus ${f} Hz, 1/${Math.round(1 / frac)} oct, ${sr} Hz`, 0, cents, 'cents', 25, cents, 1);
       }
     } finally { restore(); }
   });

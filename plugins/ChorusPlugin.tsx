@@ -46,6 +46,9 @@ interface ChorusVoice {
   depthGain: GainNode;
   feedbackGain: GainNode;
   panner: StereoPannerNode;
+  /** Voix utilisée (1) ou non (0). Avant (22/10/2026), une voix « en trop » restait branchée,
+   *  non modulée, au centre : le mode Classique (2 voix) en faisait entendre 4. */
+  level: GainNode;
 }
 
 export class ChorusNode {
@@ -98,12 +101,14 @@ export class ChorusNode {
     this.lowCutFilter = ctx.createBiquadFilter();
     this.lowCutFilter.type = 'highpass';
     this.lowCutFilter.frequency.value = 100;
-    this.lowCutFilter.Q.value = 0.5;
+    // Q en dB (spec Web Audio) : −3,01 dB = Butterworth, −3 dB pile à la fréquence affichée
+    // (avant : 0,5 lu comme 0,5 dB, soit +0,5 dB À la coupure).
+    this.lowCutFilter.Q.value = -3.0103;
     
     this.highCutFilter = ctx.createBiquadFilter();
     this.highCutFilter.type = 'lowpass';
     this.highCutFilter.frequency.value = 12000;
-    this.highCutFilter.Q.value = 0.5;
+    this.highCutFilter.Q.value = -3.0103;
     
     // Analyzers for visualization
     this.analyzerL = ctx.createAnalyser();
@@ -136,6 +141,8 @@ export class ChorusNode {
       
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = panPositions[i];
+      const level = this.ctx.createGain();
+      level.gain.value = 0;
       
       // LFO -> profondeur -> temps de retard
       depthGain.connect(delay.delayTime);
@@ -145,7 +152,8 @@ export class ChorusNode {
         lfo,
         depthGain,
         feedbackGain,
-        panner
+        panner,
+        level
       });
     }
   }
@@ -166,7 +174,8 @@ export class ChorusNode {
       // Input -> Delay -> Panner -> Wet output
       this.highCutFilter.connect(voice.delay);
       voice.delay.connect(voice.panner);
-      voice.panner.connect(this.wetGain);
+      voice.panner.connect(voice.level);
+      voice.level.connect(this.wetGain);
       
       // Feedback path
       voice.delay.connect(voice.feedbackGain);
@@ -286,9 +295,15 @@ export class ChorusNode {
       const voice = this.voices[i];
       const isActive = i < activeVoices && isEnabled;
       
-      // Rate with slight detuning between voices for richness
-      const voiceRate = sRate * (1 + i * 0.03);
+      // Même vitesse pour toutes les voix (la vitesse affichée), décalées en phase comme le mode
+      // l'annonce : Classique en quadrature (90°), Tri à 120°, Dimension à 90°. Seul « Ensemble »
+      // désaccorde légèrement les vitesses (+3 % par voix) : sa section de cordes « mouvante ».
+      // (Avant : +3 % par voix dans tous les modes et aucune phase : la quadrature annoncée
+      // n'existait pas, les voix partaient ensemble puis dérivaient.)
+      const voiceRate = mode === 'ENSEMBLE' ? sRate * (1 + i * 0.03) : sRate;
       voice.lfo.setFrequency(voiceRate);
+      voice.lfo.setPhase(mode === 'CLASSIC' ? i * 0.25 : i / Math.max(1, activeVoices));
+      smoothSet(voice.level.gain, isActive ? 1 : 0, this.ctx, 0.02);
       
       // Depth - calculate based on mode
       let voiceDepth = sDepth * 0.003; // Base depth in seconds

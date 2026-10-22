@@ -795,6 +795,8 @@ class MiniWorkletNode extends MiniNode {
     this.parameters = new Map();
     for (const d of (def.cls.parameterDescriptors || [])) {
       const p = ctx._param(this, d.defaultValue ?? 0, d.minValue ?? -3.4e38, d.maxValue ?? 3.4e38, d.automationRate || 'a-rate');
+      const init = opts.parameterData?.[d.name];
+      if (typeof init === 'number') p.value = init;
       this.parameters.set(d.name, p);
     }
     ctx._sandbox.__nextPort = procPort;

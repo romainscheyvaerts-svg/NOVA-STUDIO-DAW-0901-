@@ -1,6 +1,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { fadeInOnInsert, loadWorkletModule, smoothSet, TimelineLfo } from './vocalDspUtils';
+import { createFlangerCore } from '../engine/flangerCore';
+import { retireWorkletNode } from '../engine/workletGuard';
 import { termHelp } from '../utils/pluginUi';
 import { Faceplate, HwWindow, Knob, ToggleSwitch } from './hw';
 import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
@@ -11,6 +13,37 @@ import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
  * Logic: Ultra-short modulated delay (1-15ms) with high feedback.
  * Features: Phase Inversion for subtractive flanging and Manual offset.
  */
+
+/**
+ * Processeur du flanger : la ligne modulée ET sa réinjection dans le même cœur (engine/flangerCore),
+ * pour descendre sous 128 échantillons (une boucle de DelayNode ne le peut pas : « Position 1 ms »
+ * donnait 2,9 ms). Paramètres a-rate : `delay` (s, retard de base + LFO branché dessus) et `feedback`.
+ */
+const FLANGER_WORKLET = `
+const createFlangerCore = (${createFlangerCore.toString()});
+class NovaFlangerProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'delay', defaultValue: 0.0052, minValue: 0, maxValue: 0.025, automationRate: 'a-rate' },
+      { name: 'feedback', defaultValue: 0, minValue: -0.98, maxValue: 0.98, automationRate: 'a-rate' },
+    ];
+  }
+  constructor() { super(); this.core = createFlangerCore(sampleRate, 0.025); this.z = new Float32Array(128); }
+  process(inputs, outputs, parameters) {
+    const out = outputs[0];
+    if (!out || !out[0]) return true;
+    const n = out[0].length;
+    if (this.z.length < n) this.z = new Float32Array(n);
+    const inp = inputs[0];
+    const iL = inp && inp[0] ? inp[0] : this.z;
+    const iR = inp && inp[1] ? inp[1] : null;
+    this.core.process(iL, iR && out[1] ? iR : null, out[0], iR && out[1] ? out[1] : null, n, parameters.delay, parameters.feedback);
+    if (out[1] && !(iR)) out[1].set(out[0]);
+    return true;
+  }
+}
+try { registerProcessor('nova-flanger-v1', NovaFlangerProcessor); } catch (e) {}
+`;
 
 export interface FlangerParams {
   rate: number;       // 0.1 to 10 Hz
@@ -34,6 +67,11 @@ export class FlangerNode {
   private feedbackGain: GainNode;
   private dryGain: GainNode;
   private wetGain: GainNode;
+  /** Ligne exacte (AudioWorklet) ; tant qu'elle n'est pas chargée, le DelayNode d'origine sert. */
+  private worklet: AudioWorkletNode | null = null;
+  private disposed = false;
+  /** Prêt pour un rendu hors ligne (export) : la ligne exacte est en place. */
+  public readonly ready: Promise<void>;
 
   private params: FlangerParams = {
     rate: 0.5,
@@ -60,6 +98,32 @@ export class FlangerNode {
     this.wetGain = ctx.createGain();
 
     this.setupGraph();
+    this.ready = this.initWorklet();
+  }
+
+  /** Remplace la boucle DelayNode (≥ 128 échantillons) par la ligne exacte du worklet. */
+  private async initWorklet() {
+    try {
+      await loadWorkletModule(this.ctx, 'nova-flanger-v1', FLANGER_WORKLET);
+      if (this.disposed) return;
+      const wk = new AudioWorkletNode(this.ctx, 'nova-flanger-v1', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        channelCount: 2, channelCountMode: 'max', channelInterpretation: 'speakers',
+      });
+      this.worklet = wk;
+      try { this.input.disconnect(this.delayNode); } catch { /* */ }
+      try { this.delayNode.disconnect(this.wetGain); } catch { /* */ }
+      try { this.depthGain.disconnect(this.delayNode.delayTime); } catch { /* */ }
+      // L'ancienne boucle ne sert plus : on la débranche (plus rien à calculer).
+      try { this.delayNode.disconnect(); this.feedbackGain.disconnect(); } catch { /* */ }
+      this.input.connect(wk);
+      wk.connect(this.wetGain);
+      this.depthGain.connect(wk.parameters.get('delay')!);
+      this.applyParams();
+    } catch (e) {
+      // Pas d'AudioWorklet : la boucle d'origine reste (retard ≥ 128 échantillons).
+      console.warn('[Flanger] ligne exacte indisponible, retard minimal 128 échantillons', e);
+    }
   }
 
   private setupGraph() {
@@ -102,11 +166,14 @@ export class FlangerNode {
     if (isEnabled) {
       const baseDelay = 0.001 + (manual * 0.014); // 1ms to 15ms
       smoothSet(this.delayNode.delayTime, baseDelay, this.ctx, 0.03);
+      const wp = this.worklet?.parameters;
+      if (wp) smoothSet(wp.get('delay')!, baseDelay, this.ctx, 0.03);
       this.lfo.setFrequency(rate);
       smoothSet(this.depthGain.gain, 0.005 * depth, this.ctx, 0.03);
       
       const fbValue = invertPhase ? -feedback : feedback;
       smoothSet(this.feedbackGain.gain, fbValue, this.ctx, 0.03);
+      if (wp) smoothSet(wp.get('feedback')!, fbValue, this.ctx, 0.03);
       
       smoothSet(this.dryGain.gain, 1 - mix * 0.5, this.ctx, 0.02);
       smoothSet(this.wetGain.gain, mix, this.ctx, 0.02);
@@ -114,6 +181,8 @@ export class FlangerNode {
       smoothSet(this.dryGain.gain, 1, this.ctx, 0.02);
       smoothSet(this.wetGain.gain, 0, this.ctx, 0.02);
       smoothSet(this.feedbackGain.gain, 0, this.ctx, 0.02);
+      const wpOff = this.worklet?.parameters;
+      if (wpOff) smoothSet(wpOff.get('feedback')!, 0, this.ctx, 0.02);
     }
   }
 
@@ -126,6 +195,8 @@ export class FlangerNode {
   }
 
   public dispose() {
+    this.disposed = true;
+    if (this.worklet) { try { this.worklet.disconnect(); } catch { /* */ } retireWorkletNode(this.worklet); this.worklet = null; }
     try {
       this.lfo.stop();
     } catch (e) {

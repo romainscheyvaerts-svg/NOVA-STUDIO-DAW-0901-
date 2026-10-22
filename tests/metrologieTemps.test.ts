@@ -21,11 +21,17 @@ afterEach(() => assertMetro());
 
 type Fx = { input: AudioNode; output: AudioNode };
 
+/** Rend la main à la boucle d'événements (les rendus du banc sont longs et synchrones : sans ça, vitest perd le contact avec le fil de test). */
+const tick = () => new Promise<void>(r => setTimeout(r, 0));
+
 /** Rend `input` (canaux) à travers l'effet créé par `make`, dans un contexte hors ligne neuf. */
 async function render(sr: number, seconds: number, input: Float32Array[], make: (ctx: BaseAudioContext) => Fx, before?: (fx: any, ctx: BaseAudioContext) => void): Promise<Float32Array[]> {
+  await tick();
   const n = Math.round(seconds * sr);
   const ctx = new MiniOfflineAudioContext(2, n, sr) as unknown as OfflineAudioContext;
   const fx = make(ctx);
+  // Comme l'export (AudioEngine.renderProject) : on attend les effets qui chargent un AudioWorklet.
+  if ((fx as any).ready instanceof Promise) await (fx as any).ready;
   before?.(fx, ctx);
   const b = ctx.createBuffer(input.length, n, sr);
   input.forEach((c, i) => b.copyToChannel(c.subarray(0, n) as Float32Array<ArrayBuffer>, i));
@@ -163,8 +169,9 @@ const reverbFx = (p: Record<string, any>) => (ctx: BaseAudioContext) => {
 describe('Réverbe : durée (RT60), pré-délai, coupe-bas / coupe-haut, réponse importée', () => {
   const MODES: ReverbMode[] = ['ROOM', 'HALL', 'PLATE', 'CATHEDRAL', 'SHIMMER', 'SPRING'];
 
-  it('durée affichée = RT60 mesuré aux fréquences moyennes (500 Hz et 1 kHz, ISO 3382 T30) ±5 %', () => {
+  it('durée affichée = RT60 mesuré aux fréquences moyennes (500 Hz et 1 kHz, ISO 3382 T30) ±5 %', async () => {
     for (const sr of RATES) for (const mode of MODES) for (const decay of [0.6, 2.5, 6]) for (const damping of [0, 0.5]) {
+      await tick();
       const ctx = new MiniOfflineAudioContext(2, sr, sr) as unknown as BaseAudioContext;
       const r: any = reverbFx({ mode, decay, damping, size: 0.7, diffusion: 0.8 })(ctx);
       const ir: AudioBuffer = r.convA.buffer || r.convB.buffer;
@@ -222,6 +229,231 @@ describe('Réverbe : durée (RT60), pré-délai, coupe-bas / coupe-haut, répons
       const out = shapeIr(chs, sr, { lengthSec: 0.5, fadeSec: 0.1 });
       metro('Réverbe', `réponse importée : longueur gardée 0,5 s, ${sr} Hz`, 0.5 * 1000, out[0].length / sr * 1000, 'ms', 1000 / sr);
       expect(out[0][out[0].length - 1]).toBe(0);
+    }
+  });
+});
+
+// ───────────────────────── Modulation : chorus, flanger, doubleur, stéréo ─────────────────────────
+
+import { ChorusNode } from '../plugins/ChorusPlugin';
+import { FlangerNode } from '../plugins/FlangerPlugin';
+import { VocalDoublerNode } from '../plugins/DoublerPlugin';
+import { StereoSpreaderNode } from '../plugins/StereoSpreaderPlugin';
+import { rms } from './helpers/metro';
+
+/**
+ * Retard instantané (s) d'un sinus de fréquence f entre l'entrée et la sortie, mesuré par
+ * fenêtres de `win` s (phase de la composante à f), déroulé à partir de `d0` (retard approché).
+ */
+function delayTrack(inp: Float32Array, out: Float32Array, sr: number, f: number, win: number, from: number, to: number, d0: number) {
+  const n = Math.round(win * sr), ts: number[] = [], ds: number[] = [];
+  let prev = d0;
+  for (let a = Math.round(from * sr); a + n <= Math.round(to * sr); a += n) {
+    const pi = toneAt(inp, sr, f, a, a + n).phase, po = toneAt(out, sr, f, a, a + n).phase;
+    let d = (pi - po) / (2 * Math.PI * f);
+    d += Math.round((prev - d) * f) / f;
+    ts.push((a + n / 2) / sr); ds.push(d); prev = d;
+  }
+  return { ts, ds };
+}
+
+/** Sinusoïde ajustée (moindres carrés) à fréquence r sur une suite (t, y) : amplitude et phase (rad, à t = 0). */
+function fitSine(ts: number[], ys: number[], r: number) {
+  const m = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sc = 0, ss = 0, cc = 0, s2 = 0;
+  for (let i = 0; i < ts.length; i++) { const w = 2 * Math.PI * r * ts[i], y = ys[i] - m; sc += y * Math.cos(w); ss += y * Math.sin(w); cc += Math.cos(w) ** 2; s2 += Math.sin(w) ** 2; }
+  const A = sc / cc, B = ss / s2;
+  return { amp: Math.hypot(A, B), phase: Math.atan2(A, B), mean: m };
+}
+
+/** Fréquence d'une modulation lente (passages par zéro montants de y − moyenne). */
+function modRate(ts: number[], ys: number[]) {
+  const m = ys.reduce((a, b) => a + b, 0) / ys.length;
+  const zc: number[] = [];
+  for (let i = 1; i < ys.length; i++) if (ys[i - 1] - m < 0 && ys[i] - m >= 0) zc.push(ts[i - 1] + (ts[i] - ts[i - 1]) * (m - ys[i - 1]) / (ys[i] - ys[i - 1]));
+  return zc.length > 1 ? (zc.length - 1) / (zc[zc.length - 1] - zc[0]) : NaN;
+}
+
+const sineIn = (sr: number, sec: number, f: number, amp = 0.25) => Float32Array.from({ length: Math.round(sr * sec) }, (_, i) => amp * Math.sin(2 * Math.PI * f * i / sr));
+
+describe('Chorus : vitesse (Hz), voix en quadrature, coupe-bas / coupe-haut', () => {
+  const chorusFx = (p: Record<string, any>) => (ctx: BaseAudioContext) => {
+    const c = new ChorusNode(ctx as AudioContext);
+    c.updateParams({ mix: 1, feedback: 0, lowCut: 20, highCut: 20000, spread: 1, ...p } as any);
+    return c;
+  };
+  it('vitesse affichée = fréquence de l’ondulation mesurée (±0,5 %), voix 1 et 2', async () => {
+    const sr = 48000, f = 1000;
+    for (const rate of [0.5, 1.2, 4]) {
+      const sec = Math.max(2.5, 4 / rate);
+      const x = sineIn(sr, sec, f);
+      const [L, R] = await render(sr, sec, [x, x], chorusFx({ mode: 'CLASSIC', rate, depth: 0.5 }), fx => fx.syncTimeline(0));
+      const tl = delayTrack(x, L, sr, f, 0.004, 0.05, sec, 0.007), tr = delayTrack(x, R, sr, f, 0.004, 0.05, sec, 0.010);
+      metro('Chorus', `vitesse ${rate} Hz, voix 1 (gauche), 48000 Hz`, rate, modRate(tl.ts, tl.ds), 'Hz', rate * 0.005, undefined, 3);
+      metro('Chorus', `vitesse ${rate} Hz, voix 2 (droite), 48000 Hz`, rate, modRate(tr.ts, tr.ds), 'Hz', rate * 0.005, undefined, 3);
+    }
+  }, 120_000);
+  it('mode Classique : 2 voix « en quadrature » (90° ±3°)', async () => {
+    const sr = 48000, f = 1000, rate = 1.2, sec = 2.5;
+    const x = sineIn(sr, sec, f);
+    const [L, R] = await render(sr, sec, [x, x], chorusFx({ mode: 'CLASSIC', rate, depth: 0.5 }), fx => fx.syncTimeline(0));
+    const tl = delayTrack(x, L, sr, f, 0.004, 0.05, sec, 0.007), tr = delayTrack(x, R, sr, f, 0.004, 0.05, sec, 0.010);
+    const a = fitSine(tl.ts, tl.ds, rate), b = fitSine(tr.ts, tr.ds, rate);
+    let dphi = ((a.phase - b.phase) * 180 / Math.PI) % 360; if (dphi < 0) dphi += 360; if (dphi > 180) dphi = 360 - dphi;
+    metro('Chorus', 'Classique : écart de phase entre les 2 voix (annoncé : quadrature)', 90, dphi, '°', 3, undefined, 1);
+  }, 120_000);
+  it('coupe-bas / coupe-haut : −3,01 dB pile à la fréquence affichée', () => {
+    for (const sr of RATES) for (const [lc, hc] of [[100, 12000], [300, 4000]]) {
+      const ctx = new MiniOfflineAudioContext(2, sr, sr) as unknown as BaseAudioContext;
+      const c: any = chorusFx({ lowCut: lc, highCut: hc })(ctx);
+      const resp = (f: any, hz: number) => { const m = new Float32Array(1), ph = new Float32Array(1); f.getFrequencyResponse(Float32Array.of(hz), m, ph); return dB(m[0]); };
+      metro('Chorus', `coupe-bas ${lc} Hz : niveau à ${lc} Hz, ${sr} Hz`, -3.01, resp(c.lowCutFilter, lc), 'dB', 0.1);
+      metro('Chorus', `coupe-haut ${hc} Hz : niveau à ${hc} Hz, ${sr} Hz`, -3.01, resp(c.highCutFilter, hc), 'dB', 0.1);
+    }
+  });
+});
+
+describe('Flanger : position (retard de base, ms) et vitesse (Hz)', () => {
+  const flangerFx = (p: Record<string, any>) => (ctx: BaseAudioContext) => {
+    const fl = new FlangerNode(ctx as AudioContext);
+    fl.updateParams({ mix: 1, feedback: 0, depth: 0, invertPhase: false, ...p } as any);
+    return fl;
+  };
+  it('position affichée (1 à 15 ms) = retard mesuré (±1 échantillon)', async () => {
+    for (const sr of RATES) for (const manual of [0, 0.05, 0.1, 0.3, 1]) {
+      const want = (1 + manual * 14);
+      const t0 = 0.01;
+      const x = impulse(sr, 0.05, t0, 0.5);
+      const [L] = await render(sr, 0.05, [x], flangerFx({ manual }));
+      // Sortie = 0,5 × sec + effet : on retire le sec (gain exact 1 − mix / 2).
+      const wet = L.map((v, i) => v - 0.5 * x[i]);
+      const p = (peakPos(wet, Math.round((t0 + 0.0002) * sr), wet.length) - t0 * sr) / sr * 1000;
+      metro('Flanger', `position ${want.toFixed(1)} ms (réglage ${Math.round(manual * 100)} %), ${sr} Hz`, want, p, 'ms', 1000 / sr + 1e-9);
+    }
+  }, 120_000);
+  it('retour affiché = gain de chaque recirculation (±0,1 dB), normal et inversé', async () => {
+    for (const sr of RATES) for (const [fb, inv] of [[0.5, false], [0.7, false], [0.7, true]] as [number, boolean][]) {
+      const t0 = 0.01, x = impulse(sr, 0.05, t0, 0.5);
+      const [L] = await render(sr, 0.05, [x], flangerFx({ manual: 0.3, feedback: fb, invertPhase: inv }));
+      const wet = L.map((v, i) => v - 0.5 * x[i]);
+      // Somme des échantillons autour de chaque passage : l'interpolation linéaire étale l'impulsion
+      // (retard fractionnaire) mais garde sa somme.
+      const d = 0.0052, at = (k: number) => { const c = Math.round((t0 + k * d) * sr); let m = 0; for (let i = c - 4; i <= c + 4; i++) m += wet[i]; return m; };
+      const r = at(2) / at(1);
+      metro('Flanger', `retour ${Math.round(fb * 100)} %${inv ? ' (phase inversée)' : ''} : 2e / 1er passage, ${sr} Hz`, (inv ? -1 : 1) * fb, r, '', 0.012, undefined, 4);
+    }
+  });
+  it('vitesse affichée = fréquence du balayage mesurée (±0,5 %)', async () => {
+    const sr = 48000, f = 1000;
+    for (const rate of [0.25, 1, 4]) {
+      const sec = Math.max(2.5, 4 / rate);
+      const x = sineIn(sr, sec, f);
+      const [L] = await render(sr, sec, [x], flangerFx({ manual: 0.5, depth: 0.5, rate }), fx => fx.syncTimeline(0));
+      const wet = L.map((v, i) => v - 0.5 * x[i]);
+      const tr = delayTrack(x, wet, sr, f, 0.004, 0.05, sec, 0.008);
+      metro('Flanger', `vitesse ${rate} Hz, 48000 Hz`, rate, modRate(tr.ts, tr.ds), 'Hz', rate * 0.005, undefined, 3);
+    }
+  }, 120_000);
+});
+
+describe('Doubleur : décalages 16 / 24 ms et désaccord (cents)', () => {
+  const doublerFx = (p: Record<string, any>) => (ctx: BaseAudioContext) => {
+    const d = new VocalDoublerNode(ctx as AudioContext);
+    d.updateParams({ directOn: false, width: 1, gainL: 1, gainR: 1, ...p } as any);
+    return d;
+  };
+  it('décalages annoncés (16 ms à gauche, 24 ms à droite) ±0,1 ms', async () => {
+    for (const sr of RATES) {
+      const t0 = 0.01, x = impulse(sr, 0.06, t0, 0.5);
+      const [L, R] = await render(sr, 0.06, [x], doublerFx({ detune: 0 }));
+      const pl = (peakPos(L, Math.round((t0 + 0.005) * sr), L.length) - t0 * sr) / sr * 1000;
+      const pr = (peakPos(R, Math.round((t0 + 0.005) * sr), R.length) - t0 * sr) / sr * 1000;
+      metro('Doubleur', `décalage gauche, ${sr} Hz`, 16, pl, 'ms', 0.1);
+      metro('Doubleur', `décalage droite, ${sr} Hz`, 24, pr, 'ms', 0.1);
+    }
+  });
+  it('désaccord affiché (±15 cents à 100 %) = écart de hauteur crête mesuré (±1 cent)', async () => {
+    const sr = 44100, f = 1000, sec = 9;
+    for (const detune of [0.4, 1]) {
+      const x = sineIn(sr, sec, f);
+      const [L] = await render(sr, sec, [x], doublerFx({ detune }), fx => fx.syncTimeline(0));
+      const tr = delayTrack(x, L, sr, f, 0.004, 0.1, sec, 0.016);
+      let mx = 0;
+      for (let i = 1; i < tr.ds.length; i++) {
+        const slope = (tr.ds[i] - tr.ds[i - 1]) / (tr.ts[i] - tr.ts[i - 1]);
+        mx = Math.max(mx, Math.abs(1200 * Math.log2(1 - slope)));
+      }
+      metro('Doubleur', `désaccord ${Math.round(detune * 15)} cents (réglage ${Math.round(detune * 100)} %), voix gauche, crête sur ${sec} s`, Math.round(detune * 15 * 10) / 10, mx, 'cents', 1, undefined, 2);
+    }
+  }, 300_000);
+});
+
+describe('Stéréo (Stereo Spreader) : largeur, graves en mono, 3 bandes, Haas', () => {
+  const spreadFx = (p: Record<string, any>) => (ctx: BaseAudioContext) => {
+    const s = new StereoSpreaderNode(ctx as AudioContext);
+    s.updateParams({ safeMonoBass: false, multiBand: false, haasAmount: 0, balance: 0, ...p } as any);
+    return s;
+  };
+  const noise = (n: number, seed: number) => { let a = seed; return Float32Array.from({ length: n }, () => { a = (a * 16807) % 2147483647; return a / 2147483647 - 0.5; }); };
+  it('largeur affichée = gain mesuré du signal Côtés (S), le Milieu (M) intact (±0,1 dB)', async () => {
+    for (const sr of RATES) for (const w of [0, 0.5, 1, 1.5, 2]) {
+      const n = Math.round(sr * 0.5), L = noise(n, 3), R = noise(n, 11);
+      const [oL, oR] = await render(sr, 0.5, [L, R], spreadFx({ width: w }));
+      const a = Math.round(0.05 * sr);
+      const S = (x: Float32Array, y: Float32Array) => rms(Float32Array.from(x, (v, i) => (v - y[i]) / 2), a);
+      const M = (x: Float32Array, y: Float32Array) => rms(Float32Array.from(x, (v, i) => (v + y[i]) / 2), a);
+      metro('Stéréo', `largeur ${Math.round(w * 100)} % : gain Milieu, ${sr} Hz`, 0, dB(M(oL, oR) / M(L, R)), 'dB', 0.1);
+      if (w > 0) metro('Stéréo', `largeur ${Math.round(w * 100)} % : gain Côtés, ${sr} Hz`, dB(w), dB(S(oL, oR) / S(L, R)), 'dB', 0.1);
+      else metro('Stéréo', `largeur 0 % : Côtés restants, ${sr} Hz`, '−∞', dB(S(oL, oR) / S(L, R)), 'dB', null);
+    }
+  });
+  it('graves en mono : Côtés à −3 dB pile à la fréquence affichée', () => {
+    for (const sr of RATES) for (const fm of [80, 120, 250]) {
+      const ctx = new MiniOfflineAudioContext(2, sr, sr) as unknown as BaseAudioContext;
+      const s: any = spreadFx({ safeMonoBass: true, monoFreq: fm })(ctx);
+      const m = new Float32Array(1), ph = new Float32Array(1);
+      s.sideHighpass.getFrequencyResponse(Float32Array.of(fm), m, ph);
+      metro('Stéréo', `graves en mono sous ${fm} Hz : Côtés à ${fm} Hz, ${sr} Hz`, -3.01, dB(m[0]), 'dB', 0.1);
+    }
+  });
+  it('3 bandes : toutes à 100 % = son d’origine (±0,1 dB) ; coupures à la fréquence affichée (graves = médiums, médiums = aigus)', async () => {
+    const sr = 48000;
+    const freqs = [60, 150, 250, 400, 1000, 2500, 4000, 6000, 12000];
+    for (const f of freqs) {
+      const n = Math.round(sr * 0.3);
+      const L = sineIn(sr, 0.3, f), R = Float32Array.from(L, v => -v); // tout en Côtés
+      const [oL] = await render(sr, 0.3, [L, R], spreadFx({ multiBand: true, lowWidth: 1, midWidth: 1, highWidth: 1, lowMidFreq: 250, midHighFreq: 4000 }));
+      const a = Math.round(0.1 * sr);
+      metro('Stéréo', `3 bandes à 100 % : gain des Côtés à ${f} Hz`, 0, dB(toneAt(oL, sr, f, a, n).amp / 0.25), 'dB', 0.1);
+    }
+    // Source d'un seul côté (gauche seule) : l'image reste intacte à 100 % (droite muette, gauche à 0 dB).
+    for (const f of [250, 4000, 1000]) {
+      const n = Math.round(sr * 0.3);
+      const L = sineIn(sr, 0.3, f), R = new Float32Array(n);
+      const [oL, oR] = await render(sr, 0.3, [L, R], spreadFx({ multiBand: true, lowWidth: 1, midWidth: 1, highWidth: 1, lowMidFreq: 250, midHighFreq: 4000 }));
+      const a = Math.round(0.1 * sr);
+      metro('Stéréo', `3 bandes à 100 %, son à gauche seulement, ${f} Hz : gauche`, 0, dB(toneAt(oL, sr, f, a, n).amp / 0.25), 'dB', 0.1);
+      metro('Stéréo', `3 bandes à 100 %, son à gauche seulement, ${f} Hz : fuite à droite`, '< −60', dB(toneAt(oR, sr, f, a, n).amp / 0.25), 'dB', null);
+      if (!(dB(toneAt(oR, sr, f, a, n).amp / 0.25) < -60)) metro('Stéréo', `fuite à droite ${f} Hz`, -60, dB(toneAt(oR, sr, f, a, n).amp / 0.25), 'dB', 0);
+    }
+    // Coupure : à la fréquence affichée, la bande du dessous et celle du dessus pèsent autant.
+    for (const [fc, lo, hi] of [[250, 'lowWidth', 'midWidth'], [4000, 'midWidth', 'highWidth']] as [number, string, string][]) {
+      const n = Math.round(sr * 0.3);
+      const L = sineIn(sr, 0.3, fc), R = Float32Array.from(L, v => -v);
+      const base = { multiBand: true, lowWidth: 0, midWidth: 0, highWidth: 0, lowMidFreq: 250, midHighFreq: 4000 };
+      const [a1] = await render(sr, 0.3, [L, R], spreadFx({ ...base, [lo]: 1 }));
+      const [b1] = await render(sr, 0.3, [L, R], spreadFx({ ...base, [hi]: 1 }));
+      const a = Math.round(0.1 * sr);
+      const gLo = dB(toneAt(a1, sr, fc, a, n).amp / 0.25), gHi = dB(toneAt(b1, sr, fc, a, n).amp / 0.25);
+      metro('Stéréo', `coupure ${fc} Hz : bande du dessous − bande du dessus, à ${fc} Hz`, 0, gLo - gHi, 'dB', 0.1);
+    }
+  }, 120_000);
+  it('Haas : retard du côté droit = décalage × dose (±1 échantillon)', async () => {
+    for (const sr of RATES) for (const [hd, ha] of [[0.015, 1], [0.03, 0.5], [0.01, 0.25]]) {
+      const t0 = 0.01, x = impulse(sr, 0.06, t0, 0.5);
+      const [, R] = await render(sr, 0.06, [x, x], spreadFx({ haasDelay: hd, haasAmount: ha }));
+      const p = (peakPos(R, Math.round(t0 * sr) - 2, R.length) - t0 * sr) / sr * 1000;
+      metro('Stéréo', `Haas ${hd * 1000} ms × dose ${ha * 100} %, ${sr} Hz`, hd * ha * 1000, p, 'ms', 1000 / sr + 1e-9);
     }
   });
 });
