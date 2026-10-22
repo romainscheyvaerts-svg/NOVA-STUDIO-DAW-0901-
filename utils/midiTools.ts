@@ -436,18 +436,18 @@ export interface ToolInfo {
 }
 
 export const MIDI_TOOLS: ToolInfo[] = [
-  { id: 'quantize', label: 'Quantifier', icon: 'fa-magnet', hint: 'Cale les notes sur la grille avec une intensité et du swing (comme Quantize Settings dans Live, Q-Strength / Q-Swing dans Logic, Quick Quantize dans FL).' },
-  { id: 'strum', label: 'Strum', icon: 'fa-guitar', hint: 'Égrène les accords comme une guitare, montant ou descendant (comme Strum dans Live 12 et dans FL Studio).' },
-  { id: 'arp', label: 'Arpège', icon: 'fa-stairs', hint: 'Transforme chaque accord en arpège : motif, vitesse, octaves (comme Arpeggiate dans Live 12 et FL Studio, l’Arpeggiator de Logic figé en notes).' },
-  { id: 'roll', label: 'Roll de hi-hats', icon: 'fa-bars-staggered', hint: 'Remplit chaque note de répétitions rapides (1/32, triolets) avec une rampe de vélocité : les rolls trap (comme les rolls de FL et Ornament dans Live 12).' },
-  { id: 'chop', label: 'Chop', icon: 'fa-scissors', hint: 'Découpe chaque note en morceaux de 1/16 ou 1/32 (comme Chop dans Live 12 et FL Studio).' },
-  { id: 'flam', label: 'Flam', icon: 'fa-angles-right', hint: 'Ajoute une petite note juste avant chaque note (comme Flam dans FL Studio et Ornament dans Live 12).' },
-  { id: 'velocity', label: 'Courbe de vélocité', icon: 'fa-chart-line', hint: 'Montée, descente, vague ou courbe dessinée sur la force des notes (comme Velocity Shaper dans Live 12 et Scale Levels dans FL).' },
-  { id: 'random', label: 'Aléatoire', icon: 'fa-dice', hint: 'Varie la hauteur (dans la gamme), la vélocité et le placement (comme Randomize dans FL Studio et les plages aléatoires de Live 12).' },
-  { id: 'chord', label: 'Faire des accords', icon: 'fa-layer-group', hint: 'Chaque note devient un accord (comme Chord Trigger dans Logic et l’effet Chord de Live).' },
-  { id: 'legato', label: 'Legato', icon: 'fa-grip-lines', hint: 'Chaque note s’allonge jusqu’à la suivante (comme Legato dans Live et Logic, Articulate dans FL).', instant: true },
-  { id: 'invert', label: 'Inversion', icon: 'fa-arrows-up-down', hint: 'Retourne les hauteurs (le grave devient aigu), dans la gamme (comme Flip vertical dans FL et Invert dans Live 12).', instant: true },
-  { id: 'retro', label: 'Rétrograde', icon: 'fa-arrows-left-right', hint: 'Joue la phrase à l’envers (comme Flip horizontal dans FL et Reverse dans Live / Logic).', instant: true },
+  { id: 'quantize', label: 'Quantifier', icon: 'fa-magnet', hint: 'Cale les notes sur la grille avec une intensité et du swing.' },
+  { id: 'strum', label: 'Strum', icon: 'fa-guitar', hint: 'Égrène les accords comme une guitare, montant ou descendant.' },
+  { id: 'arp', label: 'Arpège', icon: 'fa-stairs', hint: 'Transforme chaque accord en arpège : motif, vitesse, octaves.' },
+  { id: 'roll', label: 'Roll de hi-hats', icon: 'fa-bars-staggered', hint: 'Remplit chaque note de répétitions rapides (1/32, triolets) avec une rampe de vélocité : les rolls trap.' },
+  { id: 'chop', label: 'Chop', icon: 'fa-scissors', hint: 'Découpe chaque note en morceaux de 1/16 ou 1/32.' },
+  { id: 'flam', label: 'Flam', icon: 'fa-angles-right', hint: 'Ajoute une petite note juste avant chaque note.' },
+  { id: 'velocity', label: 'Courbe de vélocité', icon: 'fa-chart-line', hint: 'Montée, descente, vague ou courbe dessinée sur la force des notes.' },
+  { id: 'random', label: 'Aléatoire', icon: 'fa-dice', hint: 'Varie la hauteur (dans la gamme), la vélocité et le placement.' },
+  { id: 'chord', label: 'Faire des accords', icon: 'fa-layer-group', hint: 'Chaque note devient un accord.' },
+  { id: 'legato', label: 'Legato', icon: 'fa-grip-lines', hint: 'Chaque note s’allonge jusqu’à la suivante.', instant: true },
+  { id: 'invert', label: 'Inversion', icon: 'fa-arrows-up-down', hint: 'Retourne les hauteurs (le grave devient aigu), dans la gamme.', instant: true },
+  { id: 'retro', label: 'Rétrograde', icon: 'fa-arrows-left-right', hint: 'Joue la phrase à l’envers.', instant: true },
 ];
 
 export const ARP_PATTERNS: { id: ArpPattern; label: string }[] = [

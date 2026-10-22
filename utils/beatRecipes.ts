@@ -161,7 +161,7 @@ export const BEAT_GENRES: GenreRecipe[] = [
     src: [11, 22, 23, 24],
   },
   {
-    id: 'boombap', name: 'Boom bap', emoji: '🎤', hint: 'swing MPC, snare sur 2 et 4, accords jazz',
+    id: 'boombap', name: 'Boom bap', emoji: '🎤', hint: 'swing à l’ancienne, snare sur 2 et 4, accords jazz',
     bpm: 90, bpmRange: [85, 95], halfTime: false, scale: 'MAJOR', defaultRoot: 0, swing: 0.3,
     kitStyles: ['boombap'], fallbackKit: 'boombap', instruments: ['rhodes', 'piano'],
     comp: ['x-------x-------', 'x-----x---x-----'],

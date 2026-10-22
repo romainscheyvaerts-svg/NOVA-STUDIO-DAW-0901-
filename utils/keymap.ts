@@ -61,10 +61,10 @@ const WHITE = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => [0, 2, 4, 5, 7, 
 const BLACK = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => ![0, 2, 4, 5, 7, 9, 11].includes(n % 12));
 /** Raccourcis du clavier MIDI : pour l'aide, et pour vérifier qu'ils ne se marchent pas dessus. */
 export const MIDI_KEYBOARD_SHORTCUTS: ShortcutDef[] = [
-  m({ id: 'midi.white', keys: WHITE.map(([c]) => letterOf(c)), label: `Touches blanches : ${WHITE.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Q S D F G H J K L M ù)`, pt: 'Live : Computer MIDI Keyboard', overridesNova: true }),
-  m({ id: 'midi.black', keys: BLACK.map(([c]) => letterOf(c)), label: `Touches noires : ${BLACK.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Z E T Y U O P)`, pt: 'Live : rangée du dessus', overridesNova: true }),
-  m({ id: 'midi.octave', keys: [letterOf(OCTAVE_DOWN), letterOf(OCTAVE_UP)], label: 'Octave − / + (en AZERTY : W / X)', pt: 'Live : Z / X', overridesNova: true }),
-  m({ id: 'midi.velocity', keys: [letterOf(VELOCITY_DOWN), letterOf(VELOCITY_UP)], label: 'Vélocité − / + (20, 40… 127)', pt: 'Live : C / V', overridesNova: true }),
+  m({ id: 'midi.white', keys: WHITE.map(([c]) => letterOf(c)), label: `Touches blanches : ${WHITE.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Q S D F G H J K L M ù)`, overridesNova: true }),
+  m({ id: 'midi.black', keys: BLACK.map(([c]) => letterOf(c)), label: `Touches noires : ${BLACK.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Z E T Y U O P)`, overridesNova: true }),
+  m({ id: 'midi.octave', keys: [letterOf(OCTAVE_DOWN), letterOf(OCTAVE_UP)], label: 'Octave − / + (en AZERTY : W / X)', overridesNova: true }),
+  m({ id: 'midi.velocity', keys: [letterOf(VELOCITY_DOWN), letterOf(VELOCITY_UP)], label: 'Vélocité − / + (20, 40… 127)', overridesNova: true }),
 ];
 
 export const KEYMAP: ShortcutDef[] = [
@@ -278,19 +278,19 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'view.arrangement', keys: [], label: 'Afficher l’arrangement', pt: 'Fenêtre › Édition', category: 'Fenêtres' }),
   nova({ id: 'view.mixer', keys: [], label: 'Afficher la console de mixage', pt: 'Fenêtre › Mixage', category: 'Fenêtres' }),
   nova({ id: 'view.browser', keys: ['ctrl+alt+b'], label: 'Afficher / masquer le navigateur (sons, effets)', pt: 'Aucun raccourci', category: 'Fenêtres' }),
-  nova({ id: 'nova.metronome', keys: [], label: 'Métronome on / off', pt: 'Pavé 7 (Click)', category: 'Transport' }),
+  nova({ id: 'nova.metronome', keys: ['o'], label: 'Métronome on / off', pt: 'Pavé 7 (Click)', category: 'Transport' }),
 
   // --- Piano roll ouvert (components/PianoRoll) : passe avant les raccourcis globaux ---
   pr({ id: 'pr.close', keys: ['escape'], label: 'Fermer le piano roll' }),
-  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Mute Notes (Ctrl+M) · FL : Alt+M' }),
+  pr({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)' }),
   pr({ id: 'pr.delete', keys: ['delete', 'backspace'], label: 'Effacer les notes sélectionnées' }),
   pr({ id: 'pr.selectAll', keys: ['ctrl+a'], label: 'Sélectionner toutes les notes' }),
-  pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite', pt: 'FL : Ctrl+B · Live : Ctrl+D' }),
+  pr({ id: 'pr.double', keys: ['ctrl+d', 'ctrl+b'], label: 'Dupliquer les notes sélectionnées à la suite' }),
   pr({ id: 'pr.up', keys: ['arrowup'], label: 'Transposer d’un demi-ton vers le haut' }),
   pr({ id: 'pr.down', keys: ['arrowdown'], label: 'Transposer d’un demi-ton vers le bas' }),
-  pr({ id: 'pr.octUp', keys: ['ctrl+arrowup'], label: 'Transposer d’une octave vers le haut' }),
-  pr({ id: 'pr.octDown', keys: ['ctrl+arrowdown'], label: 'Transposer d’une octave vers le bas' }),
-  pr({ id: 'pr.quantize', keys: ['q'], label: 'Quantifier les notes (sélection, sinon tout le clip)', pt: 'Alt+0 (Quantize) · FL : Ctrl+Alt+Q · Live : Ctrl+U' }),
+  pr({ id: 'pr.octUp', keys: ['ctrl+arrowup', 'shift+arrowup'], label: 'Transposer d’une octave vers le haut' }),
+  pr({ id: 'pr.octDown', keys: ['ctrl+arrowdown', 'shift+arrowdown'], label: 'Transposer d’une octave vers le bas' }),
+  pr({ id: 'pr.quantize', keys: ['q'], label: 'Quantifier les notes (sélection, sinon tout le clip)' }),
   pr({ id: 'pr.humanize', keys: ['h'], label: 'Humaniser (petits décalages de temps et de vélocité)' }),
   // Piano roll pro (15/10/2026) : presse-papiers, déplacement à la grille, glissés, outils (lettres de FL Studio).
   pr({ id: 'pr.copy', keys: ['ctrl+c'], label: 'Copier les notes sélectionnées' }),
@@ -298,12 +298,16 @@ export const KEYMAP: ShortcutDef[] = [
   pr({ id: 'pr.paste', keys: ['ctrl+v'], label: 'Coller les notes à la tête de lecture' }),
   pr({ id: 'pr.left', keys: ['arrowleft'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la gauche' }),
   pr({ id: 'pr.right', keys: ['arrowright'], label: 'Déplacer les notes sélectionnées d’une case de grille vers la droite' }),
-  pr({ id: 'pr.slide', keys: ['s'], label: 'Glissé : bascule les notes sélectionnées (sinon, les prochaines notes posées glissent)', pt: 'FL : Slide' }),
-  pr({ id: 'pr.toolDraw', keys: ['p'], label: 'Outil crayon', pt: 'FL : P' }),
-  pr({ id: 'pr.toolPaint', keys: ['b'], label: 'Outil pinceau (peindre des notes à la suite)', pt: 'FL : B' }),
-  pr({ id: 'pr.toolSelect', keys: ['e'], label: 'Outil sélection', pt: 'FL : E' }),
-  pr({ id: 'pr.toolSlice', keys: ['c'], label: 'Outil couteau (couper une note)', pt: 'FL : C' }),
-  pr({ id: 'pr.toolErase', keys: ['d'], label: 'Outil gomme', pt: 'FL : D' }),
+  // Tour beatmaking (22/10/2026) : gestes standard des piano rolls qui manquaient.
+  pr({ id: 'pr.longer', keys: ['shift+arrowright'], label: 'Allonger les notes sélectionnées d’une case de grille' }),
+  pr({ id: 'pr.shorter', keys: ['shift+arrowleft'], label: 'Raccourcir les notes sélectionnées d’une case de grille' }),
+  pr({ id: 'pr.legato', keys: ['ctrl+l'], label: 'Legato : chaque note s’allonge jusqu’à la suivante (sélection, sinon tout le clip)' }),
+  pr({ id: 'pr.slide', keys: ['s'], label: 'Glissé : bascule les notes sélectionnées (sinon, les prochaines notes posées glissent)' }),
+  pr({ id: 'pr.toolDraw', keys: ['p'], label: 'Outil crayon' }),
+  pr({ id: 'pr.toolPaint', keys: ['b'], label: 'Outil pinceau (peindre des notes à la suite)' }),
+  pr({ id: 'pr.toolSelect', keys: ['e'], label: 'Outil sélection' }),
+  pr({ id: 'pr.toolSlice', keys: ['c'], label: 'Outil couteau (couper une note)' }),
+  pr({ id: 'pr.toolErase', keys: ['d'], label: 'Outil gomme' }),
 
   // --- Clavier MIDI de l'ordinateur (piano roll, bouton « Clavier » allumé) -------
   ...MIDI_KEYBOARD_SHORTCUTS,

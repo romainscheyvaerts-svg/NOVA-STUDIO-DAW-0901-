@@ -38,9 +38,9 @@ export function swingTemplate(division: 8 | 16, pct: number, accent = 0.85): Gro
 
 /** Grooves prêts (Groove Pool) : MPC, trap, et ceux de la boîte à rythmes. */
 export const PRESET_GROOVES: (GrooveTemplate & { hint: string })[] = [
-  { ...swingTemplate(16, 55), id: 'mpc55', name: 'MPC 55 %', hint: 'Swing léger de double-croches façon MPC 60 (55 %) : juste assez pour que les hi-hats respirent.' },
-  { ...swingTemplate(16, 58), id: 'mpc58', name: 'MPC 58 %', hint: 'Swing MPC 58 % : le groove boom bap / lo-fi classique.' },
-  { ...swingTemplate(16, 62), id: 'mpc62', name: 'MPC 62 %', hint: 'Swing MPC 62 % : bien chaloupé, presque ternaire.' },
+  { ...swingTemplate(16, 55), id: 'mpc55', name: 'Swing 55 %', hint: 'Swing léger de double-croches (55 %) : juste assez pour que les hi-hats respirent.' },
+  { ...swingTemplate(16, 58), id: 'mpc58', name: 'Swing 58 %', hint: 'Swing 58 % : le groove boom bap / lo-fi classique.' },
+  { ...swingTemplate(16, 62), id: 'mpc62', name: 'Swing 62 %', hint: 'Swing 62 % : bien chaloupé, presque ternaire.' },
   {
     id: 'trap-bounce', name: 'Trap « bounce »', stepsPerBeat: 4, lengthBeats: 4,
     hint: 'Hi-hats qui rebondissent : 2e et 4e double-croches un peu en retard et plus douces, temps 2 et 4 appuyés (rebond façon Metro Boomin / Southside).',

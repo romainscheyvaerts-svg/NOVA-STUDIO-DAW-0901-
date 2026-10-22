@@ -23,7 +23,7 @@ import { keyLabelFr } from '../utils/scales';
  */
 
 export const CHORD_LANE_H = 30;
-const LANE_TIP = 'Piste d’accords (comme la Chord Track de Logic) : clique dans le couloir pour poser un accord, ou « Détecter » pour lire les accords du beat (Chord ID de Logic, Convert Harmony d’Ableton Live). Le piano roll surligne les notes de l’accord en cours.';
+const LANE_TIP = 'Piste d’accords : clique dans le couloir pour poser un accord, ou « Détecter » pour lire les accords du beat. Le piano roll surligne les notes de l’accord en cours.';
 const notify = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 const NOTE_BUTTONS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -189,7 +189,7 @@ const ChordLane: React.FC<LaneProps> = ({ chords, zoomH, scrollLeft, headerWidth
         <i className="fas fa-guitar text-[10px] text-cyan-300" aria-hidden />
         <span className="text-[11px] font-black text-slate-200 truncate">Accords</span>
         <button type="button" onClick={onDetect} disabled={detecting} data-testid="chord-detect"
-          title="Détecter les accords du beat : NOVA écoute l’instru et remplit la piste d’accords, calée sur les temps (comme Chord ID dans Logic ou Convert Harmony to MIDI dans Ableton Live)."
+          title="Détecter les accords du beat : NOVA écoute l’instru et remplit la piste d’accords, calée sur les temps."
           className="ml-auto h-6 px-2 rounded-md text-[10px] font-bold border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/15 disabled:opacity-60 whitespace-nowrap">
           {detecting ? <><i className="fas fa-circle-notch fa-spin mr-1" />Analyse…</> : <><i className="fas fa-wand-magic-sparkles mr-1" />Détecter</>}
         </button>
@@ -322,7 +322,7 @@ export const ChordLaneToggleButton: React.FC = () => {
   const shown = useChordLaneShown();
   return (
     <button type="button" onClick={() => chordLaneStore.set(!shown)} aria-pressed={shown} data-testid="chord-lane-toggle"
-      title={`${shown ? 'Masquer' : 'Afficher'} la piste d’accords (Chord Track de Logic), sous la règle de l’arrangement`}
+      title={`${shown ? 'Masquer' : 'Afficher'} la piste d’accords, sous la règle de l’arrangement`}
       className={`h-8 px-2 rounded-lg border text-[10px] font-bold whitespace-nowrap ${shown ? 'bg-cyan-500/15 border-cyan-400/40 text-cyan-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
       <i className="fas fa-guitar mr-1" />Accords
     </button>
@@ -337,7 +337,7 @@ export const ChordLaneMenuToggle: React.FC<{ onDone?: () => void }> = ({ onDone 
       <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Affichage</div>
       <button type="button" role="switch" aria-checked={shown} data-testid="menu-chord-lane"
         onClick={() => { chordLaneStore.set(!shown); onDone?.(); }}
-        title="Couloir des accords sous la règle de l’arrangement (comme la Chord Track de Logic)"
+        title="Couloir des accords sous la règle de l’arrangement"
         className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
         <i className="fas fa-guitar w-5 text-center text-cyan-300" />
         <span className="flex-1 text-left">Piste d’accords</span>

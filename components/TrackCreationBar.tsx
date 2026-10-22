@@ -88,7 +88,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
       )}
       {beatmaking && (
         <button type="button" onClick={() => requestSampler({ kind: 'new' })} data-testid="new-sampler-track" {...(docked ? dockItem(3) : {})}
-          title="Nouvelle piste Sampler : ton son (fichier, micro, clip) ou un instrument NOVA (piano, Rhodes, guitare, cordes, cloches, nappe) sur tout le clavier — comme le Sampler de FL, Simpler de Live ou Quick Sampler de Logic"
+          title="Nouvelle piste Sampler : ton son (fichier, micro, clip) ou un instrument NOVA (piano, Rhodes, guitare, cordes, cloches, nappe) sur tout le clavier"
           aria-label="Nouvelle piste Sampler"
           className="shrink-0 h-12 min-w-[48px] px-3 xl:px-4 rounded-full shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-amber-400/40 text-amber-200 hover:text-white">
           <span className="text-base leading-none">🎛️</span><span data-dock-label className={docked ? 'text-xs font-bold' : 'hidden xl:inline text-xs font-bold'}>Sampler</span>

@@ -31,6 +31,8 @@ interface LandingPageProps {
   /** Compte affiché en haut (compte principal, sinon compte Make Music : utils/accountDisplay). */
   account?: User | null;
   onEnterStudio: () => void;
+  /** « Nouveau beat » : projet vierge en mode beat, boîte à rythmes ouverte (tour beatmaking, 22/10/2026). */
+  onEnterBeat?: () => void;
   onEnterWithInstrumental: (instrumental: Instrumental) => void;
   /** Mélodie : projet « instru sur mélodie » (batterie, puis voix si on veut). */
   onEnterWithMelody?: (melody: Instrumental) => void;
@@ -60,6 +62,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   user, 
   account,
   onEnterStudio, 
+  onEnterBeat,
   onEnterWithInstrumental, 
   onEnterWithMelody,
   onEnterWithAudioFile, 
@@ -447,6 +450,17 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-[11px] text-slate-400">Projet vierge{newProjectRate ? ` · ${newProjectRate % 1000 ? (newProjectRate / 1000).toFixed(1).replace('.', ',') : newProjectRate / 1000} kHz` : ''}</p>
               </div>
             </button>
+            {/* Nouveau beat : batterie, 808, synthé dès l'arrivée (mode simple : dans « Plus d'options »). */}
+            {extras && onEnterBeat && (
+              <button type="button" onClick={onEnterBeat} data-testid="landing-new-beat"
+                className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-500/10 to-fuchsia-500/10 border border-orange-400/30 rounded-xl hover:border-orange-400/50 hover:bg-orange-400/15 transition-all group">
+                <div className="w-12 h-12 rounded-xl bg-orange-400/20 flex items-center justify-center group-hover:bg-orange-400/30 transition-all text-xl" aria-hidden="true">🥁</div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-white">Nouveau beat</p>
+                  <p className="text-[11px] text-slate-400">Projet vierge : batterie, 808, synthé, sampler</p>
+                </div>
+              </button>
+            )}
             {/* Mode simple : le reste de « Démarrer » est rangé ici (un clic pour tout revoir). */}
             {simple && (
               <button type="button" onClick={() => setPlusOuvert(o => !o)} aria-expanded={plusOuvert} data-testid="landing-plus"

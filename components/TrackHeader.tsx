@@ -763,7 +763,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 data-nova-arm-midi={track.id}
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
-                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus (comme le bouton d'armement, l'armement d'enregistrement de Live, le Record de FL)"}
+                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus"}
                 aria-label={`Armer l'enregistrement MIDI : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
               >

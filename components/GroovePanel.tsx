@@ -103,7 +103,7 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
         {!isMidi ? (
           <div className="space-y-3 text-[12px] text-slate-300">
             <p>NOVA repère les attaques de cette boucle (place et force de chaque coup) et en fait un groove. Pose-le ensuite sur tes clips MIDI : ils joueront avec le même balancement.</p>
-            <p className="text-slate-500 text-[11px]">Comme « Extract Groove » dans Ableton Live et les grooves d’audio de Logic.</p>
+            
             <button type="button" onClick={extract} data-testid="groove-extract"
               className="w-full min-h-11 rounded-xl bg-amber-400 text-black font-black"><i className="fas fa-wand-magic-sparkles mr-2" />Extraire le groove de cette boucle</button>
             {pool.length > 0 && <p className="text-[11px] text-slate-400">{pool.length} groove{pool.length > 1 ? 's' : ''} dans ta réserve.</p>}
@@ -112,7 +112,7 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
           <div className="space-y-4">
             <section>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title="Swing : place du contretemps dans chaque paire de notes. 50 % = droit, 66 % = triolet (swing de FL Studio, de la MPC et Q-Swing de Logic).">Swing</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title="Swing : place du contretemps dans chaque paire de notes. 50 % = droit, 66 % = triolet.">Swing</span>
                 <div className="flex gap-1">
                   {([8, 16] as const).map(d => (
                     <button key={d} type="button" aria-pressed={division === d} onClick={() => setSwingPct(swing, d)} data-testid={`swing-div-${d}`}
@@ -130,7 +130,7 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
             </section>
 
             <section>
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5" title="Comme le Groove Pool d’Ableton Live : un clic pose le groove sur ce clip.">Grooves prêts</div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5" title="Un clic pose le groove sur ce clip.">Grooves prêts</div>
               <div className="grid grid-cols-2 gap-1.5">
                 {PRESET_GROOVES.map(p => (
                   <button key={p.id} type="button" title={p.hint} data-testid={`groove-${p.id}`} aria-pressed={g?.template.id === p.id}
@@ -147,9 +147,9 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
             </section>
 
             <section className="space-y-2">
-              {slider('Intensité', 'Force du décalage du groove (Timing dans le Groove Pool de Live).', amount, v => write({ amount: v }), 'groove-amount')}
-              {slider('Effet sur la vélocité', 'Le groove change aussi la force des notes (Velocity dans le Groove Pool de Live).', velocity, v => write({ velocity: v }), 'groove-velocity')}
-              {slider('Caler sur la grille', 'Ramène d’abord les notes sur la grille, puis ajoute le groove (Quantize dans le Groove Pool de Live).', quantize, v => write({ quantize: v }), 'groove-quantize')}
+              {slider('Intensité', 'Force du décalage du groove.', amount, v => write({ amount: v }), 'groove-amount')}
+              {slider('Effet sur la vélocité', 'Le groove change aussi la force des notes.', velocity, v => write({ velocity: v }), 'groove-velocity')}
+              {slider('Caler sur la grille', 'Ramène d’abord les notes sur la grille, puis ajoute le groove.', quantize, v => write({ quantize: v }), 'groove-quantize')}
               {g ? <p className="text-[11px] text-cyan-200" role="status" data-testid="groove-measure">{g.template.name} · {measure}</p>
                 : <p className="text-[11px] text-slate-500">Choisis un swing ou un groove : tu l’entends tout de suite à la lecture.</p>}
             </section>
@@ -157,13 +157,13 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
             <div className="flex flex-col gap-2">
               <button type="button" disabled={!g} data-testid="groove-commit"
                 onClick={() => { onUpdateClip(commitGroove(clip)); notify?.('Groove appliqué : les notes sont maintenant à leur nouvelle place (Ctrl+Z pour annuler).'); onClose(); }}
-                title="Fige le groove dans les notes (Commit Groove dans Live)"
+                title="Fige le groove dans les notes"
                 className="w-full min-h-11 rounded-xl bg-amber-400 text-black font-black disabled:opacity-40">Appliquer le groove</button>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" disabled={!g} onClick={() => onUpdateClip(removeGroove(clip, bpm))} data-testid="groove-remove"
                   className="min-h-10 rounded-xl bg-white/5 border border-white/10 text-[12px] font-bold disabled:opacity-40">Retirer le groove</button>
                 <button type="button" onClick={extract} data-testid="groove-extract"
-                  title="Garde le placement de ce clip comme groove, pour le poser sur d’autres clips (Extract Groove dans Live)"
+                  title="Garde le placement de ce clip comme groove, pour le poser sur d’autres clips"
                   className="min-h-10 rounded-xl bg-white/5 border border-white/10 text-[12px] font-bold">Extraire son groove</button>
               </div>
             </div>

@@ -5496,6 +5496,20 @@ function Studio() {
   // Kits NOVA : ouverture du navigateur depuis l'extérieur du panneau (bouton « Kits »).
   const [kitsSignal, setKitsSignal] = useState(0);
   const openKits = useCallback(() => { setDrumsOpen(true); setKitsSignal(n => n + 1); }, []);
+  /**
+   * Tour beatmaking (22/10/2026) : « Faire un beat » sans mélodie du catalogue. Avant, un projet vierge
+   * n'avait AUCUN bouton de beat (Batterie, Kits, 808, Synthé, Sampler n'apparaissaient qu'en partant
+   * d'une mélodie) : il fallait taper « batterie » dans Ctrl+K. Le projet passe en mode beat (ces
+   * boutons dans la barre du bas) et la boîte à rythmes s'ouvre. Pas d'étape d'annulation : c'est un mode.
+   */
+  const startBeatMode = useCallback(() => {
+    if (stateRef.current.projectMode !== 'BEATMAKING') {
+      setSilently(s => ({ ...s, projectMode: 'BEATMAKING' }));
+      stateRef.current = { ...stateRef.current, projectMode: 'BEATMAKING' };
+    }
+    setDrumsOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const DRUM_TRACK_ID = 'track-drums';
 
   /** Fin de la boucle de batterie : fin du beat / de la mélodie, au moins 8 mesures. */
@@ -6741,6 +6755,10 @@ function Studio() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const handleSynthNoteOn = useCallback((trackId: string, pitch: number) => {
+    // Moteur déjà lancé : la touche sonne tout de suite (avant : ~29 ms d'attente de resume() à chaque
+    // note, et un tap très court pouvait relâcher la note AVANT son attaque : note qui reste tenue).
+    const c = audioEngine.ctx;
+    if (c && c.state === 'running') { audioEngine.triggerTrackAttack(trackId, pitch, 0.85); return; }
     void ensureAudioEngine().then(() => audioEngine.triggerTrackAttack(trackId, pitch, 0.85));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -11047,6 +11065,7 @@ function Studio() {
         user={user}
         account={barUser}
         onEnterStudio={handleEnterStudio}
+        onEnterBeat={() => { handleEnterStudio(); startBeatMode(); }}
         onEnterWithInstrumental={handleEnterWithInstrumental}
         onEnterWithMelody={handleEnterWithMelody}
         onEnterWithAudioFile={handleEnterWithAudioFile}
@@ -11293,7 +11312,7 @@ function Studio() {
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)} onOpenQuickMaster={() => setQuickMasterOpen(true)}
-          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')} onOpenVideoTake={() => setVideoTakeOpen(true)}
+          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')} onStartBeat={state.projectMode === 'BEATMAKING' ? undefined : startBeatMode} onOpenVideoTake={() => setVideoTakeOpen(true)}
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
@@ -11975,6 +11994,20 @@ function Studio() {
         onKit={kitId => { void ensureAudioEngine().then(() => handleSetDrumKit(kitId)); }}
         onRemove={() => { handleRemoveDrums(); setDrumsOpen(false); }}
         onAudition={ri => {
+          // Tour beatmaking (22/10/2026) : pad déjà chargé et moteur lancé → il sonne TOUT DE SUITE.
+          // Avant, chaque frappe attendait resume() du contexte et rechargeait le son : ~29 ms de retard
+          // à chaque coup au clavier (mesuré en headless), contre 0,3 ms pour le clavier du synthé.
+          {
+            const ctx = audioEngine.ctx;
+            const row = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.rows[ri];
+            const pk = stateRef.current.projectKey;
+            if (ctx && ctx.state === 'running' && row
+                && loadedPads.current.get(`${DRUM_TRACK_ID}:${ri + 1}`) === padLoadKey(row, typeof pk === 'number' ? pk : 0)
+                && audioEngine.getDrumRackNode(DRUM_TRACK_ID)?.getBuffers().has(ri + 1)) {
+              audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1);
+              return;
+            }
+          }
           // Le son choisi est chargé avant d'être joué (sample de la bibliothèque au premier clic).
           void ensureAudioEngine().then(async () => {
             const row = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.rows[ri];
@@ -12422,7 +12455,7 @@ function Studio() {
                      <>
                      {t.melodicSampler && !t.vstInstrument && (
                        <button type="button" onClick={() => openSamplerPanel(t.id)} data-testid="open-sampler-panel"
-                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé (Sampler de FL, Simpler de Live)"
+                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé"
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-amber-500/15 border-amber-400/50 text-amber-100 hover:bg-amber-500/25 shrink-0">
                          <i className="fas fa-wave-square mr-1" />{t.melodicSampler.sampleName || 'Sampler'}
                        </button>

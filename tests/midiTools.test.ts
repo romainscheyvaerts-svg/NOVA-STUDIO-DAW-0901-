@@ -128,9 +128,9 @@ describe('accord sur chaque note (ChordGenerator branché)', () => {
 });
 
 describe('catalogue', () => {
-  it('chaque outil a un libellé français et une infobulle qui cite un autre DAW', () => {
+  it('chaque outil a un libellé français et une infobulle sans nom de logiciel concurrent', () => {
     expect(MIDI_TOOLS.length).toBeGreaterThanOrEqual(12);
-    MIDI_TOOLS.forEach(t => expect(t.hint).toMatch(/Live|FL|Logic|Pro Tools/));
+    MIDI_TOOLS.forEach(t => { expect(t.hint.length).toBeGreaterThan(10); expect(t.hint).not.toMatch(/(Live|FL|Logic|Ableton|Pro Tools|Cubase|Bitwig|Studio One)/); });
     expect(chordGroups(chord())).toHaveLength(1);
   });
 });

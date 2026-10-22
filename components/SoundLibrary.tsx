@@ -94,7 +94,8 @@ const SoundLibrary: React.FC<SoundLibraryProps> = p => {
 
   const notify = (m: string) => (p.notify || sonsBeatStore.helpers().notify)?.(m);
   const engineCtx = async () => {
-    await (p.ensureEngine || sonsBeatStore.helpers().ensureEngine)?.();
+    // Moteur lancé : on n'attend rien (pré-écoute plus réactive).
+    if (!(audioEngine.ctx && audioEngine.ctx.state === 'running')) await (p.ensureEngine || sonsBeatStore.helpers().ensureEngine)?.();
     if (!audioEngine.ctx) throw new KitSoundError('decode', KIT_ERROR_TEXT.decode);
     if (audioEngine.ctx.state !== 'running') await audioEngine.ctx.resume().catch(() => {});
     return audioEngine.ctx;

@@ -117,7 +117,7 @@ const VstInstrumentPicker: React.FC<{
 
           {onChooseSampler && (
             <div className="space-y-1.5" data-testid="picker-nova-instruments">
-              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400" title="Instruments multi-échantillons libres de droits (domaine public / CC0), joués par le sampler NOVA : comme le Sampler de Live ou de Logic, ou DirectWave dans FL Studio">Instruments NOVA</div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400" title="Instruments multi-échantillons libres de droits (domaine public / CC0), joués par le sampler NOVA">Instruments NOVA</div>
               <div className="grid grid-cols-3 gap-1.5">
                 {INSTRUMENT_PRESETS.map(p => (
                   <button key={p.id} type="button" title={p.hint} data-nova-instrument={p.id}
@@ -129,7 +129,7 @@ const VstInstrumentPicker: React.FC<{
                 ))}
               </div>
               <button type="button" onClick={() => { onChooseSampler(undefined); setOpen(false); }}
-                title="Ton propre son sur tout le clavier : fichier, micro ou clip (Sampler de FL, Simpler de Live, Quick Sampler de Logic)"
+                title="Ton propre son sur tout le clavier : fichier, micro ou clip"
                 className={`w-full p-2 rounded-lg border flex items-center gap-2 text-xs ${ms && !ms.instrument ? 'border-amber-400/60 bg-amber-500/15 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]'}`}>
                 <i className="fas fa-microphone-lines text-amber-300 w-4"></i>
                 <span className="flex-1 text-left font-bold">Sampler (ton son, ton micro)</span>

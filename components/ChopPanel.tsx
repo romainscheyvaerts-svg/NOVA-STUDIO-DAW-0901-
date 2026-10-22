@@ -138,7 +138,7 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
   return (
     <div ref={boxRef} className="rounded-2xl border border-pink-400/30 bg-pink-500/[0.04] p-3 space-y-3 scroll-mt-2" role="region" aria-label="Découper en pads">
       <div className="flex items-center gap-2">
-        <p className="text-[13px] font-black text-white mr-auto" title="Comme Slicex / Fruity Slicer dans FL Studio, ou Simpler en mode Slice dans Ableton">
+        <p className="text-[13px] font-black text-white mr-auto" title="Découpe une boucle en tranches, une par pad">
           ✂️ Découper en pads {src && <span className="font-normal text-slate-400 text-[12px]">· {src.name} · {src.buffer.duration.toFixed(2)} s</span>}
         </p>
         <button type="button" onClick={onClose} aria-label="Fermer la découpe" className="nova-hit w-9 h-9 rounded-lg bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
@@ -164,9 +164,9 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
         <>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-xl overflow-hidden border border-white/10" role="tablist" aria-label="Façon de découper">
-              {tab('transients', 'Attaques', 'Coupe sur les transitoires (chaque coup de batterie, chaque note) — comme « Detect » dans Slicex')}
-              {tab('grid', 'Grille', 'Coupe à intervalles réguliers au tempo de la boucle — comme « Beat » dans Simpler')}
-              {tab('manual', 'À la main', 'Touche la forme d\'onde pour ajouter ou retirer un repère — comme « Manual » dans Simpler')}
+              {tab('transients', 'Attaques', 'Coupe sur les transitoires (chaque coup de batterie, chaque note)')}
+              {tab('grid', 'Grille', 'Coupe à intervalles réguliers au tempo de la boucle')}
+              {tab('manual', 'À la main', 'Touche la forme d’onde pour ajouter ou retirer un repère')}
             </div>
             {mode === 'transients' && (
               <label className="flex items-center gap-2 text-[11px] text-slate-300" title="Sensibilité : plus haut = trouve aussi les coups faibles">
@@ -202,11 +202,11 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
                 onKeyDown={e => e.stopPropagation()} className="w-20 h-9 rounded-lg bg-black/30 border border-white/10 px-2 text-white tabular-nums" />
             </label>
             <label className={`flex items-center gap-1.5 ${tempoDiff ? '' : 'opacity-50'}`}
-              title="Étire la boucle au tempo du projet sans changer sa hauteur, pour que les tranches tombent pile sur la grille (comme « Warp » dans Simpler, ou « Stretch » dans Slicex)">
+              title="Étire la boucle au tempo du projet sans changer sa hauteur, pour que les tranches tombent pile sur la grille">
               <input type="checkbox" checked={keepTempo} disabled={!tempoDiff} onChange={e => setKeepTempo(e.target.checked)} className="w-4 h-4 accent-pink-400" />
               Garder le tempo du projet ({Math.round(bpm)} BPM)
             </label>
-            <label className="flex items-center gap-1.5" title="Une tranche coupe la précédente (lecture mono, comme Simpler en mode Slice)">
+            <label className="flex items-center gap-1.5" title="Une tranche coupe la précédente">
               <input type="checkbox" checked={choke} onChange={e => setChoke(e.target.checked)} className="w-4 h-4 accent-pink-400" />
               Les tranches se coupent
             </label>

@@ -30,7 +30,7 @@ import type { DrumMachine, DrumRow } from './drumKits';
 export type HumInstrument = '808' | 'piano' | 'lead' | 'pad';
 
 export const HUM_INSTRUMENTS: { id: HumInstrument; label: string; emoji: string; hint: string; presetId?: string; range: [number, number]; color: string }[] = [
-  { id: '808', label: '808', emoji: '🔊', hint: 'Ta mélodie devient une ligne de 808 (une ou deux octaves plus bas), comme la 808 Bass du Synth Player de Logic.', range: [31, 43], color: '#d946ef' },
+  { id: '808', label: '808', emoji: '🔊', hint: 'Ta mélodie devient une ligne de 808 (une ou deux octaves plus bas).', range: [31, 43], color: '#d946ef' },
   { id: 'piano', label: 'Piano', emoji: '🎹', hint: 'Piano doux du synthé NOVA, à la hauteur où tu as chanté.', presetId: 'piano-doux', range: [55, 74], color: '#38bdf8' },
   { id: 'lead', label: 'Lead', emoji: '🎵', hint: 'Lead R&B du synthé NOVA : idéal pour une topline ou une réponse à la voix.', presetId: 'lead-rnb-sinus', range: [62, 79], color: '#22d3ee' },
   { id: 'pad', label: 'Nappe', emoji: '🌫️', hint: 'Nappe chaude du synthé NOVA, notes liées.', presetId: 'nappe-chaude', range: [55, 72], color: '#a78bfa' },

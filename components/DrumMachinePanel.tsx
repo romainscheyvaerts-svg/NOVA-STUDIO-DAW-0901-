@@ -51,15 +51,24 @@ const CAT_OF: Record<string, DrumCategory[]> = {
 };
 
 /**
- * Boîte à rythmes Make Music : un tap allume un pas, un deuxième tap le passe
- * en accent léger, un troisième l'éteint. Sur les hi-hats, l'appui long (ou
- * clic droit) fait un « roll » ×2 ×3 ×4.
+ * Boîte à rythmes Make Music : un clic allume un pas, un deuxième l'éteint (comme dans
+ * toutes les boîtes à rythmes) ; Maj + clic passe un pas en accent léger (ou le remet
+ * fort). Glisser sur les pas les peint (allumés ou éteints, comme le premier touché).
+ * Sur les hi-hats, l'appui long (ou clic droit) fait un « roll » ×2 ×3 ×4.
  */
 const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [playStep, setPlayStep] = useState(-1);
   const [soundMenu, setSoundMenu] = useState<number | null>(null);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  /** Tour beatmaking (22/10/2026) : coup de pinceau sur les pas (souris), comme dans les step sequencers. */
+  const strokeRef = useRef<{ on: boolean; painting: boolean; ri: number; si: number; dm: DrumMachine | null } | null>(null);
+  useEffect(() => {
+    const end = () => { strokeRef.current = null; };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => { window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+  }, []);
   // Téléphone : 8 pas par page (1–8 / 9–16) au lieu d'une grille qui défilait
   // sans le dire (7 pas visibles sur 16) ; le pad touché est le pad « choisi ».
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches);
@@ -236,12 +245,47 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     if (!dm) return;
     p.onChange({ ...dm, rows: dm.rows.map((r, i) => (i === ri ? patch({ ...r, steps: [...r.steps], ratchet: [...r.ratchet] }) : r)) });
   };
-  const toggleStep = (ri: number, si: number) => editRow(ri, r => {
+  /** Clic : allumé ↔ éteint. Maj + clic : accent léger ↔ fort (un pas éteint s'allume en léger). */
+  const toggleStep = (ri: number, si: number, accent = false) => editRow(ri, r => {
     const v = r.steps[si];
-    r.steps[si] = v === 0 ? 110 : v >= 100 ? 70 : 0;
+    r.steps[si] = accent ? (v > 0 && v < 100 ? 110 : 70) : v === 0 ? 110 : 0;
     if (r.steps[si] === 0) r.ratchet[si] = 1;
     return r;
   });
+  /** Pinceau : pose l'état du coup (allumé / éteint) sur un pas, sans relire des props pas encore à jour. */
+  const paintStep = (ri: number, si: number) => {
+    const s = strokeRef.current;
+    if (!s?.dm) return;
+    const row = s.dm.rows[ri];
+    if (!row || si >= row.steps.length) return;
+    const v = row.steps[si] || 0;
+    if (s.on ? v > 0 : v === 0) return;
+    const steps = [...row.steps]; const ratchet = [...row.ratchet];
+    steps[si] = s.on ? 110 : 0;
+    if (!s.on) ratchet[si] = 1;
+    s.dm = { ...s.dm, rows: s.dm.rows.map((x, i) => (i === ri ? { ...x, steps, ratchet } : x)) };
+    p.onChange(s.dm);
+  };
+  const stepDown = (e: React.PointerEvent, ri: number, si: number) => {
+    startPress(ri, si);
+    strokeRef.current = e.pointerType === 'mouse' && e.button === 0 && dm ? { on: !(dm.rows[ri]?.steps[si] > 0), painting: false, ri, si, dm } : null;
+  };
+  const stepEnter = (e: React.PointerEvent, ri: number, si: number) => {
+    const s = strokeRef.current;
+    if (!s || !(e.buttons & 1)) return;
+    if (!s.painting) {
+      s.painting = true;
+      if (pressTimer.current) window.clearTimeout(pressTimer.current);
+      paintStep(s.ri, s.si);
+    }
+    paintStep(ri, si);
+  };
+  const stepUp = (e: React.PointerEvent, ri: number, si: number) => {
+    const s = strokeRef.current;
+    strokeRef.current = null;
+    if (s?.painting) return;
+    endPress(ri, si, e.shiftKey);
+  };
   const cycleRoll = (ri: number, si: number) => editRow(ri, r => {
     const n = r.ratchet[si] || 1;
     r.ratchet[si] = n >= 4 ? 1 : n + 1;
@@ -254,9 +298,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
     pressTimer.current = window.setTimeout(() => { longPressed.current = true; cycleRoll(ri, si); }, 450);
   };
-  const endPress = (ri: number, si: number) => {
+  const endPress = (ri: number, si: number, accent = false) => {
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
-    if (!longPressed.current) toggleStep(ri, si);
+    if (!longPressed.current) toggleStep(ri, si, accent);
   };
 
   const len = dm ? 16 * dm.bars : 16;
@@ -298,13 +342,13 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
             </button>
           )}
           <button type="button" onClick={() => setChop(chop ? null : 'new')} aria-expanded={!!chop}
-            title="Découper une boucle en tranches sur des pads (comme Slicex dans FL Studio, ou Simpler en mode Slice dans Ableton)"
+            title="Découper une boucle en tranches sur des pads"
             className={`h-10 px-3 rounded-xl text-[12px] font-black ${chop ? 'bg-pink-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
             <i className={`fas fa-cut ${chop ? '' : 'text-pink-400'}`} aria-hidden /><span className="hidden sm:inline"> Découper</span>
           </button>
           {dm && !narrow && (
             <button type="button" onClick={() => setKeysOn(v => !v)} aria-pressed={keysOn}
-              title={keysOn ? "Clavier de l'ordinateur → pads : activé (rangée du milieu = pads 1 à 10). Clique pour le couper." : "Jouer les pads au clavier de l'ordinateur (comme le « typing keyboard » de FL Studio)"}
+              title={keysOn ? "Clavier de l'ordinateur → pads : activé (rangée du milieu = pads 1 à 10). Clique pour le couper." : "Jouer les pads au clavier de l'ordinateur"}
               className={`h-10 px-3 rounded-xl text-[12px] font-black ${keysOn ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
               <i className="fas fa-keyboard" />
             </button>
@@ -356,7 +400,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
           {!dm ? (
             <div className="space-y-2">
-              <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité de ta mélodie.</p>
+              <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité du projet.</p>
               <button type="button" onClick={() => padFileRef.current?.click()}
                 className="w-full rounded-2xl border-2 border-dashed border-white/15 hover:border-cyan-400/60 px-4 py-4 text-[13px] font-bold text-slate-200">
                 <i className="fas fa-file-import mr-2" />Ou commence avec TES sons : choisis ou glisse ici tes fichiers audio (un pad par son)
@@ -437,7 +481,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                               return (
                                 <button key={si} type="button" disabled={off} data-own-longpress=""
                                   aria-label={`${r.name}, pas ${si + 1}${off ? ' (hors de la longueur de la rangée)' : v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                                  onPointerDown={() => startPress(ri, si)} onPointerUp={() => endPress(ri, si)}
+                                  onPointerDown={e => stepDown(e, ri, si)} onPointerUp={e => stepUp(e, ri, si)} onPointerEnter={e => stepEnter(e, ri, si)}
                                   onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                                   onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
                                   className={`relative flex-1 min-w-0 rounded-[4px] ${narrow ? 'h-10' : 'h-9 [@media(pointer:coarse)]:h-10'} ${ps === si ? 'ring-2 ring-white/70' : ''} ${
@@ -458,8 +502,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                             type="button"
                             data-own-longpress=""
                             aria-label={`${r.name}, pas ${si + 1}${v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                            onPointerDown={() => startPress(ri, si)}
-                            onPointerUp={() => endPress(ri, si)}
+                            onPointerDown={e => stepDown(e, ri, si)}
+                            onPointerUp={e => stepUp(e, ri, si)}
+                            onPointerEnter={e => stepEnter(e, ri, si)}
                             onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                             onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
                             className={`relative rounded-md border transition-colors ${narrow ? 'nova-hit flex-1 min-w-0 h-10' : 'nova-hit-tactile shrink-0 w-8 h-9 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-10'} ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
@@ -514,7 +559,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       onAudition={() => p.onAudition(soundMenu)} sessionClips={p.sessionClips || []}
                       ensureEngine={p.ensureEngine || (async () => {})} onChop={src => setChop(src)} notify={p.notify} />
                     <button type="button" onClick={() => { requestSampler({ kind: 'from-pad', rowIndex: soundMenu }); p.onClose(); }} data-testid="pad-to-sampler"
-                      title="Met le son de ce pad dans un sampler sur une nouvelle piste : il se joue sur tout le clavier (808 mélodique, perc accordée) — comme « Send to Sampler » de FL ou Convert to Simpler de Live"
+                      title="Met le son de ce pad dans un sampler sur une nouvelle piste : il se joue sur tout le clavier (808 mélodique, perc accordée)"
                       className="nova-hit h-10 px-3 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[12px] font-bold hover:bg-amber-500/25">
                       <i className="fas fa-wave-square mr-1.5" />Convertir en sampler
                     </button>
@@ -531,12 +576,12 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       className={`h-10 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b} mesure{b > 1 ? 's' : ''}</button>
                   ))}
                 </div>
-                <label className="flex items-center gap-2" title="Swing : décale les doubles-croches paires, comme le swing global de FL Studio">
+                <label className="flex items-center gap-2" title="Swing : décale les doubles-croches paires">
                   Swing
                   <input type="range" min={0} max={0.6} step={0.05} value={dm.swing} onChange={e => p.onChange({ ...dm, swing: parseFloat(e.target.value) })} />
                   <span className="tabular-nums w-8">{Math.round(dm.swing * 100)}%</span>
                 </label>
-                <label className="flex items-center gap-1.5" title={`Groove : ${GROOVES.find(g => g.id === (dm.groove || 'none'))?.hint} Comme le Groove Pool d'Ableton.`}>
+                <label className="flex items-center gap-1.5" title={`Groove : ${GROOVES.find(g => g.id === (dm.groove || 'none'))?.hint}`}>
                   Groove
                   <select value={dm.groove || 'none'} onChange={e => p.onChange({ ...dm, groove: e.target.value === 'none' ? undefined : e.target.value })}
                     className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
@@ -547,7 +592,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       onChange={e => p.onChange({ ...dm, grooveAmount: parseFloat(e.target.value) })} className="w-20" />
                   )}
                 </label>
-                <label className="flex items-center gap-1.5" title="Roulement (Note Repeat de FL Studio et de la MPC) : tiens un pad (ou sa touche) et il se rejoue en rythme, calé sur le tempo.">
+                <label className="flex items-center gap-1.5" title="Roulement : tiens un pad (ou sa touche) et il se rejoue en rythme, calé sur le tempo.">
                   <i className="fas fa-repeat text-violet-300" aria-hidden />Roulement
                   <select value={repeat} onChange={e => setRepeat(parseInt(e.target.value, 10) as 0 | 4 | 8 | 16 | 32 | 24)} data-testid="note-repeat"
                     className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
@@ -559,14 +604,14 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:text-white disabled:opacity-40"><i className="fas fa-plus mr-1" />Pad</button>
                 {sliceCount > 1 && (
                   <button type="button" onClick={() => p.onChange(reorderSlices(dm, shuffledOrder(sliceCount, Date.now())))}
-                    title="Rejoue les tranches dans un autre ordre (comme « Randomize » dans Slicex). Annuler pour revenir."
+                    title="Rejoue les tranches dans un autre ordre. Annuler pour revenir."
                     className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:bg-white/10">🎲 Remixer</button>
                 )}
                 <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/[0.06] text-slate-300 hover:text-red-300">Retirer la batterie</button>
               </div>
               <p className="text-[11px] text-slate-500">
                 {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
-                Motifs : comme les Patterns de FL Studio — crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
+                Motifs : crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Clic : allumer / éteindre ; glisse sur les pas pour en peindre plusieurs ; Maj + clic : accent léger. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
               </p>
             </>
           )}

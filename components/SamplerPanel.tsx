@@ -150,7 +150,7 @@ const Wave: React.FC<{ buffer: AudioBuffer | null; s: MelodicSamplerSettings; on
   const posOf = (e: React.PointerEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
   return (
     <canvas ref={ref} className="w-full h-20 rounded-lg bg-nv-bg border border-nv-line touch-none cursor-ew-resize" data-testid="sampler-wave"
-      title="Glisse : le trait orange = début de lecture (Sample start de FL), les traits bleus = la boucle (Loop de Simpler)"
+      title="Glisse : le trait orange = début de lecture, les traits bleus = la boucle"
       onPointerDown={e => {
         const p = posOf(e);
         (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -205,7 +205,8 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
   }, [rec]);
   useEffect(() => () => { rec?.take.cancel(); }, [rec]);
 
-  const noteOn = (p: number) => { void ensureEngine().then(() => audioEngine.triggerTrackAttack(track.id, p, 0.85)); };
+  // Moteur lancé : la note sonne tout de suite (sans attendre resume(), ~29 ms par note avant).
+  const noteOn = (p: number) => { const c = audioEngine.ctx; if (c && c.state === 'running') audioEngine.triggerTrackAttack(track.id, p, 0.85); else void ensureEngine().then(() => audioEngine.triggerTrackAttack(track.id, p, 0.85)); };
   const noteOff = (p: number) => { audioEngine.triggerTrackRelease(track.id, p); };
   const noteOffStable = useRef(noteOff); noteOffStable.current = noteOff;
   const stableOff = React.useCallback((p: number) => noteOffStable.current(p), []);
@@ -281,7 +282,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
   const showAll = !narrow || more;
 
   const instruments = (
-    <Section title="Instruments NOVA" hint="Instruments multi-échantillons libres de droits (domaine public / CC0) : zones de notes et de vélocité, comme le Sampler de Live ou de Logic, ou DirectWave dans FL Studio.">
+    <Section title="Instruments NOVA" hint="Instruments multi-échantillons libres de droits (domaine public / CC0) : zones de notes et de vélocité.">
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5" data-testid="sampler-instruments">
         {INSTRUMENT_PRESETS.map(p => (
           <button key={p.id} type="button" onClick={() => void chooseInstrument(p.id)} title={p.hint} aria-pressed={s.instrument === p.id}
@@ -296,7 +297,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
   );
 
   const ownSound = (
-    <Section title="Ton son" hint="Charge un fichier, enregistre-toi au micro ou prends un clip de la session : il se joue sur tout le clavier (Sampler de FL, Simpler de Live, Quick Sampler de Logic).">
+    <Section title="Ton son" hint="Charge un fichier, enregistre-toi au micro ou prends un clip de la session : il se joue sur tout le clavier.">
       <div className="flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
           onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
@@ -305,7 +306,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
         {!rec ? (
           <button type="button" onClick={() => void startRec()} data-testid="sampler-rec"
             className="nova-hit min-h-[40px] px-3 rounded-lg bg-red-500/15 border border-red-400/50 text-[12px] font-bold text-red-500"
-            title="Enregistrer au micro directement dans le sampler (comme enregistrer dans Simpler de Live ou le Quick Sampler de Logic) : chante une note, tape un objet…"><i className="fas fa-microphone mr-1.5" />Micro</button>
+            title="Enregistrer au micro directement dans le sampler : chante une note, tape un objet…"><i className="fas fa-microphone mr-1.5" />Micro</button>
         ) : (
           <button type="button" onClick={stopRec} data-testid="sampler-rec-stop"
             className="nova-hit min-h-[40px] px-3 rounded-lg bg-red-500 text-white text-[12px] font-black animate-pulse" title="Arrêter et charger le son">
@@ -331,28 +332,28 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
             <span className="text-[12px] text-nv-muted">Note racine</span>
             <button type="button" onClick={() => onChange({ rootKey: s.rootKey - 1, rootAuto: false })} aria-label="Racine un demi-ton plus bas" className="nova-hit w-9 h-9 rounded-lg bg-nv-raised border border-nv-line text-nv-ink">−</button>
             <span className="min-w-[64px] text-center text-[14px] font-black text-nv-ink" data-testid="sampler-root"
-              title="Note à laquelle le son joue sans transposition (Root note de Simpler, Root key de FL)">{noteName(s.rootKey)}{s.rootAuto && <span className="ml-1 text-[10px] font-bold text-cyan-500">auto</span>}</span>
+              title="Note à laquelle le son joue sans transposition">{noteName(s.rootKey)}{s.rootAuto && <span className="ml-1 text-[10px] font-bold text-cyan-500">auto</span>}</span>
             <button type="button" onClick={() => onChange({ rootKey: s.rootKey + 1, rootAuto: false })} aria-label="Racine un demi-ton plus haut" className="nova-hit w-9 h-9 rounded-lg bg-nv-raised border border-nv-line text-nv-ink">+</button>
             <button type="button" onClick={redetect} className="nova-hit min-h-[36px] px-3 rounded-lg bg-cyan-500/15 border border-cyan-400/50 text-[12px] font-bold text-cyan-600 dark:text-cyan-200"
-              title="Retrouver la note du son (analyse de hauteur, comme « Detect pitch » dans FL Studio)"><i className="fas fa-wand-magic-sparkles mr-1" />Détecter</button>
-            <label className="flex items-center gap-2 text-[12px] text-nv-muted ml-auto" title="Boucle la partie entre les traits bleus pendant que la note est tenue (Loop de Simpler, Loop de FL)">
+              title="Retrouver la note du son"><i className="fas fa-wand-magic-sparkles mr-1" />Détecter</button>
+            <label className="flex items-center gap-2 text-[12px] text-nv-muted ml-auto" title="Boucle la partie entre les traits bleus pendant que la note est tenue">
               <input type="checkbox" checked={s.loop} onChange={e => onChange({ loop: e.target.checked })} className="w-5 h-5 accent-cyan-500" />Boucle
             </label>
           </div>
           {showAll && (
             <Range label="Accord fin" paramId="fineTune" dflt={0} value={s.fineTune} min={-50} max={50} step={1} fmt={v => `${v > 0 ? '+' : ''}${Math.round(v)} cents`}
-              onChange={v => onChange({ fineTune: v })} title="Accord fin en cents (Fine tune de Simpler / FL). Rempli tout seul par la détection." />
+              onChange={v => onChange({ fineTune: v })} title="Accord fin en cents. Rempli tout seul par la détection." />
           )}
         </>
       )}
-      {s.slices && <p className="text-[12px] text-nv-muted">✂️ {s.slices.length} tranches sur les notes {noteName(s.sliceBase ?? 48)} à {noteName((s.sliceBase ?? 48) + s.slices.length - 1)} (comme Slicex de FL ou « Slice to MIDI » de Live).</p>}
+      {s.slices && <p className="text-[12px] text-nv-muted">✂️ {s.slices.length} tranches sur les notes {noteName(s.sliceBase ?? 48)} à {noteName((s.sliceBase ?? 48) + s.slices.length - 1)}.</p>}
     </Section>
   );
 
   const D = DEFAULT_SAMPLER;
   const envelope = (
     <HwSection title="Enveloppe">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-1 gap-y-2" title="ADSR : comment la note démarre, tient et s'éteint (comme dans Simpler, le Sampler de FL ou Quick Sampler).">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-1 gap-y-2" title="ADSR : comment la note démarre, tient et s'éteint.">
         <Range label="Attaque" paramId="attack" dflt={D.attack} value={Math.max(0.001, s.attack)} min={0.001} max={2} step={0} log fmt={ms} onChange={v => onChange({ attack: v })} title="Attaque : temps pour atteindre le volume (Attack)" testId="sampler-attack" />
         {showAll && <Range label="Déclin" paramId="decay" dflt={D.decay} value={s.decay} min={0.005} max={5} step={0} log fmt={ms} onChange={v => onChange({ decay: v })} title="Déclin : temps pour descendre au maintien (Decay)" />}
         {showAll && <Range label="Maintien" paramId="sustain" dflt={D.sustain} value={s.sustain} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ sustain: v })} title="Maintien : niveau tant que la note est tenue (Sustain)" />}
@@ -363,7 +364,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
 
   const play = (
     <HwSection title="Jeu" className="mt-2">
-      <div className="flex flex-wrap items-start justify-around gap-2" title="Poly : plusieurs notes à la fois. Mono : une seule note, legato et glissé entre les notes (Mono / Glide de FL et Simpler, Portamento de Logic).">
+      <div className="flex flex-wrap items-start justify-around gap-2" title="Poly : plusieurs notes à la fois. Mono : une seule note, legato et glissé entre les notes.">
         <div className="flex gap-1.5 pt-5" role="radiogroup" aria-label="Polyphonie">
           {([[false, 'Poly'], [true, 'Mono']] as const).map(([m, label]) => (
             <PushButton key={label} role="radio" active={s.mono === m} onClick={() => onChange({ mono: m })} text={label} led="#a78bfa" dark
@@ -372,7 +373,7 @@ const SamplerPanel: React.FC<Props> = ({ track, isMobile, onChange, onClose, onB
           ))}
         </div>
         <Range label="Glissé" paramId="glide" dflt={0} value={s.glide} min={0} max={1} step={0.005} fmt={v => (v ? ms(v) : 'off')} onChange={v => onChange({ glide: v })}
-          title="Glissé (portamento) entre deux notes, comme le Glide de FL ou le Portamento de Logic : en mono, les notes liées glissent sans nouvelle attaque (808 qui glisse)." testId="sampler-glide" />
+          title="Glissé (portamento) entre deux notes : en mono, les notes liées glissent sans nouvelle attaque (808 qui glisse)." testId="sampler-glide" />
         {showAll && <Range label="Pitch bend" paramId="bendRange" dflt={D.bendRange} value={s.bendRange} min={0} max={24} step={1} fmt={v => `±${v} dt`} onChange={v => onChange({ bendRange: v })}
           title="Amplitude de la molette de pitch bend (demi-tons). Le pitch bend et la modulation (CC1) du piano roll sont suivis." />}
         {showAll && <Range label="Vélocité" paramId="velSens" dflt={D.velSens} value={s.velSens} min={0} max={1} step={0.01} fmt={pct} onChange={v => onChange({ velSens: v })}
