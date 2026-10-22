@@ -183,6 +183,23 @@ export class TimelineLfo {
     else { this.osc.frequency.cancelScheduledValues(0); this.osc.frequency.value = f; }
   }
 
+  /**
+   * Décalage de phase (en cycles, 0,25 = 90°) par rapport à la position du morceau : deux
+   * oscillateurs de même fréquence gardent cet écart pour toujours (voix d'un chorus « en quadrature »).
+   */
+  public setPhase(cycles: number) {
+    if (!Number.isFinite(cycles) || cycles === this.phaseOffset) return;
+    this.phaseOffset = cycles;
+    if (this.stopped) return;
+    if (this.origin !== null) { this.sync(this.origin); return; }
+    // Pas encore calé sur le morceau : l'oscillateur repart tout de suite avec la bonne phase.
+    const now = this.ctx.currentTime;
+    const old = this.osc;
+    try { old.stop(now); } catch { /* déjà arrêté */ }
+    old.onended = () => { try { old.disconnect(); } catch { /* */ } };
+    this.osc = this.make(now, cycles - Math.floor(cycles));
+  }
+
   public setShape(shape: 'sine' | 'triangle') {
     if (shape === this.shape) return;
     this.shape = shape;
