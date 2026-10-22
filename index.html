@@ -141,17 +141,36 @@
       --btn-height: 3.5rem; /* 56px pour le tactile */
       --track-header-width: 19rem; /* 304px - Plus large pour les doigts */
       --fader-width: 3.5rem; /* Faders plus larges */
-      font-size: 115%; /* Texte plus lisible */
+      /* (Plus de « font-size: 115% » : les textes sans taille fixe grandissaient, la 3e rangée de
+         l'en-tête de la piste REC — retour casque, Prises — débordait sur la piste suivante.) */
     }
     
     /* Cacher le texte des boutons secondaires sur tablette pour clarté */
     body[data-view-mode="TABLET"] .hide-on-tablet-text span { display: none; }
     
-    /* Boutons plus gros sur tablette */
-    body[data-view-mode="TABLET"] button { min-height: 44px; min-width: 44px; }
+    /* (Tablette : plus de « button { min-height: 44px; min-width: 44px } » pour tous les boutons. Il
+       gonflait la diode de saturation des vumètres (10 px) en carré gris de 44 px posé sur les clips,
+       et la 3e rangée de l'en-tête de la piste REC débordait sur la piste suivante. Les boutons gardent
+       leur dessin ; la zone de toucher de 44 px est invisible, voir « Au doigt » plus bas.) */
     
     /* Scrollbars invisibles sur tactile */
     body[data-view-mode="TABLET"] ::-webkit-scrollbar { width: 0px; background: transparent; }
+
+    /* Barre d'onglets du téléphone (components/MobileBottomNav) : sa hauteur en bas (64 px + barre
+       d'accueil de l'iPhone), que les pages et les boutons flottants laissent libre. Téléphone en
+       paysage (moins de 520 px de haut) : les onglets passent en colonne à gauche (--nv-rail-w), le
+       bas de l'écran est rendu aux pistes (avant : transport + onglets = 150 px sur 390). */
+    body { --nv-nav-h: calc(4rem + env(safe-area-inset-bottom)); --nv-rail-w: 0px; }
+    @media (orientation: landscape) and (max-height: 520px) {
+      body[data-mobile-nav] { --nv-nav-h: env(safe-area-inset-bottom); --nv-rail-w: calc(4.5rem + env(safe-area-inset-left)); }
+      body[data-mobile-nav] #root { padding-left: var(--nv-rail-w); }
+    }
+
+    /* Téléphone couché : « Piste voix / Mix auto » en icônes seules, en bas à droite (components/TrackCreationBar). */
+    @media (orientation: landscape) and (max-height: 520px) {
+      body[data-mobile-nav] [data-track-creation-bar] [data-dock-label] { display: none; }
+      body[data-mobile-nav] [data-track-creation-bar] > button { height: 2.75rem; padding-left: 0.75rem; padding-right: 0.75rem; }
+    }
 
     /* --- MODE MOBILE --- */
     body[data-view-mode="MOBILE"] {
@@ -180,6 +199,12 @@
       width: 100%;
       display: flex;
       flex-direction: column;
+      /* iPhone (viewport-fit=cover) : rien sous l'encoche ni sous la barre d'état. La barre
+         d'onglets du bas (fixe) garde sa propre marge pour la barre d'accueil. Ordinateur : 0. */
+      padding-top: env(safe-area-inset-top);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+      box-sizing: border-box;
     }
 
     /* Plancher de lisibilité : les étiquettes de 6-7 px passent à 8 px. */
@@ -268,6 +293,28 @@
         content: ''; position: absolute;
         top: min(0px, calc((100% - 40px) / 2)); bottom: min(0px, calc((100% - 40px) / 2));
         left: min(0px, calc((100% - 40px) / 2)); right: min(0px, calc((100% - 40px) / 2));
+      }
+    }
+    /* Au doigt (téléphone, tablette, PC tactile) : tout bouton se touche sur 44 px de haut, sans changer
+       son dessin (zone invisible). En hauteur seulement : en largeur, la zone empiétait sur le bouton voisin
+       et la barre du haut se croyait trop large (elle repliait « Exporter » dans ☰ sur une tablette de 1024 px). */
+    @media (pointer: coarse) {
+      /* :where() = aucune priorité : un bouton placé par une classe à lui (.delete-fx, sm:absolute…) garde sa place. */
+      :where(button:not(.absolute):not(.fixed):not(.sticky)) { position: relative; }
+      /* Pas la croix « retirer l'effet » (.delete-fx) : posée sur le bord de l'effet, sa zone agrandie avalait le
+         toucher destiné à l'effet lui-même. */
+      /* Deux petits boutons empilés (flèches ↑ ↓) : data-no-hit, sinon la zone de l'un avalait l'autre. */
+      button:not(.nova-hit):not(.nova-hit-tactile):not([data-no-hit]):not(.delete-fx)::after {
+        content: ''; position: absolute;
+        top: min(0px, calc((100% - 44px) / 2)); bottom: min(0px, calc((100% - 44px) / 2));
+        left: 0; right: 0;
+      }
+    }
+    /* Au doigt (téléphone, tablette) : zone invisible de 44 px de haut (recommandation iOS / Android), pas 40 ;
+       en largeur elle reste à 40 px (rangées serrées, mesure de la barre du haut). */
+    @media (pointer: coarse) {
+      .nova-hit::after, .nova-hit-tactile::after {
+        top: min(0px, calc((100% - 44px) / 2)); bottom: min(0px, calc((100% - 44px) / 2));
       }
     }
     /* Rangée de petits boutons : 4 px d'écart, 12 px au doigt pour que chaque

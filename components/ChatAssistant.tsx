@@ -432,7 +432,10 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   };
 
   const containerClass = isMobile 
-    ? "fixed inset-0 z-[50] bg-nv-bg flex flex-col pb-20"
+    // Téléphone : sous l'encoche rien, et la saisie au-dessus des onglets du bas ET de la barre d'accueil
+    // (pb-20 seul : 80 px pour 64 + 34 px d'onglets sur iPhone, la saisie passait sous les onglets).
+    // Sous la barre du transport (64 px) : Lecture / REC restent à portée pendant qu'on lit les conseils de Nova.
+    ? "fixed inset-x-0 bottom-0 top-[calc(4rem+env(safe-area-inset-top))] z-[50] bg-nv-bg flex flex-col pl-[max(env(safe-area-inset-left),var(--nv-rail-w,0px))] pr-[env(safe-area-inset-right)] pb-[calc(var(--nv-nav-h,4rem)+0.5rem)]"
     : "fixed bottom-6 right-6 z-[500] flex flex-col items-end";
 
   const windowClass = isMobile
@@ -496,7 +499,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 6</span>
                   <button type="button" onClick={toggleStep} aria-expanded={!stepCollapsed} data-testid="nova-step-toggle"
-                    className="ml-auto text-[10px] font-bold text-slate-400 hover:text-white">
+                    className="nova-hit-tactile ml-auto text-[11px] font-bold text-slate-400 hover:text-white">
                     {stepCollapsed ? 'Afficher' : 'Réduire'} <i className={`fas ${stepCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-[8px]`}></i>
                   </button>
                 </div>

@@ -252,7 +252,7 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
     return (
       <div className={`relative flex flex-col items-stretch gap-0.5 h-full min-h-0 ${className}`} data-meter={pointId} onContextMenu={onMenu} title={help}>
         {showClip && <button ref={clipRef} type="button" onClick={reset} data-testid={`meter-clip-${pointId}`}
-          className={`h-2.5 shrink-0 rounded-sm bg-white/10 [[data-theme=light]_&]:bg-slate-300/60 ${clipHit ? 'nova-hit-tactile' : ''}`} aria-label="Pas de saturation" />}
+          className={`h-2.5 shrink-0 rounded-sm bg-white/10 [[data-theme=light]_&]:bg-slate-300/60 ${clipHit ? 'nova-hit-tactile' : ''}`} data-no-hit={clipHit ? undefined : ''} aria-label="Pas de saturation" />}
         <canvas ref={canvasRef} className="flex-1 min-h-0 w-full" />
         {grTrackId && grText && <span ref={grRef} className="h-3 shrink-0 text-center text-[8px] font-mono tabular-nums text-amber-400 leading-3" />}
         {showReadout && <button ref={readRef} type="button" onClick={reset} title="Crête vraie la plus haute (dBTP) : clic pour remettre à zéro"

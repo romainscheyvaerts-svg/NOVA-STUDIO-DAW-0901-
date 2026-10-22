@@ -44,9 +44,12 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
   const style = findVocalMixStyle(currentStyleId);
   const newSynth = onNewSynthTrack ?? onNewMidiTrack;
   return (
-    <div data-dock-scroll={docked ? '' : undefined} className={docked
+    <div data-dock-scroll={docked ? '' : undefined} data-track-creation-bar={docked ? undefined : ''} className={docked
       ? 'flex items-center gap-2 max-w-full overflow-x-auto scrollbar-hide' 
-      : 'fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide'}>
+      // Téléphone : juste au-dessus des onglets du bas (64 px + barre d'accueil de l'iPhone). À 80 px fixes,
+      // elle mordait sur les icônes des onglets (« Morceau », « Nova ») dès qu'il y avait une barre d'accueil.
+      // Téléphone couché : en bas à droite, icônes seules (index.html), au-dessus des pistes qui défilent dessous.
+      : 'fixed bottom-[calc(var(--nv-nav-h,4rem)+0.5rem)] left-1/2 -translate-x-1/2 [@media(orientation:landscape)_and_(max-height:520px)]:left-auto [@media(orientation:landscape)_and_(max-height:520px)]:right-[calc(env(safe-area-inset-right)+0.5rem)] [@media(orientation:landscape)_and_(max-height:520px)]:translate-x-0 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide'}>
       <button
         type="button"
         onClick={() => (onAddVoiceTrack ? onAddVoiceTrack() : onCreateTrack(TrackType.AUDIO, 'VOIX'))}

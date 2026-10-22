@@ -105,7 +105,8 @@ const VideoTakeDock: React.FC<Props> = props => {
     // « Et maintenant ? ») ; la caméra est dans le menu ☰ (« Plus d'outils ») et la palette Ctrl+K.
     // Téléphone (< 640 px), même en mode avancé : la pastille recouvrait « Envois » de la piste sélectionnée.
     // La caméra y est dans ☰ (« Filmer la prise ») et la palette.
-    const phone = typeof window !== 'undefined' && window.innerWidth < 640;
+    // Téléphone couché aussi (844 px de large, vue téléphone) : la pastille couvrait les pistes et la console.
+    const phone = typeof window !== 'undefined' && (window.innerWidth < 640 || document.body.getAttribute('data-view-mode') === 'MOBILE');
     if (!voiceArmed || pillHidden || simple || phone) return null;
     return (
       <div className="fixed z-[640] bottom-[140px] right-3 sm:bottom-[120px] sm:right-5 flex items-center gap-1 rounded-full border border-nv-line bg-nv-panel/95 text-nv-ink shadow-xl pl-1 pr-1 backdrop-blur" data-testid="video-take-pill">
