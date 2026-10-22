@@ -152,7 +152,7 @@ def main():
         res["console_strips"] = page.evaluate("() => Array.from(document.querySelectorAll('[data-track-name], [data-strip-name], [data-mixer-track]')).length")
 
         # 4. Projet exporté : comparaison au modèle.
-        page.keyboard.press("Control+s"); page.wait_for_timeout(1000)
+        page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(1000)
         btn = page.get_by_role("button", name=__import__("re").compile("(Export local|cet appareil)", __import__("re").I)).first
         with page.expect_download(timeout=60000) as dl:
             btn.click()

@@ -105,22 +105,41 @@ export interface RecoveredTake { meta: TakeMetaRecord; samples: Float32Array; se
 
 export const KEEP_RECENT = 20;
 export const KEEP_HOURLY_DAYS = 7;
+/** Projet pas touché depuis 30 jours : ses 3 dernières versions restent (jamais aucune). */
+export const KEEP_IDLE = 3;
+export const IDLE_DAYS = 30;
 
 /**
- * Versions à garder : les 20 plus récentes, puis la plus récente de chaque heure
- * (sur 7 jours). Retourne les identifiants à SUPPRIMER.
+ * Versions à garder, PROJET PAR PROJET : les 20 plus récentes du projet, puis la plus
+ * récente de chaque heure (sur 7 jours) ; projet sans modification depuis 30 jours : ses
+ * 3 dernières. Retourne les identifiants à SUPPRIMER.
+ *
+ * Avant, la règle valait pour tout l'appareil : 5 minutes de travail sur un 2e projet
+ * (20 versions à 15 s) effaçaient toutes les versions du 1er qui n'avait jamais été
+ * enregistré à la main — l'ingé qui enchaîne les séances perdait les projets de la veille.
  */
-export function versionsToPrune(list: Pick<VersionMeta, 'id' | 'savedAt'>[], now = Date.now()): number[] {
-  const sorted = [...list].sort((a, b) => b.savedAt - a.savedAt);
-  const keep = new Set<number>(sorted.slice(0, KEEP_RECENT).map(v => v.id));
-  const hours = new Set<number>();
-  for (const v of sorted) {
-    const h = Math.floor(v.savedAt / 3_600_000);
-    if (hours.has(h)) continue;
-    hours.add(h);
-    if (now - v.savedAt <= KEEP_HOURLY_DAYS * 86_400_000) keep.add(v.id);
+export function versionsToPrune(list: (Pick<VersionMeta, 'id' | 'savedAt'> & { projectId?: string })[], now = Date.now()): number[] {
+  const groups = new Map<string, Pick<VersionMeta, 'id' | 'savedAt'>[]>();
+  for (const v of list) {
+    const k = v.projectId ?? '';
+    const g = groups.get(k);
+    if (g) g.push(v); else groups.set(k, [v]);
   }
-  return sorted.filter(v => !keep.has(v.id)).map(v => v.id);
+  const drop: number[] = [];
+  for (const g of groups.values()) {
+    const sorted = [...g].sort((a, b) => b.savedAt - a.savedAt);
+    const idle = sorted.length > 0 && now - sorted[0].savedAt > IDLE_DAYS * 86_400_000;
+    const keep = new Set<number>(sorted.slice(0, idle ? KEEP_IDLE : KEEP_RECENT).map(v => v.id));
+    const hours = new Set<number>();
+    for (const v of sorted) {
+      const h = Math.floor(v.savedAt / 3_600_000);
+      if (hours.has(h)) continue;
+      hours.add(h);
+      if (now - v.savedAt <= KEEP_HOURLY_DAYS * 86_400_000) keep.add(v.id);
+    }
+    for (const v of sorted) if (!keep.has(v.id)) drop.push(v.id);
+  }
+  return drop;
 }
 
 // --------------------------------------------------------------------------- session ouverte / fermée
@@ -242,6 +261,8 @@ const CHUNK_MAX = Number.MAX_SAFE_INTEGER;
 export class RecoveryStore {
   private knownAudio: Set<string> | null = null;
   private saving: Promise<SaveResult | null> | null = null;
+  /** Projet de chaque version (le ménage se fait projet par projet sans relire tous les JSON). */
+  private projectOf = new Map<number, string>();
 
   constructor(private db: RecoveryBackend, private now: () => number = Date.now) {}
 
@@ -288,6 +309,7 @@ export class RecoveryStore {
       ...(input.comment ? { comment: input.comment } : {}),
     };
     await this.db.put(VERSIONS, id, rec, { durable: true });
+    this.projectOf.set(id, input.projectId);
     // Les prises terminées AVANT cette version y sont : leurs morceaux ne servent plus.
     await this.purgeTakes(t => t.endedAt !== null && t.endedAt <= id && t.projectId === input.projectId);
     const pruned = await this.prune();
@@ -306,6 +328,11 @@ export class RecoveryStore {
       out.push(meta);
     }
     return out.sort((a, b) => b.savedAt - a.savedAt);
+  }
+
+  /** Identifiants des versions présentes (clés seules : rapide, aucun JSON relu). */
+  async versionIds(): Promise<number[]> {
+    return ((await this.db.keys(VERSIONS)) as number[]).map(Number);
   }
 
   /** Change le commentaire d'une version nommée (ou en fait une version nommée). */
@@ -357,12 +384,19 @@ export class RecoveryStore {
       known.add(a.id);
     }
     await this.db.put(VERSIONS, record.id, { ...record, audioIds: record.audioIds.filter(id => known.has(id)) }, { durable: true });
+    this.projectOf.set(record.id, record.projectId);
   }
 
   /** Versions en trop supprimées, puis sons que plus rien ne référence. */
   async prune(): Promise<number> {
     const keys = (await this.db.keys(VERSIONS)) as number[];
-    const metas = keys.map(k => ({ id: k, savedAt: k }));
+    // Projet de chaque version : connu (écrite ici) ou relu une fois (autre onglet, démarrage).
+    for (const k of keys) {
+      if (this.projectOf.has(k)) continue;
+      const v = await this.db.get<VersionRecord>(VERSIONS, k);
+      if (v) this.projectOf.set(k, v.projectId);
+    }
+    const metas = keys.map(k => ({ id: k, savedAt: k, projectId: this.projectOf.get(k) }));
     const drop = versionsToPrune(metas, this.now());
     // Dernière version ENREGISTRÉE de chaque projet : cible de « Revenir à la version enregistrée ».
     const all: VersionRecord[] = [];
@@ -374,6 +408,7 @@ export class RecoveryStore {
       const v = await this.db.get<VersionRecord>(VERSIONS, id);
       if (v && (isNamedVersion(v) || saved.has(v.id))) continue;
       await this.db.delete(VERSIONS, id);
+      this.projectOf.delete(id);
       n++;
     }
     if (n) await this.collectAudio();

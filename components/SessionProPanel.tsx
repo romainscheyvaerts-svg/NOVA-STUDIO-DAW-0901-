@@ -322,7 +322,7 @@ const VersionsTab: React.FC<{ state: DAWState; compact?: boolean }> = ({ state }
           </div>
         ))}
         <button type="button" className={`${btn} mt-1`} onClick={() => r21Bus.emit({ kind: 'openVersions' })} data-testid="versions-all"
-          title="Toutes les sauvegardes automatiques de cet appareil (20 dernières + une par heure)">🕘 Tout l'historique (sauvegardes automatiques)</button>
+          title="Toutes les sauvegardes automatiques de cet appareil (20 dernières de chaque projet + une par heure)">🕘 Tout l'historique (sauvegardes automatiques)</button>
       </section>
     </div>
   );

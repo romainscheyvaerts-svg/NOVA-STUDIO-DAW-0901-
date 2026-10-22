@@ -2,6 +2,7 @@ import type { Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { runExport, renderRate, ExportSettings } from './ExportPipeline';
 import { prepareTracksForOffline } from './VstFreeze';
+import { safeFileName } from '../utils/exportNaming';
 
 /**
  * Chantier 11 · Bounce du mix pour « Envoyer la version N » : le MÊME chemin que
@@ -15,7 +16,7 @@ export async function renderMixBounce(tracks: Track[], title: string, onStep: (t
   const settings: ExportSettings = {
     source: 'MASTER', start: 0, end, tail: { mode: 'auto', seconds: 2 },
     format: 'WAV', bits: 16, mp3Kbps: 320, sampleRate: renderRate(), layout: 'stereo', dither: false, normalize: 'off',
-    meta: { title }, naming: { title }, baseName: (title || 'Mix').replace(/[\\/:*?"<>|]+/g, '_'),
+    meta: { title }, naming: { title }, baseName: safeFileName(title, 'Mix'),
   };
   onStep('préparation des pistes…');
   const prep = await prepareTracksForOffline(tracks, msg => onStep(msg));

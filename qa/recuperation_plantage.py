@@ -237,7 +237,7 @@ def scenario_versions(p):
         while time.time() - t0 < 25 and len(page.evaluate(vers)) < 2: page.wait_for_timeout(1000)
         res["versions"] = len(page.evaluate(vers))
         res["tempo_avant_restauration"] = page.evaluate("() => window.DAW_CONTROL.getState().bpm")
-        page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+        page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
         page.get_by_test_id("open-versions").click()
         dlg = page.get_by_test_id("versions-dialog")
         dlg.wait_for(timeout=10000)

@@ -515,7 +515,7 @@ def scenario_c(p):
     shot(page, "C5_piano_roll_accords_surlignes")
     page.keyboard.press("Escape"); page.wait_for_timeout(400)
     # Sauvegarde : les accords sont dans le projet .zip
-    page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+    page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
     try:
         loc = page.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
         with page.expect_download(timeout=90000) as dl:

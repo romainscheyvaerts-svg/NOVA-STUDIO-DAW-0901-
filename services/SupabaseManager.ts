@@ -560,6 +560,21 @@ export class SupabaseManager {
    * Charge le dernier backup automatique pour l'utilisateur connecté.
    * Utilisé au démarrage pour récupérer le travail après un rafraîchissement.
    */
+  /**
+   * Date de la dernière sauvegarde en ligne automatique (moins de 24 h), sans rien télécharger
+   * d'autre : la proposer ne coûte plus le projet entier et tous ses sons à chaque entrée.
+   */
+  public async latestAutoBackupDate(): Promise<number | null> {
+    if (!supabase) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data, error } = await supabase.from('project_backups').select('created_at')
+      .eq('user_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error || !data) return null;
+    const at = new Date(data.created_at).getTime();
+    return Number.isFinite(at) && Date.now() - at <= 24 * 3_600_000 ? at : null;
+  }
+
   public async loadLatestAutoBackup(): Promise<DAWState | null> {
     if (!supabase) return null;
     

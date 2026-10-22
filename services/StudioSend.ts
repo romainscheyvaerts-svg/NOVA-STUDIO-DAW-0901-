@@ -2,6 +2,7 @@ import { catalogSupabase } from './supabase';
 import { ProjectIO } from './ProjectIO';
 import { runExport, renderRate, type ExportSettings } from './ExportPipeline';
 import { prepareTracksForOffline } from './VstFreeze';
+import { safeFileName } from '../utils/exportNaming';
 import type { DAWState } from '../types';
 import { STUDIO_BUCKET } from '../supabase/functions/studio-inbox/rules.ts';
 import { buildStudioNotes, studioNotesText, type BookingInput, type FileKind } from '../utils/studioPackage';
@@ -62,7 +63,7 @@ export async function buildStudioFiles(state: DAWState, o: { stems: boolean; not
       start: 0, end: songEnd(state), tail: { mode: 'auto', seconds: 2 },
       format: 'FLAC', bits: 24, mp3Kbps: 320, sampleRate: renderRate(), layout: 'stereo', dither: false, normalize: 'off',
       meta: { title: base, bpm: state.bpm, timeSignature: state.timeSignature },
-      naming: { title: base, bpm: state.bpm, key: '' }, baseName: base.replace(/[\\/:*?"<>|]+/g, '_'),
+      naming: { title: base, bpm: state.bpm, key: '' }, baseName: safeFileName(base, 'Mix'),
     };
     const prep = await prepareTracksForOffline(state.tracks, msg => onP(8, msg));
     try {

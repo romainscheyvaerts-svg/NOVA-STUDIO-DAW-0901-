@@ -98,7 +98,7 @@ export const VersionsDialog: React.FC<{
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 id="versions-title" className="text-lg font-black text-white">🕘 Versions de la session</h2>
-            <p className="text-[12px] text-slate-400 mt-1">Gardées sur cet appareil : les 20 dernières, puis une par heure (7 jours) ; les versions nommées (v2, v3…) pour toujours. Restaurer ne supprime rien : ta version actuelle reste dans la liste.</p>
+            <p className="text-[12px] text-slate-400 mt-1">Gardées sur cet appareil, pour chaque projet : les 20 dernières, puis une par heure (7 jours) ; les versions nommées (v2, v3…) pour toujours. Restaurer ne supprime rien : ta version actuelle reste dans la liste.</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} aria-label="Fermer" className="w-11 h-11 shrink-0 rounded-xl bg-white/5 text-slate-300">✕</button>
         </div>

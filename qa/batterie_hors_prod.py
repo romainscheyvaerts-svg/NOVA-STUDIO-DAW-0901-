@@ -228,6 +228,11 @@ BATTERIE = [
     # cascade, devant au clic, Échap = celle de devant, Maj+Échap = toutes, punaise), copie d'un insert sur les pistes
     # d'un bus (Ctrl+Z), latence des effets affichée sur la tranche.
     ("auditmix", []),
+    # 22/10/2026 · tour « projets, fichiers, export, livraison » : Ctrl+S sans fenêtre (Ctrl+Maj+S, Ctrl+O, titre), changer
+    # de projet garde les dernières modifications, « Récents » (studio, accueil, téléphone 390), « Récupérer » = le projet
+    # ouvert, .novaproj.zip glissé, sons manquants reliés, .zip sous un autre nom (interface jamais figée), export 4 min
+    # (nom propre, mix qui sature signalé).
+    ("projets_livraison", []),
 ]
 
 

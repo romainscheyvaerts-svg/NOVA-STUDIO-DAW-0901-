@@ -144,7 +144,7 @@ def part_c(b, files):
     S.drop_files(page, [files["back1"]], S.time_x(page, 0.2), S.lane_y(page, "voix-lead"))
     page.wait_for_function("() => window.__novaEdit.getState().tracks.find(t => t.id === 'voix-lead').clips.length === 1", timeout=20000)
     page.wait_for_timeout(500)
-    page.keyboard.press("Control+s")
+    page.keyboard.press("Control+Shift+s")
     page.locator("[data-testid=save-new-version]").wait_for(timeout=6000)
     page.locator("[data-testid=save-new-version-comment]").fill("prise validée")
     page.locator("[data-testid=save-new-version]").click()

@@ -155,6 +155,7 @@ const MOBILE_PAGES = [MobileArrangementPage, MobileTracksPage, MobileMixerPage, 
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
+import { safeFileName } from './utils/exportNaming';
 import { stripSilenceFromClip, StripSilenceResult } from './utils/stripSilence';
 import { findVocalMixStyle, suggestVocalMixStyle, VOCAL_MIX_STYLES } from './utils/vocalPresets';
 import { runVoiceChatAction, lufsOfSource } from './utils/voiceChatActions';
@@ -289,6 +290,9 @@ import DesktopUpdateCard from './components/DesktopUpdateCard';
 import { requestDesktopUpdateCheck, useDesktopBusyProbe } from './utils/appUpdate';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
+import { rememberRecent, type RecentProject } from './utils/recentProjects';
+import { missingClips, relinkedClip } from './utils/missingSounds';
+const MissingSoundsDialog = lazy(() => import('./components/MissingSoundsDialog'));
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
 import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
 import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
@@ -303,7 +307,7 @@ const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
 const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
-const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
+const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.quickSave', 'nova.save', 'nova.open', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake', 'nova.discardTake'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
@@ -945,7 +949,9 @@ function Studio() {
     (async () => {
       const crashed = previousSessionCrashed();
       let device: VersionMeta | null = null;
-      try { device = await recoveryStore().latest(); } catch { /* stockage indisponible */ }
+      // Après un plantage : la dernière version du projet qui était OUVERT (pas la plus récente de
+      // l'appareil : un autre projet enregistré juste avant, en changeant de projet, était proposé).
+      try { device = (crashed?.projectId ? await recoveryStore().latest(crashed.projectId) : null) || await recoveryStore().latest(); } catch { /* stockage indisponible */ }
       // Nova Studio : la sauvegarde est aussi sur le disque. On propose la plus récente des deux
       // (le stockage de l'appli a pu être vidé ; ou la dernière version n'a été écrite qu'ici).
       let latest = device;
@@ -955,7 +961,7 @@ function Studio() {
             if (!live) return;
             await new Promise(r => setTimeout(r, 250));
           }
-          const pick = pickMostRecent(device, await latestOnDisk(diskBackendRef.current));
+          const pick = pickMostRecent(device, await latestOnDisk(diskBackendRef.current, crashed?.projectId));
           if (pick) { latest = pick.meta; latestSourceRef.current = pick.source; }
           if (!device && pick?.source === 'disque') setLandingNotice(EVICTED_DESKTOP_MESSAGE);
         } catch (e) { console.warn('[Disque] Lecture des projets impossible', e); }
@@ -1069,6 +1075,27 @@ function Studio() {
     } finally {
       setRecovering(false);
     }
+  };
+
+  /**
+   * « Ouvrir un projet › Récents » : la dernière version de ce projet (appareil, ou disque de
+   * Nova Studio remis d'abord sur l'appareil). Le projet ouvert garde d'abord ses modifications.
+   */
+  const openRecentProject = async (p: RecentProject) => {
+    setIsLoadMenuOpen(false);
+    if (!showLanding) { try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ } }
+    let note = '';
+    try {
+      if (p.source === 'disque' && !(await recoveryStore().getRecord(p.versionId))) {
+        const r = await importFromDisk(diskBackendRef.current, recoveryStore(), p.projectId, p.versionId);
+        note = r.missing.length ? ` — ${r.missing.length} son(s) introuvable(s) sur le disque` : ' — relu sur le disque';
+      }
+    } catch (e) {
+      console.warn('[Récents] lecture sur le disque', e);
+      setAiNotification(`❌ « ${p.name} » n'a pas pu être relu sur le disque. Ses versions sont dans Documents › Nova Studio › Projets.`);
+      return;
+    }
+    await recoverSession(p.versionId, { takes: false, label: `« ${p.name} » rouvert (enregistré ${savedAgo(p.savedAt)})${note}` });
   };
 
   const handleResumeSession = async () => {
@@ -1192,7 +1219,9 @@ function Studio() {
 
   // Charger le dernier backup automatique au démarrage si connecté
   const [showBackupRecovery, setShowBackupRecovery] = useState(false);
-  const [pendingBackup, setPendingBackup] = useState<any>(null);
+  /** Date de la sauvegarde en ligne proposée ; le projet n'est téléchargé que si on la restaure. */
+  const [pendingBackup, setPendingBackup] = useState<number | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
   
   useEffect(() => {
     if (showLanding) return; // Pas encore entré dans le studio
@@ -1200,10 +1229,13 @@ function Studio() {
     
     const checkForBackup = async () => {
       try {
-        const backup = await supabaseManager.loadLatestAutoBackup();
-        if (backup) {
-          console.log("[AutoBackup] Backup récent trouvé, proposer restauration...");
-          setPendingBackup(backup);
+        // Studio entré avec un projet (fichier, version, beat, modèle) : on ne propose jamais de le
+        // remplacer. Avant, la fenêtre arrivait 1 s après CHAQUE ouverture, et le projet entier
+        // (tous ses sons) était téléchargé rien que pour la proposer.
+        if (hasWorthKeeping(stateRef.current)) return;
+        const at = await supabaseManager.latestAutoBackupDate();
+        if (at && !hasWorthKeeping(stateRef.current)) {
+          setPendingBackup(at);
           setShowBackupRecovery(true);
         }
       } catch (e) {
@@ -1329,6 +1361,14 @@ function Studio() {
   // Fermer l'onglet ou recharger detruisait toute la session sans le moindre
   // avertissement, alors que le projet ne vit qu'en memoire.
   const hasUnsavedChangesRef = useRef(false);
+  /**
+   * Avant d'ouvrir un autre projet : les dernières modifications du projet ouvert sont
+   * écrites dans ses versions (défini avec la sauvegarde automatique, plus bas). Avant,
+   * jusqu'à 15 s de travail (une version toutes les 15 s) partaient avec le changement.
+   */
+  const flushCurrentProjectRef = useRef<() => Promise<void>>(async () => {});
+  /** Ctrl+S : enregistré tout de suite, sans fenêtre (défini avec la sauvegarde automatique). */
+  const quickSaveRef = useRef<() => Promise<void>>(async () => {});
   const unsavedMountRef = useRef(false);
 
 
@@ -1773,7 +1813,7 @@ function Studio() {
     if (route !== 'legacy') { if (route === 'makemusic') setTakeHomeOpen(true); setAiNotification(route === 'makemusic' ? MM_CLOUD_NOTICE : LOGIN_CLOUD_NOTICE); return; }
     setSaveState({ isSaving: true, progress: 10, message: 'Création de la copie...' });
     try {
-      const copyName = `${n} (Copy)`;
+      const copyName = `${n} (copie)`;
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       // Une copie est un autre projet : elle n'hérite pas du déblocage de l'export payant.
       const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName, exportKey: newExportKey() };
@@ -1801,16 +1841,20 @@ function Studio() {
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       setSaveState(s => ({ ...s, progress: 40, message: 'Création du fichier ZIP...' }));
       
-      // Utiliser ProjectIO pour créer un ZIP avec les audios
-      const zipBlob = await ProjectIO.saveProject(baked, ownedIds);
+      // « Sauvegarder sous » un autre nom : le projet prend ce nom (dans le .zip ET dans le studio).
+      // Avant, le fichier s'appelait « Client v3 » mais se rouvrait sous l'ancien nom.
+      const name = n.trim() || baked.name || 'Session';
+      const zipBlob = await ProjectIO.saveProject({ ...baked, name }, ownedIds);
+      if (name !== stateRef.current.name) setState(prev => ({ ...prev, name }));
       
       setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
       
       // Télécharger le fichier (feuille de partage sur téléphone)
-      await saveBlob(zipBlob, `${n || 'NovaProject'}.novaproj.zip`);
+      const file = `${safeFileName(name, 'Projet NOVA')}.novaproj.zip`;
+      await saveBlob(zipBlob, file);
       
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
-      setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
+      setAiNotification(`✅ « ${file} » créé, audio compris. Pour le rouvrir : Ctrl+O › « Fichier sur l'ordinateur », ou glisse-le sur le studio.`);
       hasUnsavedChangesRef.current = false;
       void autosaveNowRef.current?.('manual', true);
     } catch (e: any) {
@@ -1829,6 +1873,8 @@ function Studio() {
     const rate = projectRateOf(loadedState);
     rateLoadingRef.current++;
     return (async () => {
+      // Le projet encore ouvert garde ses dernières modifications (versions de la session).
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try { await audioEngine.setSampleRate(rate); } catch (e) { console.warn('[Ouverture] fréquence du projet', e); }
       // Un raté du câblage audio (métronome, sorties) ne doit jamais empêcher le projet de
       // s'ouvrir : avant, l'erreur interrompait la suite et l'ancien projet restait affiché.
@@ -1886,6 +1932,8 @@ function Studio() {
 
   const handleLoadLocalFile = useCallback(async (file: File) => {
       setExternalImportNotice("Chargement du projet...");
+      // Avant de décoder l'autre projet (fréquence du moteur, sons) : le projet ouvert est écrit.
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try {
           const loadedProject = await ProjectIO.loadProject(file);
           if (loadedProject) {
@@ -1903,8 +1951,48 @@ function Studio() {
       }
   }, [handleLoadProject]);
 
+  // Sons manquants (clips muets : son introuvable à l'ouverture) : bandeau + « Relier » (utils/missingSounds).
+  const missingSounds = React.useMemo(() => missingClips(state.tracks), [state.tracks]);
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [missingHidden, setMissingHidden] = useState<string | null>(null);
+  const relinkMissing = useCallback(async (items: { clipId: string; file: File }[]) => {
+    await ensureAudioEngine();
+    const ctx = audioEngine.ctx!;
+    const decodedFiles = new Map<File, { id: string; secs: number } | null>();
+    const done = new Map<string, { id: string; secs: number }>();
+    const failed: string[] = [];
+    for (const it of items) {
+      let r = decodedFiles.get(it.file);
+      if (r === undefined) {
+        try {
+          // Décodé à la fréquence du moteur = celle du projet.
+          const b = await ctx.decodeAudioData(await it.file.arrayBuffer());
+          r = { id: audioBufferRegistry.register(b, `relie-${it.clipId}-${Date.now().toString(36)}`), secs: b.duration };
+        } catch { r = null; failed.push(it.file.name); }
+        decodedFiles.set(it.file, r);
+      }
+      if (r) done.set(it.clipId, r);
+    }
+    if (done.size) {
+      // Une seule étape d'annulation : Ctrl+Z remet les clips muets.
+      setState(prev => ({ ...prev, tracks: prev.tracks.map(t => (t.clips.some(c => done.has(c.id))
+        ? { ...t, clips: t.clips.map(c => { const d = done.get(c.id); return d ? relinkedClip(c, d.id, d.secs) : c; }) }
+        : t)) }));
+    }
+    return { ok: done.size, failed: [...new Set(failed)] };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setState]);
+
+  // Projet .zip glissé sur l'arrangement (components/ArrangementView) : ouvert comme par « Ouvrir ».
+  useEffect(() => {
+    const on = (e: Event) => { const f = (e as CustomEvent).detail; if (f instanceof File) void handleLoadLocalFile(f); };
+    window.addEventListener('nova:open-project-file', on);
+    return () => window.removeEventListener('nova:open-project-file', on);
+  }, [handleLoadLocalFile]);
+
   const handleLoadCloud = useCallback(async (id: string) => {
       setExternalImportNotice("Chargement depuis le cloud...");
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try {
           const loadedProject = await supabaseManager.loadUserSession(id);
           if (loadedProject) {
@@ -3388,7 +3476,7 @@ function Studio() {
         const newTrack: Track = {
             ...track,
             id: `track-${Date.now()}`,
-            name: `${track.name} (Copy)`,
+            name: `${track.name} (copie)`,
             clips: track.clips.map(clip => ({
                 ...clip,
                 id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -4623,7 +4711,11 @@ function Studio() {
         const btn = topOverlayClose();
         if (btn) { e.preventDefault(); btn.click(); return; }
       }
-      if (isTypingTarget(e.target)) return;
+      if (isTypingTarget(e.target)) {
+        // Ctrl+S en tapant un nom, un commentaire… : le projet est enregistré (jamais « Enregistrer la page » du navigateur).
+        if (isShortcut(e, 'nova.quickSave')) { e.preventDefault(); if (!e.repeat) void quickSaveRef.current(); }
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
       if (!mod && blockingOverlay()) return;
@@ -4671,7 +4763,10 @@ function Studio() {
           return;
         }
         case 'nova.redo': e.preventDefault(); redo(); return;
+        // Ctrl+S : enregistré tout de suite, sans fenêtre ; Ctrl+Maj+S : « Sauvegarder… » ; Ctrl+O : ouvrir.
+        case 'nova.quickSave': e.preventDefault(); if (e.repeat) return; void quickSaveRef.current(); return;
         case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
+        case 'nova.open': e.preventDefault(); setIsLoadMenuOpen(true); return;
         // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
         case 'nova.export': e.preventDefault(); void handleExportMix(); return;
         // Importer un son (Pro Tools : Ctrl+Maj+I, Import Audio) : le sélecteur de fichiers du PC.
@@ -5588,7 +5683,11 @@ function Studio() {
   // en arrière-plan ; seuls les sons nouveaux sont écrits (une fois, sans encodage) ;
   // 20 dernières versions + une par heure. La prise en cours, elle, est écrite au fil de
   // l'eau par le journal de prise (moteur audio).
-  const autosaveNotified = useRef(false);
+  // « Sauvegarde automatique active » : dit une fois sur cet appareil (avant : à chaque ouverture de page,
+  // l'ingé qui enchaîne les projets le relisait à chaque séance).
+  const autosaveNotified = useRef((() => { try { return localStorage.getItem('nova_autosave_told') === '1'; } catch { return false; } })());
+  /** Ctrl+S : la phrase complète la 1re fois de la séance, ensuite « 💾 Enregistré à 14:32 ». */
+  const quickSaveToldRef = useRef(false);
   const quotaNotifiedAtRef = useRef(0);
   const storageCheckedAtRef = useRef(0);
   const storageLevelRef = useRef<string>('unknown');
@@ -5629,6 +5728,8 @@ function Studio() {
   const autosaveBusy = useRef(false);
   const autosavePending = useRef<VersionReason | null>(null);
   const lastSavedSigRef = useRef<unknown[] | null>(null);
+  /** Raison de la dernière version écrite (Ctrl+S répété sans changement : rien de réécrit). */
+  const lastSavedReasonRef = useRef<VersionReason | null>(null);
   const purgeTakesAfterSaveRef = useRef(false);
   // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
   const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
@@ -5663,12 +5764,16 @@ function Studio() {
         },
       });
       lastSavedSigRef.current = sig;
+      if (r) lastSavedReasonRef.current = named ? 'named' : reason;
+      // « Ouvrir un projet › Récents » : ce projet passe en tête (index léger, sans relire les versions).
+      if (r) rememberRecent({ projectId: st.id, name: st.name || 'Session', savedAt: r.versionId, versionId: r.versionId, tracks: snap.tracks, takes: snap.takes, beatTitle: snap.beatTitle });
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (r) afterVersionSaved(r.versionId);
       // Une annonce récente (« Prise 1 enregistrée », « 3 prises en boucle ») reste lisible : celle-ci attend.
       if (!autosaveNotified.current && Date.now() - lastNoticeAtRef.current > 8000) {
         autosaveNotified.current = true;
+        try { localStorage.setItem('nova_autosave_told', '1'); } catch { /* stockage indisponible : redit à la prochaine page */ }
         // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
         if (!named) setAiNotification("💾 Sauvegarde automatique active sur cet appareil, prises comprises : rien n'est perdu, même après un plantage.");
       }
@@ -5689,6 +5794,35 @@ function Studio() {
   }, [user]);
   const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
+  quickSaveRef.current = async () => {
+    const st = stateRef.current;
+    if (showLanding) return;
+    if (!projectTabLock().canSave()) {
+      setAiNotification('🔒 Ce projet est ouvert dans un autre onglet : c’est lui qui l’enregistre. Touche « Travailler ici » pour enregistrer depuis cet onglet.');
+      return;
+    }
+    if (!hasWorthKeeping(st)) { setAiNotification('Rien à enregistrer pour l’instant : le projet est encore vide.'); return; }
+    for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
+    // Ctrl+S répété sans rien changer : la version « enregistrée » existe déjà, rien n'est réécrit.
+    const already = lastSavedReasonRef.current === 'manual' && sameSignature(projectSignature(st), lastSavedSigRef.current);
+    const ok = already || await autosaveNow('manual', true);
+    if (!ok) {
+      setAiNotification('❌ Enregistrement impossible sur cet appareil (stockage plein ou indisponible). Fais un fichier .zip : Ctrl+Maj+S › « Fichier sur cet appareil ».');
+      return;
+    }
+    hasUnsavedChangesRef.current = false;
+    const at = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+    const where = isNovaDesktop() && diskMirrorRef.current.available() ? 'dans Documents › Nova Studio › Projets' : 'sur cet appareil';
+    setAiNotification(quickSaveToldRef.current ? `💾 Enregistré à ${at}.`
+      : `💾 « ${st.name || 'Session'} » enregistré à ${at}, ${where}. Autre nom, .zip ou en ligne : Ctrl+Maj+S.`);
+    quickSaveToldRef.current = true;
+  };
+  flushCurrentProjectRef.current = async () => {
+    // Sauvegarde en cours : on l'attend (sinon l'écriture demandée partirait sur le NOUVEAU projet).
+    for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
+    // Rien de changé depuis la dernière version, projet vide : rien n'est écrit (autosaveNow le sait).
+    await autosaveNow('close');
+  };
   // Avant de quitter la page (paiement Stripe, portail d'abonnement) : sauvegarde d'abord
   // (utils/saveBeforeLeave). Rien à garder : on peut partir ; échec : la page reste.
   useEffect(() => {
@@ -5732,6 +5866,12 @@ function Studio() {
     }
     wasRecordingRef.current = state.isRecording;
   }, [state.isRecording, showLanding]);
+  // Titre de l'onglet / de la fenêtre = projet ouvert (barre des tâches, Alt+Tab, comme un logiciel de studio ;
+  // Nova Studio le reprend pour sa fenêtre). Avant : le même titre pour toutes les séances.
+  const baseTitleRef = useRef<string>(typeof document !== 'undefined' ? document.title : 'Nova Studio');
+  useEffect(() => {
+    document.title = showLanding ? baseTitleRef.current : `${(state.name || 'Session').trim() || 'Session'} — Nova Studio`;
+  }, [showLanding, state.name]);
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === 'hidden' && !showLanding) void autosaveNow('close'); };
     document.addEventListener('visibilitychange', onHide);
@@ -10914,6 +11054,7 @@ function Studio() {
         savedSession={savedSessionMeta}
         onResumeSession={handleResumeSession}
         onOpenVersions={savedSessionMeta ? () => setVersionsOpen(true) : undefined}
+        onOpenRecent={p => { void openRecentProject(p); }}
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
         onOpenTemplates={() => setTemplatesModal('browse')}
@@ -10971,8 +11112,10 @@ function Studio() {
       a('Transport', 'nova.play', 'Lecture / pause', () => handleTogglePlay(), { keys: k('nova.play'), pt: 'Barre d’espace' }),
       // Fichier et livraison
       a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer', primary: true }),
-      a('Fichier', 'nova.save', 'Sauvegarder le projet', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer save' }),
-      a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { pt: 'Open Session (Ctrl+O)', keywords: 'charger load open' }),
+      a('Fichier', 'nova.quickSave', 'Enregistrer maintenant (sans fenêtre)', () => { void quickSaveRef.current(); }, { keys: k('nova.quickSave'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer sauvegarder save vite' }),
+      a('Fichier', 'nova.save', 'Sauvegarder le projet… (autre nom, .zip, en ligne, nouvelle version)', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save As (Ctrl+Maj+S)', keywords: 'enregistrer sous save as copie zip' }),
+      a('Fichier', 'pal.relink', 'Relier les sons manquants (clips muets à l’ouverture)', () => setMissingOpen(true), { pt: 'Relink', keywords: 'relier relink manquant hors ligne offline fichier son introuvable' }),
+      a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { keys: k('nova.open'), pt: 'Open Session (Ctrl+O)', keywords: 'charger load open récents' }),
       a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),
       a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
@@ -11165,6 +11308,22 @@ function Studio() {
       </div>
       {/* Appli Windows : nouvelle version prête / disponible (dans la page, sous le transport). */}
       <DesktopUpdateCard />
+
+      {/* Sons manquants à l'ouverture : on le dit, et on propose de les relier (fermable). */}
+      {!showLanding && missingSounds.length > 0 && missingHidden !== state.id && !missingOpen && (
+        <div className="fixed left-4 right-4 sm:right-auto bottom-28 z-[660] flex pointer-events-none" data-testid="missing-banner">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-amber-400/50 bg-nv-surface pl-4 pr-1 py-1 shadow-2xl">
+            <p className="text-[12px] font-bold text-amber-100">🔗 {missingSounds.length} son{missingSounds.length > 1 ? 's' : ''} manquant{missingSounds.length > 1 ? 's' : ''} (clip{missingSounds.length > 1 ? 's' : ''} muet{missingSounds.length > 1 ? 's' : ''})</p>
+            <button type="button" onClick={() => setMissingOpen(true)} data-testid="missing-open" className="min-h-9 px-3 rounded-xl bg-amber-400 text-black text-[12px] font-black">Relier…</button>
+            <button type="button" onClick={() => setMissingHidden(state.id)} aria-label="Masquer" title="Masquer (palette : « Relier les sons manquants »)" className="w-9 h-9 rounded-xl text-slate-400 hover:text-white">✕</button>
+          </div>
+        </div>
+      )}
+      {missingOpen && (
+        <Suspense fallback={null}>
+          <MissingSoundsDialog missing={missingSounds} onRelink={relinkMissing} onClose={() => setMissingOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Même projet ouvert dans un autre onglet : cet onglet ne sauvegarde pas (utils/tabLock). */}
       {tabLock.role === 'guest' && tabLock.projectId === state.id && (
@@ -11731,7 +11890,8 @@ function Studio() {
           try { await autosaveNowRef.current?.('restore', true); } catch { /* */ }
           void recoverSession(v.id, { takes: false, label: `Version du ${new Date(v.savedAt).toLocaleString('fr-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} restaurée (ta version d'avant reste dans l'historique)` });
         }} />
-      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} makeMusicEmail={makeMusicAccount?.email ?? null} onOpenOnlineSession={openOnlineSession} />}
+      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} makeMusicEmail={makeMusicAccount?.email ?? null} onOpenOnlineSession={openOnlineSession}
+        onOpenRecent={p => { void openRecentProject(p); }} currentProjectId={state.id} />}
       {templatesModal && (
         <Suspense fallback={null}>
           <SessionTemplatesModal
@@ -12382,28 +12542,36 @@ function Studio() {
                   <i className="fas fa-clock-rotate-left text-amber-400 text-xl"></i>
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-white">Backup trouvé !</h3>
-                  <p className="text-xs text-slate-500">Votre travail précédent a été récupéré</p>
+                  <h3 className="text-lg font-black text-white">Sauvegarde en ligne trouvée</h3>
+                  <p className="text-xs text-slate-500">{formatAgo(pendingBackup)}</p>
                 </div>
               </div>
               <p className="text-sm text-slate-400">
-                Nous avons trouvé une sauvegarde automatique de votre session précédente. 
-                Voulez-vous restaurer ce projet ?
+                Ton compte garde une sauvegarde automatique de ta séance précédente. La rouvrir ?
               </p>
             </div>
             
             <div className="p-4 bg-black/20 space-y-3">
               <button
-                onClick={() => {
-                  handleLoadProject(pendingBackup);
-                  setShowBackupRecovery(false);
-                  setPendingBackup(null);
-                  setAiNotification("✅ Backup restauré avec succès !");
+                disabled={backupBusy}
+                onClick={async () => {
+                  setBackupBusy(true);
+                  try {
+                    const backup = await supabaseManager.loadLatestAutoBackup();
+                    if (!backup) throw new Error('introuvable');
+                    if (await handleLoadProject(backup)) setAiNotification('✅ Séance rouverte depuis la sauvegarde en ligne.');
+                  } catch (e) {
+                    setAiNotification(`❌ La sauvegarde en ligne n'a pas pu être rouverte : ${messageClair(e, 'vérifie ta connexion, puis réessaie.')}`);
+                  } finally {
+                    setBackupBusy(false);
+                    setShowBackupRecovery(false);
+                    setPendingBackup(null);
+                  }
                 }}
                 className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2"
               >
                 <i className="fas fa-check"></i>
-                Restaurer le backup
+                {backupBusy ? 'Téléchargement…' : 'Rouvrir la séance'}
               </button>
               
               <button
@@ -12414,7 +12582,7 @@ function Studio() {
                 className="w-full py-3 px-4 bg-white/5 border border-white/10 text-slate-400 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
               >
                 <i className="fas fa-times"></i>
-                Ignorer et commencer un nouveau projet
+                Non, projet vide
               </button>
             </div>
           </div>

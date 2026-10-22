@@ -131,7 +131,7 @@ def clip_menu(p):
 
 CASES = [
     ("Menu ☰", click("button[aria-label='Ouvrir le menu']"), None),
-    ("Sauvegarder (Ctrl+S)", key("Control+s"), None),
+    ("Sauvegarder… (Ctrl+Maj+S)", key("Control+Shift+s"), None),
     ("Exporter (Ctrl+Maj+E)", key("Control+Shift+E"), None),
     ("Aide des raccourcis (?)", key("Shift+Slash"), None),
     ("Éditeur de raccourcis (Ctrl+Alt+K)", key("Control+Alt+k"), None),

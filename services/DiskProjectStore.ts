@@ -114,11 +114,14 @@ export class DiskMirror {
   }
 }
 
-/** Plus récente version gardée sur le disque (tous projets confondus). */
-export async function latestOnDisk(backend: DiskBackend): Promise<DiskProjectInfo | null> {
+/**
+ * Plus récente version gardée sur le disque (tous projets confondus) ; avec `projectId`
+ * (projet ouvert au moment d'un plantage), celle de CE projet s'il est sur le disque.
+ */
+export async function latestOnDisk(backend: DiskBackend, projectId?: string | null): Promise<DiskProjectInfo | null> {
   if (!backend.available()) return null;
-  const list = await backend.listProjects();
-  return list.sort((a, b) => b.latest.savedAt - a.latest.savedAt)[0] || null;
+  const list = (await backend.listProjects()).sort((a, b) => b.latest.savedAt - a.latest.savedAt);
+  return (projectId ? list.find(p => p.projectId === projectId) : undefined) || list[0] || null;
 }
 
 export type RecoverySource = 'appareil' | 'disque';

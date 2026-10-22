@@ -15,6 +15,25 @@ import { projectRateOf } from '../utils/projectRate';
 import { packPlaylists, unpackPlaylists } from '../utils/trackPlaylists';
 import { isUserIrKey } from '../utils/userIr';
 
+/**
+ * WAV d'un son pour le .zip, encodé dans sa propre tâche : avant, les 60 sons d'une grosse
+ * séance étaient encodés d'un bloc (interface figée 1,3 s). JSZip attend la promesse.
+ */
+const wavLater = (b: AudioBuffer): Promise<Blob> => new Promise(r => setTimeout(() => r(wavOf(b)), 0));
+
+/** Au plus `n` tâches à la fois (décodage des sons à l'ouverture). */
+function limitConcurrency(n: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return <T>(fn: () => Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    const go = () => {
+      active++;
+      fn().then(resolve, reject).finally(() => { active--; queue.shift()?.(); });
+    };
+    if (active < n) go(); else queue.push(go);
+  });
+}
+
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
 export const REPAIR_REPORT = '__repairReport';
 
@@ -83,7 +102,7 @@ export class ProjectIO {
                     if (!written.has(filename)) {
                         written.add(filename);
                         // Conversion AudioBuffer -> WAV Blob
-                        const wavBlob = wavOf(buffer);
+                        const wavBlob = wavLater(buffer);
                         if (audioFolder) {
                             audioFolder.file(filename, wavBlob);
                         }
@@ -104,7 +123,7 @@ export class ProjectIO {
                     const filename = `${srcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
                     }
                     sClip.pitchEdit.sourceRef = `audio/${filename}`;
                 }
@@ -118,7 +137,7 @@ export class ProjectIO {
                     const filename = `${araSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
                     }
                     sClip.araEdit.sourceRef = `audio/${filename}`;
                 }
@@ -132,7 +151,7 @@ export class ProjectIO {
                     const filename = `${grSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
                     }
                     sClip.gainRender.sourceRef = `audio/${filename}`;
                 }
@@ -146,7 +165,7 @@ export class ProjectIO {
                     const filename = `${asSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
                     }
                     sClip.audioSuite.sourceRef = `audio/${filename}`;
                 }
@@ -160,7 +179,7 @@ export class ProjectIO {
                     const filename = `${elSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
                     }
                     sClip.elastic.sourceRef = `audio/${filename}`;
                 }
@@ -170,7 +189,7 @@ export class ProjectIO {
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
         for (const f of padSampleFiles(track, k => audioBufferRegistry.get(k))) {
-            if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavOf(f.buffer)); }
+            if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavLater(f.buffer)); }
             sTrack.drumMachine.samples[f.id].audioRef = `audio/${f.filename}`;
         }
 
@@ -180,7 +199,7 @@ export class ProjectIO {
         // Son des kits NOVA : seulement la référence (rechargé depuis la bibliothèque à la réouverture).
         if (msId && msBuf && sTrack.melodicSampler && !track.melodicSampler?.kitRef) {
             const filename = `${samplerBufferKey(msId)}.wav`;
-            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(msBuf)); }
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(msBuf)); }
             sTrack.melodicSampler.audioRef = `audio/${filename}`;
         }
 
@@ -192,7 +211,7 @@ export class ProjectIO {
             const buf = audioBufferRegistry.get(key);
             if (!buf) return;
             const filename = `${key.replace(/[^a-zA-Z0-9_-]/g, '-')}.wav`;
-            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
             const sp = sTrack.plugins?.[pIndex];
             if (sp && sp.params) sp.params.irAudioRef = `audio/${filename}`;
         });
@@ -202,7 +221,7 @@ export class ProjectIO {
         const frozenBuffer = track.frozenClip?.bufferId ? audioBufferRegistry.get(track.frozenClip.bufferId) : undefined;
         if (track.frozenClip && frozenBuffer && shouldPersistFrozen(track)) {
             const filename = `frozen-${track.id}.wav`;
-            if (audioFolder) audioFolder.file(filename, wavOf(frozenBuffer));
+            if (audioFolder) audioFolder.file(filename, wavLater(frozenBuffer));
             sTrack.frozenClip.audioRef = `audio/${filename}`;
             delete sTrack.frozenClip.buffer;
             delete sTrack.frozenClip.bufferId;
@@ -228,7 +247,7 @@ export class ProjectIO {
             const buf = sf.clip.bufferId ? audioBufferRegistry.get(sf.clip.bufferId) : undefined;
             if (!bus || !buf || !bus.frozenClip || bus.frozenClip.id !== sf.busRenderId || !shouldPersistFrozen(bus)) return;
             const filename = `send-${track.id}-${sf.busId}.wav`;
-            if (audioFolder) audioFolder.file(filename, wavOf(buf));
+            if (audioFolder) audioFolder.file(filename, wavLater(buf));
             const sSf = sTrack.sendFreezes[i];
             sSf.clip.audioRef = `audio/${filename}`;
             delete sSf.clip.buffer;
@@ -246,7 +265,7 @@ export class ProjectIO {
                 const buf = bc.bufferId ? audioBufferRegistry.get(bc.bufferId) : undefined;
                 if (buf && !isUnlicensedStoreBeat) {
                     const filename = `${bc.bufferId}.wav`;
-                    if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+                    if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
                     bc.audioRef = `audio/${filename}`;
                 }
                 delete bc.bufferId;
@@ -268,7 +287,7 @@ export class ProjectIO {
             if (c.bufferId && !buf) return; // son déjà libéré : rien à garder
             if (buf) {
                 const filename = `${c.bufferId}.wav`;
-                if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+                if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
                 sc.audioRef = `audio/${filename}`;
                 delete sc.bufferId;
             }
@@ -300,7 +319,13 @@ export class ProjectIO {
     try {
         zip = await JSZip.loadAsync(file);
     } catch (e) {
-        throw new Error("Archive illisible : ce fichier n'est pas un projet NOVA ou il est trop abîmé pour être ouvert.");
+        // project.json seul (sorti du .zip, envoyé par message) : le sélecteur le proposait, il ne
+        // s'ouvrait jamais. Il s'ouvre maintenant, ses clips muets (« Sons manquants › Relier »).
+        let text = '';
+        try { text = typeof (file as Blob).text === 'function' ? await (file as Blob).text() : ''; } catch { /* illisible */ }
+        if (!/^\s*\{/.test(text)) throw new Error("Archive illisible : ce fichier n'est pas un projet NOVA ou il est trop abîmé pour être ouvert.");
+        zip = new JSZip();
+        zip.file('project.json', text);
     }
     const files = Object.keys(zip.files).filter(f => !zip.files[f].dir);
     const audioFiles = files.filter(f => /\.(wav|mp3|ogg|oga|flac|m4a|aac|webm)$/i.test(f));
@@ -350,6 +375,20 @@ export class ProjectIO {
     // 2. Reconstruction des AudioBuffers via Registry (un décodage par fichier)
     const decoded = new Map<string, string>();
     const failed = new Set<string>();
+    // Sons des clips décodés 4 par 4 en parallèle (le décodage tourne hors du fil de l'interface) :
+    // avant, un par un, la grosse séance attendait chaque son à la suite.
+    const ctx = audioEngine.ctx!;
+    const run = limitConcurrency(4);
+    const early = new Map<string, Promise<AudioBuffer>>();
+    for (const track of loadedState.tracks) for (const clip of (track.clips || [])) {
+        const ref = clip?.audioRef;
+        if (typeof ref !== 'string' || early.has(ref)) continue;
+        const f = zip.file(ref);
+        if (!f) continue;
+        const p = run(async () => ctx.decodeAudioData(await f.async("arraybuffer")));
+        p.catch(() => { /* lu (et signalé) plus bas */ });
+        early.set(ref, p);
+    }
     for (const track of loadedState.tracks) {
         for (const clip of track.clips) {
             if (clip.audioRef) {
@@ -360,9 +399,8 @@ export class ProjectIO {
                     delete clip.buffer;
                 } else if (audioFile && !failed.has(clip.audioRef)) {
                     try {
-                        const arrayBuffer = await audioFile.async("arraybuffer");
-                        // Décodage WebAudio
-                        const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+                        // Décodage WebAudio (lancé plus haut, 4 à la fois)
+                        const audioBuffer = await (early.get(clip.audioRef) ?? audioFile.async("arraybuffer").then(ab => ctx.decodeAudioData(ab)));
 
                         // Enregistrer dans le registry et stocker l'ID
                         const bufferId = reg(audioBuffer, clip.id);

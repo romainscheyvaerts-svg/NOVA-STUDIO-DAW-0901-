@@ -91,7 +91,11 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.feedback', keys: ['ctrl+shift+b'], label: 'Signaler un bug / proposer une idée', category: 'Fenêtres' }),
   nova({ id: 'nova.undo', keys: ['ctrl+z'], label: 'Annuler', pt: 'Ctrl+Z', category: 'Édition' }),
   nova({ id: 'nova.redo', keys: ['ctrl+y', 'ctrl+shift+z'], label: 'Rétablir', pt: 'Ctrl+Maj+Z', category: 'Édition' }),
-  nova({ id: 'nova.save', keys: ['ctrl+s'], label: 'Sauvegarder', pt: 'Ctrl+S', category: 'Fenêtres' }),
+  // Ctrl+S enregistre tout de suite, sans fenêtre (comme dans tous les logiciels de studio) ;
+  // la fenêtre « Sauvegarder » (autre nom, .zip, en ligne, nouvelle version) passe à Ctrl+Maj+S.
+  nova({ id: 'nova.quickSave', keys: ['ctrl+s'], label: 'Enregistrer (tout de suite, sans fenêtre)', pt: 'Ctrl+S (Save)', category: 'Fenêtres' }),
+  nova({ id: 'nova.save', keys: ['ctrl+shift+s'], label: 'Sauvegarder… (autre nom, fichier .zip, en ligne, nouvelle version)', pt: 'Ctrl+Maj+S (Save As)', category: 'Fenêtres' }),
+  nova({ id: 'nova.open', keys: ['ctrl+o'], label: 'Ouvrir un projet (récents, fichier .zip, en ligne)', pt: 'Ctrl+O (Open Session)', category: 'Fenêtres' }),
   nova({ id: 'nova.importAudio', keys: ['ctrl+shift+i'], label: 'Importer un son du PC (beat, prise, back) : sur une piste vide du modèle ou une nouvelle piste', pt: 'Ctrl+Maj+I (Import Audio)', category: 'Fenêtres' }),
   nova({ id: 'nova.importSession', keys: ['alt+shift+i'], label: 'Importer depuis une session (pistes, effets, envois et automation d’un autre projet)', pt: 'Alt+Maj+I (Import Session Data)', category: 'Fenêtres' }),
   nova({ id: 'nova.export', keys: ['ctrl+shift+e'], label: 'Exporter (mix, stems, voix seules)', pt: 'Bounce to Disk : Ctrl+Alt+B', category: 'Fenêtres' }),

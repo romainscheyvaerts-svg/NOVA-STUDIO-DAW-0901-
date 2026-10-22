@@ -814,6 +814,14 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           return;
       }
 
+      // Projet NOVA (.novaproj.zip) glissé sur le studio : il s'ouvre (comme une session glissée sur
+      // un logiciel de studio). Avant : « 1 fichier ignoré (pas de l'audio) ».
+      const projectDropped = Array.from(e.dataTransfer.files || []).filter(f => /\.novaproj(\s*\(\d+\))?\.zip$/i.test(f.name));  // « Mon son.novaproj (1).zip » : 2e téléchargement
+      if (projectDropped.length) {
+          window.dispatchEvent(new CustomEvent('nova:open-project-file', { detail: projectDropped[0] }));
+          return;
+      }
+
       // Dossier(s) glissé(s) depuis l'Explorateur (stems, prises…) : leurs sons et leurs .mid, dans l'ordre
       // des noms, une piste par son comme pour plusieurs fichiers (utils/droppedFiles). Entrées relevées
       // PENDANT l'événement, parcourues ensuite.
@@ -832,7 +840,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       if (audioUrl && onAudioDrop) {
           const tid = targetTrackId || fallbackTrackId();
           if (!tid) { console.warn('[ArrangementView Drop] Aucune piste cible trouvée!'); return; }
-          const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
+          const audioName = e.dataTransfer.getData('audio-name') || 'Son importé';
           onAudioDrop(tid, audioUrl, audioName, dropTime);
           return;
       }
@@ -2012,6 +2020,28 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     if (fadeInW > 1) drawFadeShape(ctx, x, fadeInW, y, h, clip.fadeInCurve, 'in', cv.ink(0.75));
     if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', cv.ink(0.75));
     ctx.restore();
+
+    // Son manquant (introuvable à l'ouverture) : hachures ambre + « Son manquant », comme un clip
+    // hors ligne des logiciels de studio. Avant : un clip vide, sans rien qui le dise.
+    if (clip.isOffline && !clip.bufferId && !clip.notes && !clip.isUnlicensed) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, w, h);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.10)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let k = -h; k < w; k += 10) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); }
+        ctx.stroke();
+        if (w > 100 && h > 34) {
+            ctx.font = '700 11px Inter';
+            ctx.fillStyle = 'rgba(253, 230, 138, 0.95)';
+            ctx.fillText('🔗 Son manquant', x + 9, y + h / 2 + 8, w - 18);
+        }
+        ctx.restore();
+    }
 
     // Poignees de fondu : bien visibles au survol et sur le clip selectionne (G7)
     if (isSelected || isHovered || w > 60) {

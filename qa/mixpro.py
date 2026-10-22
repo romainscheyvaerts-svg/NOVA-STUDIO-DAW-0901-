@@ -95,7 +95,7 @@ def shot_window(pg, win, name):
 
 
 def save_project(pg):
-    pg.keyboard.press("Control+s"); pg.wait_for_timeout(900)
+    pg.keyboard.press("Control+Shift+s"); pg.wait_for_timeout(900)
     loc = pg.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
     with pg.expect_download(timeout=30000) as dl:
         loc.click()

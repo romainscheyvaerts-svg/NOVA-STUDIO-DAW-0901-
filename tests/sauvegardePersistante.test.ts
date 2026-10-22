@@ -192,6 +192,20 @@ describe('copie sur le disque (services/DiskProjectStore)', () => {
     expect(Array.from(back!.audio.get('voix')!.channels[0])).toEqual(Array.from(new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])));
   });
 
+  it('après un plantage : la version sur le disque du projet qui était OUVERT, pas celle du dernier projet enregistré', async () => {
+    const backend = {
+      available: () => true,
+      listProjects: async () => [
+        { projectId: 'autre', name: 'Autre', folder: '', versions: 1, latest: { id: 20, savedAt: 20 } },
+        { projectId: 'ouvert', name: 'Ouvert', folder: '', versions: 1, latest: { id: 10, savedAt: 10 } },
+      ],
+    } as any;
+    expect((await latestOnDisk(backend))?.projectId).toBe('autre');
+    expect((await latestOnDisk(backend, 'ouvert'))?.projectId).toBe('ouvert');
+    // Projet ouvert absent du disque (jamais copié) : la plus récente, comme avant.
+    expect((await latestOnDisk(backend, 'inconnu'))?.projectId).toBe('autre');
+  });
+
   it('« Récupérer » : la plus récente des deux ; égalité → l’appareil (rien à relire)', () => {
     const dev = { id: 5, savedAt: 5, projectId: 'p1' } as any;
     const disk = { projectId: 'p1', name: 'S', folder: '', versions: 1, latest: { id: 9, savedAt: 9 } } as any;

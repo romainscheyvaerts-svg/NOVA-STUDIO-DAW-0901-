@@ -199,7 +199,7 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                   <button type="button" onClick={onOpenVersions} data-testid="open-versions"
                     className="col-span-2 p-4 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/10 text-left transition-all">
                     <span className="block text-[12px] font-black text-white">🕘 Versions de la session</span>
-                    <span className="block text-[11px] text-slate-400 mt-1">Sauvegardées toutes seules sur cet appareil (20 dernières + une par heure) : reviens à une version d'avant en un clic.</span>
+                    <span className="block text-[11px] text-slate-400 mt-1">Sauvegardées toutes seules sur cet appareil (20 dernières de chaque projet + une par heure) : reviens à une version d'avant en un clic.</span>
                   </button>
                 )}
             </div>

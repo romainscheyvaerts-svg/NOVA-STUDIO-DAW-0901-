@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { memoryBackend, RecoveryStore, versionsToPrune, KEEP_RECENT, AUDIO, VERSIONS, TAKES, TAKE_CHUNKS, markSessionOpen, markSessionClosed, previousSessionCrashed } from '../utils/recoveryStore';
+import { memoryBackend, RecoveryStore, versionsToPrune, KEEP_RECENT, KEEP_IDLE, IDLE_DAYS, AUDIO, VERSIONS, TAKES, TAKE_CHUNKS, markSessionOpen, markSessionClosed, previousSessionCrashed } from '../utils/recoveryStore';
 import { addRecoveredTakes, snapshotOf, stateFromVersion } from '../utils/recoverySnapshot';
 import { makeClip, makeState, makeTrack } from './helpers/fixtures';
 import { TrackType } from '../types';
@@ -34,6 +34,51 @@ describe('Historique des versions : 20 dernières + une par heure', () => {
     const now = 1000 * HOUR;
     const list = Array.from({ length: 40 }, (_, i) => ({ id: now - 8 * 24 * HOUR - i * HOUR, savedAt: now - 8 * 24 * HOUR - i * HOUR }));
     expect(versionsToPrune(list, now)).toHaveLength(20);
+  });
+});
+
+describe('Historique des versions : projet par projet (plusieurs séances par jour)', () => {
+  it("2 h sur un 2e projet n'effacent pas le 1er (jamais enregistré à la main)", () => {
+    const now = 200 * HOUR + 50 * 60_000;
+    const list: { id: number; savedAt: number; projectId: string }[] = [];
+    // Séance A : 10 minutes (une version toutes les 15 s), puis séance B : 2 h, dans la même heure que A au début.
+    let t = 198 * HOUR + 30 * 60_000;
+    for (let i = 0; i < 40; i++, t += 15_000) list.push({ id: t, savedAt: t, projectId: 'A' });
+    for (let i = 0; i < 480; i++, t += 15_000) list.push({ id: t, savedAt: t, projectId: 'B' });
+    const drop = new Set(versionsToPrune(list, now));
+    const keptA = list.filter(v => v.projectId === 'A' && !drop.has(v.id));
+    expect(keptA.length).toBeGreaterThanOrEqual(KEEP_RECENT);
+    // La toute dernière version de A est là.
+    expect(keptA.some(v => v.id === Math.max(...list.filter(x => x.projectId === 'A').map(x => x.id)))).toBe(true);
+    // B garde ses 20 dernières + une par heure, comme avant.
+    expect(list.filter(v => v.projectId === 'B' && !drop.has(v.id)).length).toBeLessThanOrEqual(KEEP_RECENT + 3);
+  });
+
+  it('projet pas touché depuis 30 jours : ses 3 dernières versions restent (jamais aucune)', () => {
+    const now = 2000 * HOUR;
+    const old = now - (IDLE_DAYS + 5) * 24 * HOUR;
+    const list = Array.from({ length: 25 }, (_, i) => ({ id: old - i * 15_000, savedAt: old - i * 15_000, projectId: 'vieux' }));
+    const drop = new Set(versionsToPrune(list, now));
+    const kept = list.filter(v => !drop.has(v.id));
+    expect(kept).toHaveLength(KEEP_IDLE);
+    expect(kept.map(v => v.id)).toContain(old);
+  });
+
+  it('magasin : 40 versions du projet B ne font pas disparaître le projet A ni ses sons', async () => {
+    const db = memoryBackend();
+    const clock = clockAt(300 * HOUR);
+    const store = new RecoveryStore(db, clock);
+    const voixA = makeTrack({ id: 'voixA', clips: [makeClip({ id: 'ca', bufferId: 'sonA' })] });
+    for (let i = 0; i < 3; i++) { clock.add(15_000); await store.saveVersion(snapInput(makeState([voixA], { id: 'A', name: 'Séance A' }))); }
+    for (let i = 0; i < 40; i++) {
+      clock.add(15_000);
+      await store.saveVersion(snapInput(makeState([makeTrack({ id: 'voixB', clips: [makeClip({ id: `cb${i}`, bufferId: `sonB${i}` })] })], { id: 'B', name: 'Séance B' })));
+    }
+    expect(await store.listVersions('A')).toHaveLength(3);
+    expect(await store.listVersions('B')).toHaveLength(KEEP_RECENT);
+    expect((await db.keys(AUDIO)).map(String)).toContain('sonA');
+    const v = await store.loadVersion((await store.latest('A'))!.id);
+    expect(v!.missing).toEqual([]);
   });
 });
 

@@ -317,7 +317,7 @@ def record(page, seconds, start=0.0, label=None):
 
 def save_zip(page, label):
     """Enregistrement local du projet (Ctrl+S → cet appareil) et lecture du .zip : clips + audio des prises."""
-    page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+    page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
     loc = page.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
     with page.expect_download(timeout=90000) as dl:
         loc.click()

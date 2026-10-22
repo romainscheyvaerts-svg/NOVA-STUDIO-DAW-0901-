@@ -50,7 +50,7 @@ MASTER_SPECTRUM = """async () => {
 
 def clips_of(page, label):
     """Sauvegarde locale du projet et lecture de project.json (positions exactes des clips)."""
-    page.keyboard.press("Control+s"); page.wait_for_timeout(800)
+    page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(800)
     loc = page.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
     with page.expect_download(timeout=60000) as dl:
         loc.click()

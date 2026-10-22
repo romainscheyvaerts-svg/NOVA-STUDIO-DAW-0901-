@@ -20,6 +20,26 @@ export function safePart(s: string, max = 40): string {
   return t.slice(0, max).replace(/[-.]+$/g, '');
 }
 
+/**
+ * Nom de fichier choisi par l'utilisateur (mix, projet .zip) : gardé tel quel (accents, espaces),
+ * seuls les caractères interdits par Windows / macOS deviennent des tirets. Avant :
+ * « Titre: test / mix » → « Titre_ test _ mix.wav ». Maintenant : « Titre - test - mix.wav ».
+ * Pas de point ni d'espace final (refusés par Windows), pas de nom réservé (CON, NUL…).
+ */
+export function safeFileName(name: string, fallback = 'Projet'): string {
+  let t = String(name || '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s*[\\/:*?"<>|]+\s*/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.-]+|[\s.-]+$/g, '')
+    .slice(0, 120)
+    .replace(/[\s.-]+$/g, '');
+  if (!t) t = fallback;
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(t)) t = `${t}_`;
+  return t;
+}
+
 /** Tonalité courte pour un nom de fichier : « Cm », « Fdm » (Fa# mineur) ; '' si inconnue. */
 export function keyForFile(root?: number, scale?: string): string {
   const k = keyToId3(root, scale);

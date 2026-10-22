@@ -18,7 +18,7 @@ import { runExport, outputBits, outputRate, type ExportSettings, type ExportForm
 import { exportQueue } from '../services/ExportQueue';
 import { reportLine } from './ExportQueueToast';
 import { keyToId3, type ChannelLayout } from '../utils/audioFormats';
-import { keyForFile } from '../utils/exportNaming';
+import { keyForFile, safeFileName } from '../utils/exportNaming';
 import { nomTonaliteCourt } from '../utils/musicKey';
 import { PLATFORM_TARGETS } from '../utils/masterAssistant';
 import { JARGON } from '../utils/jargon';
@@ -347,14 +347,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         cover: cover ? { mime: cover.mime, data: cover.data } : undefined,
       },
       naming: { title: metaTitle || projectState.name || 'Morceau', bpm, key: metaKey === keyLabel ? keyForFile(projectState.projectKey, projectState.projectScale) : '' },
-      baseName: (filename || 'Master').replace(/[\\/:*?"<>|]+/g, '_'),
+      baseName: safeFileName(filename, 'Master'),
     };
   };
 
   const jobLabel = (s: ExportSettings) => {
     const what = s.source === 'MASTER' ? 'Mix' : s.source === 'STEMS' ? 'Stems' : 'Mes pistes';
     const fmt = s.format === 'MP3' ? `MP3 ${s.mp3Kbps}` : `${s.format} ${outputBits(s) === 32 ? '32f' : outputBits(s)}`;
-    return `${what} · ${fmt} · ${outputRate(s) / 1000} kHz — ${s.meta.title || 'Morceau'}`;
+    return `${what} · ${fmt} · ${String(outputRate(s) / 1000).replace('.', ',')} kHz — ${s.meta.title || 'Morceau'}`;
   };
 
   // --- EXPORT (par la file : un ou plusieurs exports à la suite) ---
@@ -883,7 +883,7 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
                         <div className="bg-nv-well/40 p-3 rounded-lg space-y-2 text-[11px]">
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Taille estimée</span><span className="font-mono">~{estimateMb().toFixed(1).replace('.', ',')} Mo{source !== 'MASTER' ? ' / piste' : ''}</span></div>
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Durée</span><span className="font-mono">{Math.floor(getDuration() / 60)} min {String(Math.round(getDuration() % 60)).padStart(2, '0')} s{tailMode === 'auto' ? ' env.' : ''}</span></div>
-                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Fichier</span><span className="font-mono text-right">{format === 'MP3' ? `MP3 ${mp3Bitrate}` : `${format} ${effBits === 32 ? '32f' : effBits}`} · {effRate / 1000} kHz</span></div>
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Fichier</span><span className="font-mono text-right">{format === 'MP3' ? `MP3 ${mp3Bitrate}` : `${format} ${effBits === 32 ? '32f' : effBits}`} · {String(effRate / 1000).replace('.', ',')} kHz</span></div>
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Canaux</span><span className="font-mono">{layout === 'stereo' ? 'Stéréo' : layout === 'dual-mono' ? '2 × mono' : 'Mono'}</span></div>
                         </div>
                     </div>
