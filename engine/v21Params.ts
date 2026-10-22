@@ -45,15 +45,15 @@ export const HARMONY_INTERVALS: { deg: number; label: string; short: string }[] 
 ];
 
 export const HARMONIZER_SPECS: V21ParamSpec[] = [
-  { id: 'voices', label: 'Nombre de voix', min: 1, max: 4, step: 1, unit: '', hint: "Nombre de voix d'harmonie ajoutées à la voix (1 à 4), comme les voix du Vocal Transformer / harmonies de Logic ou du Pitcher de FL Studio." },
+  { id: 'voices', label: 'Nombre de voix', min: 1, max: 4, step: 1, unit: '', hint: "Nombre de voix d'harmonie ajoutées à la voix (1 à 4), comme un harmoniseur de studio." },
   ...[1, 2, 3, 4].flatMap(i => [
     { id: `v${i}Deg`, label: `Voix ${i} : intervalle`, min: -7, max: 7, step: 1, unit: 'degrés', hint: `Intervalle de la voix ${i} dans la gamme du projet : +2 = tierce au-dessus, +4 = quinte, +7 = octave ; négatif = en dessous.` },
     { id: `v${i}Level`, label: `Voix ${i} : niveau`, min: -30, max: 6, step: 0.5, unit: 'dB', hint: `Volume de la voix ${i} (dB). Une harmonie se place souvent 4 à 8 dB sous la voix principale.` },
     { id: `v${i}Pan`, label: `Voix ${i} : panoramique`, min: -1, max: 1, step: 0.05, unit: 'pan', hint: `Place de la voix ${i} dans la stéréo : écarte les harmonies à gauche et à droite pour laisser la voix principale au centre.` },
   ]),
   { id: 'dry', label: 'Voix principale', min: -60, max: 6, step: 0.5, unit: 'dB', hint: "Niveau de la voix d'origine (−60 dB = coupée : on n'entend que les harmonies, pratique sur une piste d'harmonies séparée)." },
-  { id: 'humanize', label: 'Humanisation', min: 0, max: 1, step: 0.01, unit: '%', hint: "Rend les voix plus naturelles : léger retard, légère différence de justesse et petite dérive, comme de vrais choristes (Humanize du Pitcher / doublage de Melodyne)." },
-  { id: 'formant', label: 'Formant des voix', min: -12, max: 12, step: 0.5, unit: 'demi-tons', hint: 'Timbre des voix d\'harmonie : négatif = plus grosses / plus graves de timbre, positif = plus fines. Ne change pas les notes (Formant du Vocal Transformer).' },
+  { id: 'humanize', label: 'Humanisation', min: 0, max: 1, step: 0.01, unit: '%', hint: "Rend les voix plus naturelles : léger retard, légère différence de justesse et petite dérive, comme de vrais choristes." },
+  { id: 'formant', label: 'Formant des voix', min: -12, max: 12, step: 0.5, unit: 'demi-tons', hint: 'Timbre des voix d\'harmonie : négatif = plus grosses / plus graves de timbre, positif = plus fines. Ne change pas les notes.' },
   { id: 'preserve', label: 'Formants préservés', min: 0, max: 1, step: 1, unit: '', hint: "Activé : les voix gardent le timbre naturel de la voix. Désactivé : les voix aiguës sonnent « chipmunk » et les graves « monstre »." },
   { id: 'rootKey', label: 'Tonique', min: 0, max: 11, step: 1, unit: '', hint: 'Tonalité utilisée pour les harmonies (celle du projet par défaut).' },
 ];
@@ -82,8 +82,8 @@ export const HARMONIZER_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const VOICESHIFT_SPECS: V21ParamSpec[] = [
-  { id: 'pitch', label: 'Hauteur', min: -24, max: 24, step: 0.1, unit: 'demi-tons', hint: 'Transpose la voix sans changer son tempo (Pitch du Vocal Transformer de Logic, Little AlterBoy). −12 = une octave plus grave.' },
-  { id: 'formant', label: 'Formant', min: -12, max: 12, step: 0.1, unit: 'demi-tons', hint: 'Timbre de la voix, sans changer la hauteur (Formant du Vocal Transformer) : négatif = plus gros, plus « monstre » ; positif = plus fin, plus « enfant ».' },
+  { id: 'pitch', label: 'Hauteur', min: -24, max: 24, step: 0.1, unit: 'demi-tons', hint: 'Transpose la voix sans changer son tempo. −12 = une octave plus grave.' },
+  { id: 'formant', label: 'Formant', min: -12, max: 12, step: 0.1, unit: 'demi-tons', hint: 'Timbre de la voix, sans changer la hauteur : négatif = plus gros, plus « monstre » ; positif = plus fin, plus « enfant ».' },
   { id: 'link', label: 'Formant lié à la hauteur', min: 0, max: 1, step: 1, unit: '', hint: 'Activé : le timbre suit la hauteur, comme une bande accélérée (effet chipmunk / ralenti). Désactivé : la voix garde son timbre naturel.' },
   { id: 'mix', label: 'Dosage', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Part de la voix transformée. 50 % = la voix d\'origine + sa copie transformée (layer, octaver).' },
   { id: 'output', label: 'Sortie', min: -24, max: 12, step: 0.5, unit: 'dB', hint: 'Volume après l\'effet (dB), pour comparer à volume égal.' },
@@ -94,7 +94,7 @@ export const DEFAULT_VOICESHIFT = { pitch: -5, formant: -2, link: 0, mix: 1, out
 export const VOICESHIFT_PRESETS: V21Preset[] = [
   { id: 'demon', name: 'Voix démon', hint: 'Une octave plus bas, timbre très gros : voix de démon / de méchant (ad-libs trap, intros).', params: { pitch: -12, formant: -4, link: 0, mix: 1, output: 2 } },
   { id: 'grave', name: 'Voix grave', hint: 'Quelques demi-tons plus bas, timbre un peu plus gros : voix posée, plus sombre.', params: { pitch: -5, formant: -2, link: 0, mix: 1, output: 0 } },
-  { id: 'chipmunk', name: 'Voix de chipmunk', hint: 'Une octave plus haut, timbre lié : la voix « accélérée » des samples soul (Kanye, chipmunk soul).', params: { pitch: 12, formant: 0, link: 1, mix: 1, output: -2 } },
+  { id: 'chipmunk', name: 'Voix de chipmunk', hint: 'Une octave plus haut, timbre lié : la voix « accélérée » des samples soul (chipmunk soul).', params: { pitch: 12, formant: 0, link: 1, mix: 1, output: -2 } },
   { id: 'aigue', name: 'Voix aiguë naturelle', hint: 'Plus haut mais le timbre reste naturel.', params: { pitch: 5, formant: 0, link: 0, mix: 1, output: 0 } },
   { id: 'formant-gros', name: 'Formant seul : plus gros', hint: 'Même notes, timbre plus gros et plus grave.', params: { pitch: 0, formant: -4, link: 0, mix: 1, output: 0 } },
   { id: 'formant-fin', name: 'Formant seul : plus fin', hint: 'Même notes, timbre plus fin et plus jeune.', params: { pitch: 0, formant: 4, link: 0, mix: 1, output: 0 } },
@@ -107,13 +107,13 @@ export const VOICESHIFT_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const TIMEFX_SPECS: V21ParamSpec[] = [
-  { id: 'stop', label: 'Tape stop', min: 0, max: 1, step: 1, unit: '', hint: 'Déclenche l\'arrêt de bande : le son ralentit et descend jusqu\'à l\'arrêt (Tape stop de Gross Beat / FL Studio). Automatise-le pour le placer pile avant un drop.' },
+  { id: 'stop', label: 'Tape stop', min: 0, max: 1, step: 1, unit: '', hint: 'Déclenche l\'arrêt de bande : le son ralentit et descend jusqu\'à l\'arrêt, comme une platine qu\'on coupe. Automatise-le pour le placer pile avant un drop.' },
   { id: 'stopBeats', label: 'Durée de l\'arrêt', min: 0.125, max: 8, step: 0.125, unit: 'temps', hint: 'Durée du ralentissement, en temps (1 = une noire au tempo du projet).' },
   { id: 'stopCurve', label: 'Courbe', min: -1, max: 1, step: 0.05, unit: '', hint: '0 = vinyle freiné (ralentit régulièrement) ; à droite = la bande tient puis s\'écroule ; à gauche = chute rapide puis longue traîne.' },
   { id: 'startBeats', label: 'Redémarrage', min: 0, max: 4, step: 0.125, unit: 'temps', hint: 'Durée du redémarrage quand on relâche (tape start). 0 = reprise immédiate. Le redémarrage retombe pile sur le temps.' },
-  { id: 'half', label: 'Half-time', min: 0, max: 1, step: 1, unit: '', hint: 'Joue au ralenti, une octave plus bas, en se recalant à chaque cycle (Half-time de Gross Beat, effet trap). Automatise-le sur une zone.' },
+  { id: 'half', label: 'Half-time', min: 0, max: 1, step: 1, unit: '', hint: 'Joue au ralenti, une octave plus bas, en se recalant à chaque cycle (effet trap). Automatise-le sur une zone.' },
   { id: 'halfBeats', label: 'Cycle du half-time', min: 1, max: 8, step: 1, unit: 'temps', hint: 'Longueur d\'un cycle : 4 temps = une mesure rejoue sa première moitié au ralenti.' },
-  { id: 'stutter', label: 'Stutter', min: 0, max: 1, step: 1, unit: '', hint: 'Répète la tranche qui commence au déclenchement (Beat Repeat de Live, stutter de Gross Beat).' },
+  { id: 'stutter', label: 'Stutter', min: 0, max: 1, step: 1, unit: '', hint: 'Répète la tranche qui commence au déclenchement (effet de bégaiement).' },
   { id: 'stutterDiv', label: 'Taille de la répétition', min: 0.0625, max: 2, step: 0.0625, unit: 'temps', hint: '0,25 temps = une double croche (1/16) ; 0,5 = une croche (1/8) ; 1 = une noire.' },
 ];
 
@@ -136,7 +136,7 @@ export const TIMEFX_PRESETS: V21Preset[] = [
 // ---------------------------------------------------------------------------
 
 export const DJFILTER_SPECS: V21ParamSpec[] = [
-  { id: 'filter', label: 'Filtre', min: -1, max: 1, step: 0.01, unit: '', hint: 'Un seul bouton : à gauche passe-bas (le son s\'étouffe), à droite passe-haut (les basses disparaissent), au centre rien. Comme le filtre d\'une table de mixage DJ, l\'Auto Filter de Live ou le DJ Filter de Logic.' },
+  { id: 'filter', label: 'Filtre', min: -1, max: 1, step: 0.01, unit: '', hint: 'Un seul bouton : à gauche passe-bas (le son s\'étouffe), à droite passe-haut (les basses disparaissent), au centre rien. Comme le filtre d\'une table de mixage DJ.' },
   { id: 'resonance', label: 'Résonance', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Accentue la fréquence de coupure : le balayage « siffle » davantage.' },
   { id: 'slope', label: 'Pente', min: 12, max: 24, step: 12, unit: 'dB/oct', hint: '12 dB/octave = doux ; 24 dB/octave = net, comme un filtre DJ.' },
   { id: 'output', label: 'Sortie', min: -24, max: 12, step: 0.5, unit: 'dB', hint: 'Volume après le filtre (dB).' },
@@ -160,8 +160,8 @@ export const LOFI_SPECS: V21ParamSpec[] = [
   { id: 'lowCut', label: 'Coupe-bas', min: 20, max: 2000, step: 1, unit: 'Hz', hint: 'Retire les graves : 300 à 600 Hz pour un téléphone ou un talkie-walkie.' },
   { id: 'highCut', label: 'Coupe-haut', min: 1000, max: 20000, step: 10, unit: 'Hz', hint: 'Retire les aigus : 3 400 Hz = téléphone, 5 000 Hz = radio AM, 9 000 Hz = cassette.' },
   { id: 'drive', label: 'Saturation', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Grain léger d\'un petit haut-parleur. Pour une vraie saturation, utilise plutôt « Saturation ».' },
-  { id: 'bits', label: 'Résolution', min: 2, max: 16, step: 1, unit: 'bits', hint: 'Bitcrush : moins de bits = son granuleux (Bitcrusher de Logic, Redux de Live). 16 = intact.' },
-  { id: 'rate', label: 'Échantillonnage', min: 1000, max: 48000, step: 50, unit: 'Hz', hint: 'Réduction de fréquence d\'échantillonnage : son métallique de vieux sampler (SP-1200 ≈ 26 kHz, téléphone 8 kHz). 48 000 = intact.' },
+  { id: 'bits', label: 'Résolution', min: 2, max: 16, step: 1, unit: 'bits', hint: 'Bitcrush : moins de bits = son granuleux. 16 = intact.' },
+  { id: 'rate', label: 'Échantillonnage', min: 1000, max: 48000, step: 50, unit: 'Hz', hint: 'Réduction de fréquence d\'échantillonnage : son métallique de vieux sampler (≈ 26 kHz, téléphone 8 kHz). 48 000 = intact.' },
   { id: 'noise', label: 'Souffle', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Ajoute un souffle de bande / de ligne.' },
   { id: 'mix', label: 'Dosage', min: 0, max: 1, step: 0.01, unit: '%', hint: 'Part du son traité (100 % = effet complet).' },
   { id: 'output', label: 'Sortie', min: -24, max: 12, step: 0.5, unit: 'dB', hint: 'Volume après l\'effet (dB) : un son filtré paraît moins fort.' },
@@ -176,11 +176,11 @@ export const LOFI_PRESETS: V21Preset[] = [
   { id: 'bitcrush', name: 'Bitcrush 8 bits', hint: '8 bits à 11 kHz : son de console rétro, granuleux.', params: { bits: 8, rate: 11025, lowCut: 20, highCut: 20000, drive: 0, noise: 0, mix: 1, output: 0 } },
   { id: 'talkie', name: 'Talkie-walkie', hint: 'Très étroit et saturé, avec du souffle.', params: { bits: 8, rate: 8000, lowCut: 700, highCut: 2800, drive: 0.6, noise: 0.2, mix: 1, output: 5 } },
   { id: 'megaphone', name: 'Mégaphone', hint: 'Médium agressif et saturé, sans bitcrush.', params: { bits: 16, rate: 48000, lowCut: 500, highCut: 4000, drive: 0.7, noise: 0, mix: 1, output: 3 } },
-  { id: 'sp1200', name: 'Sampler 12 bits (SP-1200)', hint: '12 bits à 26 kHz : le grain des samplers hip-hop des années 90.', params: { bits: 12, rate: 26040, lowCut: 20, highCut: 13000, drive: 0.15, noise: 0, mix: 1, output: 0 } },
+  { id: 'sp1200', name: 'Sampler 12 bits années 90', hint: '12 bits à 26 kHz : le grain des samplers hip-hop des années 90.', params: { bits: 12, rate: 26040, lowCut: 20, highCut: 13000, drive: 0.15, noise: 0, mix: 1, output: 0 } },
 ];
 
 // ---------------------------------------------------------------------------
-// Gate rythmique (Gross Beat / Trance Gate / ShaperBox)
+// Gate rythmique (hachage calé sur le tempo)
 // ---------------------------------------------------------------------------
 
 export const GATE_STEPS = 16;
@@ -201,7 +201,7 @@ export const GATE_RATES: { rate: number; label: string; hint: string }[] = [
 ];
 
 export const GATEFX_SPECS: V21ParamSpec[] = [
-  { id: 'rate', label: 'Division', min: 1, max: 8, step: 1, unit: 'pas', hint: 'Durée d’un pas, calée sur le tempo du projet : 1/16 = double croche (Step size de Gross Beat / ShaperBox).' },
+  { id: 'rate', label: 'Division', min: 1, max: 8, step: 1, unit: 'pas', hint: 'Durée d’un pas, calée sur le tempo du projet : 1/16 = double croche.' },
   { id: 'length', label: 'Longueur du motif', min: 1, max: 16, step: 1, unit: 'pas', hint: 'Nombre de pas avant que le motif recommence : 12 pour une mesure en triolets de croches, 16 pour une mesure en doubles croches.' },
   { id: 'depth', label: 'Profondeur', min: 0, max: 1, step: 0.01, unit: '%', hint: '100 % = un pas fermé est muet ; 50 % = il est seulement baissé (effet de pompe doux).' },
   { id: 'attack', label: 'Attaque', min: 0, max: 50, step: 0.5, unit: 'ms', hint: 'Temps d’ouverture au début d’un pas ouvert : 1 à 3 ms = coupe nette sans clic, plus long = attaque adoucie.' },
@@ -214,7 +214,7 @@ const OPEN = Array(16).fill(1);
 export const DEFAULT_GATEFX = { rate: 4, length: 16, depth: 1, attack: 2, release: 20, keyThreshold: -30, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]), isEnabled: true };
 
 export const GATEFX_PRESETS: V21Preset[] = [
-  { id: 'trance-16', name: 'Trance gate 1/16', hint: 'Le hachage classique en doubles croches, comme le Trance Gate.', params: { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]) } },
+  { id: 'trance-16', name: 'Trance gate 1/16', hint: 'Le hachage classique en doubles croches de la trance.', params: { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]) } },
   { id: 'stutter-32', name: 'Stutter 1/32', hint: 'Hachage très rapide en triples croches : l’effet « stutter » des transitions trap.', params: { rate: 8, length: 16, depth: 1, attack: 0.5, release: 4, ...gatePattern([1, 0]) } },
   { id: 'stutter-16', name: 'Stutter 1/16', hint: 'Une double croche sur deux : roulement haché régulier.', params: { rate: 4, length: 16, depth: 1, attack: 1, release: 8, ...gatePattern([1, 0]) } },
   { id: 'half', name: 'Half (un temps sur deux)', hint: 'Le son ne passe qu’un temps sur deux : sensation de demi-temps, à poser avant le drop.', params: { rate: 4, length: 8, depth: 1, attack: 2, release: 25, ...gatePattern([1, 1, 1, 1, 0, 0, 0, 0]) } },
