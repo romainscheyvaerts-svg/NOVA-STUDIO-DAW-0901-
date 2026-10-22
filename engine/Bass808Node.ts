@@ -171,14 +171,14 @@ export class Bass808Node {
     }
   }
 
-  /** Plan entier (rendu hors temps réel). */
-  public playVoices(voices: Voice808[], offset: number) {
+  /** Plan entier (rendu hors temps réel). `at` : instant du rendu → instant programmé (posé sur l'échantillon, utils/noteTiming). */
+  public playVoices(voices: Voice808[], offset: number, at: (t: number) => number = t => t) {
     for (const v of voices) {
       const s = v.start - offset;
       if (s < 0) continue; // note commencée avant la zone rendue : comme en lecture
-      this.startVoice(s, v.steps[0].pitch, v.velocity);
-      v.steps.slice(1).forEach(st => this.glideTo(st.t - offset, st.pitch));
-      this.stopVoice(v.end - offset);
+      this.startVoice(at(s), v.steps[0].pitch, v.velocity);
+      v.steps.slice(1).forEach(st => this.glideTo(at(st.t - offset), st.pitch));
+      this.stopVoice(at(v.end - offset));
     }
   }
 

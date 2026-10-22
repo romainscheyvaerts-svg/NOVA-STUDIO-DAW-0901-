@@ -97,6 +97,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
 import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll, loopPrerollLatency } from '../utils/pdc';
 import { applyGainEvents, clipGainAt, clipGainEvents, frameTime } from '../utils/fades';
+import { noteFrameTime, noteRenderTimes } from '../utils/noteTiming';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
 import { Scrubber, type ScrubStats } from './Scrubber';
@@ -2043,12 +2044,11 @@ export class AudioEngine {
         // Glissés par note (piano roll pro) : décidés d'après les notes, comme en lecture.
         const slides = rt.synth instanceof NovaSynthNode ? absorbedSlides(heard) : null;
         for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(heard) : heard)) {
-          const noteStart = clip.start + note.start - startOffset - lat;
-          const noteEnd = noteStart + note.duration;
+          // Attaque et relâchement posés sur l'échantillon (utils/noteTiming), comme en lecture :
+          // une note écrite directement et la même note déplacée par un changement de tempo
+          // (positions à un ulp ou une demi-nanoseconde près) donnent le même son, au bit près.
+          const { noteStart, noteEnd, attackAt, releaseAt } = noteRenderTimes(clip.start, note, startOffset, lat, totalDuration, offlineCtx.sampleRate);
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
-
-          const attackAt = Math.max(0, noteStart);
-          const releaseAt = Math.min(totalDuration, noteEnd);
 
           if (slides && slides.has(note)) {
             if (noteStart >= 0) (rt.synth as NovaSynthNode).slideTo(note.pitch, attackAt, note.duration);
@@ -2085,7 +2085,7 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       if (!rt.bass808 || !track.bass808) continue;
       const clips = clipsWithMidiFx(track, isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []));
-      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)));
+      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), t => noteFrameTime(t, offlineCtx.sampleRate));
     }
 
     // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
@@ -3739,6 +3739,7 @@ export class AudioEngine {
    *        [ws, we[ seulement (aucun rattrapage), contrôleurs repris à leur valeur au début du tour.
    */
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, lead = false) {
+      const sr = this.ctx?.sampleRate || 0;
       tracks.map(t => this.eff(t)).forEach(track => {
         if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
@@ -3764,12 +3765,14 @@ export class AudioEngine {
         const b808 = this.tracksDSP.get(track.id)?.bass808;
         if (track.bass808 && b808) {
           const evs = events808(planOfClips(midiClips, track.bass808), ws, Math.min(we, loopEnd));
-          b808.play(evs, t => contextScheduleTime + (t - ws));
+          b808.play(evs, t => noteFrameTime(contextScheduleTime + (t - ws), sr));
           return;
         }
 
         const synth = this.tracksDSP.get(track.id)?.synth;
         const novaSynth = synth instanceof NovaSynthNode;
+        // Instant de chaque note posé sur l'échantillon (utils/noteTiming), même règle qu'à l'export.
+        const at = (abs: number) => noteFrameTime(contextScheduleTime + (abs - ws), sr);
         // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
         if (synth || this.tracksDSP.get(track.id)?.melodicSampler) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow || lead);
         midiClips.forEach(clip => {
@@ -3791,18 +3794,18 @@ export class AudioEngine {
 
                if (noteAbsStart >= loopEnd) return;
                if (slides && slides.has(note)) {
-                   if (noteAbsStart >= ws && noteAbsStart < we) (synth as NovaSynthNode).slideTo(note.pitch, contextScheduleTime + (noteAbsStart - ws), note.duration);
+                   if (noteAbsStart >= ws && noteAbsStart < we) (synth as NovaSynthNode).slideTo(note.pitch, at(noteAbsStart), note.duration);
                    return;
                }
                if (noteAbsStart >= ws && noteAbsStart < we) {
-                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws), note);
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, at(noteAbsStart), note);
                } else if (firstWindow && lat > 0 && noteAbsStart >= projectWindowStart && noteAbsStart < ws) {
                    // Trop tard pour être calée : jouée tout de suite plutôt que perdue.
                    this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime, note);
                }
 
                if (noteAbsEnd >= ws && noteAbsEnd < we) {
-                   this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime + (noteAbsEnd - ws));
+                   this.triggerTrackRelease(track.id, note.pitch, at(noteAbsEnd));
                } else if (firstWindow && lat > 0 && noteAbsEnd >= projectWindowStart && noteAbsEnd < ws) {
                    this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime);
                }
