@@ -201,7 +201,7 @@ import { structureBus, StructurePanel } from './utils/structureBus';
 import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
 import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp, editGroupsStore } from './utils/editGroups';
 import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates, inputWidth } from './utils/multiRecord';
-import { placeTake, trimToPlan } from './utils/multiTake';
+import { placeTake, takeSection, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked, takeGroupMates } from './utils/takeGroups';
 import type { TakeResult, TakeJournalMeta, TakeJournalLike } from './engine/AudioEngine';
 import { LiveRef, LiveTakeAssembly, LiveTakeSender, LT_SEGMENT_SEC, SegmentCutter, nextOrder, sanitizeLiveRef, withoutLive } from './utils/liveTake';
@@ -2380,6 +2380,10 @@ function Studio() {
     }
     const recWall = rec?.wall || Date.now();
     const stamp = Date.now().toString(36);
+    // Nommage automatique d'après la section (repère « Couplet 2 ») : « Couplet 2 · Prise 3 ».
+    const section = first ? (rec?.loop
+      ? takeSection(stateRef.current.markers, rec.loop.start, rec.loop.end)
+      : takeSection(stateRef.current.markers, rec?.in ?? first.clip.start, rec?.out ?? first.clip.start + first.clip.duration)) : null;
     const placed = new Map<string, ReturnType<typeof placeTake>>();
     setState(produce(draft => {
       draft.isRecording = false;
@@ -2391,7 +2395,7 @@ function Studio() {
         if (!track) continue;
         const p = placeTake(track as Track, clip, {
           rec: rec ? { in: rec.in, out: rec.out, isPunch: rec.isPunch, loop: rec.loop, wall: rec.wall } : null,
-          xfade, takeGain, cleaned: cleaned && r === first ? cleaned.clips : null, group, wall: recWall, stamp,
+          xfade, takeGain, cleaned: cleaned && r === first ? cleaned.clips : null, group, wall: recWall, stamp, section,
         });
         track.clips = p.clips as any;
         track.takeMeta = p.takeMeta;
@@ -2426,7 +2430,7 @@ function Studio() {
     const names = (ids: string[]) => ids.map(id => `« ${stateRef.current.tracks.find(t => t.id === id)?.name || id} »`).join(', ');
     if (p0.loopCount) {
       setTakeLanesOpen(prev => ({ ...prev, ...Object.fromEntries(trackIds.map(id => [id, true])) }));
-      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.${bridgeNote ? ` ${bridgeNote}.` : ''}`);
+      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (${p0.takeName})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends ${p0.activeName ? `« ${p0.activeName} »` : `la Prise ${p0.activeTake}`}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.${bridgeNote ? ` ${bridgeNote}.` : ''}`);
       return first;
     }
     const mutedOld = [...placed.values()].reduce((s, p) => s + p.mutedOld, 0);
@@ -4911,7 +4915,7 @@ function Studio() {
       const t = draft.tracks.find(x => x.id === trackId);
       if (t) t.clips = compTakeInZone(t as Track, n, zone);
     }));
-    setAiNotification(`🎚️ Prise ${n} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
+    setAiNotification(`🎚️ ${takeName(stateRef.current.tracks.find(x => x.id === trackId), n)} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
   }, [setState]);
 
   // ===== Couloirs de prises (V4) et comp à la souris (V5) ==========================
@@ -5002,7 +5006,7 @@ function Studio() {
     }));
     breakHistory();
     setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, removedIds)), 0);
-    setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
+    setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — ${r.replacedBy.map(k => takeName(t, k)).join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
   }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
 
   // ===== 📌 Prises gardées (utils/keptTakes) : zone au-dessus de la piste =============
