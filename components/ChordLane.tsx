@@ -193,7 +193,7 @@ const ChordLane: React.FC<LaneProps> = ({ chords, zoomH, scrollLeft, headerWidth
           className="ml-auto h-6 px-2 rounded-md text-[10px] font-bold border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/15 disabled:opacity-60 whitespace-nowrap">
           {detecting ? <><i className="fas fa-circle-notch fa-spin mr-1" />Analyse…</> : <><i className="fas fa-wand-magic-sparkles mr-1" />Détecter</>}
         </button>
-        <button type="button" onClick={() => chordLaneStore.set(false)} aria-label="Masquer la piste d’accords" title="Masquer la piste d’accords (menu ☰ → Affichage, ou le bouton « Accords » de la barre, pour la remettre)"
+        <button type="button" onClick={() => chordLaneStore.set(false)} aria-label="Masquer la piste d’accords" title="Masquer la piste d’accords (menu ☰ → Affichage, ou menu « Vue ▾ » de la barre, pour la remettre)"
           className="w-6 h-6 rounded-md text-slate-500 hover:text-white hover:bg-white/10 shrink-0"><i className="fas fa-eye-slash text-[10px]" /></button>
       </div>
       <div ref={areaRef} className="relative flex-1 overflow-hidden cursor-pointer" onClick={openAt} onPointerMove={onEdgeMove} onPointerUp={onEdgeUp}

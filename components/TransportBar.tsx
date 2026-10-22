@@ -25,6 +25,8 @@ import { openFeedback } from '../services/feedback';
 import { MidiFileMenu, MidiMobileMenuItems } from './MidiFileMenu';
 import DspMeter from './DspMeter';
 import PracticeSpeed from './PracticeSpeed';
+import { usePracticeSpeed } from '../utils/practiceSpeed';
+import { TransportOptionsMenu, ViewMenu } from './TransportMenus';
 import type { Track } from '../types';
 import type { SafetyContext } from '../utils/dspLoad';
 import { fitBar, barItem } from '../utils/barFit';
@@ -291,6 +293,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   const audioImportInputRef = useRef<HTMLInputElement>(null);
   // Mode simple : outils de mixage, routage et import cachés (menu ☰ → Mode avancé).
   const { simple } = useSimpleMode();
+  // Lecture ralentie : la puce reste dans la barre tant qu'elle est active (sinon dans « Options ▾ »).
+  const practiceSlow = usePracticeSpeed() < 0.999;
 
   useComputerKeyboard();
   const kbOn = computerKeyboardStore.on;
@@ -782,7 +786,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             data-testid="transport-menu"
-            className="nova-bar-menu 2xl:hidden w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-white/[0.06] text-white hover:bg-white/10 transition-all"
+            className={`nova-bar-menu ${simple ? '2xl:hidden ' : ''}w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-white/[0.06] text-white hover:bg-white/10 transition-all`}
             title={foldedNames.length ? `Menu (aussi : ${foldedNames.join(', ')})` : 'Menu'}
             aria-label={isMobileMenuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
             aria-expanded={isMobileMenuOpen}

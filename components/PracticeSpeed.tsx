@@ -12,7 +12,7 @@ import { nextPreset, PRACTICE_PRESETS, practiceLabel, practiceSpeedStore, usePra
 
 const TITLE = 'Lecture ralentie : écoute de 50 à 100 % sans changer la hauteur, pour travailler un passage rapide ou apprendre un texte (Half-Speed, Maj+Espace · Logic : Varispeed « vitesse seulement » · Live : tempo baissé avec Warp · FL : tempo baissé). L’export n’est jamais ralenti. Maj+Espace : lecture à 50 %.';
 
-const PracticeSpeed: React.FC<{ compact?: boolean; className?: string }> = ({ compact = false, className = '' }) => {
+const PracticeSpeed: React.FC<{ compact?: boolean; className?: string; inline?: boolean }> = ({ compact = false, className = '', inline = false }) => {
   const speed = usePracticeSpeed();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -26,6 +26,27 @@ const PracticeSpeed: React.FC<{ compact?: boolean; className?: string }> = ({ co
     window.addEventListener('keydown', key);
     return () => { document.removeEventListener('pointerdown', close); window.removeEventListener('keydown', key); };
   }, [open]);
+
+  // Contenu du réglage : dans la bulle du bouton, ou à plat dans le menu « Options ▾ » de la barre (inline).
+  const panelBody = (<>
+          <div className="flex items-baseline justify-between">
+            <span className="text-[12px] font-black">Lecture ralentie</span>
+            <span className="text-[16px] font-black tabular-nums" data-testid="practice-speed-value">{practiceLabel(speed)}</span>
+          </div>
+          <input type="range" min={50} max={100} step={1} value={Math.round(speed * 100)} aria-label="Vitesse (%)" data-testid="practice-speed-slider"
+            onChange={e => practiceSpeedStore.set(Number(e.target.value) / 100)} className="w-full accent-amber-500" />
+          <div className="flex gap-1">
+            {PRACTICE_PRESETS.map(p => (
+              <button key={p} type="button" onClick={() => practiceSpeedStore.set(p)} aria-pressed={Math.abs(p - speed) < 1e-6} data-testid={`practice-preset-${Math.round(p * 100)}`}
+                className={`flex-1 min-h-[32px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg text-[11px] font-bold ${Math.abs(p - speed) < 1e-6 ? 'bg-amber-500 text-black' : 'border border-nv-line hover:bg-nv-accent/10'}`}>{Math.round(p * 100)}</button>
+            ))}
+          </div>
+          <p className="text-[10px] leading-snug text-nv-muted">La hauteur ne change pas. NOVA prépare le passage quelques instants avant de le jouer ; la prise et l’export restent à 100 %.</p>
+  </>);
+
+  if (inline) {
+    return <div className={`space-y-2 ${className}`} role="group" aria-label="Vitesse de lecture" data-testid="practice-speed-panel">{panelBody}</div>;
+  }
 
   const chip = `h-8 min-w-[52px] px-2 rounded-lg border text-[11px] font-black tabular-nums transition-colors ${slow ? 'border-amber-400/60 bg-amber-400/15 text-amber-500' : 'border-white/10 text-slate-500 hover:text-white'}`;
 
@@ -47,19 +68,7 @@ const PracticeSpeed: React.FC<{ compact?: boolean; className?: string }> = ({ co
       {open && (
         <div role="dialog" aria-label="Vitesse de lecture" data-testid="practice-speed-panel"
           className="absolute left-1/2 top-full z-[400] mt-2 w-64 -translate-x-1/2 space-y-2 rounded-xl border border-nv-line bg-nv-panel p-3 text-nv-ink shadow-2xl">
-          <div className="flex items-baseline justify-between">
-            <span className="text-[12px] font-black">Lecture ralentie</span>
-            <span className="text-[16px] font-black tabular-nums" data-testid="practice-speed-value">{practiceLabel(speed)}</span>
-          </div>
-          <input type="range" min={50} max={100} step={1} value={Math.round(speed * 100)} aria-label="Vitesse (%)" data-testid="practice-speed-slider"
-            onChange={e => practiceSpeedStore.set(Number(e.target.value) / 100)} className="w-full accent-amber-500" />
-          <div className="flex gap-1">
-            {PRACTICE_PRESETS.map(p => (
-              <button key={p} type="button" onClick={() => practiceSpeedStore.set(p)} aria-pressed={Math.abs(p - speed) < 1e-6} data-testid={`practice-preset-${Math.round(p * 100)}`}
-                className={`flex-1 min-h-[32px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg text-[11px] font-bold ${Math.abs(p - speed) < 1e-6 ? 'bg-amber-500 text-black' : 'border border-nv-line hover:bg-nv-accent/10'}`}>{Math.round(p * 100)}</button>
-            ))}
-          </div>
-          <p className="text-[10px] leading-snug text-nv-muted">La hauteur ne change pas. NOVA prépare le passage quelques instants avant de le jouer ; la prise et l’export restent à 100 %.</p>
+          {panelBody}
         </div>
       )}
     </div>

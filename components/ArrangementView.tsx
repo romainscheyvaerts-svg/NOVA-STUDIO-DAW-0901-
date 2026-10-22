@@ -78,6 +78,7 @@ import { dragRefusal, explainLockedDrag } from '../utils/clipLock';
 import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
+import { EditMenu, ToolsMoreMenu } from './EditToolbarMenus';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -2839,51 +2840,13 @@ useEffect(() => {
             {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Sélecteur (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
-            {!simple && <button onClick={() => setActiveTool('SCRUB')} aria-pressed={activeTool === 'SCRUB'} data-testid="tool-scrub" className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SCRUB' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title={`Scrubber (${shortcutHint('tool.scrub') || 'F9'}) : glisse sur la forme d'onde pour l'entendre, au rythme de ta main (ou de ton doigt). Alt+glisser = shuttle. Avec le Sélecteur, Ctrl+glisser fait la même chose.`} aria-label="Outil scrub"><i className="fas fa-headphones text-[12px]"></i></button>}
-            {!simple && <button onClick={() => setActiveTool('ZOOM')} aria-pressed={activeTool === 'ZOOM'} data-testid="tool-zoom" className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'ZOOM' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
-              title={`Zoom (${shortcutHint('tool.zoom') || 'F5'}) : clic = zoom avant sur ce point, Alt+clic = zoom arrière`} aria-label="Outil zoom"><i className="fas fa-magnifying-glass text-[12px]"></i></button>}
+            {/* Mode avancé : scrub, zoom, crayon, ligne de gain, mode boucle et Trim TCE sont dans « Outils ▾ » (EditToolbarMenus). */}
           </div>
-          {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
-          {!simple && (
-            <button type="button" onClick={() => editPrefsStore.set({ trimTce: !editPrefs.trimTce })} aria-pressed={!!editPrefs.trimTce} data-testid="trim-tce" aria-label="Étirer en tirant le bord (Trim TCE)"
-              title="Étirer en tirant le bord (outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
-              className={`hidden [@media(pointer:fine)]:flex lg:flex w-9 h-9 shrink-0 rounded-lg items-center justify-center border transition-all ${editPrefs.trimTce ? 'bg-amber-500/15 border-amber-500/50 text-amber-400' : 'border-white/5 bg-black/40 text-slate-500 hover:text-white'}`}>
-              <i className="fas fa-left-right text-[11px]" aria-hidden="true"></i><i className="fas fa-clock text-[8px] -ml-0.5 mt-2" aria-hidden="true"></i>
-            </button>
-          )}
-          {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). Mode simple : sélection, ciseaux,
-              Smart Tool et gomme suffisent (le reste en mode avancé, raccourcis et Ctrl+K inchangés). */}
-          {!simple && <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />}
-          {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
-          {!simple && <EditModeSelector compact={simple} />}
-          {!simple && (
-            <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
-              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge ») : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
-              <select id="nova-nudge" value={editPrefs.nudge} onChange={e => editCommands ? editCommands.setNudgeUnit(e.target.value as NudgeUnit) : editPrefsStore.set({ nudge: e.target.value as NudgeUnit })}
-                title="Pas du décalage (« Nudge value ») : ← / → sur la sélection, Maj = 10 pas" aria-label="Pas du décalage"
-                className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
-                {NUDGE_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
-              </select>
-              <button onClick={() => editPrefsStore.set({ autoXfade: !editPrefs.autoXfade })} aria-pressed={editPrefs.autoXfade}
-                title="Fondu enchaîné auto : quand tu poses un clip contre un autre ou par-dessus (≤ 2 s), un fondu enchaîné (crossfade) est créé tout seul."
-                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
-                <i className="fas fa-xmark mr-1"></i>Fondu enchaîné auto
-              </button>
-              <button onClick={() => editPrefsStore.set({ automationFollowsEdit: !editPrefs.automationFollowsEdit })} aria-pressed={editPrefs.automationFollowsEdit !== false}
-                data-nova-target="automation-follows"
-                title="L'automation suit l'édition (« Automation Follows Edit ») : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
-                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.automationFollowsEdit !== false ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
-                <i className="fas fa-wave-square mr-1"></i>Automation suit l'édition
-              </button>
-              <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
-                aria-label="Courbe des fondus enchaînés"
-                title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power », sans creux de niveau."
-                className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
-                {FADE_CURVES.map(cv => <option key={cv} value={cv}>{FADE_CURVE_INFO[cv].label}</option>)}
-              </select>
-            </div>
-          )}
+          {/* Allégé (22/10/2026) : les outils rares dans « Outils ▾ » (l'outil actif s'affiche sur le bouton),
+              modes SHUF / SLIP / SPOT / GRID, grille, décalage, fondus et « l'automation suit l'édition »
+              dans « Édition ▾ » (le mode actif et la grille restent lisibles sur le bouton). Raccourcis inchangés. */}
+          {!simple && <ToolsMoreMenu activeTool={activeTool} setActiveTool={setActiveTool} />}
+          {!simple && <EditMenu onSetNudge={editCommands ? (u) => editCommands.setNudgeUnit(u) : undefined} />}
         </div>
         <div className="flex-1 h-full py-2 px-4 flex items-center min-w-0 justify-center">
             <div 
@@ -2896,7 +2859,6 @@ useEffect(() => {
         </div>
         <div className="flex items-center space-x-3 shrink-0">
              <FollowPlayheadButton suspended={follow.suspended} onResume={follow.resume} />
-             {!simple && <ChordLaneToggleButton />}
              <i className="fas fa-search-plus text-[10px]"></i>
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
