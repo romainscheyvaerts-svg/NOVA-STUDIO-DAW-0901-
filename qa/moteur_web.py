@@ -120,7 +120,7 @@ def t_isolation(p, res):
 
 
 # ---------------------------------------------------------------- prise (faux micro)
-PRISE = r"""async (secs) => {
+PRISE = r"""async (secs, fige) => {
   const E = await __mw.engine(); const T = await __mw.types();
   const tid = 'voix-prise';
   const tr = __mw.track(T, tid); E.updateTrack(tr, [tr]);
@@ -128,7 +128,8 @@ PRISE = r"""async (secs) => {
   await __mw.sleep(800);
   const t0 = E.ctx.currentTime;
   if (!(await E.startRecording(0, tid))) return { erreur: 'startRecording' };
-  await __mw.sleep(secs * 1000);
+  if (fige) { await __mw.sleep(2000); const W = await window.__novaAppModule('/engine/takeWriter.ts'); W.takeWriter().qaFreeze(fige * 1000); await __mw.sleep(secs * 1000 - 2000); }
+  else await __mw.sleep(secs * 1000);
   const takes = await E.stopRecordingAll(); const t1 = E.ctx.currentTime; E.disarmTrack(tid);
   const h = E.getLastTakeHealth ? E.getLastTakeHealth() : null;
   const RS = await window.__novaAppModule('/utils/recoveryStore.ts');
@@ -146,7 +147,7 @@ PRISE = r"""async (secs) => {
 def t_prise(p, res):
     b, ctx, page, log = browser_page(p, "mw_prise")
     page_ready(page)
-    r = page.evaluate(PRISE, 6)
+    r = page.evaluate("([s, f]) => (" + PRISE + ")(s, f)", [6, 0])
     r["erreurs_console"] = console_errors(log)
     res["prise"] = r
     print("prise :", json.dumps(r, ensure_ascii=False, default=str), flush=True)
@@ -157,6 +158,19 @@ def t_prise(p, res):
     else:
         ok("prise : 6 s captées, autant d'images dans la base de récupération (aucune perdue)",
            not r.get("erreur") and r.get("images_prise") and abs((r.get("images_journal") or 0) - r["images_prise"]) <= 0 and (h.get("lost") or 0) == 0, r)
+    # Écrivain figé 12 s (anneau de 8 s : il déborderait) pendant une prise de 20 s : le fil audio passe
+    # par la page (secours), la prise reste entière et calée, rien n'est perdu.
+    try:
+        r2 = page.evaluate("([s, f]) => (" + PRISE + ")(s, f)", [20, 12])
+    except Exception as e:
+        r2 = {"erreur": str(e)[:300]}
+    res["prise_ecrivain_fige"] = r2
+    print("prise, écrivain figé 12 s :", json.dumps(r2, ensure_ascii=False, default=str), flush=True)
+    h2 = r2.get("sante") or {}
+    if r2.get("sante") is not None:
+        ok("prise : écrivain figé 12 s, prise entière (images = horloge à 0,1 s près — mesure murale du départ —, aucune perdue, base de récupération complète)",
+           not r2.get("erreur") and (h2.get("lost") or 0) == 0 and abs(r2["images_prise"] - round(r2["duree_horloge_s"] * r2["sr"])) <= r2["sr"] * 0.1
+           and r2.get("images_journal") == r2["images_prise"], r2)
     b.close()
 
 

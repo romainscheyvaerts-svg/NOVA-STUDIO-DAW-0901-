@@ -3074,7 +3074,7 @@ export class AudioEngine {
   }
 
   /** Dernière prise : chemin des échantillons (anneau partagé, port direct, page), images écrites, perdues. */
-  private lastTakeHealth: { at: number; transport: 'ring' | 'port' | 'post'; frames: number; durable: number | null; lost: number; allocs: number; error: string | null; sampleRate: number } | null = null;
+  private lastTakeHealth: { at: number; transport: 'ring' | 'port' | 'post'; frames: number; durable: number | null; lost: number; allocs: number; rescued: number; error: string | null; sampleRate: number } | null = null;
   public getLastTakeHealth() { return this.lastTakeHealth; }
 
   /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
@@ -3182,7 +3182,7 @@ export class AudioEngine {
     if (this.inputLostDuringTake) { this.inputLostDuringTake = false; void this.refreshInputSource(); }
     // Santé de la prise (Réglages audio, QA) : chemin des échantillons, images écrites durablement, perdues.
     const wr = session.writerReport;
-    this.lastTakeHealth = { at: Date.now(), transport: session.transport, frames: channels?.[0]?.length || 0, durable: wr?.durable ?? null, lost: wr?.lost ?? 0, allocs: wr?.allocs ?? 0, error: wr?.error || session.writerWarning || null, sampleRate: ctx.sampleRate };
+    this.lastTakeHealth = { at: Date.now(), transport: session.transport, frames: channels?.[0]?.length || 0, durable: wr?.durable ?? null, lost: wr?.lost ?? 0, allocs: wr?.allocs ?? 0, rescued: session.rescuedFrames, error: wr?.error || session.writerWarning || null, sampleRate: ctx.sampleRate };
     const journals = this.recJournals;
     this.recJournals = new Map();
     const len = channels?.[0]?.length || 0;

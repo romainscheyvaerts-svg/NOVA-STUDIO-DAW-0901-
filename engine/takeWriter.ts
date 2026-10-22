@@ -6,7 +6,7 @@
 export interface TakeTarget { takeId: string; first: number; width: 1 | 2 }
 export interface TakeWriterEnded { first: number; frames: number; durable: number; lost: number; allocs: number; error: string | null }
 
-interface Handlers { onChunk(ch: Float32Array[], first: number): void; onWarn?(msg: string): void; ended?: (r: TakeWriterEnded) => void }
+interface Handlers { onChunk(ch: Float32Array[], first: number, pos: number): void; onWarn?(msg: string): void; ended?: (r: TakeWriterEnded) => void }
 
 export class TakeWriterClient {
   private worker: Worker;
@@ -19,7 +19,7 @@ export class TakeWriterClient {
       const m = e.data;
       const h = m && this.handlers.get(m.id);
       if (!h) return;
-      if (m.type === 'chunk') h.onChunk(m.ch, m.first);
+      if (m.type === 'chunk') h.onChunk(m.ch, m.first, m.pos);
       else if (m.type === 'warn') h.onWarn?.(m.message);
       else if (m.type === 'ended') { this.handlers.delete(m.id); h.ended?.({ first: m.first ?? -1, frames: m.frames, durable: m.durable, lost: m.lost, allocs: m.allocs || 0, error: m.error || null }); }
     };
@@ -30,6 +30,15 @@ export class TakeWriterClient {
     this.handlers.set(opts.id, h);
     const { port, ...msg } = opts;
     this.worker.postMessage({ type: 'begin', ...msg }, port ? [port] : []);
+  }
+
+  /** QA : fige le Worker `ms` millisecondes (page gelée par le navigateur). */
+  qaFreeze(ms: number) { this.worker.postMessage({ type: 'qa-fige', ms }); }
+
+  /** Morceau de secours (passé par la page) à écrire à sa position. */
+  inject(id: string, pos: number, ch: Float32Array[]) {
+    if (!this.handlers.has(id)) return;
+    this.worker.postMessage({ type: 'inject', id, pos, ch });
   }
 
   /** Fin : l'anneau est vidé, le reste écrit ; rend le compte (null si le Worker ne répond pas). */

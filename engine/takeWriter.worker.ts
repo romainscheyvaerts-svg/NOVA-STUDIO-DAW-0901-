@@ -32,7 +32,8 @@ interface Session {
   pend: Float32Array[][]; pendLen: number;
   fwd: Float32Array[][]; fwdLen: number;
   first: number; frames: number; durable: number; failed: string | null;
-  seq: Map<string, number>;
+  /** Position (images depuis le début de la prise) du 1er échantillon en attente d'écriture / de renvoi. */
+  pendPos: number; fwdPos: number;
   writes: Promise<void>;
   eos: boolean; eosWait: (() => void) | null; allocs: number; portLost: number;
   drains: number; lastErr: string | null;
@@ -72,6 +73,14 @@ function flushDurable(s: Session) {
   const chans = s.pend.map(p => concat(p, len));
   s.pend = s.pend.map(() => []);
   s.pendLen = 0;
+  writeRecords(s, s.pendPos, chans, len);
+}
+
+/**
+ * Un enregistrement par prise, clé [prise, position en images] : la récupération relit les morceaux
+ * dans l'ordre des positions, même si un morceau de secours (fil audio → page → ici) arrive après.
+ */
+function writeRecords(s: Session, pos: number, chans: Float32Array[], len: number) {
   const recs: { key: [string, number]; value: Float32Array }[] = [];
   for (const t of s.targets) {
     const a = chans[t.first];
@@ -83,9 +92,7 @@ function flushDurable(s: Session) {
       v = new Float32Array(len * 2);
       for (let i = 0; i < len; i++) { v[2 * i] = a[i]; v[2 * i + 1] = b ? b[i] : 0; }
     }
-    const n = s.seq.get(t.takeId) || 0;
-    s.seq.set(t.takeId, n + 1);
-    recs.push({ key: [t.takeId, n], value: v });
+    recs.push({ key: [t.takeId, pos], value: v });
   }
   if (!recs.length) { s.durable += len; return; }
   s.writes = s.writes.then(async () => {
@@ -114,13 +121,15 @@ function forward(s: Session) {
   const ch = s.fwd.map(p => concat(p, s.fwdLen, true));
   s.fwd = s.fwd.map(() => []);
   s.fwdLen = 0;
-  post({ type: 'chunk', id: s.id, first: s.first, ch }, ch.map(c => c.buffer));
+  post({ type: 'chunk', id: s.id, first: s.first, pos: s.fwdPos, ch }, ch.map(c => c.buffer));
 }
 
 /** Échantillons reçus (un tableau par canal). */
 function take(s: Session, ch: Float32Array[]) {
   const n = ch[0]?.length || 0;
   if (!n) return;
+  if (!s.fwdLen) s.fwdPos = s.frames;
+  if (!s.pendLen) s.pendPos = s.frames;
   s.frames += n;
   for (let c = 0; c < s.k; c++) {
     const x = ch[c] || new Float32Array(n);
@@ -189,7 +198,7 @@ function begin(m: Begin, port: MessagePort | null) {
     pend: Array.from({ length: k }, () => []), pendLen: 0,
     fwd: Array.from({ length: k }, () => []), fwdLen: 0,
     first: -1, frames: 0, durable: 0, failed: null,
-    seq: new Map(), writes: Promise.resolve(), eos: false, eosWait: null, allocs: 0, portLost: 0,
+    pendPos: 0, fwdPos: 0, writes: Promise.resolve(), eos: false, eosWait: null, allocs: 0, portLost: 0,
     drains: 0, lastErr: null,
   };
   sessions.set(s.id, s);
@@ -234,6 +243,13 @@ self.onmessage = (e: MessageEvent) => {
   if (!m || typeof m !== 'object') return;
   if (m.type === 'begin') begin(m as Begin, e.ports?.[0] || null);
   else if (m.type === 'end') void end(m.id);
+  else if (m.type === 'inject') {
+    // Morceau de secours (le fil audio l'a confié à la page pendant que ce Worker était figé) : écrit à sa place.
+    const s = sessions.get(m.id);
+    if (s && m.ch?.[0]?.length) writeRecords(s, m.pos, m.ch, m.ch[0].length);
+  }
+  // QA (qa/moteur_web.py) : Worker figé `ms` millisecondes, comme une page gelée par le navigateur.
+  else if (m.type === 'qa-fige') { const t = Date.now(); while (Date.now() - t < (m.ms | 0)) { /* figé */ } }
   else if (m.type === 'ping') post({ type: 'pong', sessions: sessions.size, polling: !!pollTimer });
   else if (m.type === 'status') {
     const s = sessions.get(m.id);

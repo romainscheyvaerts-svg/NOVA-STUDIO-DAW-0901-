@@ -55,6 +55,13 @@ describe('anneau des prises (fil audio → écrivain)', () => {
     const f = new Function(`${takeRingSource()} return ringWrite;`)();
     expect(typeof f).toBe('function');
   });
+
+  it("le module complet de l'enregistreur s'évalue (aucune erreur de syntaxe dans le code du worklet)", () => {
+    const code = NOVA_RECORDER_WORKLET.replace("registerProcessor('nova-recorder', NovaRecorder);", '');
+    // eslint-disable-next-line no-new-func
+    const K = new Function('AudioWorkletProcessor', code + '; return NovaRecorder;')(class { port = { postMessage() {}, onmessage: null }; });
+    expect(typeof K).toBe('function');
+  });
 });
 
 describe('mesure de la latence par boucle', () => {
