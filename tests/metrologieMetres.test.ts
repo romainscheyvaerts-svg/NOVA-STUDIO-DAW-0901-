@@ -53,13 +53,16 @@ function live(L: Float32Array, R: Float32Array, sr: number, opt = { loudness: tr
 }
 
 afterAll(() => flushMetroLog('metres'));
+/** Rend la main entre deux mesures longues (sinon vitest perd le contact avec le fil de test). */
+const tick = () => new Promise<void>(r => setTimeout(r, 0));
 // Chaque mesure hors tolérance fait échouer le test, après avoir tout mesuré (rapport complet).
 afterEach(() => assertMetro());
 
 describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
   for (const sr of RATES) {
-    it(`${sr} Hz : cas 1 et 2 (sinus 1 kHz stéréo −23 / −33 dBFS) — M, S, I = niveau ±0,1 LU`, () => {
+    it(`${sr} Hz : cas 1 et 2 (sinus 1 kHz stéréo −23 / −33 dBFS) — M, S, I = niveau ±0,1 LU`, async () => {
       for (const lvl of [-23, -33]) {
+        await tick();
         const x = tone(sr, 20, 1000, lvl);
         const r = live(x, x, sr);
         const m = r.lm.momentary(), s = r.lm.shortTerm(), I = r.lm.integrated();
@@ -68,18 +71,19 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
         metro('LUFS intégré (direct)', `sinus 1 kHz ${lvl} dBFS, ${sr} Hz`, lvl, I, 'LUFS', 0.1);
       }
     });
-    it(`${sr} Hz : cas 3, 4, 5 (portillons) — intégré = −23,0 ±0,1 LU`, () => {
+    it(`${sr} Hz : cas 3, 4, 5 (portillons) — intégré = −23,0 ±0,1 LU`, async () => {
       const cases: [string, Float32Array][] = [
         ['cas 3 −36/−23/−36', cat(tone(sr, 10, 1000, -36), tone(sr, 60, 1000, -23), tone(sr, 10, 1000, -36))],
         ['cas 4 −72/−36/−23/−36/−72', cat(tone(sr, 10, 1000, -72), tone(sr, 10, 1000, -36), tone(sr, 60, 1000, -23), tone(sr, 10, 1000, -36), tone(sr, 10, 1000, -72))],
         ['cas 5 −26/−20/−26', cat(tone(sr, 20, 1000, -26), tone(sr, 20.1, 1000, -20), tone(sr, 20, 1000, -26))],
       ];
       for (const [name, x] of cases) {
+        await tick();
         const I = live(x, x, sr).lm.integrated();
         metro('LUFS intégré (direct)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1);
       }
     });
-    it(`${sr} Hz : LRA Tech 3342 (cas 1 à 4) ±1 LU`, () => {
+    it(`${sr} Hz : LRA Tech 3342 (cas 1 à 4) ±1 LU`, async () => {
       const cases: [string, Float32Array, number][] = [
         ['−20/−30', cat(tone(sr, 20, 1000, -20), tone(sr, 20, 1000, -30)), 10],
         ['−20/−15', cat(tone(sr, 20, 1000, -20), tone(sr, 20, 1000, -15)), 5],
@@ -87,6 +91,7 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
         ['−50/−35/−20/−35/−50', cat(tone(sr, 20, 1000, -50), tone(sr, 20, 1000, -35), tone(sr, 20, 1000, -20), tone(sr, 20, 1000, -35), tone(sr, 20, 1000, -50)), 15],
       ];
       for (const [name, x, want] of cases) {
+        await tick();
         const lra = live(x, x, sr).lm.lra();
         metro('LRA (direct)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1);
       }
@@ -97,30 +102,32 @@ describe('LUFS en direct (noyau des mètres) — EBU Tech 3341', () => {
 describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
   const buf = (L: Float32Array, R: Float32Array, sr: number) => ({ sampleRate: sr, numberOfChannels: 2, length: L.length, getChannelData: (c: number) => (c ? R : L) }) as unknown as AudioBuffer;
   for (const sr of RATES) {
-    it(`${sr} Hz : intégré EBU cas 1, 3, 5 ±0,1 LU`, () => {
+    it(`${sr} Hz : intégré EBU cas 1, 3, 5 ±0,1 LU`, async () => {
       const cases: [string, Float32Array][] = [
         ['cas 1 −23', tone(sr, 20, 1000, -23)],
         ['cas 3 −36/−23/−36', cat(tone(sr, 10, 1000, -36), tone(sr, 60, 1000, -23), tone(sr, 10, 1000, -36))],
         ['cas 5 −26/−20/−26', cat(tone(sr, 20, 1000, -26), tone(sr, 20.1, 1000, -20), tone(sr, 20, 1000, -26))],
       ];
       for (const [name, x] of cases) {
+        await tick();
         const I = integratedLufs(buf(x, x, sr));
         metro('LUFS intégré (export)', `${name}, ${sr} Hz`, -23, I, 'LUFS', 0.1);
         expect(Math.abs(lufsOf([x, x], sr) - I)).toBeLessThan(1e-9);
       }
     });
-    it(`${sr} Hz : LRA de l'export (Tech 3342) ±1 LU`, () => {
+    it(`${sr} Hz : LRA de l'export (Tech 3342) ±1 LU`, async () => {
       const cases: [string, Float32Array, number][] = [
         ['−20/−30', cat(tone(sr, 20, 1000, -20), tone(sr, 20, 1000, -30)), 10],
         ['−40/−20', cat(tone(sr, 20, 1000, -40), tone(sr, 20, 1000, -20)), 20],
         ['−50/−35/−20/−35/−50', cat(tone(sr, 20, 1000, -50), tone(sr, 20, 1000, -35), tone(sr, 20, 1000, -20), tone(sr, 20, 1000, -35), tone(sr, 20, 1000, -50)), 15],
       ];
       for (const [name, x, want] of cases) {
+        await tick();
         const lra = loudnessRangeOf([x, x], sr);
         metro('LRA (export)', `Tech 3342 ${name}, ${sr} Hz`, want, lra, 'LU', 1);
       }
     });
-    it(`${sr} Hz : LRA de l'export pondéré K comme la norme (graves forts puis aigus, même niveau crête)`, () => {
+    it(`${sr} Hz : LRA de l'export pondéré K comme la norme (graves forts puis aigus, même niveau crête)`, async () => {
       // 20 s de sinus 60 Hz puis 20 s de sinus 3 kHz, même amplitude : la pondération K donne
       // 4,2 dB d'écart réel de loudness ; un LRA sans pondération K voyait 0 LU.
       const x = cat(tone(sr, 20, 60, -20), tone(sr, 20, 3000, -20));
@@ -128,7 +135,7 @@ describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
       const lra = loudnessRangeOf([x, x], sr);
       metro('LRA (export)', `60 Hz puis 3 kHz à −20 dBFS, ${sr} Hz (référence = mètre direct)`, ref, lra, 'LU', 1);
     });
-    it(`${sr} Hz : crête vraie de l'export (×4, 16 coefficients) ±0,1 dB`, () => {
+    it(`${sr} Hz : crête vraie de l'export (×4, 16 coefficients) ±0,1 dB`, async () => {
       for (const [f, ph] of [[sr / 4, Math.PI / 4], [sr / 6, 0.3], [997, 1.1], [15000, 0.7]] as [number, number][]) {
         const x = soft(tone(sr, 1, f, -1, ph), sr);
         const tp = truePeakDb(buf(x, x, sr));
@@ -140,7 +147,7 @@ describe('LUFS, LRA et crête vraie HORS LIGNE (export, distribution)', () => {
 
 describe('Crête échantillon et crête vraie en direct (master ×4/16, pistes ×4/8 avec portillon)', () => {
   for (const sr of RATES) {
-    it(`${sr} Hz : sinus à fs/4 déphasé de 45° (échantillons à −3,01 dB sous la crête vraie)`, () => {
+    it(`${sr} Hz : sinus à fs/4 déphasé de 45° (échantillons à −3,01 dB sous la crête vraie)`, async () => {
       const x = soft(tone(sr, 1, sr / 4, -6, Math.PI / 4), sr);
       const m = live(x, x, sr);
       const t = live(x, x, sr, { loudness: false, tpTaps: 8, tpGate: true } as any);
@@ -148,7 +155,7 @@ describe('Crête échantillon et crête vraie en direct (master ×4/16, pistes �
       metro('Crête vraie master (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(m.tp), 'dBTP', 0.1);
       metro('Crête vraie piste (direct)', `sinus fs/4 45° −6 dBFS, ${sr} Hz`, -6, dB(t.tp), 'dBTP', 0.1);
     });
-    it(`${sr} Hz : sinus 997 Hz, fs/6, 15 kHz, quelle que soit la phase : crête vraie ±0,1 dB`, () => {
+    it(`${sr} Hz : sinus 997 Hz, fs/6, 15 kHz, quelle que soit la phase : crête vraie ±0,1 dB`, async () => {
       for (const f of [997, sr / 6, 15000]) for (const ph of [0, 0.4, 1.3]) {
         const x = soft(tone(sr, 0.5, f, -3, ph), sr);
         const m = live(x, x, sr);
@@ -159,7 +166,7 @@ describe('Crête échantillon et crête vraie en direct (master ×4/16, pistes �
 });
 
 describe('Corrélation de phase', () => {
-  it('+1 (mono), −1 (inversé), 0 (quadrature, bruits indépendants)', () => {
+  it('+1 (mono), −1 (inversé), 0 (quadrature, bruits indépendants)', async () => {
     const sr = 48000, n = sr;
     const s = tone(sr, 1, 440, -6), c = tone(sr, 1, 440, -6, Math.PI / 2), neg = s.map(v => -v);
     let a = 1, b = 7;
@@ -210,7 +217,7 @@ describe('Vumètre de la console (MeterBank) : référence et balistique, au ryt
   }
 
   for (const sr of RATES) {
-    it(`${sr} Hz : sinus 1 kHz à −18 dBFS (crête) = 0,0 VU ; K-20 : −20 dBFS = 0 ; K-14 : −14 dBFS = 0`, () => {
+    it(`${sr} Hz : sinus 1 kHz à −18 dBFS (crête) = 0,0 VU ; K-20 : −20 dBFS = 0 ; K-14 : −14 dBFS = 0`, async () => {
       for (const [sid, lvl] of [['vu', -18], ['k20', -20], ['k14', -14], ['k12', -12]] as [string, number][]) {
         const s = scaleById(sid);
         const v = vuRun(sr, tone(sr, 3, 1000, lvl));
@@ -219,7 +226,7 @@ describe('Vumètre de la console (MeterBank) : référence et balistique, au ryt
         expect(scaleReading(s, meterMainDb(s, v.peak[0], v.rms[0]))).toMatch(/^[−+]?0,[01]$/);
       }
     });
-    it(`${sr} Hz : balistique VU — 99 % de la déviation finale en 300 ms (±10 %)`, () => {
+    it(`${sr} Hz : balistique VU — 99 % de la déviation finale en 300 ms (±10 %)`, async () => {
       const s = scaleById('vu');
       const x = cat(new Float32Array(Math.round(0.5 * sr)), tone(sr, 2, 1000, -18));
       const trace: [number, number][] = [];
@@ -271,7 +278,7 @@ describe('Analyseur de spectre du master : niveau et fréquence d’un sinus', (
 });
 
 describe('Échelles des vumètres', () => {
-  it('chaque échelle : sa référence est à sa graduation 0', () => {
+  it('chaque échelle : sa référence est à sa graduation 0', async () => {
     for (const s of METER_SCALES) {
       const zero = s.marks.find(m => m.label === '0');
       expect(zero?.db).toBe(s.refDb);

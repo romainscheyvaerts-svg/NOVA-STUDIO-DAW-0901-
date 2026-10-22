@@ -17,6 +17,8 @@ afterAll(() => flushMetroLog('hauteur'));
 afterEach(() => assertMetro());
 
 const math = createHarmonyMath();
+/** Rend la main entre deux mesures longues (sinon vitest perd le contact avec le fil de test). */
+const tick = () => new Promise<void>(r => setTimeout(r, 0));
 const hz = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
 function run(x: Float32Array, params: Partial<PsolaCoreParams>, sr: number) {
@@ -53,13 +55,14 @@ function f0Precise(x: Float32Array, sr: number): number {
 
 describe('Voix grave / aiguë : hauteur affichée (demi-tons, au dixième) = hauteur mesurée (±1 cent)', () => {
   for (const sr of [44100, 48000]) {
-    it(`${sr} Hz`, () => {
+    it(`${sr} Hz`, async () => {
       for (const f0 of [110, 196, 330]) {
         const x = vowel(f0, 1.6, sr);
         for (const semis of [-12, -7, -5, -1, -0.3, 0.1, 0.5, 1, 4, 7, 12]) {
           const want = f0 * Math.pow(2, semis / 12);
           if (want > 1000 || want < 55) continue;
           for (const link of [0, 1]) {
+            await tick();
             const p = voiceShiftToCore({ pitch: semis, formant: 0, link, mix: 1, output: 0 });
             const { L } = run(x, p as any, sr);
             const f = f0Precise(L.subarray(Math.round(0.4 * sr), Math.round(1.4 * sr)), sr);
@@ -72,7 +75,7 @@ describe('Voix grave / aiguë : hauteur affichée (demi-tons, au dixième) = hau
 });
 
 describe('Harmoniseur : degrés de la gamme → notes exactes (±1 cent)', () => {
-  it('La3 en Do majeur et La mineur : tierce, quinte, octave, en dessous', () => {
+  it('La3 en Do majeur et La mineur : tierce, quinte, octave, en dessous', async () => {
     const sr = 48000;
     const x = vowel(hz(57), 1.6, sr);
     const voice = (v: any) => ({ on: true, semis: 0, degree: null, formant: 0, follow: false, gainL: 1, gainR: 1, delayMs: 0, detune: 0, drift: 0, ...v });
@@ -80,6 +83,7 @@ describe('Harmoniseur : degrés de la gamme → notes exactes (±1 cent)', () =>
       ['Do majeur', 0, SCALE_INTERVALS.MAJOR, 2, 60], ['Do majeur', 0, SCALE_INTERVALS.MAJOR, 4, 64], ['Do majeur', 0, SCALE_INTERVALS.MAJOR, -2, 53], ['Do majeur', 0, SCALE_INTERVALS.MAJOR, 7, 69],
       ['La mineur', 9, SCALE_INTERVALS.MINOR, 2, 60], ['La mineur', 9, SCALE_INTERVALS.MINOR, 4, 64], ['La mineur', 9, SCALE_INTERVALS.MINOR, -7, 45],
     ] as [string, number, number[], number, number][]) {
+      await tick();
       const { L } = run(x, { dry: 0, root, scale, voices: [voice({ degree: deg })] }, sr);
       const f = f0Precise(L.subarray(Math.round(0.4 * sr), Math.round(1.4 * sr)), sr);
       metro('Harmoniseur', `La3 (220 Hz) en ${name}, degré ${deg > 0 ? '+' : ''}${deg} → ${hz(want).toFixed(2)} Hz`, 0, cents(f, hz(want)), 'cents', 1, cents(f, hz(want)), 2);
