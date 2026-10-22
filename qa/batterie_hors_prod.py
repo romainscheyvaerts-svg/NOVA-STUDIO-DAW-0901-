@@ -248,6 +248,13 @@ BATTERIE = [
     # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
     # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
     ("pianoroll_pratique", []),
+    # 23/10/2026 · Nova Pitch « Notes de la voix » : double-clic sur un clip de voix → éditeur en bas (analyse avec
+    # avancement), note glissée (aimant gamme), Maj+↑ = 2 cents, ↑ = demi-ton, saisie « La2 +4 », Corriger la sélection,
+    # réglages (gain, formant), élastique (×1,3, voisine qui s'adapte, double-clic = durée d'origine), couper / fusionner,
+    # un geste = une étape (Ctrl+Z / Ctrl+Y), hauteur mesurée ±1 cent (YIN Python), export = son rendu au bit près,
+    # .zip (analyse pitch/<clip>.bin) et réouverture sans nouvelle analyse ; tablette claire au doigt (cibles ≥ 44 px),
+    # téléphone 390 (« Corriger la justesse »), PC clair (palette, version épurée) ; aucun nom de concurrent.
+    ("nova_pitch", []),
 ]
 
 

@@ -403,10 +403,15 @@ def f4(b, R):
     pg.keyboard.press("Escape"); pg.mouse.click(1000, 600); pg.wait_for_timeout(300)
     rec = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
     x0 = rec["x"] + rec["width"] + 25
-    pg.mouse.dblclick(x0, rec["y"] + 60); pg.wait_for_timeout(600)
+    # 23/10/2026 : le double-clic sur un clip de VOIX ouvre l'éditeur de notes (Nova Pitch) ;
+    # « Renommer le clip » : Ctrl+Maj+R (et le menu du clip), comme partout.
+    pg.mouse.dblclick(x0, rec["y"] + 60); pg.wait_for_timeout(800)
+    R["double_clic_notes_de_la_voix"] = pg.locator("[data-testid=pitch-editor]").count() > 0
+    if R["double_clic_notes_de_la_voix"]:
+        pg.locator("[data-testid=pitch-close]").first.click(); pg.wait_for_timeout(300)
+    pg.mouse.click(x0, rec["y"] + 60); pg.wait_for_timeout(200)
+    pg.keyboard.press("Control+Shift+r"); pg.wait_for_timeout(600)
     S(pg, "f4", "01_double_clic_clip")
-    # Depuis la parité Pro Tools, le double-clic sur un clip audio ouvre « Renommer le clip »
-    # (le menu des fondus reste au clic droit).
     dlg = pg.locator("[data-testid=clip-props]")
     R["renommer_ouvert"] = dlg.count() > 0 and "Renommer le clip" in dlg.first.inner_text()
     champ = dlg.get_by_role("textbox", name="Nom")

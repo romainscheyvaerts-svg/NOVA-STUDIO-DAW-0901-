@@ -158,7 +158,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     if (!open || !clipRef.current) return;
     let alive = true;
     const c = clipRef.current;
-    setStatus('loading'); setProgress(0); setError('');
+    setVoice(null); setStatus('loading'); setProgress(0); setError('');
     if (c.isReversed) { setStatus('error'); setError('Ce clip est inversé : remets-le à l’endroit (menu du clip) pour éditer ses notes.'); return; }
     loadClipVoice(c, p => { if (alive) setProgress(p); }).then(v => {
       if (!alive) return;
@@ -177,7 +177,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   useEffect(() => {
     if (!voice) return;
     const own = pe && pe.sourceBufferId === voice.sourceBufferId ? pe : undefined;
-    const sig = own ? infoSig(own) : '';
+    const sig = `${voice.key}|${own ? infoSig(own) : ''}`;
     if (lastSig.current === sig) return;
     lastSig.current = sig;
     const layout = own ? layoutOf(own, voice.region.start) : {};
@@ -191,7 +191,6 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       style: own?.style || 'naturel',
     });
   }, [voice, pe]);
-  useEffect(() => { lastSig.current = null; }, [clipId]);
 
   const tr = voice?.analysis.track;
   const hopSec = tr ? tr.hop / tr.sr : 0.005;
@@ -223,7 +222,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       if (!c.pitchEdit) return;
       const patch = revertClipPatch(c, id => audioBufferRegistry.has(id));
       if (!patch) return;
-      lastSig.current = '';
+      lastSig.current = `${voice.key}|`;
       onCommit(trackId, c.id, patch, message);
       return;
     }
@@ -231,7 +230,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       sourceBufferId: voice.sourceBufferId, sourceOffset: voice.sourceOffset, region: voice.region,
       edits: stored, layout: next.layout, extend: next.extend, amount: next.amount / 100, style: next.style, at: Date.now(),
     });
-    lastSig.current = patch.pitchEdit ? infoSig(patch.pitchEdit) : '';
+    lastSig.current = `${voice.key}|${patch.pitchEdit ? infoSig(patch.pitchEdit) : ''}`;
     onCommit(trackId, c.id, patch, message);
   }, [trackId, voice, tr, onCommit]);
 
@@ -817,7 +816,8 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     { id: 'gamme-choisir', label: 'Autre gamme…', onSelect: () => setPop({ kind: 'all', x: menu?.anchor.x ?? 200, y: menu?.anchor.y ?? 200 }) },
   ];
 
-  // Clavier (quand l'éditeur a la main : dernier clic dedans).
+  // Clavier (quand l'éditeur a la main : dernier clic dedans, ou il vient de s'ouvrir).
+  useEffect(() => { if (open) activeRef.current = true; }, [open, clipId]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => { activeRef.current = !!rootRef.current?.contains(e.target as Node) || !!(e.target as HTMLElement)?.closest?.('[data-nova-roll-menu]'); };
@@ -826,12 +826,15 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   }, [open]);
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandler.current = (e: KeyboardEvent) => {
+    // Un menu ou un réglage ouvert : Échap le ferme (et seulement lui).
+    if (e.key === 'Escape' && (menu || pop)) { e.preventDefault(); e.stopPropagation(); if (menu) setMenu(null); else setPop(null); return; }
+    if (menu) return;
     if (!activeRef.current || status !== 'ready') return;
     const t = e.target as HTMLElement;
     if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.tagName === 'SELECT' || t?.isContentEditable) return;
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
     const k = e.key;
-    if (k === 'Escape') { stop(); if (pop) setPop(null); else if (sel.size) setSel(new Set()); else onClose(); return; }
+    if (k === 'Escape') { stop(); if (sel.size) setSel(new Set()); else onClose(); return; }
     if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'a') { stop(); setSel(new Set(notes.map((_, i) => i))); return; }
     if (e.ctrlKey || e.metaKey) return; // Ctrl+Z / Ctrl+Y : annuler / rétablir du projet
     if (k === 'ArrowUp' || k === 'ArrowDown') { if (!selected.length) return; stop(); nudgeSel(k === 'ArrowUp' ? 1 : -1, e.shiftKey); return; }
@@ -944,6 +947,10 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     : selected.length > 1 ? `${selected.length} notes` : notes.length ? (epure ? 'Glisse une note vers le haut ou le bas' : 'Clique une note · Ctrl+A : toutes') : '';
   const geom = JSON.stringify(drawNotes.map((n, i) => ({ i, x0: Math.round(xOf(view, n.a)), x1: Math.round(xOf(view, n.b)), y: Math.round(yOf(view, n.m)), m: +n.m.toFixed(4), a: +n.a.toFixed(4), b: +n.b.toFixed(4) })));
 
+  const simpleBar = (
+    <SimpleBar amount={draft.amount} style={draft.style} stacked={phone} keyText={typeof key.root === 'number' ? `${keyLabelFr(key.root, key.scale)}${keyGuessed ? ' (devinée)' : ''}` : 'chromatique'}
+      onLive={(a, s) => globalCorrect(a, s, true)} onCommit={(a, s) => globalCorrect(a, s, false)} />
+  );
   const header = (
     <div className="np-bar flex min-h-[44px] flex-wrap items-center gap-2 px-2 py-1" data-testid="pitch-bar">
       <span className="mr-1 min-w-0 truncate text-[12px] font-black" id="pitch-title" title={clipName}>
@@ -958,7 +965,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           <button type="button" className="pr-cap pr-drop" data-testid="pitch-magnet" aria-haspopup="menu"
             title={tool === 'time' ? 'Grille du projet pour l’élastique (Alt : sans grille)' : 'Aimant de hauteur (Alt : sans aimant, Maj : au plus fin)'}
             onClick={ev => openMenuAt('aimant', 'Aimant', ev.currentTarget, magnetEntries())}>
-            <i className="fas fa-magnet" aria-hidden /> {tool === 'time' ? `Grille : ${GRIDS.find(g => g.v === grid)?.label}` : MAGNETS.find(m => m.id === magnet)!.label} <i className="fas fa-chevron-down" aria-hidden />
+            <i className="fas fa-magnet" aria-hidden /> {tool === 'time' ? `Grille : ${GRIDS.find(g => g.v === grid)?.label}` : `Aimant : ${MAGNETS.find(m => m.id === magnet)!.label.toLowerCase()}`} <i className="fas fa-chevron-down" aria-hidden />
           </button>
           <button type="button" className="pr-cap pr-drop" data-testid="pitch-menu-notes" aria-haspopup="menu"
             onClick={ev => { const r = ev.currentTarget.getBoundingClientRect(); openMenuAt('notes', 'Notes', ev.currentTarget, noteEntries({ x: r.left, y: r.bottom + 6 })); }}>
@@ -969,12 +976,9 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           </button>
         </>
       )}
-      {epure && status === 'ready' && (
-        <SimpleBar amount={draft.amount} style={draft.style} keyText={typeof key.root === 'number' ? `${keyLabelFr(key.root, key.scale)}${keyGuessed ? ' (devinée)' : ''}` : 'chromatique'}
-          onLive={(a, s) => globalCorrect(a, s, true)} onCommit={(a, s) => globalCorrect(a, s, false)} />
-      )}
+      {epure && !phone && status === 'ready' && simpleBar}
       <span className="mr-auto" />
-      {status === 'ready' && (
+      {status === 'ready' && !phone && (
         <>
           <span className="np-soft hidden text-[11px] sm:inline" data-testid="pitch-render-state" aria-live="polite">{renderBusy ? '⏳ Calcul du son…' : '✓ À jour'}</span>
           <button type="button" className="pr-cap" data-testid="pitch-loop" aria-pressed={playing === 'loop'} onClick={toggleLoop}
@@ -985,6 +989,17 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
         </>
       )}
       <button type="button" className="pr-cap" onClick={onClose} aria-label="Fermer l’éditeur de notes" data-testid="pitch-close">✕</button>
+      {phone && status === 'ready' && (
+        <div className="flex w-full flex-col gap-2 pb-1">
+          {epure && simpleBar}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="pr-cap flex-1" data-testid="pitch-loop" aria-pressed={playing === 'loop'} onClick={toggleLoop}>{playing === 'loop' ? '■' : '▶'} {selected.length ? 'Sélection' : 'Écouter'}</button>
+            <button type="button" className="pr-cap flex-1" data-testid="pitch-orig" aria-pressed={playing === 'orig'} onClick={toggleOrig}>{playing === 'orig' ? '■' : '▶'} Original</button>
+            {epure && <button type="button" className="pr-cap flex-1" data-testid="pitch-full" onClick={() => setEpure(false)}>Note par note…</button>}
+            <span className="np-soft w-full text-[11px]" data-testid="pitch-render-state" aria-live="polite">{renderBusy ? '⏳ Calcul du son…' : '✓ À jour · rien n’est effacé, ta prise d’origine est gardée'}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1004,7 +1019,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
         <div className="absolute bottom-0 left-0 right-0 flex" style={{ top: RULER_H }}>
           <canvas ref={keysRef} className="shrink-0" aria-hidden="true" />
           {voice && (
-            <canvas ref={canvasRef} role="img" data-testid="pitch-canvas" data-geom={geom} data-tool={tool}
+            <canvas ref={canvasRef} role="img" data-testid="pitch-canvas" data-geom={geom} data-sung={JSON.stringify(notes.map(n => +n.center.toFixed(4)))} data-tool={tool}
               aria-label={`Notes de ${clipName} dans un piano roll, avec la courbe de hauteur`}
               className="block touch-none"
               style={{ cursor: tool === 'cut' && !epure ? 'crosshair' : tool === 'time' && !epure ? 'ew-resize' : 'ns-resize' }}
@@ -1029,7 +1044,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           </div>
         )}
       </div>
-      <div className="np-bar flex min-h-[30px] items-center gap-3 border-t px-2 text-[11px]" style={{ borderColor: 'var(--pr-panel-line)' }} data-testid="pitch-selection">
+      <div className={`np-bar flex min-h-[30px] items-center gap-3 border-t px-2 text-[11px] ${phone ? '' : 'pr-32'}`} style={{ borderColor: 'var(--pr-panel-line)' }} data-testid="pitch-selection">
         <span role="status" className="min-w-0 truncate">{selInfo}</span>
         {selected.length > 0 && !epure && <button type="button" className="pr-cap" onClick={ev => { const r = ev.currentTarget.getBoundingClientRect(); setPop({ kind: 'settings', x: r.left, y: r.top }); }} data-testid="pitch-open-settings">Réglages…</button>}
         <span className="np-soft ml-auto hidden md:inline">{epure ? 'Rien n’est effacé : ta prise d’origine est gardée · Ctrl+Z annule' : '↑↓ demi-ton · Maj+↑↓ 2 cents · Alt sans aimant · Ctrl+Z annule'}</span>
@@ -1097,17 +1112,17 @@ const NumberField: React.FC<{ label: string; value: string; placeholder: string;
   );
 };
 
-const SimpleBar: React.FC<{ amount: number; style: CorrectStyle; keyText: string; onLive: (a: number, s: CorrectStyle) => void; onCommit: (a: number, s: CorrectStyle) => void }> = ({ amount, style, keyText, onLive, onCommit }) => (
-  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2" data-testid="pitch-global">
-    <label className="flex min-w-[200px] flex-1 items-center gap-2" title="Ramène chaque note vers la note de la gamme la plus proche. Les notes retouchées à la main ne bougent pas.">
+const SimpleBar: React.FC<{ amount: number; style: CorrectStyle; keyText: string; stacked?: boolean; onLive: (a: number, s: CorrectStyle) => void; onCommit: (a: number, s: CorrectStyle) => void }> = ({ amount, style, keyText, stacked, onLive, onCommit }) => (
+  <div className={`flex min-w-0 flex-1 gap-2 ${stacked ? 'w-full flex-col items-stretch' : 'flex-wrap items-center'}`} data-testid="pitch-global">
+    <label className={`flex items-center gap-2 ${stacked ? 'w-full flex-wrap' : 'min-w-[260px] flex-1'}`} title="Ramène chaque note vers la note de la gamme la plus proche. Les notes retouchées à la main ne bougent pas.">
       <span className="whitespace-nowrap text-[12px] font-black">🎯 Corriger la justesse</span>
       <input type="range" min={0} max={100} step={1} value={amount} aria-label="Dosage de la correction" data-testid="pitch-amount"
         onChange={e => onLive(Number(e.target.value), style)} onPointerUp={e => onCommit(Number((e.target as HTMLInputElement).value), style)}
         onKeyUp={e => onCommit(Number((e.target as HTMLInputElement).value), style)}
-        className="min-w-[90px] flex-1" style={{ accentColor: 'var(--pr-accent)', minHeight: 32 }} />
-      <span className="w-12 shrink-0 text-right font-mono text-[12px] font-black">{amount} %</span>
+        className="min-w-[110px] flex-1" style={{ accentColor: 'var(--pr-accent)', minHeight: 32 }} />
+      <span className="w-12 shrink-0 text-right font-mono text-[12px] font-black" data-testid="pitch-amount-value">{amount} %</span>
     </label>
-    <div role="radiogroup" aria-label="Style de correction" className="pr-seg">
+    <div role="radiogroup" aria-label="Style de correction" className={`pr-seg ${stacked ? 'self-start' : ''}`}>
       {([['naturel', 'Naturel', 'Garde la vie de ta voix : glissades, vibrato'], ['robot', 'Robot', 'Notes bien droites, sauts nets : l’effet rap']] as const).map(([id, label, hint]) => (
         <button key={id} type="button" role="radio" aria-checked={style === id} aria-pressed={style === id} title={hint} data-testid={`pitch-style-${id}`} className="pr-cap"
           onClick={() => onCommit(amount || 100, id)}>{label}</button>

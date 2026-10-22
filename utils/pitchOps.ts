@@ -4,7 +4,7 @@
  * hauteurs visées tombent sur une grille absolue de 2 cents.
  */
 import type { PitchNote } from './pitchAnalysis';
-import { NEUTRAL_EDIT, nearestScaleNote, nudgeEdit, targetCenter, type NoteEdit } from './pitchCorrect';
+import { NEUTRAL_EDIT, nearestScaleNote, targetCenter, type NoteEdit } from './pitchCorrect';
 import { FINE_STEP, roundFine } from './pitchText';
 
 export type Magnet = 'scale' | 'semi' | 'free';
@@ -41,8 +41,14 @@ export function dragPitch(notes: PitchNote[], base: (NoteEdit | undefined)[], id
 /** Flèches : ±1 demi-ton (la note retombe sur un demi-ton juste) ou ±2 cents (grille absolue). */
 export function nudge(note: PitchNote, edit: NoteEdit | undefined, dir: 1 | -1, fine: boolean): NoteEdit {
   const e = edit || NEUTRAL_EDIT;
-  if (!fine) return nudgeEdit(note, e, dir, 'semitone');
   const now = targetCenter(note, e);
+  if (!fine) {
+    // Sur un demi-ton juste (à moins d'un demi-cent) : un demi-ton plus loin ; sinon le
+    // premier pas retombe sur le demi-ton voisin dans le sens demandé (hauteur exacte).
+    const r = Math.round(now);
+    const dest = Math.abs(now - r) < 0.005 ? r + dir : dir > 0 ? Math.ceil(now) : Math.floor(now);
+    return withTarget(note, e, dest);
+  }
   const onGrid = Math.abs(now - roundFine(now)) < 1e-6;
   const t = onGrid ? roundFine(now) + dir * FINE_STEP : dir > 0 ? Math.ceil(now / FINE_STEP - 1e-9) * FINE_STEP : Math.floor(now / FINE_STEP + 1e-9) * FINE_STEP;
   return withTarget(note, e, r6(t));
