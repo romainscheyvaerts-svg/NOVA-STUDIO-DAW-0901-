@@ -3676,13 +3676,23 @@ function Studio() {
    * multiple). Une seule mise a jour d'etat pour tout le groupe : sinon chaque
    * clip declenchait son propre rendu et sa propre entree d'historique.
    */
-  const handleMoveClipsBy = useCallback((items: {trackId:string, clipId:string, start:number}[], delta: number) => {
+  const handleMoveClipsBy = useCallback((items: {trackId:string, clipId:string, start:number}[], delta: number, dest?: Record<string, string>) => {
     if (!items.length) return;
     setState(produce((draft: DAWState) => {
       items.forEach(it => {
-        const track = draft.tracks.find(t => t.id === it.trackId);
-        const clip = track?.clips.find(c => c.id === it.clipId);
-        if (clip) clip.start = Math.max(0, it.start + delta);
+        // Le clip peut déjà être passé sur une autre piste pendant ce glisser (sélection multiple
+        // glissée vers le haut ou le bas : utils/multiClipMove).
+        const track = draft.tracks.find(t => t.id === it.trackId && t.clips.some(c => c.id === it.clipId))
+          || draft.tracks.find(t => t.clips.some(c => c.id === it.clipId));
+        const idx = track ? track.clips.findIndex(c => c.id === it.clipId) : -1;
+        if (!track || idx < 0) return;
+        const clip = track.clips[idx];
+        clip.start = Math.max(0, it.start + delta);
+        const to = dest?.[it.clipId];
+        if (to && to !== track.id) {
+          const destTrack = draft.tracks.find(t => t.id === to);
+          if (destTrack) { track.clips.splice(idx, 1); destTrack.clips.push(clip); }
+        }
       });
     }));
   }, [setState]);

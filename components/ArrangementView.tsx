@@ -77,6 +77,7 @@ import { dragRefusal, explainLockedDrag } from '../utils/clipLock';
 import { runEditCommand } from '../utils/editCommands';
 import { useFollowPlayhead } from '../hooks/useFollowPlayhead';
 import FollowPlayheadButton from './FollowPlayheadButton';
+import { multiShiftFor, planMultiShift } from '../utils/multiClipMove';
 import { clampZoom, scrollForAnchor, sliderToZoom, zoomAnchor, zoomToSlider, SLIDER_STEPS, ZOOM_DEFAULT, type ZoomAnchor } from '../utils/arrangeZoom';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
@@ -122,7 +123,8 @@ interface ArrangementViewProps {
   recStartTime: number | null;
   onCreatePattern?: (trackId: string, time: number) => void;
   /** Decale d'un meme delta un ensemble de clips (deplacement groupe). */
-  onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
+  /** `dest` : piste d'arrivée de chaque clip (sélection glissée vers une autre piste). */
+  onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number, dest?: Record<string, string>) => void;
   /** Fin d'un déplacement de clips (R8) : l'automation suit les clips (préférence). Positions d'AVANT le geste. */
   onClipsMoved?: (moves: { clipId: string; fromTrackId: string; fromStart: number }[]) => void;
   onSwapInstrument?: (trackId: string) => void; 
@@ -334,6 +336,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
   const multiDragRef = useRef<{trackId:string, clipId:string, start:number}[] | null>(null);
+  // Sélection multiple glissée vers le haut ou le bas : décalage de pistes en cours et piste d'arrivée de chaque clip.
+  const multiShiftRef = useRef<{ shift: number; dest: Record<string, string> } | null>(null);
   /** Piste d'origine du clip saisi (l'automation suit le clip, R8). */
   const dragOriginTrackRef = useRef<string | null>(null);
   // Groupe d'édition (R12) : clips jumeaux des autres pistes du groupe, photographiés au début du geste.
@@ -489,6 +493,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         ? tracks.flatMap(tr => tr.clips.filter(c => selectedClipIds.has(c.id)).map(c => ({ trackId: tr.id, clipId: c.id })))
         : (sel ? [{ trackId: sel.trackId, clipId: sel.clip.id }] : []);
 
+      // S sans clip sélectionné : les clips de la piste choisie sous la tête de lecture (comme le
+      // curseur de Pro Tools, B / Ctrl+E). Avant : rien ne se passait, sans explication.
+      if (id === 'nova.split' && cibles.length === 0) { if (runEditCommand('split')) e.preventDefault(); return; }
       if (cibles.length === 0 || !id) return;
 
       switch (id) {
@@ -1679,7 +1686,14 @@ const handleMouseMove = (e: React.MouseEvent) => {
         // selectionnes, en une seule mise a jour d'etat.
         if (multiDragRef.current && multiDragRef.current.length > 1) {
             const delta = newStart - initialClipState.start;
-            onMoveClipsBy?.(multiDragRef.current, delta);
+            // Toute la sélection change de piste avec la souris (comme dans les DAW ; avant, un
+            // groupe ne bougeait que dans le temps), si chaque clip tombe sur une piste du même type.
+            const order = visibleTracks.map(t => ({ id: t.id, kind: String(t.type) }));
+            const wanted = multiShiftFor(order, dragOriginTrackRef.current || activeClip.trackId, targetTrackId);
+            const prev = multiShiftRef.current?.shift ?? 0;
+            const plan = planMultiShift(order, multiDragRef.current, wanted) || planMultiShift(order, multiDragRef.current, prev) || planMultiShift(order, multiDragRef.current, 0)!;
+            multiShiftRef.current = plan;
+            onMoveClipsBy?.(multiDragRef.current, delta, plan.dest);
             return;
         }
 
@@ -1801,7 +1815,10 @@ const handleMouseUp = () => {
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
     // Un simple clic (aucun déplacement) ne pose pas de crossfade.
     if (editCommands && activeClip && ((dragAction === 'MOVE' && movedRef.current) || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
-        const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
+        const dest = multiShiftRef.current?.dest;
+        const ids = multiDragRef.current && multiDragRef.current.length > 1
+            ? multiDragRef.current.map(it => ({ trackId: dest?.[it.clipId] || it.trackId, clipId: it.clipId }))
+            : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
         const byTrack = new Map<string, string[]>();
         // Clips jumeaux du groupe d'édition (R12) rognés en même temps : crossfade automatique aussi.
         [...ids, ...groupMatesRef.current.map(m => ({ trackId: m.trackId, clipId: m.clip.id }))]
@@ -1823,6 +1840,7 @@ const handleMouseUp = () => {
     setInitialClipState(null);
     marqueeOriginRef.current = null;
     multiDragRef.current = null;
+    multiShiftRef.current = null;
     groupMatesRef.current = [];
     setMarquee(null);
 };
