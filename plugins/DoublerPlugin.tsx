@@ -168,14 +168,15 @@ export class VocalDoublerNode {
       const sWidth = Math.max(0, Math.min(1, safe(width)));
       this.auto.get('width')!.setStatic(sWidth, { ...st, tau: 0.1 });
       
-      // Detune 0..1 => ecart de hauteur crete d'environ 0..15 cents.
-      // L'ecart de hauteur d'un retard module vaut 2*pi*f*A : on calcule
-      // l'amplitude A pour chaque LFO a partir de l'ecart voulu (avant :
-      // 4 cents au maximum, alors que l'interface affiche 15).
+      // Detune 0..1 => ecart de hauteur crete 0..15 cents (2^(15/1200) − 1 = 0,0087 :
+      // 0,0065 par le LFO lent, 0,0022 par le rapide). L'ecart de hauteur d'un retard
+      // module est sa pente : 2·pi·f·A pour un sinus, 4·f·A pour un triangle (le LFO
+      // rapide). Avant (22/10/2026), le triangle etait calcule comme un sinus : ±13,6
+      // cents au lieu de 15.
       const d = Math.max(0, Math.min(1, safe(detune)));
       for (const v of [this.voiceL, this.voiceR]) {
         const slowA = (d * 0.0065) / (2 * Math.PI * v.slowHz);
-        const fastA = (d * 0.0022) / (2 * Math.PI * v.fastHz);
+        const fastA = (d * 0.0022) / (4 * v.fastHz);
         this.setP(v.depthSlow.gain, slowA, 0.1);
         this.setP(v.depthFast.gain, fastA, 0.1);
       }

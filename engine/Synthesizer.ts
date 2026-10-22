@@ -65,7 +65,16 @@ export class Synthesizer {
     osc.start(t);
 
     const detach = this.ctrl.attachVoice([osc.detune], [filter.detune]);
-    osc.onended = () => detach();
+    // Débranchement quand l'oscillateur s'arrête VRAIMENT (temps audio). Avant : setTimeout de
+    // 0,4 s en temps réel après le relâchement PROGRAMMÉ. En rendu hors ligne (export) ou pour une
+    // note programmée à l'avance, la voix était débranchée avant d'avoir sonné : notes manquantes
+    // au hasard selon la vitesse du rendu (clips liés : export ≠ lecture, écart 0,395).
+    osc.onended = () => {
+      detach();
+      try { filter.disconnect(); } catch { /* déjà fait */ }
+      try { osc.disconnect(); } catch { /* déjà fait */ }
+      try { env.disconnect(); } catch { /* déjà fait */ }
+    };
     this.activeVoices.set(pitch, { osc, env, filter, detach });
   }
 
@@ -100,13 +109,7 @@ export class Synthesizer {
         this.figerEnveloppe(voice.env.gain, t);
         voice.env.gain.exponentialRampToValueAtTime(0.001, t + this.params.release);
         voice.osc.stop(t + this.params.release + 0.1); // Stop after release
-        
-        // FIX: Added a delayed disconnection for all nodes in the voice. This prevents memory leaks by ensuring audio nodes are cleaned up after they have finished playing.
-        setTimeout(() => {
-            try { voice.filter.disconnect(); } catch(e) {}
-            try { voice.osc.disconnect(); } catch(e) {}
-            try { voice.env.disconnect(); } catch(e) {}
-        }, (this.params.release + 0.2) * 1000);
+        // Les noeuds se débranchent à la fin réelle de l'oscillateur (osc.onended, temps audio).
 
       } catch (e) {
           // Ignore scheduling errors
@@ -121,11 +124,7 @@ export class Synthesizer {
         try {
             this.figerEnveloppe(voice.env.gain, now);
             voice.env.gain.linearRampToValueAtTime(0, now + 0.05);
-            voice.osc.stop(now + 0.05);
-            // FIX: Added a delayed disconnection for all nodes during `releaseAll`. This ensures a clean shutdown of all voices without causing audio artifacts from immediate disconnection.
-            setTimeout(() => {
-                try { voice.filter.disconnect(); voice.osc.disconnect(); voice.env.disconnect(); } catch(e) {}
-            }, 100);
+            voice.osc.stop(now + 0.05); // débranchement par osc.onended
         } catch(e) {}
     });
     this.activeVoices.clear();

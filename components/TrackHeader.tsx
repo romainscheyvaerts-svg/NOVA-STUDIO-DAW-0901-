@@ -788,7 +788,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               automation écrite), et toutes les actions du clic droit. Monté seulement à l'ouverture. */}
           {!simple && track.id !== 'master' && (
             <ToolbarMenu testId={`track-more-${track.id}`} menuLabel={`Piste ${track.name}`} width={260} alignRight
-              ariaLabel={`Plus d'options : ${track.name}`} title="Envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
+              ariaLabel={`Plus d'options : ${track.name}`} title="Plus d'options : envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
               triggerClassName="nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
               label={<i className="fas fa-ellipsis-h text-[10px]" aria-hidden="true" />}>
               {(close) => (<>
@@ -801,7 +801,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {!autoModeShown && (
                   <div className="px-2 py-1.5 flex items-center gap-2">
                     <span className="text-[11px] font-semibold text-slate-400">Automation</span>
-                    <div className="flex-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
+                    <div className="flex-1"><AutomationModeSelector track={track} onUpdate={(t) => { close(); onUpdate(t); }} variant="mixer" /></div>
                   </div>
                 )}
                 <button type="button" onClick={(e) => { close(); onContextMenu(e, track.id); }} className={menuRowClass(false)}

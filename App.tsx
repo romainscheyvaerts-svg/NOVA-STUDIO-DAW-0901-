@@ -5776,8 +5776,14 @@ function Studio() {
       try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
     }
     if (!seen) {
-      const t = setTimeout(() => setWelcomeOpen(true), 1200);
-      return () => clearTimeout(t);
+      // Déjà au travail (clic, toucher, touche) avant la fenêtre : on ne la pose pas par-dessus
+      // ce qu'on vient d'ouvrir (synthé, menu, piano roll…) ; elle reviendra à la prochaine visite.
+      const busy = () => { clearTimeout(t); off(); };
+      const off = () => { window.removeEventListener('pointerdown', busy, true); window.removeEventListener('keydown', busy, true); };
+      const t = setTimeout(() => { off(); setWelcomeOpen(true); }, 1200);
+      window.addEventListener('pointerdown', busy, true);
+      window.addEventListener('keydown', busy, true);
+      return () => { clearTimeout(t); off(); };
     }
   }, [showLanding, arrivedByLink]);
   const closeWelcome = () => {

@@ -5,6 +5,7 @@ import { hwCtx, useHwCanvas } from './hw/screens';
 import { termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth, fadeInOnInsert, TimelineLfo } from './vocalDspUtils';
+import { quartersToTime, tempoMapStore, timeToQuarters, type TempoMap } from '../utils/tempoMap';
 
 /**
  * PROFESSIONAL TAPE DELAY ENGINE v3.0
@@ -47,21 +48,40 @@ export interface DelayParams {
   isEnabled: boolean;
 }
 
-const DIVISION_FACTORS: Record<DelayDivision, number> = {
+/**
+ * Valeur de chaque note en noires. Triolets EXACTS (2/3, 1/3, 1/6) : avant (22/10/2026),
+ * 0,6667 / 0,3333 / 0,1667 décalaient l'écho d'un échantillon (1/4T à 90 BPM : +0,022 ms).
+ */
+export const DIVISION_FACTORS: Record<DelayDivision, number> = {
   '1/1': 4,
   '1/2': 2,
   '1/2D': 3,
   '1/4': 1,
   '1/4D': 1.5,
-  '1/4T': 0.6667,
+  '1/4T': 2 / 3,
   '1/8': 0.5,
   '1/8D': 0.75,
-  '1/8T': 0.3333,
+  '1/8T': 1 / 3,
   '1/16': 0.25,
   '1/16D': 0.375,
-  '1/16T': 0.1667,
+  '1/16T': 1 / 6,
   '1/32': 0.125,
 };
+
+/** Durée max d'un écho (taille des DelayNode : 4 s). */
+const MAX_ECHO_S = 3.99;
+
+/**
+ * Temps d'écho (s) qui fait tomber la répétition d'un son joué à l'instant `songT` (s, dans le
+ * morceau) EXACTEMENT `q` noires plus loin dans la carte de tempo : à l'instant t de lecture,
+ * le retard vaut t − (instant situé q noires avant t). Tempo constant : q × 60 / bpm. Après
+ * une marche de tempo, il glisse en ligne droite d'une valeur à l'autre ; dans une rampe, il
+ * suit la rampe (l'écho reste sur la note, en lecture comme à l'export).
+ */
+export function echoDelayAt(map: TempoMap, songT: number, q: number): number {
+  const t = Math.max(0, songT);
+  return Math.min(MAX_ECHO_S, Math.max(0, t - quartersToTime(map, timeToQuarters(map, t) - q)));
+}
 
 /**
  * Une ligne de retard avec sa propre boucle de reinjection :
@@ -401,19 +421,24 @@ export class SyncDelayNode {
     const beatDuration = 60 / bpm;
     const factor = (d: DelayDivision | undefined) => DIVISION_FACTORS[d as DelayDivision] ?? 1;
     // 4 s max (taille des DelayNode)
-    const delayL = Math.min(3.99, beatDuration * factor(this.params.division));
-    const delayR = Math.min(3.99, beatDuration * factor(this.params.divisionR || this.params.division));
+    const delayL = Math.min(MAX_ECHO_S, beatDuration * factor(this.params.division));
+    const delayR = Math.min(MAX_ECHO_S, beatDuration * factor(this.params.divisionR || this.params.division));
 
     if (this.params.isEnabled) {
-      // Main delay times (glissement doux facon bande, pas de clic)
-      this.setP(this.lineL.delay.delayTime, delayL, 0.05);
-      this.setP(this.lineR.delay.delayTime, delayR, 0.05);
+      // Main delay times (glissement doux facon bande, pas de clic).
+      // Carte de tempo (changements, rampes) pendant la lecture / l'export : les temps suivent la carte.
+      if (!this.scheduleTempo(now)) {
+        this.setP(this.lineL.delay.delayTime, delayL, 0.05);
+        this.setP(this.lineR.delay.delayTime, delayR, 0.05);
+      }
 
       // Multi-tap times (fractions of main delay)
       if (this.params.multiTap) {
-        this.setP(this.tap2Delay.delayTime, delayL * 0.5, 0.05);
-        this.setP(this.tap3Delay.delayTime, delayL * 0.75, 0.05);
-        this.setP(this.tap4Delay.delayTime, delayL * 0.25, 0.05);
+        if (!this.tempoScheduled) {
+          this.setP(this.tap2Delay.delayTime, delayL * 0.5, 0.05);
+          this.setP(this.tap3Delay.delayTime, delayL * 0.75, 0.05);
+          this.setP(this.tap4Delay.delayTime, delayL * 0.25, 0.05);
+        }
         this.setP(this.tap2Gain.gain, safe(this.params.tap2Level, 0.5), T);
         this.setP(this.tap3Gain.gain, safe(this.params.tap3Level, 0.35), T);
         this.setP(this.tap4Gain.gain, safe(this.params.tap4Level, 0.2), T);
@@ -479,7 +504,75 @@ export class SyncDelayNode {
 
   /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
   public get followsTimeline(): boolean { return true; }
-  public syncTimeline(origin: number, at?: number) { this.modLFO1.sync(origin, at); this.modLFO2.sync(origin, at); }
+  public syncTimeline(origin: number, at?: number) {
+    this.modLFO1.sync(origin, at); this.modLFO2.sync(origin, at);
+    // Carte de tempo : `origin` = instant du contexte où le morceau commence (lecture comme export).
+    this.tempoOrigin = origin;
+    if (!this.tempoUnsub) this.tempoUnsub = tempoMapStore.subscribe(() => { if (this.tempoOrigin !== null) this.scheduleTempo(this.ctx.currentTime); });
+    this.scheduleTempo(Math.max(this.ctx.currentTime, at ?? 0));
+  }
+
+  /** Instant du contexte où le morceau commence (null : pas encore calé sur la lecture / l'export). */
+  private tempoOrigin: number | null = null;
+  private tempoUnsub: (() => void) | null = null;
+  /** Vrai quand les temps d'écho sont programmés sur la carte de tempo. */
+  private tempoScheduled = false;
+
+  /**
+   * Programme les temps d'écho le long de la carte de tempo (marches et rampes) à partir de
+   * `from` (instant du contexte). Tempo constant (une seule section) : rien à programmer, on
+   * garde le réglage fixe. Renvoie vrai si les temps sont programmés.
+   */
+  private scheduleTempo(from: number): boolean {
+    const map = tempoMapStore.get();
+    const origin = this.tempoOrigin;
+    const lines: [AudioParam, number][] = [];
+    const qL = DIVISION_FACTORS[this.params.division] ?? 1;
+    const qR = DIVISION_FACTORS[(this.params.divisionR || this.params.division) as DelayDivision] ?? qL;
+    lines.push([this.lineL.delay.delayTime, qL], [this.lineR.delay.delayTime, qR]);
+    if (this.params.multiTap) lines.push([this.tap2Delay.delayTime, qL * 0.5], [this.tap3Delay.delayTime, qL * 0.75], [this.tap4Delay.delayTime, qL * 0.25]);
+    const wasScheduled = this.tempoScheduled;
+    if (origin === null || !map || map.segments.length <= 1 || !this.params.isEnabled) {
+      this.tempoScheduled = false;
+      if (wasScheduled) {
+        // Retour au tempo fixe : on efface la programmation.
+        const beat = 60 / Math.max(20, Math.min(400, Number.isFinite(this.params.bpm) ? this.params.bpm : 120));
+        for (const [p, q] of lines) { p.cancelScheduledValues(from); p.setValueAtTime(Math.min(MAX_ECHO_S, q * beat), from); }
+      }
+      return false;
+    }
+    const s0 = Math.max(0, from - origin);
+    const last = map.segments[map.segments.length - 1];
+    // Au-delà du dernier changement + 2 échos au plus long, le retard ne bouge plus.
+    const s1 = Math.max(s0, last.time + 2 * MAX_ECHO_S);
+    const STEP = 0.01;
+    for (const [p, q] of lines) {
+      p.cancelScheduledValues(from);
+      // Instants à poser : une grille de 10 ms, plus les cassures EXACTES de la courbe (chaque
+      // changement de tempo, et l'instant situé q noires après lui) : une marche donne deux
+      // droites exactes, une rampe une courbe lisse (écart < 1 µs entre deux points).
+      const ts: number[] = [];
+      for (let s = s0; s <= s1 + 1e-9; s += STEP) ts.push(s);
+      for (const seg of map.segments) {
+        for (const k of [seg.time, quartersToTime(map, seg.q + q)]) if (k > s0 && k < s1) ts.push(k);
+      }
+      ts.sort((x, y) => x - y);
+      let pT = ts[0], pV = echoDelayAt(map, pT, q), slope = NaN;
+      p.setValueAtTime(pV, origin + pT);
+      // On ne garde que les cassures de pente (une droite = un seul segment).
+      for (let k = 1; k < ts.length; k++) {
+        const s = ts[k];
+        if (s - pT < 1e-7) continue;
+        const v = echoDelayAt(map, s, q);
+        const sl = (v - pV) / (s - pT);
+        if (Number.isFinite(slope) && Math.abs(sl - slope) > 1e-9) p.linearRampToValueAtTime(pV, origin + pT);
+        slope = sl; pT = s; pV = v;
+      }
+      p.linearRampToValueAtTime(pV, origin + pT);
+    }
+    this.tempoScheduled = true;
+    return true;
+  }
 
   public getParameters(): PluginParameter[] {
     return [
@@ -500,6 +593,7 @@ export class SyncDelayNode {
   }
 
   public dispose() {
+    this.tempoUnsub?.(); this.tempoUnsub = null; this.tempoOrigin = null;
     try {
       this.modLFO1?.stop();
       this.modLFO2?.stop();

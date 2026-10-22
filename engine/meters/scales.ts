@@ -5,9 +5,18 @@
  *
  *  - crête : la barre suit la crête échantillon (retombée rapide), le RMS
  *    est dessiné à l'intérieur, plus sombre ;
- *  - RMS (VU, K) : la barre suit le RMS intégré sur 300 ms, la crête est un
- *    trait fin au-dessus.
+ *  - RMS (VU, K) : la barre suit le RMS avec la balistique VU (99 % en 300 ms),
+ *    la crête est un trait fin au-dessus.
+ *
+ * Référence des échelles RMS (VU, K-System) : comme sur une console et chez Bob
+ * Katz, le RMS est lu à la convention AES17 — un SINUS se lit à son niveau de
+ * crête (RMS + 3,01 dB). « 0 VU = −18 dBFS » veut donc dire : un sinus dont la
+ * crête est à −18 dBFS met l'aiguille à 0 VU (alignement des consoles, EBU R68).
+ * Avant (22/10/2026), le RMS brut était affiché : ce sinus lisait −3 VU.
  */
+
+/** Écart AES17 entre le RMS brut d'un sinus et son niveau de crête : 10·log10(2) dB. */
+export const AES17_SINE_DB = 10 * Math.log10(2);
 
 export type MeterScaleId = 'pt' | 'dbfs' | 'vu' | 'k20' | 'k14' | 'k12';
 
@@ -32,7 +41,7 @@ export interface MeterScale {
 
 const k = (id: 'k20' | 'k14' | 'k12', ref: number): MeterScale => ({
   id, label: `K-${-ref}`, ballistics: 'rms',
-  hint: `K-System ${-ref} (Bob Katz) : 0 = ${ref} dBFS RMS, le haut = 0 dBFS. ${ref === -20 ? 'Musique dynamique, film, classique.' : ref === -14 ? 'Pop, rock, la plupart des mixes.' : 'Radio, mastering très fort.'} Vert sous 0, ambre jusqu'à +4, rouge au-dessus.`,
+  hint: `K-System ${-ref} (Bob Katz) : 0 = ${ref} dBFS RMS (sinus à ${ref} dBFS), le haut = 0 dBFS. ${ref === -20 ? 'Musique dynamique, film, classique.' : ref === -14 ? 'Pop, rock, la plupart des mixes.' : 'Radio, mastering très fort.'} Vert sous 0, ambre jusqu'à +4, rouge au-dessus.`,
   floorDb: ref - 24, topDb: 0, refDb: ref,
   curve: [[ref - 24, 0], [0, 1]],
   marks: [-ref, 12, 8, 4, 0, -4, -8, -12, -20].filter((v, i, a) => v <= -ref && a.indexOf(v) === i).map(v => ({ db: ref + v, label: v > 0 ? `+${v}` : String(v) })),
@@ -58,7 +67,7 @@ export const METER_SCALES: MeterScale[] = [
   },
   {
     id: 'vu', label: 'VU', ballistics: 'rms',
-    hint: 'VU-mètre : RMS intégré sur 300 ms, 0 VU = −18 dBFS (alignement des consoles et des plugins analogiques).',
+    hint: 'VU-mètre : balistique VU (99 % en 300 ms), 0 VU = sinus à −18 dBFS (alignement des consoles et des plugins analogiques).',
     floorDb: -38, topDb: -15, refDb: -18,
     curve: [[-38, 0], [-28, 0.3], [-25, 0.42], [-23, 0.52], [-21, 0.63], [-19, 0.76], [-18, 0.82], [-15, 1]],
     marks: [3, 0, -3, -5, -7, -10, -20].map(v => ({ db: -18 + v, label: v > 0 ? `+${v}` : String(v) })),
@@ -91,4 +100,12 @@ export function scaleReading(s: MeterScale, dbfs: number): string {
   const v = dbfs - s.refDb;
   const t = v.toFixed(1).replace('.', ',').replace('-', '−');
   return v > 0.05 && s.refDb !== 0 ? `+${t}` : t;
+}
+
+/**
+ * Niveau (dBFS) que suit la barre principale de l'échelle : la crête, ou le RMS à la
+ * convention AES17 (sinus lu à sa crête) pour les échelles RMS (VU, K).
+ */
+export function meterMainDb(s: MeterScale, peakDb: number, rmsDb: number): number {
+  return s.ballistics === 'peak' ? peakDb : rmsDb + AES17_SINE_DB;
 }

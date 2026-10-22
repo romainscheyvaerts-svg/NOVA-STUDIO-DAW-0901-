@@ -278,16 +278,23 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       while (ta > limit) ta -= P;
       this.anaMark = ta;
 
+      // Grain pose a sa position EXACTE (fractionnaire) : le grain est relu decale de la partie
+      // fractionnaire et sa fenetre centree dessus. Avant (22/10/2026), la position etait arrondie a
+      // l'echantillon : periode de sortie juste en moyenne, mais tremblante de ±0,5 echantillon
+      // (±4 cents a 220 Hz, ±8 cents a 440 Hz, d'une periode a l'autre).
       const tsI = Math.round(ts);
-      const base = Math.floor(ta);
-      const frac = ta - base;
+      const delta = ts - tsI;
+      const taEff = ta - delta;
+      const base = Math.floor(taEff);
+      const frac = taEff - base;
       const Pi = Math.floor(P);
       const invP = Math.PI / P;
       // Jamais d'ecriture dans des echantillons deja sortis.
       const kStart = Math.max(-Pi + 1, this.outCount - tsI);
       const inB = this.inBuf, acc = this.acc, ws = this.wsum, M = this.MASK;
       for (let k = kStart; k < Pi; k++) {
-        const w = 0.5 + 0.5 * Math.cos(k * invP);
+        const u = k - delta;
+        const w = u <= -P || u >= P ? 0 : 0.5 + 0.5 * Math.cos(u * invP);
         const i0 = (base + k) & M;
         const s0 = inB[i0];
         const s = s0 + (inB[(i0 + 1) & M] - s0) * frac;
