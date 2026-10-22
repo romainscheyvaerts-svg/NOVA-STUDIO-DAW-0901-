@@ -237,10 +237,28 @@ def _bridge_import_path() -> None:
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), "bridge-python"))
 
 
+def lean_numpy() -> None:
+    """numpy charge OpenBLAS avec un fil et une réserve de calcul par cœur : ~750 Mo de mémoire
+    engagée et ~23 fils inutiles par pont sur un processeur de 24 cœurs (mesuré, 1.5.15), alors
+    que les ponts ne font que de petits calculs par bloc. Un seul fil de calcul pour ce processus
+    (variable remise ensuite : les modules stems / voix lancés plus tard gardent tous les cœurs).
+    OPENBLAS_NUM_THREADS déjà réglé par l'utilisateur : respecté."""
+    if "numpy" in sys.modules or os.environ.get("OPENBLAS_NUM_THREADS"):
+        return
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    try:
+        import numpy  # noqa: F401
+    except Exception:
+        pass
+    finally:
+        os.environ.pop("OPENBLAS_NUM_THREADS", None)
+
+
 def run_bridge(kind: str) -> int:
     _redirect_output(kind)
     print(f"processus : {tune_process()}")
     _bridge_import_path()
+    lean_numpy()
     if kind == "asio":
         import asyncio
         import asio_bridge
@@ -1471,6 +1489,7 @@ def main() -> int:
     if argv and argv[0] == "--probe-vst3":
         # Pont VST : lecture des plugins (instrument ou effet ?) dans un processus enfant
         _bridge_import_path()
+        lean_numpy()
         import vst_probe
         vst_probe.child_main()
         return 0
