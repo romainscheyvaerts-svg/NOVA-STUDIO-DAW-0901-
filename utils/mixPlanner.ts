@@ -28,6 +28,7 @@ import type { PluginInstance } from '../types';
 import type { VstParam } from './autotuneVst';
 import { classifyPlugin, CompType, FxCategory, paramRoles, PluginSetting, toSetting, unitOf } from './vstKnowledge';
 import type { Dims } from './mixStyles';
+import { retuneMsFromSpeed } from './tuneSpeed';
 
 export interface KnownPlugin {
   key: string;
@@ -302,7 +303,7 @@ export const planVoiceMix = (ctx: PlanContext): MixPlan => {
   if (v('tune') > 0.2) {
     const speed = typeof ctx.tuneSpeed === 'number' ? ctx.tuneSpeed : v('tune') >= 0.9 ? 0 : 0.25;
     plan.autotune = { speed, humanize: speed >= 0.25 ? 0.35 : 0, mix: v('tune') >= 0.6 ? 1 : 0.6 };
-    plan.summary.push(`justesse : autotune calé sur la gamme du beat (vitesse ${Math.round(speed * 100)} ms)`);
+    plan.summary.push(`justesse : autotune calé sur la gamme du beat (vitesse ${Math.round(retuneMsFromSpeed(speed))} ms)`);
   }
 
   // 3. Compression n°1 (prise) : rapide, VCA ou FET, ratio 2:1 réglable OBLIGATOIRE.

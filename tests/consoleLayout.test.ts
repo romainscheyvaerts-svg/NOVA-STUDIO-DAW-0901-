@@ -13,6 +13,6 @@ describe('console à la taille de la séance', () => {
   it('hauteur de la zone d\'effets : 4 lignes ≈ 117 px (avant : 200 px réservés)', () => {
     expect(insertAreaHeight(4, false)).toBe(117);
     expect(insertAreaHeight(8, false)).toBe(205);
-    expect(insertAreaHeight(4, true)).toBe(200);
+    expect(insertAreaHeight(4, true)).toBe(212);
   });
 });

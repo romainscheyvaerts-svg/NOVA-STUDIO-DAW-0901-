@@ -58,8 +58,8 @@ const InputMeter: React.FC<{ trackId: string; compact?: boolean }> = ({ trackId,
         title={clip ? 'Saturation détectée : baisse le gain de ta carte son / éloigne-toi du micro. Clic pour effacer.' : `Diode de saturation${compact ? ` (crête ${v.hold <= -89 ? '-∞' : v.hold.toFixed(1)} dB)` : ''}`}
         aria-label={clip ? 'Saturation détectée, cliquer pour effacer' : 'Pas de saturation'}
         className={compact
-          ? `shrink-0 h-2.5 w-2.5 rounded-full ${clip ? 'bg-red-600' : 'bg-white/15 [[data-theme=light]_&]:bg-slate-300'}`
-          : `h-4 px-1 rounded text-[8px] font-black ${clip ? 'bg-red-600 text-white' : 'bg-white/5 text-slate-600'}`}
+          ? `nova-hit-tactile shrink-0 h-2.5 w-2.5 rounded-full ${clip ? 'bg-red-600' : 'bg-white/15 [[data-theme=light]_&]:bg-slate-300'}`
+          : `nova-hit-tactile h-4 px-1 rounded text-[8px] font-black ${clip ? 'bg-red-600 text-white' : 'bg-white/5 text-slate-600'}`}
       >
         {compact ? null : 'CLIP'}
       </button>

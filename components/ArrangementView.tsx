@@ -31,6 +31,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
+import { haptic } from '../utils/haptics';
 import { visibleEnvelope, visibleSamples } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
@@ -1120,7 +1121,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current || clipGainActiveRef.current) ev.preventDefault(); };
+    // Deux doigts : pincement / défilement gérés par NOVA (sinon le navigateur annule les pointeurs en défilant).
+    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current || clipGainActiveRef.current || (ev.touches.length >= 2 && pinchRef.current)) ev.preventDefault(); };
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => el.removeEventListener('touchmove', onTouchMove);
   }, []);
@@ -1159,10 +1161,42 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
    *  = défilement / zoom à deux doigts : jamais un appui long, jamais un nouveau geste. */
   const touchPointersRef = useRef<Set<number>>(new Set());
   const gestureFingerRef = useRef<number | null>(null);
+  /** Position de chaque doigt posé, et pincement en cours (deux doigts) : zoom horizontal ancré sous
+   *  le milieu des doigts + défilement à deux doigts. Avant : deux doigts ne faisaient rien (la page
+   *  ne zoome pas, user-scalable=no), seul le curseur de zoom de la barre servait. */
+  const fingerPosRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ d0: number; z0: number; time: number; my0: number; st0: number; atBound: boolean } | null>(null);
+  const pinchGeo = () => {
+    const pts = [...fingerPosRef.current.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return { d: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  };
+  const startPinch = () => {
+    const el = scrollContainerRef.current, g = pinchGeo();
+    if (!el || !g) return;
+    const rect = el.getBoundingClientRect();
+    pinchRef.current = { d0: g.d, z0: zoomHRef.current, time: Math.max(0, (el.scrollLeft + g.mx - rect.left - headerWidthRef.current) / zoomHRef.current), my0: g.my, st0: el.scrollTop, atBound: false };
+  };
+  const movePinch = () => {
+    const el = scrollContainerRef.current, p = pinchRef.current, g = pinchGeo();
+    if (!el || !p || !g) return;
+    const rect = el.getBoundingClientRect();
+    const raw = p.z0 * (g.d / p.d0);
+    const z = clampZoom(raw, durationRef.current);
+    if (z !== raw && !p.atBound) haptic('select');
+    p.atBound = z !== raw;
+    el.scrollTop = Math.max(0, p.st0 - (g.my - p.my0));
+    const pointerX = g.mx - rect.left;
+    if (Math.abs(z - zoomHRef.current) > 1e-6) { pendingZoomAnchorRef.current = { time: p.time, pointerX }; setZoomH(z); }
+    else { el.scrollLeft = Math.max(0, p.time * z + headerWidthRef.current - pointerX); setScrollLeft(el.scrollLeft); }
+  };
   /** Geste interrompu par un 2e doigt : sa fin n'est pas un « clic » (Spot n'ouvre rien). */
   const gestureAbortedRef = useRef(false);
   const endTouch = (pointerId: number) => {
     touchPointersRef.current.delete(pointerId);
+    fingerPosRef.current.delete(pointerId);
+    if (fingerPosRef.current.size < 2) pinchRef.current = null;
     cancelLongPress();
     // Le lever d'un 2e doigt ne termine pas le geste du premier.
     if (gestureFingerRef.current !== pointerId) return;
@@ -3167,12 +3201,14 @@ useEffect(() => {
             const fingers = touchPointersRef.current;
             // Premier doigt posé (isPrimary) : aucun autre doigt n'est sur l'écran
             // (un lever perdu ne laisse pas un doigt fantôme).
-            if (e.isPrimary) fingers.clear();
+            if (e.isPrimary) { fingers.clear(); fingerPosRef.current.clear(); pinchRef.current = null; }
             fingers.add(e.pointerId);
+            fingerPosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
             // Deuxième doigt : défilement ou zoom à deux doigts, pas un nouveau geste
             // (ni un appui long sous ce doigt, ni la fin de celui du premier doigt).
             if (fingers.size > 1) {
               cancelLongPress();
+              if (fingers.size === 2) startPinch();
               // Le geste du premier doigt s'arrête là (sans valoir un clic) : le clip ne suit
               // plus ce doigt et le navigateur peut faire défiler / zoomer à deux doigts.
               if (gestureFingerRef.current !== null) {
@@ -3221,6 +3257,8 @@ useEffect(() => {
           }}
           onPointerMove={(e) => {
             if (e.pointerType === 'mouse') return;
+            if (fingerPosRef.current.has(e.pointerId)) fingerPosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (pinchRef.current) { movePinch(); return; }
             if (e.pointerId !== gestureFingerRef.current) return;
             const lp = longPressRef.current;
             if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();

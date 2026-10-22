@@ -21,7 +21,8 @@ import { TrackType, type Track } from '../types';
 const RATES = [44100, 48000];
 let restore: () => void = () => {};
 let engine: any;
-beforeAll(async () => { restore = installMiniWebAudio(); engine = (await import('../engine/AudioEngine')).audioEngine; });
+// Import du moteur complet : plus de 10 s quand toute la suite tourne en parallèle (délai du crochet relevé).
+beforeAll(async () => { restore = installMiniWebAudio(); engine = (await import('../engine/AudioEngine')).audioEngine; }, 120_000);
 afterAll(() => { restore(); flushMetroLog('console'); });
 afterEach(() => assertMetro());
 

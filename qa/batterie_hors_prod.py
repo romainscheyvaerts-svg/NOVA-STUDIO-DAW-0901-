@@ -248,6 +248,19 @@ BATTERIE = [
     # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
     # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
     ("pianoroll_pratique", []),
+    # 22/10/2026 · tour tactile : iPhone 390 × 844 (sombre, clair), iPhone couché 844 × 390, petit Android 360 × 800,
+    # iPad 820 × 1180 / 1180 × 820, iPad mini 744 × 1133, au doigt (encoche et barre d'accueil simulées) : parcours
+    # instru → 2 prises → écoute → export compté, cibles < 32 px, recouverts, sous l'encoche, défilement parasite,
+    # pincer pour zoomer (ancré sous les doigts), glisser à un doigt, double-toucher sans zoom de la page.
+    ("tactile_audit", ["--strict"]),
+    # 23/10/2026 · éléments flottants (« Et maintenant ? », conseils de Nova, « Filmer la prise », bouton Nova, messages) :
+    # jamais sur la timeline ni la console ; bureau 1366 / 1600 / 1920, tablette 1024, iPad portrait et paysage.
+    ("flottants", []),
+    # 23/10/2026 · boîte à rythmes et piano roll au doigt (téléphone 390, iPad 820) : pas de 44 px, toucher, glisser
+    # pour peindre, appui long = menu, barre du piano roll sans défilement, pincer pour zoomer, cibles ≥ 32 px.
+    ("beat_doigt", []),
+    # 22/10/2026 : Nova Tune (fenêtre sobre, réglages avancés repliés, préréglages sourcés, notes cibles), bureau et téléphone.
+    ("nova_tune", []),
     # 23/10/2026 · Nova Pitch « Notes de la voix » : double-clic sur un clip de voix → éditeur en bas (analyse avec
     # avancement), note glissée (aimant gamme), Maj+↑ = 2 cents, ↑ = demi-ton, saisie « La2 +4 », Corriger la sélection,
     # réglages (gain, formant), élastique (×1,3, voisine qui s'adapte, double-clic = durée d'origine), couper / fusionner,

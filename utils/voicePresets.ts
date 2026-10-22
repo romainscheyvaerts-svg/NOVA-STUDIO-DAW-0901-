@@ -28,6 +28,7 @@
  */
 import type { PluginInstance, PluginType, Track, VoiceChainState } from '../types';
 import { ANALOG_SPECS } from '../engine/analogCompParams';
+import { speedFromRetuneMs } from './tuneSpeed';
 import { V21_DEFAULTS } from '../engine/v21Params';
 import { VOICE_PRESET_CALIB, type VoicePresetCalib } from './voicePresetCalib';
 import { PRESET_DEFS } from './voicePresetDefs';
@@ -183,8 +184,13 @@ const dbToGain = (db: number) => Math.pow(10, db / 20);
 export const gainToDb = (g: number) => (g > 0 ? 20 * Math.log10(g) : -Infinity);
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-/** Temps de correction (ms) → réglage « vitesse » de Nova Tune (0-1, ms = 300 × v²). */
-export const tuneSpeedFromMs = (ms: number) => r2(Math.sqrt(Math.max(0, ms) / 300));
+/**
+ * Temps de correction (ms) d'une recette publiée → réglage « vitesse » de Nova Tune (0-1).
+ * Les recettes donnent la vitesse des correcteurs du marché, dont la convention (mesurée en
+ * boîte noire le 22/10/2026) est la demi-vie de l'écart : voir utils/tuneSpeed.ts. Avant, la
+ * conversion prenait ces ms pour une constante de temps : correction 1,44 × trop rapide.
+ */
+export const tuneSpeedFromMs = (ms: number) => speedFromRetuneMs(ms);
 
 const DENOISE_PARAMS = {
   threshold: -60, range: -30, attack: 0.002, hold: 0.08, release: 0.08, scFreq: 250, flip: false,
