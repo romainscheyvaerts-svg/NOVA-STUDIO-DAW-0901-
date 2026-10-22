@@ -214,6 +214,12 @@ BATTERIE = [
     # attaque 5 ms, relâchement 80 ms) ; export de la basse seule = creux à chaque coup (≥ 6 dB), lecture = même courbe ;
     # coupé, Ctrl+Z, sauvegarde + rechargement ; téléphone.
     ("modulateurs_suiveur", []),
+    # 22/10/2026 · audit mix : séance de 60 pistes dans la console (fader de 200 px au lieu de 57 sur un écran de 900 px,
+    # nom de piste visible), Ctrl+glisser fin, Alt+clic = défaut, saisie d'une valeur au clavier (fader, pan, bouton de
+    # façade), « Ajouter un effet » avec Récents / Favoris / VST du PC (pont simulé), 10 fenêtres d'effet (Maj+clic,
+    # cascade, devant au clic, Échap = celle de devant, Maj+Échap = toutes, punaise), copie d'un insert sur les pistes
+    # d'un bus (Ctrl+Z), latence des effets affichée sur la tranche.
+    ("auditmix", []),
 ]
 
 
