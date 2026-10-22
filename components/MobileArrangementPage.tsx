@@ -723,7 +723,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </select></>}
       </div>
 
-      {!(keptZone && kept && !keptZone.closed[kept.t.id]) && tipCard}
+      {/* Cartes « Et après ? » / « Être prévenu… » : cachées seulement quand la carte des prises gardées a du
+          contenu (prise à garder ou lignes). Depuis que la playlist vide est visible d'office sur la piste REC,
+          elles ne s'affichaient plus jamais au téléphone (audit de nuit 22/10/2026, qa/notifications.py). */}
+      {!(keptZone && kept && !keptZone.closed[kept.t.id] && (kept.lanes.length > 0 || !!kept.candidate)) && tipCard}
       {topCard}
       {keptZone && kept && (
         <KeptTakesCard track={kept.t} lanes={kept.lanes} open={!keptZone.closed[kept.t.id]} api={keptZone} candidate={kept.candidate}

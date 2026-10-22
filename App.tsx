@@ -11856,9 +11856,12 @@ function Studio() {
       <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
         onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
         busy={!!nextStep || countInBeat !== null} simple={simpleMode} />
+      {/* « Être prévenu… » : sur ordinateur, pas en même temps que la carte « étape suivante » (deux cartes
+          flottantes). Téléphone : les deux sont posées dans la page à des places différentes ; avant (audit de nuit
+          22/10/2026), la carte « étape suivante » toujours là au téléphone empêchait la proposition pour de bon. */}
       <NotificationsHost open={notifOpen} onOpen={() => setNotifOpen(true)} onClose={() => setNotifOpen(false)} isMobile={isMobile} simple={simpleMode}
         inCollab={!!collab} meKey={collab?.key || 'local'} comments={state.timelineComments} versions={state.mixVersions}
-        busy={!!state.isRecording || countInBeat !== null || !!nextStep} sessionId={cloudSession?.id || null}
+        busy={!!state.isRecording || countInBeat !== null || (!isMobile && !!nextStep)} sessionId={cloudSession?.id || null}
         openComment={id => reviews.openAt(id)} openVersion={id => reviews.openAt(id, 'versions')} seek={t => handleSeek(Math.max(0, t))} />
 
       {/* R23 : changer de beat (fenêtre + carte Avant / Après), passage refait (avant / après) */}
