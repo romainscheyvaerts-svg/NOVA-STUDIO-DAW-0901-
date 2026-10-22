@@ -52,7 +52,7 @@ export function parseHits(pattern: string): { vel: number[]; ratchet: number[] }
 
 const ROLE_PAD: Record<string, string> = Object.fromEntries(KIT_PAD_LAYOUT.map(s => [s.role, s.id]));
 /** Rôle d'une ligne de recette → pad de la boîte à rythmes. Les rôles sans pad du même nom vont sur un pad voisin. */
-const padFor = (role: string) => ROLE_PAD[role] || (role === 'snap' ? 'clap' : role === 'rim' ? 'fx' : 'perc');
+export const padFor = (role: string) => ROLE_PAD[role] || (role === 'snap' ? 'clap' : role === 'rim' ? 'fx' : 'perc');
 
 // ── Squelette ─────────────────────────────────────────────────────────────────────────────
 export interface SkeletonDrums {

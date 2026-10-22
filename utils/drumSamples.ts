@@ -1,5 +1,6 @@
 import type { DrumMachine, DrumRow } from './drumKits';
-import { STEPS_PER_BAR } from './drumPatterns';
+import { mapPatternRecords, STEPS_PER_BAR } from './drumPatterns';
+import { bakeKey } from './padSampler';
 
 /**
  * V16 · Tes propres samples sur les pads (comme le Drum Rack / Drum Sampler
@@ -52,7 +53,10 @@ export const hasRegion = (r: Partial<DrumRow>) => {
 /** Clé de cache du son prêt à jouer d'un pad. */
 export const padLoadKey = (r: Partial<DrumRow>, root: number) => {
   const g = regionOf(r);
-  return `${r.sound}|${root}|${hasRegion(r) ? [g.start, g.end, g.fadeIn, g.fadeOut, g.reverse ? 1 : 0].map(v => +(+v).toFixed(5)).join(',') : ''}`;
+  // Sampler du pad (polarité, normalisation, drive, résolution, durée gardée, fondu de boucle) : clé
+  // ajoutée seulement s'il traite le son — la clé d'un pad d'avant ne change pas.
+  const bk = bakeKey(r.smp, r.tune || 0);
+  return `${r.sound}|${root}|${hasRegion(r) ? [g.start, g.end, g.fadeIn, g.fadeOut, g.reverse ? 1 : 0].map(v => +(+v).toFixed(5)).join(',') : ''}${bk ? `|${bk}` : ''}`;
 };
 
 /**
@@ -139,12 +143,7 @@ export function removePad(dm: DrumMachine, rowIndex: number): DrumMachine {
   if (!row || dm.rows.length <= 1) return dm;
   const rows = dm.rows.filter((_, i) => i !== rowIndex);
   const patterns = dm.patterns?.map(p => {
-    const steps = { ...p.steps }; const ratchet = { ...p.ratchet };
-    delete steps[row.id]; delete ratchet[row.id];
-    const pan = p.pan ? { ...p.pan } : undefined; const pitch = p.pitch ? { ...p.pitch } : undefined;
-    if (pan) delete pan[row.id];
-    if (pitch) delete pitch[row.id];
-    return { ...p, steps, ratchet, ...(pan ? { pan } : {}), ...(pitch ? { pitch } : {}) };
+    return mapPatternRecords(p, rec => { const o = { ...rec }; delete o[row.id]; return o; });
   });
   return pruneSamples({ ...dm, rows, ...(patterns ? { patterns } : {}) });
 }
@@ -152,9 +151,35 @@ export function removePad(dm: DrumMachine, rowIndex: number): DrumMachine {
 /** Oublie les samples qu'aucun pad n'utilise plus. */
 export function pruneSamples(dm: DrumMachine): DrumMachine {
   if (!dm.samples) return dm;
-  const used = new Set(dm.rows.map(r => userSampleId(r.sound)).filter(Boolean) as string[]);
+  // Couches du sampler de pad (vélocité / alternance) : leurs sons perso sont gardés aussi.
+  const used = new Set(dm.rows.flatMap(r => [r.sound, ...(r.smp?.layers || []).map(l => l.sound)]).map(userSampleId).filter(Boolean) as string[]);
   const kept = Object.fromEntries(Object.entries(dm.samples).filter(([id]) => used.has(id)));
   return { ...dm, samples: kept };
+}
+
+/**
+ * Sampler de pad : ajoute (index null) ou remplace une couche du pad par un son (`user:<id>` d'un
+ * sample perso, ou un son de bibliothèque / de kit). Une seule étape d'annulation côté App.
+ */
+export function setPadLayer(dm: DrumMachine, rowIndex: number, index: number | null, sound: string, name: string, info?: { id: string; info: PadSampleInfo }): DrumMachine {
+  const row = dm.rows[rowIndex];
+  if (!row) return dm;
+  const layers = [...(row.smp?.layers || [])];
+  const l = { sound, name: sampleLabel(name) };
+  if (index === null) { if (layers.length >= 7) return dm; layers.push(l); } else if (layers[index]) layers[index] = l; else return dm;
+  const samples = info ? { ...(dm.samples || {}), [info.id]: { name: info.info.name, duration: info.info.duration } } : dm.samples;
+  const rows = dm.rows.map((r, i) => (i === rowIndex ? { ...r, smp: { ...(r.smp || {}), layers } } : r));
+  return pruneSamples({ ...dm, rows, ...(samples ? { samples } : {}) });
+}
+
+/** Retire une couche du pad. */
+export function removePadLayer(dm: DrumMachine, rowIndex: number, index: number): DrumMachine {
+  const row = dm.rows[rowIndex];
+  if (!row?.smp?.layers?.[index]) return dm;
+  const layers = row.smp.layers.filter((_, i) => i !== index);
+  const smp = { ...row.smp, layers };
+  if (!layers.length) delete (smp as { layers?: unknown }).layers;
+  return pruneSamples({ ...dm, rows: dm.rows.map((r, i) => (i === rowIndex ? { ...r, smp } : r)) });
 }
 
 // ===== Sauvegarde du projet (appelé par services/ProjectIO.ts) =====

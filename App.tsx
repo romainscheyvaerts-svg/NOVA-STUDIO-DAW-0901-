@@ -117,7 +117,7 @@ import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
-import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, timeToQuarters, quartersToTime, type TempoEvent } from './utils/tempoMap';
+import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, timeToQuarters, quartersToTime, tempoSignature, type TempoEvent } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp, applyTempoOpFollowing, tempoHistoryMove, undoKeepsAudio } from './utils/collabTempo';
 import { followTempo, followSummary, keepAudioFor, hasUnwarpedBeat, newFollowId } from './utils/tempoFollow';
@@ -323,7 +323,7 @@ import { DrumMachine, makeDrumMachineLib, makeDrumMachine, drumPadsFor, suggestD
 import { KIT_BAKE_REFUSAL, KIT_SOUND_DROP_EVENT, kitIndexIfLoaded, loadKitIndex, setPadKitSound, usesKitSounds } from './utils/drumKitLibrary';
 import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils/drumPatterns';
 import { padLoadKey } from './utils/drumSamples';
-import { loadPadBuffer } from './utils/padBuffers';
+import { loadPadBuffer, loadPadLayerBuffers, padLayersKey } from './utils/padBuffers';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
@@ -5606,10 +5606,15 @@ function Studio() {
       const end = drumSongEnd(dm, draft.bpm, drumLoopEnd(draft as DAWState));
       const prev = t.drumMachine as DrumMachine | undefined;
       const curEnd = t.clips.length ? Math.max(...t.clips.map(c => c.start + c.duration)) : 0;
-      if (!prev || !t.clips.length || drumRhythmSig(prev) !== drumRhythmSig(dm) || Math.abs(curEnd - end) > 0.01 || prev.bpmUsed !== draft.bpm) {
-        t.clips = drumSongClips(dm, draft.bpm, end, `clip-drums-${Date.now().toString(36)}`) as any;
+      // Séquenceur pro : la batterie suit la piste tempo (changements et rampes), comme le clic et l'export.
+      const evs = (draft as DAWState).tempoEvents;
+      const tmap = evs?.length ? buildTempoMap(draft.bpm, draft.timeSignature, evs) : null;
+      const tSig = tmap ? tempoSignature(draft.bpm, draft.timeSignature, evs) : undefined;
+      if (!prev || !t.clips.length || drumRhythmSig(prev) !== drumRhythmSig(dm) || Math.abs(curEnd - end) > 0.01 || prev.bpmUsed !== draft.bpm || prev.tempoUsed !== tSig) {
+        t.clips = drumSongClips(dm, draft.bpm, end, `clip-drums-${Date.now().toString(36)}`, tmap) as any;
       }
-      t.drumMachine = { ...dm, bpmUsed: draft.bpm } as any;
+      const { tempoUsed: _tu, ...rest } = dm;
+      t.drumMachine = { ...rest, bpmUsed: draft.bpm, ...(tSig ? { tempoUsed: tSig } : {}) } as any;
       t.drumPads = drumPadsFor(dm) as any;
     }));
   }, [setState]);
@@ -5701,6 +5706,15 @@ function Studio() {
       t.drumMachine!.rows.forEach((r, i) => {
         const key = padLoadKey(r, root);
         const padKey = `${t.id}:${i + 1}`;
+        // Sampler de pad : couches de vélocité / alternance (chargées à part, même zone et même traitement).
+        const lk = padLayersKey(r, root);
+        if ((loadedPads.current.get(`${padKey}:L`) || '') !== lk) {
+          if (!lk) { audioEngine.loadDrumRackLayer(t.id, i + 1, 0, null, 0); loadedPads.current.set(`${padKey}:L`, ''); }
+          else void loadPadLayerBuffers(r, ctx, root).then(bufs => {
+            bufs.forEach((b, k) => audioEngine.loadDrumRackLayer(t.id, i + 1, k + 1, b, bufs.length));
+            loadedPads.current.set(`${padKey}:L`, lk);
+          });
+        }
         if (loadedPads.current.get(padKey) === key && audioEngine.getDrumRackNode(t.id)?.getBuffers().has(i + 1)) return;
         loadPadBuffer(r, ctx, root).then(buf => {
           audioEngine.loadDrumRackSample(t.id, i + 1, buf);
@@ -5712,14 +5726,16 @@ function Studio() {
   }, [state.tracks, state.projectKey]);
 
   // Tempo ou longueur du beat changés : la boucle de batterie suit.
-  const drumTempoRef = useRef<number>(state.bpm);
+  // Séquenceur pro : la piste tempo (changements, rampes) compte aussi.
+  const drumTempoKey = `${state.bpm}|${state.tempoEvents?.length ? tempoSignature(state.bpm, state.timeSignature, state.tempoEvents) : ''}`;
+  const drumTempoRef = useRef<string>(drumTempoKey);
   useEffect(() => {
     const t = stateRef.current.tracks.find(x => x.id === DRUM_TRACK_ID);
-    if (!t?.drumMachine) { drumTempoRef.current = state.bpm; return; }
-    if (drumTempoRef.current === state.bpm) return;
-    drumTempoRef.current = state.bpm;
+    if (!t?.drumMachine) { drumTempoRef.current = drumTempoKey; return; }
+    if (drumTempoRef.current === drumTempoKey) return;
+    drumTempoRef.current = drumTempoKey;
     applyDrumMachine(t.drumMachine);
-  }, [state.bpm, applyDrumMachine]);
+  }, [drumTempoKey, applyDrumMachine]);
 
   // Première visite du studio : les 3 gestes à connaître.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
