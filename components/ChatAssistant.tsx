@@ -450,7 +450,10 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           // Mix auto » pendant 6 s, et passait par-dessus les menus et fenêtres (z 900).
           // Au-dessus de la pastille « 🎥 Filmer la prise » (piste armée : bas droite, 120-160 px) :
           // elle couvrait la fin du message (« … mise sur la piste : c'est elle que tu entends mai… »).
-          className="fixed left-1/2 -translate-x-1/2 bottom-[196px] md:left-auto md:right-6 md:translate-x-0 md:bottom-[176px] z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-nv-surface/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
+          // Fenêtre de travail ouverte (batterie, piano roll, export…) : la bulle se lit mais laisse passer les
+          // clics (audit de nuit 22/10/2026 : elle couvrait les derniers pas de la batterie et un clic sur un
+          // pas ouvrait le chat au lieu d'allumer le pas). Le chat ne s'ouvre pas tout seul dans ce cas non plus.
+          className={`fixed left-1/2 -translate-x-1/2 bottom-[196px] md:left-auto md:right-6 md:translate-x-0 md:bottom-[176px] z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-nv-surface/95 px-4 py-3 text-left shadow-2xl backdrop-blur ${suppressAutoOpen ? 'pointer-events-none' : 'pointer-events-auto'}`}>
           <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
           {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
         </button>,
