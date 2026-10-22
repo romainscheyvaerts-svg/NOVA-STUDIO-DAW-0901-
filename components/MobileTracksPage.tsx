@@ -1,4 +1,5 @@
 import MonitorControl from './MonitorControl';
+import { faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
 import { gainToDbText } from '../utils/db';
 import { SEND_LABELS, trackDisplayName } from '../utils/sendLabels';
 import React, { useState } from 'react';
@@ -33,10 +34,10 @@ const MobileSendFader: React.FC<{
   onChange: (level: number) => void;
 }> = ({ send, label, color, onChange }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onChange(parseFloat(e.target.value));
+    onChange(faderPosToGain(parseFloat(e.target.value)));
   };
 
-  const percent = (send.level / 1.5) * 100;
+  const percent = gainToFaderPos(send.level) * 100;
 
   return (
     <div className="flex items-center gap-3 py-1">
@@ -56,9 +57,9 @@ const MobileSendFader: React.FC<{
         <input
           type="range"
           min="0"
-          max="1.5"
-          step="0.01"
-          value={send.level}
+          max="1"
+          step="0.001"
+          value={gainToFaderPos(send.level)}
           onChange={handleChange}
           aria-label={`Envoi ${label}`}
           aria-valuetext={gainToDbText(send.level)}
@@ -265,7 +266,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                     <div 
                       className="h-full transition-all"
                       style={{ 
-                        width: `${(track.volume / 1.5) * 100}%`,
+                        width: `${gainToFaderPos(track.volume) * 100}%`,
                         backgroundColor: track.color 
                       }}
                     />
@@ -273,12 +274,12 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                   <input
                     type="range"
                     min="0"
-                    max="1.5"
-                    step="0.01"
-                    value={track.volume}
+                    max="1"
+                    step="0.001"
+                    value={gainToFaderPos(track.volume)}
                     onChange={(e) => {
                       e.stopPropagation();
-                      onUpdateTrack({ ...track, volume: parseFloat(e.target.value) });
+                      onUpdateTrack({ ...track, volume: faderPosToGain(parseFloat(e.target.value)) });
                     }}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={`Volume ${track.name}`}

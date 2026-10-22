@@ -18,7 +18,7 @@ Scénarios, au bureau (1600 × 900, clavier) et au téléphone (390 × 844, au d
   5. « supprime la piste 3 » → confirmation ; « Non » ne touche à rien ; « Oui, fais-le » supprime ;
      Ctrl+Z la ramène ;
   6. réponse du modèle avec une commande inconnue et un volume hors bornes → ❌ avec la raison,
-     volume ramené à +3,5 dB (✅ + note).
+     volume hors course (+40 dB, au-delà de la butée +12 dB) refusé (❌ + raison).
 
   NOVA_URL=http://127.0.0.1:3453/ python qa/chat_inge.py [--vp pc|tel390]
 Sorties : D:\\1 WORK\\CONTENU\\nova-chat-inge\\captures (captures + resultats_chat_inge.json)
@@ -267,7 +267,7 @@ def run_vp(p, vp, res):
         # 6. Commande inconnue et valeur hors bornes renvoyées par le modèle.
         o = send("ouvre le truc", "results")
         check("6. ❌ commande inconnue refusée, avec la raison", any(x.startswith("KO") and "pal.inexistant" in x and "inconnue" in x for x in o["results"]), o["results"])
-        check("6. ✅ volume ramené dans les bornes (+3,5 dB) avec une note", any(x.startswith(f"OK Volume de {lead_name} : +3,5 dB") and "ramené" in x for x in o["results"]), o["results"])
+        check("6. ❌ volume hors course (+40 dB > +12 dB) refusé, jamais poussé en butée", any(x.startswith("KO") and "hors course" in x for x in o["results"]), o["results"])
         snap("06_refus_et_bornes")
 
         errs = [e["text"] for e in log.errors() if "Failed to load resource" not in e["text"]]

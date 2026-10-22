@@ -1,4 +1,5 @@
 
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Track, AutomationLane } from '../types';
 import AutomationLaneComponent from './AutomationLane';
@@ -76,9 +77,9 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   // Get available parameters for a track (Native + Plugins)
   const getAvailableParameters = (track: Track) => {
       const params: { id: string; name: string; min: number; max: number; value?: number }[] = [
-          { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
+          { id: 'volume', name: 'Volume', min: 0, max: FADER_MAX_GAIN },
           // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
-          { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
+          { id: 'preVolume', name: 'Volume avant effets', min: 0, max: FADER_MAX_GAIN },
           { id: 'pan', name: 'Panoramique', min: -1, max: 1 },
           // Mute automatisé (R8, Pro Tools « mute ») : 0 = son, 1 = muet, en paliers.
           { id: 'mute', name: 'Muet', min: 0, max: 1 },
@@ -89,7 +90,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       
       // Sends
       track.sends.forEach(s => {
-          params.push({ id: `send::${s.id}`, name: `Envoi ${sendLabel(s.id, tracks)}`, min: 0, max: 1.5 });
+          params.push({ id: `send::${s.id}`, name: `Envoi ${sendLabel(s.id, tracks)}`, min: 0, max: FADER_MAX_GAIN });
       });
 
       // Plugins

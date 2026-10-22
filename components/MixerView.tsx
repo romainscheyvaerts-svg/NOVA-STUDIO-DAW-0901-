@@ -4,6 +4,7 @@ import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
 import { dbTextToGain } from '../plugins/hw/valueEntry';
+import { faderPosToGain, gainToFaderPos, FADER_UNITY_POS, FADER_TICKS } from '../utils/faderLaw';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -52,7 +53,7 @@ import { sendTransferMenuItems } from '../utils/sendFader';
  * Avant, toute la tranche (inserts, envois, mètres) se redessinait à chaque image.
  */
 const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElement | null> }> = ({ track, host }) => {
-  const pos = useLiveView(track.id, 'volume', track.volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 1024) / 1024);
+  const pos = useLiveView(track.id, 'volume', track.volume, v => Math.round(gainToFaderPos(v) * 1024) / 1024);
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
   React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
   return (
@@ -61,6 +62,14 @@ const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElemen
     </div>
   );
 };
+/** Graduations du fader (+12, +6, 0, −5 … −60, −∞) : repères discrets à gauche de la course. */
+const FaderScale: React.FC = React.memo(() => (
+  <div aria-hidden className="pointer-events-none absolute inset-y-0 right-full mr-0.5 w-4 select-none" data-testid="fader-scale">
+    {FADER_TICKS.map(t => (
+      <span key={t.label} className={`absolute right-0 translate-y-1/2 text-[7px] leading-none font-mono tabular-nums ${t.db === 0 ? 'text-slate-300 font-bold' : 'text-slate-600'}`} style={{ bottom: `${t.pos * 100}%` }}>{t.label}</span>
+    ))}
+  </div>
+));
 const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = ({ track, onSet }) => {
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
   // Saisie au clavier (comme la case de volume d'une console de DAW) : clic, « -3,5 », Entrée.
@@ -206,14 +215,15 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
           targetId={track.id}
           paramId={`send::${send.id}`} 
           label={sendLabel(send.id, allTracks, true)}
-          value={shownLevel}
+          value={gainToFaderPos(shownLevel)}
           min={0}
-          max={1.5}
+          max={1}
           size={26} // Slightly bigger
           color={getSendColor(send.id)}
-          defaultValue={1}
-          format={gainToDbText}
-          onChange={(val) => {
+          defaultValue={FADER_UNITY_POS}
+          format={p => gainToDbText(faderPosToGain(p))}
+          onChange={(p) => {
+              const val = faderPosToGain(p);
               const newSends = track.sends.map(s => sameSend(s, send) ? { ...s, level: val } : s);
               onUpdate({ ...track, sends: newSends });
           }}
@@ -344,14 +354,14 @@ const ChannelStrip: React.FC<{
     if (onRequestAddPlugin) onRequestAddPlugin(track.id, clientX, clientY);
   };
 
-  // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
+  // Fader de volume : échelle de console (utils/faderLaw, −∞…+12 dB, 0 dB aux 3/4), glissement RELATIF
   // (le fader ne saute plus sous le clic), Ctrl ou Maj = fin, molette, double-clic ou Alt+clic = 0 dB.
   // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
   // Valeur entendue lue au moment du geste ; l'affichage suit seul (LiveFaderCap, LivePanKnob).
-  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
-  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
-      min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
-      valueNow: () => Math.sqrt(Math.max(0, getLive(liveKey(track.id, 'volume')) ?? track.volume) / 1.5),
+  const faderPos = gainToFaderPos(track.volume);
+  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: faderPosToGain(p) }), {
+      min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.005,
+      valueNow: () => gainToFaderPos(getLive(liveKey(track.id, 'volume')) ?? track.volume),
       sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
       // Automation Touch / Latch / Write / Trim : l'appui et le relâchement bornent l'écriture.
       onStart: () => automationRecorder.touch(track.id, 'volume'),
@@ -576,6 +586,7 @@ const ChannelStrip: React.FC<{
                 // Taille donnée par la tranche : le capuchon qui suit l'automation ne refait que cette boîte.
                 style={{ width: 'var(--fader-width)', contain: 'layout style' }}
               >
+                 <FaderScale />
                  <LiveFaderCap track={track} host={faderTrackRef} />
               </div>
            </div>

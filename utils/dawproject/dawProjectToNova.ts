@@ -10,6 +10,7 @@
  *
  * Module pur : tests/dawProject.test.ts.
  */
+import { FADER_MAX_GAIN } from '../faderLaw';
 import { AutomationLane, Clip, Marker, MidiNote, PluginInstance, TimeSignature, Track, TrackType } from '../../types';
 import { buildTempoMap, timeToPosition, TempoEvent } from '../tempoMap';
 import type { DawDevice, DawSession, DawTrack } from './dawProjectRead';
@@ -152,7 +153,7 @@ export function dawProjectToNova(s: DawSession, audioOf: (path: string) => Media
     for (const a of t.automation) {
       const ls = side?.lanes[a.xmlId];
       let name: string | undefined, conv = (v: number) => v, min = 0, max = 1;
-      if (a.target && a.target === t.ids.volume) { name = 'volume'; max = 1.5; if (a.unit === 'decibel') conv = v => dbToLin(v); }
+      if (a.target && a.target === t.ids.volume) { name = 'volume'; max = FADER_MAX_GAIN; if (a.unit === 'decibel') conv = v => dbToLin(v); }
       else if (a.target && a.target === t.ids.pan) { name = 'pan'; min = -1; max = 1; conv = v => (a.unit === 'normalized' || !a.unit ? panFromNormalized(v) : v); }
       else if (a.target && paramLane.has(a.target)) name = paramLane.get(a.target);
       if (!name) continue;

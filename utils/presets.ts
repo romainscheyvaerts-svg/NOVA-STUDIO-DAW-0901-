@@ -18,6 +18,7 @@
  * nettoyés par sanitizePlugin, VST absent remplacé par l'effet NOVA proche).
  * Aucune dépendance au moteur audio ni à React : testable tel quel.
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import { PluginInstance, PluginType, Track, TrackSend, TrackType } from '../types';
 import { instantiateTemplate, InstantiateOptions, sanitizePlugin, SessionTemplate, TEMPLATE_FORMAT, TEMPLATE_VERSION, TemplateLoadReport } from './sessionTemplate';
 import { busesOf, findBusByName, outputOf, setTrackOutput } from './trackStructure';
@@ -398,7 +399,7 @@ const returnTrack = (def: ChainReturn, tracks: Track[]): Track => ({
   color: def.color || '#10b981', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
   volume: typeof def.volume === 'number' ? def.volume : 0.8, pan: 0, outputTrackId: 'master',
   sends: [], clips: [], plugins: def.plugins.map(p => ({ ...clone(p), id: newPluginId(), latency: 0 })),
-  automationLanes: [{ id: `auto-${Date.now().toString(36)}${rnd()}`, parameterName: 'volume', points: [], color: def.color || '#10b981', isExpanded: false, min: 0, max: 1.5 }],
+  automationLanes: [{ id: `auto-${Date.now().toString(36)}${rnd()}`, parameterName: 'volume', points: [], color: def.color || '#10b981', isExpanded: false, min: 0, max: FADER_MAX_GAIN }],
   totalLatency: 0,
 });
 
@@ -481,7 +482,7 @@ export const blankTrackFor = (preset: TrackPreset, o: { id: string; name?: strin
   id: o.id, name: (o.name || preset.name).slice(0, 60), type: o.type || preset.trackType || TrackType.AUDIO,
   color: o.color || preset.color || '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
   volume: 1, pan: 0, outputTrackId: 'master', sends: [], clips: [], plugins: [],
-  automationLanes: [{ id: `auto-${Date.now().toString(36)}${rnd()}`, parameterName: 'volume', points: [], color: o.color || preset.color || '#3b82f6', isExpanded: false, min: 0, max: 1.5 }],
+  automationLanes: [{ id: `auto-${Date.now().toString(36)}${rnd()}`, parameterName: 'volume', points: [], color: o.color || preset.color || '#3b82f6', isExpanded: false, min: 0, max: FADER_MAX_GAIN }],
   totalLatency: 0,
 });
 

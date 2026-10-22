@@ -1,4 +1,5 @@
 
+import { faderPosToGain, gainToFaderPos, FADER_UNITY_POS, FADER_MAX_GAIN } from '../utils/faderLaw';
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import { openSessionPanel } from '../utils/r21Bus';
 import { muteClickKind, soloClickKind } from '../utils/soloMute';
@@ -90,10 +91,10 @@ const HorizontalSendFader: React.FC<{
   const handleInteraction = (clientX: number, rect: DOMRect) => {
     const x = clientX - rect.left;
     const progress = Math.max(0, Math.min(1, x / rect.width));
-    onChange(progress * 1.5);
+    onChange(faderPosToGain(progress));
   };
-  // Molette / double-clic (0 dB) partagés avec les autres potards
-  const knob = useKnobInteraction(shown / 1.5, (p) => onChange(p * 1.5), { min: 0, max: 1, defaultValue: 1 / 1.5, wheelStep: 0.01 });
+  // Molette / double-clic (0 dB) partagés avec les autres potards ; même échelle que les faders (utils/faderLaw).
+  const knob = useKnobInteraction(gainToFaderPos(shown), (p) => onChange(faderPosToGain(p)), { min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.01 });
 
   const param = `send::${send.id}`;
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -101,7 +102,7 @@ const HorizontalSendFader: React.FC<{
     if (e.detail >= 2) { knob.handleDoubleClick(); return; }
     // Automation (Touch / Latch…) : l'appui et le relâchement bornent l'écriture.
     automationRecorder.touch(trackId, param);
-    dragHorizontal(e, shown / 1.5, (p) => onChange(p * 1.5), () => automationRecorder.release(trackId, param));
+    dragHorizontal(e, gainToFaderPos(shown), (p) => onChange(faderPosToGain(p)), () => automationRecorder.release(trackId, param));
   };
   
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -116,7 +117,7 @@ const HorizontalSendFader: React.FC<{
     handleInteraction(e.touches[0].clientX, rect);
   };
 
-  const percent = (shown / 1.5) * 100;
+  const percent = gainToFaderPos(shown) * 100;
 
   return (
     <div
@@ -167,7 +168,7 @@ const LivePanNeedle: React.FC<{ trackId: string; pan: number; host: React.RefObj
 };
 const LiveVolumeFill: React.FC<{ trackId: string; volume: number; color: string; adjusting: boolean; host: React.RefObject<HTMLDivElement | null> }> = ({ trackId, volume, color, adjusting, host }) => {
   // Remplissage au 1/512 près (moins d'un demi-pixel), déplacé par le GPU (scaleX, pas de mise en page).
-  const fill = useLiveView(trackId, 'volume', volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 512) / 512);
+  const fill = useLiveView(trackId, 'volume', volume, v => Math.round(gainToFaderPos(v) * 512) / 512);
   const text = useLiveView(trackId, 'volume', volume, gainToDbText);
   React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
   return (
@@ -375,14 +376,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     min: -1, max: 1, sensitivity: 200, defaultValue: 0, valueNow: shownPanNow,
     onStart: () => automationRecorder.touch(track.id, 'pan'), onEnd: () => automationRecorder.release(track.id, 'pan'),
   });
-  // Volume : molette et double-clic = 0 dB (course en racine du gain)
-  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }),
-    { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005, valueNow: () => Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5) });
+  // Volume : molette et double-clic = 0 dB (échelle de console −∞…+12 dB, utils/faderLaw)
+  const volKnob = useKnobInteraction(gainToFaderPos(track.volume), (p) => onUpdate({ ...track, volume: faderPosToGain(p) }),
+    { min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.005, valueNow: () => gainToFaderPos(shownVolumeNow()) });
 
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
       const progress = Math.max(0, Math.min(1, x / rect.width));
-      onUpdate({ ...track, volume: progress * progress * 1.5 });
+      onUpdate({ ...track, volume: faderPosToGain(progress) });
   };
 
   const handleVolumeMouseDown = (e: React.MouseEvent) => {
@@ -390,7 +391,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     if (e.detail >= 2) { volKnob.handleDoubleClick(); return; }
     setIsAdjustingVolume(true);
     automationRecorder.touch(track.id, 'volume');
-    dragHorizontal(e, Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
+    dragHorizontal(e, gainToFaderPos(shownVolumeNow()), (p) => onUpdate({ ...track, volume: faderPosToGain(p) }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
   };
 
   const handleVolumeTouchStart = (e: React.TouchEvent) => {
@@ -419,7 +420,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           color: track.color, 
           isExpanded: true, 
           min: 0, 
-          max: 1.5 
+          max: FADER_MAX_GAIN 
       });
     } else {
       lanes = lanes.map(l => ({ ...l, isExpanded: !l.isExpanded }));

@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import { describe, expect, it } from 'vitest';
 import {
   balanceGains, copyMainMix, cueLevelOf, cueProblems, cueRoutable, defaultCueMixes, directMonitorRoutes, newCueMix, outputLayout,
@@ -22,7 +23,7 @@ describe('R15 · mixes casque', () => {
     const m2 = setCueLevel(m, 'v', { level: 1.2 }, t);
     expect(cueLevelOf(m2, t)).toEqual({ level: 1.2, pan: -0.4 });
     expect(cueLevelOf(setCueLevel(m2, 'v', { muted: true }, t), t).muted).toBe(true);
-    expect(cueLevelOf(setCueLevel(m2, 'v', { level: 9, pan: 3 }), t)).toEqual({ level: 2, pan: 1 });
+    expect(cueLevelOf(setCueLevel(m2, 'v', { level: 9, pan: 3 }), t)).toEqual({ level: FADER_MAX_GAIN, pan: 1 });
     const c = copyMainMix(m, [t, makeTrack({ id: 'b', volume: 0.8, pan: 0.2, isMuted: true })]);
     expect(c.levels).toEqual({ v: { level: 0.5, pan: -0.4 }, b: { level: 0.8, pan: 0.2, muted: true } });
   });
@@ -86,7 +87,7 @@ describe('R15 · mixes casque', () => {
 
   it('lecture d’un projet : valeurs bornées, champs inconnus ignorés', () => {
     const m = sanitizeCueMixes([{ id: 'x', name: '  Casque  ', pair: 2, click: 9, levels: { a: { level: 5, pan: -3, muted: 1 } }, junk: 1 }, null, 'x']);
-    expect(m).toEqual([{ id: 'x', name: 'Casque', pair: 2, click: 2, master: 1, levels: { a: { level: 2, pan: -1, muted: true } } }]);
+    expect(m).toEqual([{ id: 'x', name: 'Casque', pair: 2, click: FADER_MAX_GAIN, master: 1, levels: { a: { level: FADER_MAX_GAIN, pan: -1, muted: true } } }]);
     expect(sanitizeCueMixes('nope')).toEqual([]);
   });
 });

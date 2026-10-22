@@ -9,7 +9,7 @@ import {
 } from '../utils/clipGain';
 import { gridStepSeconds, snapToGrid } from '../utils/grid';
 import { LANE_HEIGHT } from '../utils/automationDraw';
-import { paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
+import { denormalize, paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
 import { canvasTheme } from '../utils/canvasTheme';
 import { getEditCommands, bufferDurationOf } from '../hooks/useEditCommands';
 import {
@@ -58,8 +58,7 @@ const laneSpec = (lane: AutomationLane) => ({ ...paramSpec(lane.parameterName), 
 const laneValueAt = (lane: AutomationLane, relY: number): number => {
   const spec = laneSpec(lane);
   const n = Math.max(0, Math.min(1, 1 - (relY - 8) / (LANE_HEIGHT - 16)));
-  if (spec.kind === 'gain') return n * n * (spec.max || 1);
-  return spec.min + n * (spec.max - spec.min);
+  return denormalize(spec, n);
 };
 
 export function useClipGainEdit(deps: ClipGainEditDeps) {

@@ -170,9 +170,20 @@ describe('validation des appels d’outils', () => {
     expect(plan.rejected.every(r => /jamais de paiement/.test(r.reason))).toBe(true);
   });
 
-  it('valeurs bornées (volume, pan, envoi, tempo, effets) et unités d’ingé traduites', () => {
+  it('volume hors course (au-delà de +12 dB) : refusé, jamais poussé en butée par erreur', () => {
     const plan = planChatCalls([
       { action: 'SET_VOLUME', payload: { trackId: 'Lead', volume: 9 } },
+      { action: 'SET_VOLUME', payload: { trackId: 'Lead', volumeDb: 40 } },
+      { action: 'SET_VOLUME', payload: { trackId: 'Lead', volumeDb: 12 } },
+    ], ctx());
+    expect(plan.rejected).toHaveLength(2);
+    expect(plan.rejected.every(r => /hors course/.test(r.reason))).toBe(true);
+    expect(20 * Math.log10(plan.run[0].action.payload.volume)).toBeCloseTo(12, 1);
+  });
+
+  it('valeurs bornées (volume, pan, envoi, tempo, effets) et unités d’ingé traduites', () => {
+    const plan = planChatCalls([
+      { action: 'SET_VOLUME', payload: { trackId: 'Lead', volume: 3.5 } },
       { action: 'SET_VOLUME', payload: { trackId: 'track-backs', volumeDb: -6 } },
       { action: 'SET_PAN', payload: { trackId: '4', pan: -3 } },
       { action: 'SET_SEND_LEVEL', payload: { trackId: 'track-adlib', sendId: 'send-delay', level: 2 } },
@@ -181,7 +192,7 @@ describe('validation des appels d’outils', () => {
     ], ctx());
     expect(plan.rejected).toHaveLength(0);
     const p = plan.run.map(c => c.action.payload);
-    expect(p[0].volume).toBe(1.5);
+    expect(p[0].volume).toBe(3.5); // +10,9 dB : dans la course du fader (−∞ … +12 dB)
     expect(p[1].volume).toBeCloseTo(0.5, 2);
     expect(p[2]).toMatchObject({ trackId: 'track-backs', pan: -1 });
     expect(p[3].level).toBe(1);

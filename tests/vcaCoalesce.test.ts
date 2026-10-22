@@ -35,8 +35,8 @@ describe('fusionner un VCA dans ses pistes (Coalesce)', () => {
     expect(coalesceVca(mk(), 'inconnu').members).toEqual([]);
   });
 
-  it('un membre qui dépasserait +3,5 dB est signalé', () => {
-    const ts = mk().map(t => (t.id === 'vca' ? { ...t, volume: 1.4 } : t.id === 'a' ? { ...t, volume: 1.2 } : t));
+  it('un membre qui dépasserait +12 dB (butée des faders) est signalé', () => {
+    const ts = mk().map(t => (t.id === 'vca' ? { ...t, volume: 3 } : t.id === 'a' ? { ...t, volume: 2 } : t));
     expect(coalesceOverflow(coalesceVca(ts, 'vca'))).toEqual(['Voix']);
   });
 });

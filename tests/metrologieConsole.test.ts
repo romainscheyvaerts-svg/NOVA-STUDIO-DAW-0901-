@@ -45,24 +45,49 @@ const lvl = (x: Float32Array, sr: number, f: number, ref: number, a = 0.1, b = 0
 
 describe('Fader : la valeur affichée (dB) est le gain réel', () => {
   for (const sr of RATES) {
-    it(`${sr} Hz : −∞, −20, −6, 0, +3,5 dB (butée) ; saisie « +6 » bornée et affichée honnêtement`, async () => {
+    it(`${sr} Hz : −∞, −20, −6, 0, +3,5, +6, +12 dB (butée) ; saisie « +15 » bornée à +12 et affichée honnêtement`, async () => {
       const x = sine(sr, 1, 1000, 0.25);
-      for (const typed of ['-20', '-6', '0', '+3.5', '+6', '-80']) {
+      for (const typed of ['-20', '-6', '0', '+3.5', '+6', '+12', '+15', '-80']) {
         const g = dbTextToGain(typed)!;
         const shown = gainToDbText(g);
-        const t = makeTrack({ volume: g, sends: [], clips: [clipOf(sr, [x, x])] });
+        // Pan neutre (tranche stéréo) : on mesure le fader seul.
+        const t = makeTrack({ volume: g, panFormat: 'stereo', sends: [], clips: [clipOf(sr, [x, x])] } as any);
         const [L, R] = await render([t], 1, sr);
         const shownDb = shown === '-∞' ? -Infinity : parseFloat(shown);
         metro('Fader', `saisi « ${typed} » → affiché « ${shown} », gauche, ${sr} Hz`, shownDb, lvl(L, sr, 1000, 0.25), 'dB', 0.05 + 0.05);
         metro('Fader', `saisi « ${typed} » → affiché « ${shown} », droite, ${sr} Hz`, shownDb, lvl(R, sr, 1000, 0.25), 'dB', 0.1);
       }
       // Fader en bas : −∞ affiché = silence réel.
-      const t0 = makeTrack({ volume: 0, sends: [], clips: [clipOf(sr, [x, x])] });
+      const t0 = makeTrack({ volume: 0, panFormat: 'stereo', sends: [], clips: [clipOf(sr, [x, x])] } as any);
       const [L0] = await render([t0], 1, sr);
       metro('Fader', `fader à 0 (affiché « ${gainToDbText(0)} »), ${sr} Hz`, '−∞', lvl(L0, sr, 1000, 0.25), 'dB', null);
       if (Number.isFinite(lvl(L0, sr, 1000, 0.25))) metro('Fader', 'fader à 0 : silence', -Infinity, lvl(L0, sr, 1000, 0.25), 'dB', 0);
     }, 120_000);
   }
+  // Retour casque (mix casque qui suit le mix principal) : même gain de fader que la lecture et l'export,
+  // jusqu'à +12 dB.
+  it('mix casque : piste à 0 / +6 / +12 dB (fader) = même niveau au casque', async () => {
+    const { CueMixEngine } = await import('../engine/CueMixEngine');
+    const { newCueMix } = await import('../utils/cueMix');
+    const sr = 48000, x = sine(sr, 1, 1000, 0.25);
+    for (const typed of ['0', '+6', '+12']) {
+      const g = dbTextToGain(typed)!;
+      const ctx = new MiniOfflineAudioContext({ numberOfChannels: 2, length: sr, sampleRate: sr }) as unknown as AudioContext;
+      const src = ctx.createBufferSource();
+      src.buffer = buf(sr, [x, x]);
+      const cue = new CueMixEngine(ctx);
+      const mix = newCueMix([]);
+      // Pan neutre (tranche stéréo) : on mesure le fader seul.
+      const t = makeTrack({ id: 'v', volume: g, panFormat: 'stereo', sends: [], clips: [] } as any);
+      cue.sync([mix], [t], id => (id === 'v' ? src : null));
+      cue.outputOf(mix.id)!.connect(ctx.destination);
+      src.start(0);
+      const out = await ctx.startRendering();
+      const [L, R] = [out.getChannelData(0), out.getChannelData(1)];
+      metro('Fader', `casque : fader « ${gainToDbText(g)} », gauche`, 20 * Math.log10(g), lvl(L, sr, 1000, 0.25, 0.2, 0.9), 'dB', 0.05);
+      metro('Fader', `casque : fader « ${gainToDbText(g)} », droite`, 20 * Math.log10(g), lvl(R, sr, 1000, 0.25, 0.2, 0.9), 'dB', 0.05);
+    }
+  }, 120_000);
 });
 
 describe('Panoramique : loi mesurée (source mono et stéréo), identique lecture / export', () => {

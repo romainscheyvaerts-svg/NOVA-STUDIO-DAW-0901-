@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 import { AIAction, DAWState, Track, TrackType } from '../types';
 import { findVocalMixStyle } from './vocalPresets';
 import { listTakes, selectTakeActions } from './takes';
@@ -229,13 +230,13 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
 
   // --- Volumes ---
   if ((more || less) && /\b(voix|vocal|moi|ma voix|lead|backs?|harmo\w*|ad.?libs?)\b/.test(msg) && voice) {
-    const v = clamp(voice.volume * (more ? 1.22 : 0.8), 0.05, 1.5);
+    const v = clamp(voice.volume * (more ? 1.22 : 0.8), 0.05, FADER_MAX_GAIN);
     return say(`${more ? '🔊 Je monte' : '🔉 Je baisse'} ${voice.name} à ${pct(v)}.`,
       { action: 'SET_VOLUME', payload: { trackId: voice.id, volume: Math.round(v * 100) / 100 } },
       { action: 'HIGHLIGHT', payload: { target: `vol-${voice.id}`, text: `${voice.name} à ${pct(v)}` } });
   }
   if ((more || less) && /\b(beat|instru|prod|musique|son)\b/.test(msg) && beat) {
-    const v = clamp(beat.volume * (more ? 1.22 : 0.8), 0.05, 1.5);
+    const v = clamp(beat.volume * (more ? 1.22 : 0.8), 0.05, FADER_MAX_GAIN);
     return say(`${more ? '🔊 Je monte' : '🔉 Je baisse'} le beat à ${pct(v)}.`,
       { action: 'SET_VOLUME', payload: { trackId: beat.id, volume: Math.round(v * 100) / 100 } },
       { action: 'HIGHLIGHT', payload: { target: `vol-${beat.id}`, text: `Beat à ${pct(v)}` } });

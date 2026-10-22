@@ -18,6 +18,7 @@
  * Mêmes verrous que l'export AAF : le beat du catalogue sans licence et les sons des kits
  * NOVA ne sont jamais écrits en fichier. Module pur : tests/dawProject.test.ts.
  */
+import { FADER_MAX_GAIN } from '../faderLaw';
 import { AutomationLane, Clip, DAWState, PluginInstance, Track, TrackType } from '../../types';
 import { encodeBwf, BwfFormat } from '../bwf';
 import { usesKitSounds } from '../drumKitLibrary';
@@ -231,7 +232,7 @@ export function buildDawProject(state: DAWState, getAudio: (bufferId: string) =>
       const sid = id('send');
       sendsSide[sid] = { isEnabled: s.isEnabled, ...(s.isMuted !== undefined ? { isMuted: s.isMuted } : {}), ...(s.slot !== undefined ? { slot: s.slot } : {}), ...(s.pan !== undefined ? { pan: s.pan } : {}), ...(s.preFader !== undefined ? { preFader: s.preFader } : {}) };
       return el('Send', { id: sid, destination: ids.get(s.id)!.channel, type: s.preFader ? 'pre' : 'post' }, [
-        el('Volume', { id: id('p'), name: 'Envoi', unit: 'linear', min: 0, max: 2, value: s.level }),
+        el('Volume', { id: id('p'), name: 'Envoi', unit: 'linear', min: 0, max: FADER_MAX_GAIN, value: s.level }),
         s.pan !== undefined ? el('Pan', { id: id('p'), name: 'Pan', unit: 'normalized', min: 0, max: 1, value: (s.pan + 1) / 2 }) : null,
         boolP('Enable', s.isEnabled !== false && !s.isMuted, 'Actif'),
       ]);
@@ -244,7 +245,7 @@ export function buildDawProject(state: DAWState, getAudio: (bufferId: string) =>
       devices.length ? el('Devices', {}, devices) : null,
       el('Mute', { id: ref.mute, name: 'Mute', value: t.isMuted ? 'true' : 'false' }),
       el('Pan', { id: ref.pan, name: 'Pan', unit: 'normalized', min: 0, max: 1, value: ((t.pan ?? 0) + 1) / 2 }),
-      el('Volume', { id: ref.volume, name: 'Volume', unit: 'linear', min: 0, max: 2, value: t.volume ?? 1 }),
+      el('Volume', { id: ref.volume, name: 'Volume', unit: 'linear', min: 0, max: FADER_MAX_GAIN, value: t.volume ?? 1 }),
       sends.length ? el('Sends', {}, sends) : null,
     ]);
     stats.tracks += isMaster(t) ? 0 : 1;

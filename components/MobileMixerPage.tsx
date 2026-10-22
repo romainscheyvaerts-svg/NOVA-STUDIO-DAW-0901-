@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
 import MobileContainer from './MobileContainer';
 import { Track, TrackType } from '../types';
 import { structureBus } from '../utils/structureBus';
@@ -23,10 +24,10 @@ interface MobileMixerPageProps {
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
 }
 
-const MAX_VOLUME = 1.5;
-// Même courbe que le fader du mixer PC (MixerView) : volume = p² × 1,5.
-const volumeToPos = (v: number) => Math.sqrt(Math.max(0, v) / MAX_VOLUME);
-const posToVolume = (p: number) => p * p * MAX_VOLUME;
+const MAX_VOLUME = FADER_MAX_GAIN;
+// Même échelle que le fader du mixer PC (utils/faderLaw : −∞…+12 dB, 0 dB aux 3/4).
+const volumeToPos = gainToFaderPos;
+const posToVolume = faderPosToGain;
 const toDb = (v: number) => (v <= 0.0001 ? '-∞' : (20 * Math.log10(v)).toFixed(1));
 
 /** Fader vertical tactile (Pointer Events : doigt, souris, stylet). */
@@ -43,7 +44,7 @@ const VerticalFader: React.FC<{
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     const p = 1 - Math.min(1, Math.max(0, (clientY - r.top) / r.height));
-    onChange(Math.round(posToVolume(p) * 100) / 100);
+    onChange(Math.round(posToVolume(p) * 10000) / 10000);
   };
 
   return (

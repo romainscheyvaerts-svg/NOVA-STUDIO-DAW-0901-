@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './utils/faderLaw';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix, TimeSignature } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
@@ -417,7 +418,7 @@ const AVAILABLE_FX_MENU = [
 
 const createDefaultAutomation = (param: string, color: string): AutomationLane => ({
   id: `auto-${Date.now()}-${Math.random()}`,
-  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: 1.5
+  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: FADER_MAX_GAIN
 });
 
 /**

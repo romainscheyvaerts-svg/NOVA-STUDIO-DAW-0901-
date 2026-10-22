@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos } from './faderLaw';
 /**
  * Surfaces de contrôle (chantier A5) : vocabulaire commun aux protocoles
  * Mackie Control Universal (utils/mcu.ts) et HUI (utils/hui.ts).
@@ -84,18 +85,14 @@ export interface SurfaceCodec {
 
 // --- Conversions communes -----------------------------------------------------------
 
-/** Course du volume de NOVA (gain linéaire, +3,5 dB en haut), comme son fader à l'écran. */
-export const VOLUME_MAX = 1.5;
+/** Course du volume de NOVA (gain linéaire, +12 dB en haut), comme son fader à l'écran. */
+export const VOLUME_MAX = FADER_MAX_GAIN;
 
-/** Volume (gain) → position du fader 0…1 (racine du gain : même loi que la console de NOVA). */
-export const volumeToFader = (v: number): number =>
-  Math.max(0, Math.min(1, Math.sqrt(Math.max(0, Number.isFinite(v) ? v : 0) / VOLUME_MAX)));
+/** Volume (gain) → position du fader 0…1 (même échelle que la console de NOVA, utils/faderLaw). */
+export const volumeToFader = (v: number): number => gainToFaderPos(Math.max(0, Number.isFinite(v) ? v : 0));
 
 /** Position du fader 0…1 → volume (gain). */
-export const faderToVolume = (p: number): number => {
-  const x = Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0));
-  return x * x * VOLUME_MAX;
-};
+export const faderToVolume = (p: number): number => faderPosToGain(Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0)));
 
 export const to14 = (p: number): number => Math.max(0, Math.min(16383, Math.round(Math.max(0, Math.min(1, p)) * 16383)));
 export const from14 = (v: number): number => Math.max(0, Math.min(1, v / 16383));

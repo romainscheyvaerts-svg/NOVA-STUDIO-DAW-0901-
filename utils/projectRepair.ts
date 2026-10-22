@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN, LEGACY_FADER_MAX_GAIN } from './faderLaw';
 import { cleanMarkerSelection } from './selectionMarkers';
 /**
  * Validation et réparation d'un projet NOVA (project.json d'un .novaproj.zip,
@@ -303,6 +304,10 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
       l.points = sorted.map((q: any, k: number) => (typeof q.id === 'string' ? q : { ...q, id: `${l.id}-p${k}` }));
       if (!finite(l.min)) l.min = 0;
       if (!finite(l.max)) l.max = 1;
+      // Faders à +12 dB (22/10/2026) : une voie de volume / d'envoi enregistrée avec l'ancienne butée
+      // (1,5 ≈ +3,5 dB) prend la nouvelle. Les points (gains) ne bougent pas : même son, en dB près.
+      if ((l.parameterName === 'volume' || l.parameterName === 'preVolume' || l.parameterName.startsWith('send::'))
+        && l.min === 0 && l.max <= LEGACY_FADER_MAX_GAIN + 1e-9 && l.max >= LEGACY_FADER_MAX_GAIN - 1e-9) l.max = FADER_MAX_GAIN;
       if (typeof l.isExpanded !== 'boolean') l.isExpanded = false;
       if (typeof l.color !== 'string') l.color = t.color;
       lanes.push(l);

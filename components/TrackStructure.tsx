@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { FADER_MAX_DB, FADER_MAX_GAIN, FADER_UNITY_POS, faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
 import { ContextMenuItem, PluginInstance, Track, TrackSend, TrackType } from '../types';
 import {
   ancestorsOf, busesOf, busListeners, createFolder, createVca, dissolveFolder, folderDescendants, isEffectivelyInactive,
@@ -489,9 +490,9 @@ const SendRow: React.FC<{ track: Track; all: Track[]; slot: number; send: TrackS
       </select>
       {send && (
         <>
-          <input type="range" min={-60} max={6} step={0.5} value={Math.round(dbOf(send.level) * 2) / 2}
+          <input type="range" min={-60} max={FADER_MAX_DB} step={0.5} value={Math.round(dbOf(send.level) * 2) / 2}
             aria-label={`Niveau de l'envoi ${letter}`} title={`Niveau : ${gainToDbText(send.level)}`}
-            onChange={(e) => set({ level: Math.min(1.5, gOf(Number(e.target.value))) })}
+            onChange={(e) => set({ level: Math.min(FADER_MAX_GAIN, gOf(Number(e.target.value))) })}
             onDoubleClick={() => set({ level: 1 })}
             className={`${big ? 'w-full order-last' : 'w-16'} accent-cyan-400`} />
           <span className="w-12 text-right text-[9px] tabular-nums text-slate-400">{gainToDbText(send.level)}</span>
@@ -564,8 +565,8 @@ export const SendViewStrip: React.FC<{ track: Track; all: Track[]; slot: number 
       {send ? (
         <>
           <div className="flex items-center gap-1">
-            <input type="range" min={-60} max={6} step={0.5} value={Math.round(dbOf(send.level) * 2) / 2} aria-label={`Niveau de l'envoi ${letter}`}
-              onChange={(e) => set({ level: Math.min(1.5, gOf(Number(e.target.value))) })} onDoubleClick={() => set({ level: 1 })}
+            <input type="range" min={-60} max={FADER_MAX_DB} step={0.5} value={Math.round(dbOf(send.level) * 2) / 2} aria-label={`Niveau de l'envoi ${letter}`}
+              onChange={(e) => set({ level: Math.min(FADER_MAX_GAIN, gOf(Number(e.target.value))) })} onDoubleClick={() => set({ level: 1 })}
               title="Niveau de l'envoi · double-clic : 0 dB" className="min-w-0 flex-1 accent-cyan-400" />
             <span className="w-11 shrink-0 text-right text-[9px] tabular-nums text-slate-300">{gainToDbText(send.level)}</span>
           </div>
@@ -614,9 +615,9 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
   const set = (patch: Partial<Track>) => applyTracks(mapTrack(vca.id, t => ({ ...t, ...patch })));
   const candidates = all.filter(t => t.id !== vca.id && t.id !== 'master' && !t.folder && !(t.isVca && t.id === vca.id));
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const pos = Math.sqrt(Math.max(0, vca.volume) / 1.5);
-  const fader = useKnobInteraction(pos, (p) => set({ volume: p * p * 1.5 }), {
-    min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005, sensitivity: Math.max(120, trackRef.current?.clientHeight || 300),
+  const pos = gainToFaderPos(vca.volume);
+  const fader = useKnobInteraction(pos, (p) => set({ volume: faderPosToGain(p) }), {
+    min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.005, sensitivity: Math.max(120, trackRef.current?.clientHeight || 300),
   });
   return (
     <div data-strip-id={vca.id} data-testid={`vca-strip-${vca.id}`}
@@ -634,7 +635,7 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
           <div className="absolute left-1/2 -translate-x-1/2 w-9 h-14 rounded border border-violet-300/60 bg-violet-500 shadow-2xl flex items-center justify-center"
             style={{ bottom: `calc(${pos * 100}% - 28px)` }}><div className="w-full h-0.5 bg-black/70" /></div>
         </div>
-        <input type="range" min={-60} max={3.5} step={0.1} value={Math.max(-60, Math.round(db * 10) / 10)}
+        <input type="range" min={-60} max={FADER_MAX_DB} step={0.1} value={Math.max(-60, Math.round(db * 10) / 10)}
           aria-label={`Fader du VCA ${vca.name}`} data-testid={`vca-fader-${vca.id}`}
           onChange={(e) => set({ volume: Number(e.target.value) <= -59.9 ? 0 : Math.pow(10, Number(e.target.value) / 20) })}
           className="sr-only" />

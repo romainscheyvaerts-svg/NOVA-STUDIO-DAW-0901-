@@ -1,5 +1,6 @@
 import type { AutomationCurveType, AutomationLane, AutomationPoint, Track } from '../types';
 import { parseRackChildKey, rackNestedValue, withRackNestedValue } from '../engine/fxRack';
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos, LEGACY_FADER_MAX_GAIN } from './faderLaw';
 
 /**
  * Modes d'automation façon Pro Tools (Off, Read, Touch, Latch, Write, Trim) :
@@ -156,12 +157,12 @@ const PLUGIN_RANGES: [RegExp, number, number][] = [
  * de la valeur entendue (elle s'élargit ensuite si l'écriture la dépasse).
  */
 export const paramSpec = (name: string, sample?: number): ParamSpec => {
-  if (name === 'volume' || name === PRE_VOLUME) return { min: 0, max: 1.5, kind: 'gain' };
+  if (name === 'volume' || name === PRE_VOLUME) return { min: 0, max: FADER_MAX_GAIN, kind: 'gain' };
   if (name === 'pan') return { min: -1, max: 1, kind: 'pan' };
   // Tête de tranche (R11)
   if (name === 'trim') return { min: 0, max: 4, kind: 'gain' };
   if (name === 'width') return { min: 0, max: 2, kind: 'linear' };
-  if (name.startsWith(SEND_PREFIX)) return { min: 0, max: 1.5, kind: 'gain' };
+  if (name.startsWith(SEND_PREFIX)) return { min: 0, max: FADER_MAX_GAIN, kind: 'gain' };
   const p = parsePluginParam(name);
   const v = typeof sample === 'number' && Number.isFinite(sample) ? sample : 0;
   if (p) {
@@ -185,10 +186,24 @@ export const widenSpec = (spec: ParamSpec, values: number[]): ParamSpec => {
 
 export const clampToSpec = (spec: ParamSpec, v: number) => Math.max(spec.min, Math.min(spec.max, v));
 
-/** Valeur → position 0…1 (fader en racine du gain, comme la console de NOVA). */
+/** Valeur → position 0…1 (gain : échelle des faders de la console, utils/faderLaw). */
 export const normalize = (spec: ParamSpec, v: number): number => {
-  if (spec.kind === 'gain') return Math.sqrt(Math.max(0, v) / (spec.max || 1));
+  if (spec.kind === 'gain') return usesFaderScale(spec) ? gainToFaderPos(v) : Math.sqrt(Math.max(0, v) / (spec.max || 1));
   return (v - spec.min) / ((spec.max - spec.min) || 1);
+};
+
+/**
+ * Voie de volume / d'envoi (butée +12 dB, ou ancienne butée 1,5 pas encore relevée) : affichée avec
+ * l'échelle des faders (0 dB aux 3/4). Les autres gains (trim) gardent la racine du gain.
+ */
+export const usesFaderScale = (spec: Pick<ParamSpec, 'kind' | 'max'>): boolean =>
+  spec.kind === 'gain' && spec.max >= LEGACY_FADER_MAX_GAIN - 1e-9 && spec.max <= FADER_MAX_GAIN + 1e-6;
+
+/** Position 0…1 → valeur (inverse de normalize). */
+export const denormalize = (spec: ParamSpec, n: number): number => {
+  const x = Math.max(0, Math.min(1, n));
+  if (spec.kind === 'gain') return usesFaderScale(spec) ? faderPosToGain(x) : x * x * (spec.max || 1);
+  return spec.min + x * (spec.max - spec.min);
 };
 
 /** Paramètre piloté par un fader, un potard ou un effet (pas le volume avant effets). */

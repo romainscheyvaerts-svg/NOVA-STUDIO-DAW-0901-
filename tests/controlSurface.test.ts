@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../types';
 import {
@@ -16,12 +17,12 @@ import { guessPorts } from '../services/ControlSurface';
 // --- Conversions -------------------------------------------------------------------------
 
 describe('surfaces : conversions communes', () => {
-  it('fader ↔ volume suivent la loi du fader de NOVA (racine du gain, 0 dB vers 82 %)', () => {
-    expect(volumeToFader(1.5)).toBeCloseTo(1);
+  it('fader ↔ volume suivent l’échelle des faders de NOVA (−∞ … +12 dB, 0 dB aux 3/4)', () => {
+    expect(volumeToFader(FADER_MAX_GAIN)).toBeCloseTo(1);
     expect(volumeToFader(0)).toBe(0);
-    expect(volumeToFader(1)).toBeCloseTo(Math.sqrt(1 / 1.5));
-    for (const v of [0, 0.1, 0.5, 1, 1.2, 1.5]) expect(faderToVolume(volumeToFader(v))).toBeCloseTo(v, 6);
-    expect(faderToVolume(2)).toBeCloseTo(1.5);
+    expect(volumeToFader(1)).toBe(0.75);
+    for (const v of [0, 0.1, 0.5, 1, 1.2, 1.5, 2, 3.5]) expect(faderToVolume(volumeToFader(v))).toBeCloseTo(v, 6);
+    expect(faderToVolume(2)).toBeCloseTo(FADER_MAX_GAIN);
     expect(to14(1)).toBe(16383);
     expect(from14(to14(0.5))).toBeCloseTo(0.5, 3);
   });
@@ -304,7 +305,7 @@ describe('contrôleur de surface', () => {
     r.ctl.handleMidi([0xe0, 0, 0]);
     expect(r.tracks().find(t => t.id === 't8')!.volume).toBe(0);
     r.ctl.handleMidi([0xe8, 0x7f, 0x7f]);
-    expect(r.tracks().find(t => t.id === 'master')!.volume).toBeCloseTo(1.5);
+    expect(r.tracks().find(t => t.id === 'master')!.volume).toBeCloseTo(FADER_MAX_GAIN);
   });
 
   it('faders motorisés : suivent l’automation, jamais pendant le toucher, sans écho', () => {

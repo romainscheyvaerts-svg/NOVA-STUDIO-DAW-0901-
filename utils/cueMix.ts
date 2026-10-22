@@ -1,4 +1,5 @@
 import type { CueLevel, CueMix, Track } from '../types';
+import { FADER_MAX_GAIN } from './faderLaw';
 
 /**
  * R15 · Mixes casque (cue mixes), comme les envois pré-fader de Pro Tools vers les
@@ -42,7 +43,8 @@ export function cueLevelOf(mix: Pick<CueMix, 'levels'>, track: Pick<Track, 'id' 
   return { level: clampLevel(track.volume ?? 1), pan: clampPan(track.pan ?? 0) };
 }
 
-const clampLevel = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : 1);
+// Même butée que les faders (+12 dB, utils/faderLaw) : une piste à +12 dB l'est aussi au casque.
+const clampLevel = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(FADER_MAX_GAIN, v)) : 1);
 const clampPan = (v: number) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
 
 export function setCueLevel(mix: CueMix, trackId: string, patch: Partial<CueLevel>, track?: Pick<Track, 'id' | 'volume' | 'pan'>): CueMix {
@@ -185,8 +187,8 @@ export function sanitizeCueMixes(raw: unknown): CueMix[] {
     out.push({
       id, name: typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 40) : 'Casque',
       pair: Number.isInteger(m.pair) && m.pair >= 0 && m.pair < 16 ? m.pair : 1,
-      levels, click: Math.max(0, Math.min(2, Number.isFinite(Number(m.click)) ? Number(m.click) : 0.7)),
-      master: Math.max(0, Math.min(2, Number.isFinite(Number(m.master)) ? Number(m.master) : 1)),
+      levels, click: Math.max(0, Math.min(FADER_MAX_GAIN, Number.isFinite(Number(m.click)) ? Number(m.click) : 0.7)),
+      master: Math.max(0, Math.min(FADER_MAX_GAIN, Number.isFinite(Number(m.master)) ? Number(m.master) : 1)),
       ...(m.muted ? { muted: true } : {}),
     });
   }
