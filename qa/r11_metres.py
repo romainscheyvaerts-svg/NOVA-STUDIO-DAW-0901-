@@ -423,7 +423,8 @@ def run_D(b, vp, theme):
     pg.wait_for_timeout(1500)
     shot(pg, f"D_{tag}_03_console_metres")
     res["metres_console"] = pg.locator("[data-meter]").locator("visible=true").count()
-    res["tetes_de_tranche"] = pg.locator("[data-testid^='strip-head-']").locator("visible=true").count()
+    # Barre allégée : une tête neutre est rangée dans « Ø · Trim ▾ » (strip-more-…), réglée elle reste affichée.
+    res["tetes_de_tranche"] = pg.locator("[data-testid^='strip-head-'], [data-testid^='strip-more-']").locator("visible=true").count()
     res["boutons_phase_actifs"] = pg.locator("[data-testid^='strip-phase-'][aria-pressed=true]").count()
     res["boutons_mono_actifs"] = pg.locator("[data-testid^='strip-mono-'][aria-pressed=true]").count()
     # Fenêtre Loudness

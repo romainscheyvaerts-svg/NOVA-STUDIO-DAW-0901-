@@ -114,9 +114,11 @@ def scenario_pc(page, res):
     res["canvas"] = box
     RATE["sr"] = page.evaluate("() => window.__novaEditMode.sampleRate()")
     res["frequence_session_debut"] = RATE["sr"]
+    qalib.ouvrir_menu_range(page, '[data-edit-mode]')  # « Édition ▾ » (barre allégée)
     res["selecteur"] = page.evaluate("() => [...document.querySelectorAll('[data-edit-mode]')].map(b => ({ mode: b.dataset.editMode, actif: b.getAttribute('aria-checked'), texte: b.textContent.trim(), infobulle: (b.title || '').slice(0, 60) }))")
     res["mode_initial"] = mode(page)
     shot(page, "pc_02_selecteur_grid_relatif")
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
     page.locator('[data-testid="grid-value"]').click(); page.wait_for_timeout(250)
     shot(page, "pc_03_menu_grille")
     page.keyboard.press("Escape"); page.wait_for_timeout(150)
@@ -237,12 +239,16 @@ def scenario_pc(page, res):
     shot(page, "pc_13_shuffle_plage_supprimee")
     # Shuffle Lock (clic droit sur SHUF) : F1 ne fait plus entrer en Shuffle
     page.keyboard.press("F2"); page.wait_for_timeout(150)
+    qalib.ouvrir_menu_range(page, '[data-edit-mode="SHUFFLE"]')
     page.locator('[data-edit-mode="SHUFFLE"]').click(button="right"); page.wait_for_timeout(150)
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
     page.keyboard.press("F1"); page.wait_for_timeout(150)
     res["shuffle_lock"] = mode(page)
     res["shuffle_lock_ok"] = res["shuffle_lock"] == "SLIP:LOCK"
     shot(page, "pc_14_shuffle_lock")
+    qalib.ouvrir_menu_range(page, '[data-edit-mode="SHUFFLE"]')
     page.locator('[data-edit-mode="SHUFFLE"]').click(button="right"); page.wait_for_timeout(150)
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
 
     # ---------------- Projet rouvert : le mode (préférence) est gardé ; Spot (F3 / Alt+3)
     pe.open_project(page, project(), "pc_15_projet_rouvert")
@@ -348,14 +354,19 @@ def scenario_ecran(page, res, vp):
         pe.open_project(page, project(), f"{vp}_01c_avance")
     res[f"{vp}_debordements"] = qalib.overflow_report(page)[:10]
     res[f"{vp}_hscroll"] = page.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1")
+    opened = qalib.ouvrir_menu_range(page, '[data-edit-mode]', tap=(vp != "pc"))
     res[f"{vp}_selecteur"] = page.evaluate("() => [...document.querySelectorAll('[data-edit-mode]')].filter(b => b.getClientRects().length).map(b => { const r = b.getBoundingClientRect(); return { mode: b.dataset.editMode, h: Math.round(r.height), w: Math.round(r.width) }; })")
-    res[f"{vp}_libre_grille"] = libre_grille(page)
     shot(page, f"{vp}_02_selecteur")
+    if opened:
+        page.keyboard.press("Escape"); page.wait_for_timeout(150)
+    res[f"{vp}_libre_grille"] = libre_grille(page)
     if vp == "tab":
         box = pe.canvas_box(page)
         res["tab_canvas"] = box
         # Mode Spot au doigt, puis appui long sur A : Position exacte (et pas le menu du clip)
+        qalib.ouvrir_menu_range(page, '[data-edit-mode="SPOT"]', tap=True)
         page.locator('[data-edit-mode="SPOT"]').tap(); page.wait_for_timeout(150)
+        page.keyboard.press("Escape"); page.wait_for_timeout(100)
         res["tab_tap_spot"] = mode(page)
         x, y = pe.x_of(box, 1.0), pe.lane_y(box, 0, 0.85)
         cdp = page.context.new_cdp_session(page)
@@ -368,9 +379,11 @@ def scenario_ecran(page, res, vp):
         shot(page, "tab_03_appui_long_spot")
         page.keyboard.press("Escape"); page.wait_for_timeout(200)
         # Sélecteur au doigt : SLIP puis GRID
+        qalib.ouvrir_menu_range(page, '[data-edit-mode="SLIP"]', tap=True)
         page.locator('[data-edit-mode="SLIP"]').tap(); page.wait_for_timeout(150)
         res["tab_tap_slip"] = mode(page)
         page.locator('[data-edit-mode="GRID"]').tap(); page.wait_for_timeout(150)
+        page.keyboard.press("Escape"); page.wait_for_timeout(100)
         res["tab_tap_grid"] = mode(page)
     if vp == "tel":
         btn = page.get_by_role("radio", name="Libre").locator("visible=true").first

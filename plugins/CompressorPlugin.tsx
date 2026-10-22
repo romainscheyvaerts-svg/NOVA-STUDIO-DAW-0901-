@@ -361,6 +361,74 @@ try { registerProcessor('vocal-compressor-processor-r', VocalCompressorProcessor
 try { registerProcessor('vocal-compressor-processor-r-lite', VocalCompressorLite); } catch (e) {}
 `;
 
+/** Code du worklet tel qu'il est chargé (banc de métrologie : tests/metrologieCompresseurs.test.ts). */
+export const __compWorkletCodeForTests = () => COMP_WORKLET_CODE;
+
+/**
+ * Réglages RÉELLEMENT appliqués par le cœur selon le caractère (métrologie du 22/10/2026) :
+ * OPTO lent et doux, FET rapide et dur, VCA tel quel, CLEAN neutre. Fonction pure, partagée par
+ * le moteur (même calcul qu'avant, son identique au bit près) et par la fenêtre, qui affiche ces
+ * valeurs : un « 3 ms » réglé en FET agit à 1,5 ms, un genou de 12 dB en FET est un genou de 4 dB.
+ *  - trimDb : compensation de niveau du caractère (perte de crête de sa saturation) ;
+ *  - rmsMs : détection RMS (VCA, OPTO), moyenne de cette constante de temps ; 0 = détection crête ;
+ *  - releaseMax : facteur de relâche « dépendant du programme » quand la réduction dure (×2 VCA, ×5 OPTO).
+ */
+export function compModeDynamics(p: Partial<CompressorParams>) {
+  const safe = (val: any, def: number) => Number.isFinite(val) ? val as number : def;
+  let attack = Math.max(0.0001, safe(p.attack, 0.003));
+  let release = Math.max(0.01, safe(p.release, 0.25));
+  let knee = Math.max(0, Math.min(40, safe(p.knee, 12)));
+  let trimDb = 0;
+  switch (p.mode) {
+    case 'VCA':
+      trimDb = 0.3;
+      break;
+    case 'OPTO':
+      attack = Math.max(0.01, attack * 1.5);
+      release = Math.max(0.06, release);
+      knee = Math.max(knee, 10);
+      trimDb = 0.3;
+      break;
+    case 'FET':
+      attack = Math.max(0.0002, attack * 0.5);
+      release = Math.max(0.03, release * 0.75);
+      knee = Math.min(knee, 4);
+      trimDb = 0.6;
+      break;
+  }
+  const rmsMs = p.mode === 'OPTO' ? 10 : p.mode === 'VCA' ? 4 : 0;
+  const releaseMax = p.mode === 'OPTO' ? 5 : p.mode === 'VCA' ? 2 : 1;
+  return { attack: Math.min(1, attack), release: Math.min(1, release), knee, trimDb, trim: Math.pow(10, trimDb / 20), rmsMs, releaseMax };
+}
+
+/**
+ * Courbe statique du cœur (genou doux quadratique, ratio exact) : sortie (dB) pour une entrée (dB),
+ * avant le gain de compensation. C'est celle que dessine l'écran (avec le genou EFFECTIF du caractère).
+ */
+export function compCurveOutDb(inDb: number, threshold: number, ratio: number, knee: number): number {
+  const k = 1 - 1 / Math.max(1, ratio), over = inDb - threshold;
+  if (2 * over > knee) return inDb - k * over;
+  if (knee > 0 && 2 * over > -knee) { const u = over + knee / 2; return inDb - k * u * u / (2 * knee); }
+  return inDb;
+}
+
+/** Gain auto (dB) : la moitié de la réduction qu'aurait un sinus à 0 dBFS (seuil et ratio du réglage). */
+export const compAutoMakeupDb = (threshold: number, ratio: number) => (Math.abs(threshold) * (1 - 1 / ratio)) / 2;
+
+/**
+ * Temps (s) pour que la réduction redescende de 63 % après un son fort : détecteur « lisse découplé »
+ * (relâche τR puis lissage d'attaque τA en cascade), réponse 1 − (τR·e^(−t/τR) − τA·e^(−t/τA)) / (τR − τA).
+ * C'est la relâche que l'on MESURE (égale à τR seulement si l'attaque est très courte).
+ */
+export function compRelease63(release: number, attack: number): number {
+  const R = Math.max(1e-6, release), A = Math.max(1e-7, attack);
+  if (Math.abs(R - A) < 1e-9 * R) return 2.1461932206 * R; // τ double : (1 + t/τ)·e^(−t/τ) = e^(−1)
+  const rest = (t: number) => (R * Math.exp(-t / R) - A * Math.exp(-t / A)) / (R - A);
+  let lo = 0, hi = 20 * (R + A);
+  for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; if (rest(m) > Math.exp(-1)) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
 const MODE_INDEX: Record<CompressorParams['mode'], number> = { CLEAN: 0, VCA: 1, OPTO: 2, FET: 3 };
 
 export class CompressorNode {
@@ -614,10 +682,19 @@ export class CompressorNode {
     return this.effectiveLookahead() + (this.compressor ? 0.006 : 0);
   }
 
+  /**
+   * Pré-lecture réelle (s) : un nombre ENTIER d'échantillons, arrondi exactement comme le cœur
+   * (réglage en 32 bits × fréquence). Avant le 22/10/2026, la latence annoncée au PDC et le retard
+   * de la voie sèche gardaient la valeur brute (5 ms à 44,1 kHz = 220,5 échantillons annoncés pour
+   * 220 réels) : décalage d'un demi-échantillon avec les autres pistes, et filtrage en peigne du
+   * mélange parallèle (voie sèche retardée par interpolation). Le son compressé ne change pas.
+   */
   private effectiveLookahead(): number {
     if (this.params.lowLatency || !this.params.isEnabled) return 0;
     const l = Number(this.params.lookahead);
-    return Number.isFinite(l) ? Math.max(0, Math.min(0.01, l)) : 0;
+    const raw = Number.isFinite(l) ? Math.max(0, Math.min(0.01, l)) : 0;
+    const sr = this.ctx.sampleRate;
+    return Math.round(Math.fround(raw) * sr) / sr;
   }
 
   /**
@@ -665,29 +742,7 @@ export class CompressorNode {
    * sur une voix compressee, le mode change la couleur, pas le niveau).
    */
   private modeDynamics() {
-    const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
-    let attack = Math.max(0.0001, safe(this.params.attack, 0.003));
-    let release = Math.max(0.01, safe(this.params.release, 0.25));
-    let knee = Math.max(0, Math.min(40, safe(this.params.knee, 12)));
-    let trimDb = 0;
-    switch (this.params.mode) {
-      case 'VCA':
-        trimDb = 0.3;
-        break;
-      case 'OPTO':
-        attack = Math.max(0.01, attack * 1.5);
-        release = Math.max(0.06, release);
-        knee = Math.max(knee, 10);
-        trimDb = 0.3;
-        break;
-      case 'FET':
-        attack = Math.max(0.0002, attack * 0.5);
-        release = Math.max(0.03, release * 0.75);
-        knee = Math.min(knee, 4);
-        trimDb = 0.6;
-        break;
-    }
-    return { attack: Math.min(1, attack), release: Math.min(1, release), knee, trim: Math.pow(10, trimDb / 20) };
+    return compModeDynamics(this.params);
   }
 
   private calculateAutoMakeup(): number {
@@ -1047,8 +1102,8 @@ const COMP_HINTS = {
   threshold: termHelp('Seuil'),
   ratio: termHelp('Ratio'),
   knee: termHelp('Genou'),
-  attack: termHelp('Attack'),
-  release: termHelp('Release'),
+  attack: `${termHelp('Attack')} Valeur affichée = constante de temps : 63 % de la réduction est atteinte en ce temps (90 % en 2,3 fois ce temps).`,
+  release: `${termHelp('Release')} Valeur affichée = constante de temps de la relâche ; la relâche réellement mesurée (63 %) est indiquée sous les boutons.`,
   makeupGain: `${termHelp('Gain de sortie')} Grisé quand « Gain auto » est enfoncé.`,
   mix: termHelp('Mélange'),
   lookahead: termHelp('Anticipation'),
@@ -1056,8 +1111,25 @@ const COMP_HINTS = {
   autoMakeup: 'Gain auto : NOVA remonte tout seul le volume perdu par la compression.',
   vu: 'Réduction de gain : de combien (dB) le compresseur baisse le son en ce moment. Sur une voix, 3 à 6 dB au VU, c’est bien.',
 };
-const msFr = (s: number) => { const ms = s * 1000; return `${ms < 10 ? numFr(ms, 1) : numFr(ms, 0)} ms`; };
 const signedFr = (v: number, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + numFr(Math.abs(v), d);
+const msFr = (s: number) => { const ms = s * 1000; return `${ms < 10 ? numFr(ms, 1) : numFr(ms, 0)} ms`; };
+/** Durée lisible (ms jusqu'à 1 s, puis s). */
+const durFr = (s: number) => (s >= 1 ? `${numFr(s, s >= 10 ? 0 : 2)} s` : msFr(s));
+
+/**
+ * Ce que le compresseur fait VRAIMENT avec ces réglages (métrologie du 22/10/2026) : attaque
+ * (constante de temps, 63 %), relâche mesurée à 63 % (relâche + lissage d'attaque), genou,
+ * détection et compensation du caractère. Mêmes calculs que le moteur (compModeDynamics).
+ */
+export function compRealText(p: Partial<CompressorParams>): string {
+  const d = compModeDynamics(p);
+  const parts = [`attaque ${msFr(d.attack)}`, `relâche ${durFr(compRelease63(d.release, d.attack))} (63 %)`];
+  if (d.releaseMax > 1) parts[1] += `, jusqu’à ${durFr(compRelease63(d.release * d.releaseMax, d.attack))} si la réduction dure`;
+  parts.push(`genou ${numFr(d.knee, d.knee % 1 ? 1 : 0)} dB`);
+  parts.push(d.rmsMs ? `détection RMS (moyenne ${numFr(d.rmsMs, 0)} ms)` : 'détection crête');
+  if (d.trimDb) parts.push(`${signedFr(d.trimDb)} dB de compensation du caractère`);
+  return `Réel : ${parts.join(' · ')}`;
+}
 
 /** Écran de la courbe de compression : redessiné quand un réglage change, jamais à chaque image. */
 const CompCurve: React.FC<{ threshold: number; ratio: number; knee: number; mode: string }> = React.memo(({ threshold, ratio, knee, mode }) => {
@@ -1081,7 +1153,7 @@ const CompCurve: React.FC<{ threshold: number; ratio: number; knee: number; mode
     ctx.setLineDash([]);
     ctx.strokeStyle = 'rgba(251,146,60,0.45)';
     ctx.beginPath(); ctx.moveTo(X(threshold), 0); ctx.lineTo(X(threshold), h); ctx.stroke();
-    // Même courbe qu'avant (genou doux quadratique, ratio exact) : celle qu'on entend.
+    // Courbe du cœur (genou doux quadratique, ratio exact) avec le genou EFFECTIF du caractère : celle qu'on entend.
     ctx.beginPath();
     ctx.strokeStyle = COMP_ACCENT;
     ctx.lineWidth = 2.5;
@@ -1089,10 +1161,7 @@ const CompCurve: React.FC<{ threshold: number; ratio: number; knee: number; mode
     ctx.shadowColor = 'rgba(251,146,60,0.45)';
     for (let i = 0; i <= w; i++) {
       const inDb = (i / w) * 60 - 60;
-      let outDb = inDb;
-      if (inDb > threshold + knee / 2) outDb = threshold + (inDb - threshold) / ratio;
-      else if (inDb > threshold - knee / 2) { const t = (inDb - (threshold - knee / 2)) / knee; outDb = inDb + (1 / ratio - 1) * knee * t * t / 2; }
-      const y = Y(outDb);
+      const y = Y(compCurveOutDb(inDb, threshold, ratio, knee));
       if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
     }
     ctx.stroke();
@@ -1143,7 +1212,7 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
       <Faceplate finish="petrol" model="Compresseur" kicker="Compresseur de studio · 4 caractères" modelStyle="wide" className="hw-touch" style={{ ['--hw-accent' as any]: COMP_ACCENT }}>
         <div className="flex flex-wrap sm:flex-nowrap items-stretch gap-3">
           <div className="hw-screen w-full sm:flex-1 min-w-0">
-            <CompCurve threshold={params.threshold} ratio={params.ratio} knee={params.knee} mode={COMP_MODES.find(m => m.v === params.mode)?.label || params.mode} />
+            <CompCurve threshold={params.threshold} ratio={params.ratio} knee={compModeDynamics(params).knee} mode={COMP_MODES.find(m => m.v === params.mode)?.label || params.mode} />
           </div>
           <div className="flex items-center justify-center gap-3 w-full sm:w-auto" aria-label="Mesures du compresseur">
             <VuMeter read={() => -(node?.getReduction?.() || 0)} mode="gr" caption="Réduction de gain" readout hint={COMP_HINTS.vu}
@@ -1178,11 +1247,14 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
           {K('release', 'Relâche', { size: 'M', min: 0.01, max: 1, curve: 'log', defaultValue: 0.25, format: msFr, ariaLabel: 'Relâche (release)',
             scale: [{ v: 0.01, label: '10' }, { v: 0.1, label: '100' }, { v: 1, label: '1k' }], sub: 'ms' })}
         </div>
+        <p className="hw-silk hw-silk-soft mt-2" style={{ textAlign: 'center', textTransform: 'none', letterSpacing: '0.02em' }} data-nova-comp-reel aria-live="polite">
+          {compRealText(params)}
+        </p>
 
         <HwSection title="Sortie et mélange" className="mt-3">
           <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
             {K('makeupGain', 'Sortie', { size: 'M', min: 0.25, max: 4, curve: 'log', defaultValue: 1.6, disabled: params.autoMakeup, ariaLabel: 'Gain de sortie',
-              format: v => (params.autoMakeup ? 'auto' : gainDbFr(v)), scale: [{ v: 0.25, label: '−12' }, { v: 1, label: '0' }, { v: 4, label: '+12' }] })}
+              format: v => (params.autoMakeup ? `auto · ${signedFr(compAutoMakeupDb(params.threshold, params.ratio))} dB` : gainDbFr(v)), scale: [{ v: 0.25, label: '−12' }, { v: 1, label: '0' }, { v: 4, label: '+12' }] })}
             <div className="flex flex-col items-center gap-1 pt-4" data-nova-param="autoMakeup">
               <PushButton role="checkbox" active={!!params.autoMakeup} onClick={() => updateParam('autoMakeup', !params.autoMakeup)} text="Auto" label="Gain auto"
                 led="#4ade80" ariaLabel="Gain de sortie automatique" hint={COMP_HINTS.autoMakeup} dark valueText={params.autoMakeup ? 'enfoncé (gain automatique)' : 'relevé'} />

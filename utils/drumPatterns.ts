@@ -1,5 +1,6 @@
 import { Clip, TrackType } from '../types';
 import type { DrumMachine, DrumRow } from './drumKits';
+import { quartersToTime, timeToQuarters, type TempoMap } from './tempoMap';
 
 /**
  * V16 · Plusieurs motifs de batterie (comme les Patterns de FL Studio).
@@ -17,12 +18,14 @@ import type { DrumMachine, DrumRow } from './drumKits';
 export const STEPS_PER_BAR = 16;
 export const MAX_PATTERNS = 12;
 
+export type PatternBars = 1 | 2 | 4 | 8;
+
 export interface DrumPattern {
   id: string;
   /** Nom affiché (« A », « Couplet »…). */
   name: string;
   color: string;
-  bars: 1 | 2 | 4;
+  bars: PatternBars;
   /** Vélocité 0-127 par pas, par pad (clé = id du pad). */
   steps: Record<string, number[]>;
   /** Rolls par pas, par pad. */
@@ -30,13 +33,45 @@ export interface DrumPattern {
   /** R18 : panoramique et hauteur par pas, par pad (absents : 0). */
   pan?: Record<string, number[]>;
   pitch?: Record<string, number[]>;
+  /** Séquenceur pro : probabilité, décalage fin, longueur de note, glisse par pas, par pad (absents : défaut). */
+  prob?: Record<string, number[]>;
+  nudge?: Record<string, number[]>;
+  gate?: Record<string, number[]>;
+  glide?: Record<string, number[]>;
+}
+
+// ===== Couloirs par pas facultatifs (R18 + séquenceur pro 22/10/2026) =====
+
+export type LaneKey = 'pan' | 'pitch' | 'prob' | 'nudge' | 'gate' | 'glide';
+export type RowLane = 'stepPan' | 'stepPitch' | 'stepProb' | 'stepNudge' | 'stepGate' | 'stepGlide';
+/**
+ * Un couloir = une valeur par pas, rangée dans la rangée (`row`, motif affiché) et dans chaque motif
+ * (`key`). Absent (ou tout à la valeur par défaut) : rien n'est écrit, un ancien projet reste identique.
+ */
+export const STEP_LANES: { key: LaneKey; row: RowLane; dflt: number }[] = [
+  { key: 'pan', row: 'stepPan', dflt: 0 },
+  { key: 'pitch', row: 'stepPitch', dflt: 0 },
+  { key: 'prob', row: 'stepProb', dflt: 100 },
+  { key: 'nudge', row: 'stepNudge', dflt: 0 },
+  { key: 'gate', row: 'stepGate', dflt: 0 },
+  { key: 'glide', row: 'stepGlide', dflt: 0 },
+];
+export const ROW_LANE: Record<LaneKey, RowLane> = { pan: 'stepPan', pitch: 'stepPitch', prob: 'stepProb', nudge: 'stepNudge', gate: 'stepGate', glide: 'stepGlide' };
+const laneSet = (a: number[] | undefined, dflt: number) => !!a && a.some(v => (v ?? dflt) !== dflt);
+
+/** Applique `fn` à chaque tableau par pad d'un motif (pas, rolls et couloirs), pour retirer / renommer un pad. */
+export function mapPatternRecords(p: DrumPattern, fn: (rec: Record<string, number[]>) => Record<string, number[]>): DrumPattern {
+  const out: DrumPattern = { ...p, steps: fn(p.steps), ratchet: fn(p.ratchet) };
+  for (const l of STEP_LANES) { const rec = p[l.key]; if (rec) out[l.key] = fn(rec); }
+  return out;
 }
 
 // ===== R18 · Résolution et longueur par rangée (FL Studio, Bitwig, Live) =====
 
-/** Résolution d'une rangée : 1/16, 1/32, triolets de croches (1/8 T) ou de doubles-croches (1/16 T). */
-export type StepRate = '16' | '32' | '8t' | '16t';
+/** Résolution d'une rangée : 1/8, 1/16, 1/32, triolets de croches (1/8 T) ou de doubles-croches (1/16 T). */
+export type StepRate = '8' | '16' | '32' | '8t' | '16t';
 export const STEP_RATES: { id: StepRate; label: string; perBar: number; hint: string }[] = [
+  { id: '8', label: '1/8', perBar: 8, hint: 'Croches : grille large (kicks, claps, cloches).' },
   { id: '16', label: '1/16', perBar: 16, hint: 'Doubles-croches : la grille classique du beatmaking.' },
   { id: '32', label: '1/32', perBar: 32, hint: 'Triples-croches : hi-hats trap très rapides.' },
   { id: '16t', label: '1/16 T', perBar: 24, hint: 'Triolets de doubles-croches (rolls drill).' },
@@ -44,15 +79,25 @@ export const STEP_RATES: { id: StepRate; label: string; perBar: number; hint: st
 ];
 /** Pas par mesure d'une rangée. */
 export const rowStepsPerBar = (r: { rate?: StepRate }): number => STEP_RATES.find(x => x.id === r.rate)?.perBar || STEPS_PER_BAR;
+/** Longueur propre maximale d'une rangée, en mesures (64 pas en 1/16). */
+export const MAX_ROW_BARS = 8;
 /** Nombre de pas d'une rangée dans un motif de `bars` mesures (sa longueur propre si elle en a une). */
 export const rowLength = (r: { rate?: StepRate; len?: number }, bars: number): number =>
-  r.len && r.len > 0 ? Math.max(1, Math.min(rowStepsPerBar(r) * 4, Math.round(r.len))) : rowStepsPerBar(r) * barsOf(bars);
+  r.len && r.len > 0 ? Math.max(1, Math.min(rowStepsPerBar(r) * MAX_ROW_BARS, Math.round(r.len))) : rowStepsPerBar(r) * barsOf(bars);
 
 export interface DrumFill {
-  /** Toutes les 4 ou 8 mesures (0 = pas de fill). */
-  every: 0 | 4 | 8;
+  /** Toutes les 2, 4 ou 8 mesures (0 = pas de fill). */
+  every: 0 | 2 | 4 | 8;
   /** Motif joué en fill ; absent = variation automatique du motif en cours. */
   patternId?: string | null;
+  /**
+   * Remplissage automatique (règles publiées, CONTENU/nova-pro-2026/seance/RECETTES.md §3) :
+   * 'roll' roulement de caisse claire sur le dernier temps (défaut, comme avant), 'toms' fill de
+   * 2 temps (4 doubles de tom puis le roulement), 'hats' roulement + charleston doublé (trap / drill).
+   */
+  style?: 'roll' | 'toms' | 'hats';
+  /** Crash sur le 1 de la mesure qui suit le fill [S4]. */
+  crash?: boolean;
 }
 
 export const PATTERN_COLORS = ['#f97316', '#22d3ee', '#a78bfa', '#f43f5e', '#84cc16', '#eab308', '#ec4899', '#14b8a6'];
@@ -64,22 +109,23 @@ const fit = (a: number[] | undefined, len: number, fill: number): number[] => {
   return Array.from({ length: len }, (_, i) => (src ? (src[i] ?? src[i % src.length] ?? fill) : fill));
 };
 
-const barsOf = (b: number | undefined): 1 | 2 | 4 => (b === 4 ? 4 : b === 2 ? 2 : 1);
+export const barsOf = (b: number | undefined): PatternBars => (b === 8 ? 8 : b === 4 ? 4 : b === 2 ? 2 : 1);
 
-/** Pas et rolls des pads (motif affiché). */
-export function captureRows(dm: DrumMachine): Pick<DrumPattern, 'steps' | 'ratchet' | 'pan' | 'pitch'> {
+/** Pas, rolls et couloirs des pads (motif affiché). */
+export function captureRows(dm: DrumMachine): Pick<DrumPattern, 'steps' | 'ratchet' | LaneKey> {
   const steps: Record<string, number[]> = {};
   const ratchet: Record<string, number[]> = {};
-  const pan: Record<string, number[]> = {};
-  const pitch: Record<string, number[]> = {};
+  const lanes: Partial<Record<LaneKey, Record<string, number[]>>> = {};
   dm.rows.forEach(r => {
     const len = rowLength(r, dm.bars);
     steps[r.id] = fit(r.steps, len, 0); ratchet[r.id] = fit(r.ratchet, len, 1);
-    if (r.stepPan?.some(v => v)) pan[r.id] = fit(r.stepPan, len, 0);
-    if (r.stepPitch?.some(v => v)) pitch[r.id] = fit(r.stepPitch, len, 0);
+    for (const l of STEP_LANES) {
+      const a = r[l.row];
+      if (laneSet(a, l.dflt)) (lanes[l.key] ||= {})[r.id] = fit(a, len, l.dflt);
+    }
   });
   // Champs absents quand rien n'est réglé : les projets d'avant R18 restent identiques.
-  return { steps, ratchet, ...(Object.keys(pan).length ? { pan } : {}), ...(Object.keys(pitch).length ? { pitch } : {}) };
+  return { steps, ratchet, ...lanes };
 }
 
 /** Projet d'avant la V16 : son motif unique devient le motif A. */
@@ -99,7 +145,8 @@ export function commitActive(dm: DrumMachine): DrumMachine {
     ...d,
     patterns: d.patterns!.map(p => {
       if (p.id !== d.activePattern) return p;
-      const { pan: _p, pitch: _h, ...rest } = p;
+      const rest: DrumPattern = { ...p };
+      for (const l of STEP_LANES) delete rest[l.key];
       return { ...rest, bars: barsOf(d.bars), ...captureRows(d) };
     }),
   };
@@ -118,12 +165,13 @@ function loadPattern(d: DrumMachine, id: string): DrumMachine {
     ...d, activePattern: p.id, bars: p.bars,
     rows: d.rows.map(r => {
       const len = rowLength(r, p.bars);
-      const { stepPan: _sp, stepPitch: _sh, ...base } = r;
-      return {
-        ...base, steps: fit(p.steps[r.id], len, 0), ratchet: fit(p.ratchet[r.id], len, 1),
-        ...(p.pan?.[r.id] ? { stepPan: fit(p.pan[r.id], len, 0) } : {}),
-        ...(p.pitch?.[r.id] ? { stepPitch: fit(p.pitch[r.id], len, 0) } : {}),
-      };
+      const out: DrumRow = { ...r, steps: fit(p.steps[r.id], len, 0), ratchet: fit(p.ratchet[r.id], len, 1) };
+      for (const l of STEP_LANES) {
+        delete out[l.row];
+        const a = p[l.key]?.[r.id];
+        if (a) out[l.row] = fit(a, len, l.dflt);
+      }
+      return out;
     }),
   };
 }
@@ -151,19 +199,16 @@ export function addPattern(dm: DrumMachine, opts: { copyFrom?: string; name?: st
   const bars = src ? src.bars : barsOf(d.bars);
   const steps: Record<string, number[]> = {};
   const ratchet: Record<string, number[]> = {};
-  const pan: Record<string, number[]> = {};
-  const pitch: Record<string, number[]> = {};
+  const lanes: Partial<Record<LaneKey, Record<string, number[]>>> = {};
   d.rows.forEach(r => {
     const len = rowLength(r, bars);
     steps[r.id] = src ? fit(src.steps[r.id], len, 0) : new Array(len).fill(0);
     ratchet[r.id] = src ? fit(src.ratchet[r.id], len, 1) : new Array(len).fill(1);
-    if (src?.pan?.[r.id]) pan[r.id] = fit(src.pan[r.id], len, 0);
-    if (src?.pitch?.[r.id]) pitch[r.id] = fit(src.pitch[r.id], len, 0);
+    for (const l of STEP_LANES) { const a = src?.[l.key]?.[r.id]; if (a) (lanes[l.key] ||= {})[r.id] = fit(a, len, l.dflt); }
   });
   const p: DrumPattern = {
     id: newId(d), name: opts.name || nextPatternName(d),
-    color: PATTERN_COLORS[d.patterns!.length % PATTERN_COLORS.length], bars, steps, ratchet,
-    ...(Object.keys(pan).length ? { pan } : {}), ...(Object.keys(pitch).length ? { pitch } : {}),
+    color: PATTERN_COLORS[d.patterns!.length % PATTERN_COLORS.length], bars, steps, ratchet, ...lanes,
   };
   // Comme dans FL Studio, créer un motif ne change pas ce que joue le morceau :
   // sans placement, l'ancien motif reste partout (un placement d'une seule
@@ -204,18 +249,17 @@ interface PatternData {
   bars: number;
   steps: (r: DrumRow) => number[];
   ratchet: (r: DrumRow) => number[];
-  pan: (r: DrumRow) => number[] | undefined;
-  pitch: (r: DrumRow) => number[] | undefined;
+  lane: (k: LaneKey, r: DrumRow) => number[] | undefined;
 }
 function patternData(dm: DrumMachine, patternId: string | undefined): PatternData | null {
   if (patternId === '') return null;
   const activeId = dm.activePattern || dm.patterns?.[0]?.id;
   if (!dm.patterns?.length || !patternId || patternId === activeId) {
-    return { bars: barsOf(dm.bars), steps: r => r.steps, ratchet: r => r.ratchet, pan: r => r.stepPan, pitch: r => r.stepPitch };
+    return { bars: barsOf(dm.bars), steps: r => r.steps, ratchet: r => r.ratchet, lane: (k, r) => r[ROW_LANE[k]] };
   }
   const p = dm.patterns!.find(x => x.id === patternId);
   if (!p) return null;
-  return { bars: p.bars, steps: r => p.steps[r.id] || [], ratchet: r => p.ratchet[r.id] || [], pan: r => p.pan?.[r.id], pitch: r => p.pitch?.[r.id] };
+  return { bars: p.bars, steps: r => p.steps[r.id] || [], ratchet: r => p.ratchet[r.id] || [], lane: (k, r) => p[k]?.[r.id] };
 }
 
 // ===== Placement dans le morceau (comme la Playlist de FL Studio) =====
@@ -297,20 +341,31 @@ export function planBars(dm: DrumMachine, totalBars: number): BarPlan[] {
 }
 
 /**
- * Variation automatique de fin de phrase : roulement de caisse claire sur le
- * dernier temps (crescendo), charleston doublé, kick retiré du dernier temps.
+ * Variation automatique de fin de phrase (règles publiées, CONTENU/nova-pro-2026/seance/RECETTES.md §3) :
+ *  - 'roll' (défaut, comme avant) : roulement de caisse claire en crescendo sur les doubles du dernier
+ *    temps (72, 88, 104, 122, le dernier en roll de 2), le kick laisse la place, charleston doublé ;
+ *  - 'toms' : fill de 2 temps — 4 doubles de tom (64, 72, 80, 88 ; caisse claire sans tom) puis le
+ *    roulement ; le kick garde seulement le premier temps du fill.
  */
-export function autoFillBar(rows: { id: string; steps: number[]; ratchet: number[] }[]): { id: string; steps: number[]; ratchet: number[] }[] {
+export function autoFillBar(rows: { id: string; steps: number[]; ratchet: number[] }[], style: DrumFill['style'] = 'roll'): { id: string; steps: number[]; ratchet: number[] }[] {
   const out = rows.map(r => ({ id: r.id, steps: [...r.steps], ratchet: [...r.ratchet] }));
   const hits = (r: { steps: number[] }) => r.steps.some(v => v > 0);
   const roll = out.find(r => r.id === 'snare' && hits(r)) || out.find(r => r.id === 'clap' && hits(r))
     || out.find(r => r.id === 'snare') || out.find(r => r.id !== 'kick' && hits(r));
   const vel = [72, 88, 104, 122];
+  const two = style === 'toms';
+  const from = two ? 8 : 12;
+  if (two) {
+    const tom = out.find(r => r.id === 'tom') || roll;
+    const toms = [64, 72, 80, 88];
+    if (tom) for (let i = 0; i < 4; i++) { tom.steps[8 + i] = toms[i]; tom.ratchet[8 + i] = 1; }
+    if (roll && tom !== roll) for (let i = 8; i < 12; i++) { roll.steps[i] = 0; roll.ratchet[i] = 1; }
+  }
   if (roll) for (let i = 0; i < 4; i++) { roll.steps[12 + i] = vel[i]; roll.ratchet[12 + i] = i === 3 ? 2 : 1; }
   const kick = out.find(r => r.id === 'kick');
-  if (kick) for (let i = 13; i < 16; i++) { kick.steps[i] = 0; kick.ratchet[i] = 1; }
+  if (kick) for (let i = from + 1; i < 16; i++) { kick.steps[i] = 0; kick.ratchet[i] = 1; }
   const hat = out.find(r => r.id === 'hatc');
-  if (hat) for (let i = 12; i < 16; i++) if (hat.steps[i] > 0) hat.ratchet[i] = Math.max(2, hat.ratchet[i] || 1);
+  if (hat) for (let i = from; i < 16; i++) if (hat.steps[i] > 0) hat.ratchet[i] = Math.max(2, hat.ratchet[i] || 1);
   return out;
 }
 
@@ -341,39 +396,74 @@ export const grooveOf = (id?: string) => GROOVES.find(g => g.id === id) || GROOV
 
 // ===== Rendu : un clip MIDI par suite de mesures d'un même motif =====
 
-type Note = { id: string; pitch: number; start: number; duration: number; velocity: number; pan?: number; tune?: number };
+type Note = {
+  id: string; pitch: number; start: number; duration: number; velocity: number; pan?: number; tune?: number;
+  /** Séquenceur pro : la note a une longueur (le son s'arrête à sa fin, avec le relâchement du pad). */
+  hold?: 1;
+  /** Glisse depuis la hauteur `glideFrom` (demi-tons, comme `tune`) en `glideTime` s. */
+  glide?: 1; glideFrom?: number; glideTime?: number;
+  /** Rang du coup sur ce pad (couches en alternance, « round-robin ») : le même à la lecture et à l'export. */
+  rr?: number;
+};
 
-/** Une rangée sur une mesure : pas, rolls, pan et hauteur (dans la résolution de la rangée). */
-interface BarRow { id: string; steps: number[]; ratchet: number[]; pan?: number[]; pitch?: number[] }
+/** Une rangée sur une mesure : pas, rolls et couloirs (dans la résolution de la rangée). */
+interface BarRow { id: string; steps: number[]; ratchet: number[]; lanes: Partial<Record<LaneKey, number[]>> }
+
+/** Tirage déterministe 0 ≤ x < 1 (FNV-1a) : même graine, même pad, même mesure, même pas = même résultat partout. */
+export function stepChance(seed: number, rowId: string, bar: number, step: number): number {
+  const s = `${seed}|${rowId}|${bar}|${step}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  // Mélange final (les graines voisines donnent des tirages bien différents).
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0; h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+/** Temps de glisse par défaut d'un pad (ms) : réglable dans le sampler du pad. */
+export const DEFAULT_GLIDE_MS = 80;
 
 /**
  * Clips de la batterie de 0 à `end` (s) : un clip par motif placé (couleur et
  * nom du motif), avec swing, groove, rolls et fills. R18 : chaque rangée a sa
  * résolution (1/16, 1/32, triolets), sa longueur (polymétrie), son swing, et
  * chaque pas sa vélocité, son panoramique et sa hauteur (Graph Editor de FL).
+ * Séquenceur pro : probabilité (tirage déterministe), décalage fin du pas et de
+ * la rangée, longueur de note, glisse ; crash après un fill. `map` : carte des
+ * tempos du projet (changements et rampes) — sans elle, tempo constant `bpm`
+ * (calcul d'avant, au bit près).
  */
-export function drumSongClips(dm: DrumMachine, bpm: number, end: number, idBase: string): Clip[] {
+export function drumSongClips(dm: DrumMachine, bpm: number, end: number, idBase: string, map?: TempoMap | null): Clip[] {
   const d = ensurePatterns(dm);
   const stepDur = 60 / bpm / 4;
+  /** Instant (s) d'une position en doubles-croches depuis le début du morceau. */
+  const T = (s16: number) => (map ? quartersToTime(map, s16 / 4) : s16 * stepDur);
   const minLen = STEPS_PER_BAR * barsOf(d.bars) * stepDur;
-  const nSteps = Math.floor(Math.max(minLen, end) / stepDur + 1e-6);
+  const nSteps = map
+    ? Math.floor(Math.max(timeToQuarters(map, end) * 4, STEPS_PER_BAR * barsOf(d.bars)) + 1e-6)
+    : Math.floor(Math.max(minLen, end) / stepDur + 1e-6);
   const totalBars = Math.ceil(nSteps / STEPS_PER_BAR);
   const plan = planBars(d, totalBars);
   const groove = grooveOf(d.groove);
   const gAmt = Math.max(0, Math.min(1, d.grooveAmount ?? 1));
   const fillPat = d.fill?.patternId ? patternData(d, d.fill.patternId) : null;
+  const seed = d.seed || 0;
+  const crashRi = d.fill?.crash ? d.rows.findIndex(r => r.id === 'crash') : -1;
+  // Glisse : dernière hauteur jouée par pad ; alternance : coups déjà joués par pad.
+  const lastTune: (number | undefined)[] = d.rows.map(() => undefined);
+  const rrCount: number[] = d.rows.map(() => 0);
+  const rrOn = d.rows.map(r => !!(r.smp?.layers?.length && r.smp.layerMode === 'rr'));
 
   const clips: Clip[] = [];
   let cur: { id: string; startStep: number; notes: (Note & { o: number; ri: number; k: number })[]; endStep: number } | null = null;
   const flush = () => {
     if (!cur) return;
     const p = d.patterns!.find(x => x.id === cur!.id);
-    // Ordre du temps (les rangées en 1/32 ou en triolets s'intercalent).
     // Ordre d'avant R18 : pas, puis rangée, puis roll (les pas en 1/32 ou en triolets s'intercalent).
     const notes = cur.notes.sort((x, y) => x.o - y.o || x.ri - y.ri || x.k - y.k).map(({ o: _o, ri: _r, k: _k, ...n }) => n);
+    const start = map ? T(cur.startStep) : cur.startStep * stepDur;
     clips.push({
       id: `${idBase}-${clips.length}`, name: p ? `Motif ${p.name}` : 'Batterie', type: TrackType.MIDI,
-      start: cur.startStep * stepDur, duration: (cur.endStep - cur.startStep) * stepDur, offset: 0,
+      start, duration: map ? T(cur.endStep) - start : (cur.endStep - cur.startStep) * stepDur, offset: 0,
       fadeIn: 0, fadeOut: 0, color: p?.color || '#f97316', notes,
     } as unknown as Clip);
     cur = null;
@@ -394,56 +484,86 @@ export function drumSongClips(dm: DrumMachine, bpm: number, end: number, idBase:
     // Pas de la mesure, dans la résolution de chaque rangée (fill compris).
     let bar: BarRow[] = d.rows.map(r => {
       const spb = rowStepsPerBar(r);
-      const s = src.steps(r), k = src.ratchet(r), pn = src.pan(r), ph = src.pitch(r);
+      const s = src.steps(r), k = src.ratchet(r);
       const len = r.len && r.len > 0 ? rowLength(r, src.bars) : 0;
       const at = (i: number) => (len ? (runBars * spb + i) % len : barIdx * spb + i);
       const pick = (a: number[] | undefined, i: number, dflt: number) => (a ? a[at(i)] ?? a[i] ?? dflt : dflt);
+      const lanes: Partial<Record<LaneKey, number[]>> = {};
+      for (const l of STEP_LANES) { const a = src.lane(l.key, r); if (a) lanes[l.key] = Array.from({ length: spb }, (_, i) => pick(a, i, l.dflt)); }
       return {
         id: r.id,
         steps: Array.from({ length: spb }, (_, i) => pick(s, i, 0)),
         ratchet: Array.from({ length: spb }, (_, i) => pick(k, i, 1)),
-        ...(pn ? { pan: Array.from({ length: spb }, (_, i) => pick(pn, i, 0)) } : {}),
-        ...(ph ? { pitch: Array.from({ length: spb }, (_, i) => pick(ph, i, 0)) } : {}),
+        lanes,
       };
     });
     if (pl.fill && !fillPat) {
       // Variation automatique : seulement sur les rangées en 1/16 sans longueur propre.
       const plain = (ri: number) => rowStepsPerBar(d.rows[ri]) === STEPS_PER_BAR && !((d.rows[ri].len || 0) > 0);
-      const filled = autoFillBar(bar.filter((_, ri) => plain(ri)));
+      const filled = autoFillBar(bar.filter((_, ri) => plain(ri)), d.fill?.style);
       bar = bar.map((x, ri) => (plain(ri) ? { ...x, ...filled.find(f => f.id === x.id)! } : x));
     }
+    // Crash sur le 1 de la mesure qui suit un fill [S4] (si le kit a une crash).
+    if (crashRi >= 0 && b > 0 && plan[b - 1].fill && !pl.fill && bar[crashRi]) {
+      const c = bar[crashRi];
+      if (!(c.steps[0] > 0)) { c.steps = [...c.steps]; c.steps[0] = 110; c.ratchet = [...c.ratchet]; c.ratchet[0] = 1; if (c.lanes.prob) { c.lanes.prob = [...c.lanes.prob]; c.lanes.prob[0] = 100; } }
+    }
     const barT = (b * STEPS_PER_BAR - cur.startStep) * stepDur;
+    const clipT0 = map ? T(cur.startStep) : 0;
     bar.forEach((r, ri) => {
       const row = d.rows[ri];
       const spb = r.steps.length;
       const cell = STEPS_PER_BAR / spb; // durée d'un pas de la rangée, en doubles-croches
       const triplet = spb % 3 === 0;
       const sw = typeof row.swing === 'number' ? Math.max(0, Math.min(0.6, row.swing)) : d.swing;
+      const rowShift = Math.max(-0.5, Math.min(0.5, (row.shift || 0) / 100)); // en doubles-croches
+      const glideMs = Math.max(0, Math.min(2000, Number(row.smp?.glideMs ?? DEFAULT_GLIDE_MS) || 0));
+      const L = r.lanes;
       for (let i = 0; i < spb; i++) {
         const v = r.steps[i] || 0;
         if (v <= 0) continue;
         const pos16 = i * cell;
         if (b * STEPS_PER_BAR + pos16 >= lastStep - 1e-9) break;
+        const prob = L.prob ? Math.max(0, Math.min(100, L.prob[i] ?? 100)) : 100;
+        if (prob < 100 && stepChance(seed, row.id, b, i) * 100 >= prob) continue;
         const i16 = Math.floor(pos16 + 1e-9) % STEPS_PER_BAR;
         // Swing et groove sur les grilles binaires (les triolets sont déjà « swingués »).
-        const swing = !triplet && i16 % 2 === 1 ? sw * stepDur * 0.5 : 0;
-        const shift = triplet ? 0 : groove.timing[i16] * gAmt * stepDur;
+        const swingS = !triplet && i16 % 2 === 1 ? sw * 0.5 : 0; // en doubles-croches
+        const shiftS = triplet ? 0 : groove.timing[i16] * gAmt;
+        const swing = swingS * stepDur;
+        const shift = shiftS * stepDur;
         const vMul = 1 + (groove.velocity[i16] - 1) * gAmt;
         const n = Math.max(1, Math.min(8, r.ratchet[i] || 1));
         const cellDur = cell * stepDur;
-        const pan = r.pan ? Math.max(-1, Math.min(1, r.pan[i] || 0)) : 0;
-        const tune = r.pitch ? Math.max(-24, Math.min(24, r.pitch[i] || 0)) : 0;
+        const pan = L.pan ? Math.max(-1, Math.min(1, L.pan[i] || 0)) : 0;
+        const tune = L.pitch ? Math.max(-24, Math.min(24, L.pitch[i] || 0)) : 0;
+        // Décalage fin : du pas (fraction d'un pas de la rangée) et de toute la rangée (fraction de double-croche).
+        const nudgeS = (L.nudge ? Math.max(-0.5, Math.min(0.5, (L.nudge[i] || 0) / 100)) * cell : 0) + rowShift;
+        const gate = L.gate ? Math.max(0, Math.min(16, L.gate[i] || 0)) : 0;
+        const glide = !!(L.glide && L.glide[i] > 0) && lastTune[ri] !== undefined && lastTune[ri] !== tune;
         for (let k = 0; k < n; k++) {
-          const t = Math.max(0, barT + pos16 * stepDur + swing + shift + (k * cellDur) / n);
           const s16 = b * STEPS_PER_BAR + i16;
+          let t: number; let dur: number;
+          if (map) {
+            const P = b * STEPS_PER_BAR + pos16 + swingS + shiftS + nudgeS + (k * cell) / n;
+            t = Math.max(0, T(P) - clipT0);
+            dur = gate > 0 ? T(P + (gate * cell) / n) - T(P) : Math.min(0.1, (T(P + cell) - T(P)) / n);
+          } else {
+            t = Math.max(0, barT + pos16 * stepDur + swing + shift + (k * cellDur) / n + (nudgeS ? nudgeS * stepDur : 0));
+            dur = gate > 0 ? (gate * cellDur) / n : Math.min(0.1, cellDur / n);
+          }
           cur!.notes.push({
             id: spb === STEPS_PER_BAR ? `d${s16}-${ri}-${k}` : `d${b}_${i}r${spb}-${ri}-${k}`,
-            pitch: 60 + ri, start: t, duration: Math.min(0.1, cellDur / n),
+            pitch: 60 + ri, start: t, duration: dur,
             velocity: Math.min(1, (v / 127) * vMul * (k === 0 ? 1 : 0.8)),
             ...(pan ? { pan } : {}), ...(tune ? { tune } : {}),
+            ...(gate > 0 ? { hold: 1 as const } : {}),
+            ...(glide && k === 0 ? { glide: 1 as const, glideFrom: lastTune[ri]!, glideTime: Math.max(0, glideMs) / 1000 } : {}),
+            ...(rrOn[ri] ? { rr: rrCount[ri]++ } : {}),
             o: b * STEPS_PER_BAR + pos16, ri, k,
           });
         }
+        lastTune[ri] = tune;
       }
     });
   }
@@ -454,18 +574,21 @@ export function drumSongClips(dm: DrumMachine, bpm: number, end: number, idBase:
 /** Empreinte du rythme : le clip n'est régénéré que si elle change. */
 export function drumRhythmSig(dm: DrumMachine): string {
   const d = commitActive(dm);
+  const lanesOfRow = (r: DrumRow) => STEP_LANES.map(l => r[l.row] || 0);
+  const lanesOfPat = (p: DrumPattern) => STEP_LANES.map(l => p[l.key] || 0);
   return JSON.stringify([
-    d.bars, d.swing, d.groove || 'none', d.grooveAmount ?? 1, d.song || null, d.fill || null, d.activePattern,
-    d.rows.map(r => [r.id, r.steps, r.ratchet, r.stepPan || 0, r.stepPitch || 0, r.rate || 0, r.len || 0, r.swing ?? null]),
-    d.patterns!.map(p => [p.id, p.bars, p.steps, p.ratchet, p.pan || 0, p.pitch || 0]),
+    d.bars, d.swing, d.groove || 'none', d.grooveAmount ?? 1, d.song || null, d.fill || null, d.activePattern, d.seed || 0,
+    d.rows.map(r => [r.id, r.steps, r.ratchet, ...lanesOfRow(r), r.rate || 0, r.len || 0, r.swing ?? null, r.shift || 0,
+      r.smp?.glideMs ?? null, r.smp?.layers?.length && r.smp.layerMode === 'rr' ? 1 : 0]),
+    d.patterns!.map(p => [p.id, p.bars, p.steps, p.ratchet, ...lanesOfPat(p)]),
   ]);
 }
 
-/** Motif et mesure qui jouent à un instant (pour la tête de lecture du panneau). */
-export function whereAt(dm: DrumMachine, bpm: number, t: number): { bar: number; patternId: string; step: number; pos16: number; runBars: number } | null {
+/** Motif et mesure qui jouent à un instant (pour la tête de lecture du panneau). `map` : carte des tempos. */
+export function whereAt(dm: DrumMachine, bpm: number, t: number, map?: TempoMap | null): { bar: number; patternId: string; step: number; pos16: number; runBars: number } | null {
   if (t < 0) return null;
   const stepDur = 60 / bpm / 4;
-  const exact = t / stepDur;
+  const exact = map ? timeToQuarters(map, t) * 4 : t / stepDur;
   const abs = Math.floor(exact + 1e-9);
   const bar = Math.floor(abs / STEPS_PER_BAR);
   const plans = planBars(dm, bar + 1);
@@ -507,16 +630,16 @@ export function setRowRate(dm: DrumMachine, rowIndex: number, rate: StepRate): D
     const bars = p.bars;
     const st = fit(p.steps[row.id], from * bars, 0);
     const hit = (i: number) => st[i] > 0;
-    const ext = (a: number[] | undefined, dflt: number) => (a ? conv(fit(a, from * bars, dflt), bars, dflt, hit) : undefined);
-    const pan = ext(p.pan?.[row.id], 0);
-    const pitch = ext(p.pitch?.[row.id], 0);
-    return {
+    const out: DrumPattern = {
       ...p,
       steps: { ...p.steps, [row.id]: conv(st, bars, 0, hit) },
       ratchet: { ...p.ratchet, [row.id]: conv(fit(p.ratchet[row.id], from * bars, 1), bars, 1, hit) },
-      ...(pan ? { pan: { ...(p.pan || {}), [row.id]: pan } } : {}),
-      ...(pitch ? { pitch: { ...(p.pitch || {}), [row.id]: pitch } } : {}),
     };
+    for (const l of STEP_LANES) {
+      const a = p[l.key]?.[row.id];
+      if (a) out[l.key] = { ...(p[l.key] || {}), [row.id]: conv(fit(a, from * bars, l.dflt), bars, l.dflt, hit) };
+    }
+    return out;
   });
   const rows = d.rows.map((r, i) => (i === rowIndex ? { ...r, rate: rate === '16' ? undefined : rate, len: undefined } : r));
   return loadPattern({ ...d, rows, patterns }, d.activePattern!);
@@ -528,39 +651,59 @@ export function setRowLength(dm: DrumMachine, rowIndex: number, len: number): Dr
   const row = d.rows[rowIndex];
   if (!row) return d;
   const spb = rowStepsPerBar(row);
-  const n = len > 0 ? Math.max(1, Math.min(spb * 4, Math.round(len))) : 0;
+  const n = len > 0 ? Math.max(1, Math.min(spb * MAX_ROW_BARS, Math.round(len))) : 0;
   const rows = d.rows.map((r, i) => (i === rowIndex ? { ...r, len: n || undefined } : r));
   const patterns = d.patterns!.map(p => {
     const L = n || spb * p.bars;
     const cut = (a: number[] | undefined, dflt: number) => Array.from({ length: L }, (_, i) => (a || [])[i] ?? dflt);
-    return {
+    const out: DrumPattern = {
       ...p,
       steps: { ...p.steps, [row.id]: cut(p.steps[row.id], 0) },
       ratchet: { ...p.ratchet, [row.id]: cut(p.ratchet[row.id], 1) },
-      ...(p.pan?.[row.id] ? { pan: { ...p.pan, [row.id]: cut(p.pan[row.id], 0) } } : {}),
-      ...(p.pitch?.[row.id] ? { pitch: { ...p.pitch, [row.id]: cut(p.pitch[row.id], 0) } } : {}),
     };
+    for (const l of STEP_LANES) { const a = p[l.key]?.[row.id]; if (a) out[l.key] = { ...p[l.key], [row.id]: cut(a, l.dflt) }; }
+    return out;
   });
   return loadPattern({ ...d, rows, patterns }, d.activePattern!);
 }
 
-/** Valeur d'un pas dans l'éditeur de graphe (vélocité 1-127, pan -1…1, hauteur -12…+12). */
-export type StepParam = 'vel' | 'pan' | 'pitch';
+/**
+ * Valeur d'un pas dans l'éditeur de graphe : vélocité 1-127, pan -1…1, hauteur -24…+24 dt,
+ * probabilité 0-100 %, décalage -50…+50 % d'un pas, longueur 0-16 pas (0 = son entier), glisse 0/1.
+ */
+export type StepParam = 'vel' | LaneKey;
+export const STEP_PARAM_RANGE: Record<StepParam, { min: number; max: number; step: number }> = {
+  vel: { min: 1, max: 127, step: 1 },
+  pan: { min: -1, max: 1, step: 0.01 },
+  pitch: { min: -24, max: 24, step: 1 },
+  prob: { min: 0, max: 100, step: 1 },
+  nudge: { min: -50, max: 50, step: 1 },
+  gate: { min: 0, max: 16, step: 0.25 },
+  glide: { min: 0, max: 1, step: 1 },
+};
 export function setStepParam(dm: DrumMachine, rowIndex: number, step: number, param: StepParam, value: number): DrumMachine {
   const row = dm.rows[rowIndex];
-  if (!row || step < 0 || step >= row.steps.length) return dm;
+  if (!row || step < 0 || step >= row.steps.length || !Number.isFinite(value)) return dm;
   const r = { ...row };
+  const rg = STEP_PARAM_RANGE[param];
+  const q = Math.max(rg.min, Math.min(rg.max, Math.round(value / rg.step) * rg.step));
+  const v = Math.round(q * 1000) / 1000;
   if (param === 'vel') {
     if (!(r.steps[step] > 0)) return dm; // un pas éteint n'a pas de vélocité
-    r.steps = [...r.steps]; r.steps[step] = Math.max(1, Math.min(127, Math.round(value)));
-  } else if (param === 'pan') {
-    const a = r.stepPan ? [...r.stepPan] : new Array(r.steps.length).fill(0);
-    a[step] = Math.max(-1, Math.min(1, Math.round(value * 100) / 100));
-    r.stepPan = a.some(v => v) ? a : undefined;
+    r.steps = [...r.steps]; r.steps[step] = v;
   } else {
-    const a = r.stepPitch ? [...r.stepPitch] : new Array(r.steps.length).fill(0);
-    a[step] = Math.max(-12, Math.min(12, Math.round(value)));
-    r.stepPitch = a.some(v => v) ? a : undefined;
+    const lane = STEP_LANES.find(l => l.key === param)!;
+    const a = r[lane.row] ? [...r[lane.row]!] : new Array(r.steps.length).fill(lane.dflt);
+    if (a[step] === v) return dm;
+    a[step] = v;
+    r[lane.row] = laneSet(a, lane.dflt) ? a : undefined;
   }
   return { ...dm, rows: dm.rows.map((x, i) => (i === rowIndex ? r : x)) };
+}
+
+/** Valeur d'un pas (vélocité ou couloir), avec la valeur par défaut du couloir. */
+export function stepParamOf(row: DrumRow, step: number, param: StepParam): number {
+  if (param === 'vel') return row.steps[step] || 0;
+  const lane = STEP_LANES.find(l => l.key === param)!;
+  return row[lane.row]?.[step] ?? lane.dflt;
 }

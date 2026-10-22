@@ -17,7 +17,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3447/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-r7-r8")
-from qalib import launch, new_page, shot, overflow_report, Log, OUT  # noqa: E402
+from qalib import launch, new_page, shot, overflow_report, Log, OUT, ouvrir_menu_range  # noqa: E402
 from gel_pre_effet import prepare, open_project_file  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -194,6 +194,7 @@ def run(vp, theme="dark"):
                 t = pg.get_by_role("button", name=re.compile(f"^{label}$", re.I))
                 if t.count() and t.first.is_visible():
                     t.first.click(); pg.wait_for_timeout(900); break
+            ouvrir_menu_range(pg, "[data-nova-target=automation-follows]")  # « Édition ▾ » (barre allégée)
             btn = pg.locator("[data-nova-target=automation-follows]")
             out["bouton_visible"] = btn.count() > 0 and btn.first.is_visible()
             if out["bouton_visible"]:

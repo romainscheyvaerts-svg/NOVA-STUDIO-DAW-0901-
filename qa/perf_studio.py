@@ -20,7 +20,7 @@ PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\perf")
 RUNS = int(os.environ.get("PERF_RUNS", "3"))
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, ouvrir_master_nova  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 from scenarios import close_welcome  # noqa: E402
 from projet_mix import make_mix_project  # noqa: E402
@@ -116,7 +116,7 @@ def one_run(b, zpath, k):
     r["fenetres_ms"] = {
         "Exporter": win("export", lambda: page.keyboard.press("Control+Shift+E"), "[role=dialog][aria-labelledby=export-title]"),
         "Tempo": win("tempo", lambda: page.locator("[data-testid=open-tempo]").first.click(), "input[aria-label='Tempo en BPM']"),
-        "Master Nova": win("master", lambda: page.locator("[data-nova-open-master]").first.click(), "[data-nova-master]"),
+        "Master Nova": win("master", lambda: ouvrir_master_nova(page), "[data-nova-master]"),
         "Palette": win("palette", lambda: page.keyboard.press("Control+k"), "[data-testid=command-palette]"),
     }
     r["erreurs"] = [e["text"][:160] for e in log.errors() if not re.search(r"876[56]|ERR_CONNECTION_REFUSED", e["text"])][:5]

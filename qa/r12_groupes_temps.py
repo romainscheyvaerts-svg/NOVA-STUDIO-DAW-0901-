@@ -241,7 +241,7 @@ def scenario_pc(page, res_, theme="dark"):
     res["mesures"]["tracksTop"] = b["tt"]
 
     # 1. Groupe VOX créé dans la liste des groupes (Pro Tools : Groups List).
-    page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(400)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-groups]"); page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(400)
     shot(page, "pc_01_liste_groupes_vide")
     page.get_by_test_id("group-new").click(); page.wait_for_timeout(400)
     page.get_by_test_id("group-name-input").fill("VOX"); page.keyboard.press("Enter"); page.wait_for_timeout(200)
@@ -343,7 +343,7 @@ def scenario_pc(page, res_, theme="dark"):
     t_bar6_before = bar_time(page, 6)
     a_before = {t: automation_value(page, t) for t in (5.0, 6.0, 7.0, 8.0, 9.0, 11.0, 13.0)}
     set_playhead(page, 0)
-    page.get_by_test_id("dock-time").click(); page.wait_for_timeout(500)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-time]"); page.get_by_test_id("dock-time").click(); page.wait_for_timeout(500)
     page.get_by_test_id("timeops-bar").fill("4"); page.get_by_test_id("timeops-beat").fill("1")
     page.get_by_test_id("timeops-len-bars").fill("0"); page.get_by_test_id("timeops-len-beats").fill("4")
     page.wait_for_timeout(200)
@@ -419,7 +419,7 @@ def scenario_pc(page, res_, theme="dark"):
     # 11. Captures : groupes suspendus, console avec groupe, piste Arrangement, fenêtre Temps en sombre.
     page.keyboard.press("Control+Shift+G"); page.wait_for_timeout(400)
     susp = st(page, "s => !!(s.groupSettings && s.groupSettings.suspended)")
-    page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(400)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-groups]"); page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(400)
     shot(page, "pc_13_groupes_suspendus")
     ok("Ctrl+Maj+G : tous les groupes suspendus", susp)
     close_groups(page)
@@ -429,7 +429,7 @@ def scenario_pc(page, res_, theme="dark"):
 
 def scenario_clair(page, res_):
     open_r12(page, "clair_00_projet", "light")
-    page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(300)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-groups]"); page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(300)
     page.get_by_test_id("group-new").click(); page.wait_for_timeout(300)
     for tid in ("lead", "dbl", "backs"):
         cb = page.get_by_test_id(f"group-member-{tid}")
@@ -439,7 +439,7 @@ def scenario_clair(page, res_):
     page.get_by_role("button", name="OK", exact=True).click(); page.wait_for_timeout(200)
     shot(page, "clair_02_liste_groupes")
     close_groups(page)
-    page.get_by_test_id("dock-time").click(); page.wait_for_timeout(400)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-time]"); page.get_by_test_id("dock-time").click(); page.wait_for_timeout(400)
     shot(page, "clair_03_fenetre_temps")
     close_overlays(page)
     page.get_by_test_id("arrange-section-m-refrain").click(button="right"); page.wait_for_timeout(300)
@@ -450,7 +450,7 @@ def scenario_clair(page, res_):
 
 def scenario_tab(page, res_):
     open_r12(page, "tab_00_projet")
-    page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(300)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-groups]"); page.get_by_test_id("dock-groups").click(); page.wait_for_timeout(300)
     shot(page, "tab_01_liste_groupes")
     close_groups(page)
     # Au doigt : « Copier » puis glisser le Refrain jusqu'à sa fin.
@@ -471,7 +471,7 @@ def scenario_tab(page, res_):
     mk = st(page, "s => s.markers.map(m => [m.name, m.time]).sort((a, b) => a[1] - b[1])")
     ok("tablette : Refrain dupliqué au doigt (mode Copier)", mk == [["Intro", 0], ["Couplet", 2], ["Refrain", 8], ["Refrain", 12], ["Outro", 16]], mk)
     shot(page, "tab_03_section_dupliquee")
-    page.get_by_test_id("dock-time").tap(); page.wait_for_timeout(400)
+    qalib.ouvrir_menu_range(page, "[data-testid=dock-time]", tap=True); page.get_by_test_id("dock-time").tap(); page.wait_for_timeout(400)
     shot(page, "tab_04_fenetre_temps")
     close_overlays(page)
 

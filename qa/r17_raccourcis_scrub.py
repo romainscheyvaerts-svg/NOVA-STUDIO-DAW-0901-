@@ -82,8 +82,15 @@ def press(pg, key, wait=350):
 
 
 def tool_on(pg, testid=None, label=None):
+    # 22/10/2026 (barre allégée) : scrub, zoom et crayon sont dans « Outils ▾ » (monté à l'ouverture).
+    menu = False
+    if testid and not pg.locator(f'[data-testid="{testid}"]').count() and pg.locator('[data-testid="tools-more"]').count():
+        pg.locator('[data-testid="tools-more"]').first.click(); pg.wait_for_timeout(250); menu = True
     loc = pg.locator(f'[data-testid="{testid}"]') if testid else pg.get_by_role("button", name=label, exact=True)
-    return loc.first.get_attribute("aria-pressed") == "true"
+    on = loc.first.get_attribute("aria-pressed") == "true"
+    if menu:
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
+    return on
 
 
 # --- Enregistrement du master (AudioWorklet) + mesures -------------------------------
@@ -384,7 +391,12 @@ def run_pc(b):
         ok("PC · dispositions livrées : Mix (Ctrl+Maj+3) puis Enregistrement (Ctrl+Maj+1)", v_mix == "MIXER" and v_rec == "ARRANGEMENT", {"mix": v_mix, "rec": v_rec})
         blur(pg); pg.keyboard.press("NumpadDecimal"); pg.keyboard.press("Numpad2"); pg.keyboard.press("NumpadMultiply"); pg.wait_for_timeout(900)
         edit_zoom = lane_geom(pg)[1]
-        tracks_panel = pg.locator('[data-testid="dock-track-list"]').first.get_attribute("aria-pressed")
+        # Barre allégée : « Liste des pistes » est dans « Session ▾ », dont le bouton dit le panneau ouvert.
+        if pg.locator('[data-testid="dock-track-list"]').count():
+            tracks_panel = pg.locator('[data-testid="dock-track-list"]').first.get_attribute("aria-pressed")
+        else:
+            lab = pg.locator('[data-testid="dock-session-menu"]').first.get_attribute("aria-label") or ""
+            tracks_panel = "true" if "Pistes ouvert" in lab else "false"
         ok("PC · pavé . 2 * = disposition Édition (zoom 120, liste des pistes)", abs(edit_zoom - 120) < 1 and tracks_panel == "true", {"zoom": edit_zoom, "liste": tracks_panel})
         shot(pg, "r17_10_disposition_edition")
         set_zoom(pg, 222)
@@ -433,6 +445,8 @@ def run_tab(b):
     try:
         ctx.add_init_script("try { localStorage.removeItem('nova_keymap_v1'); } catch (e) {}")
         open_project(pg, "r17_20_tablette_projet")
+        if not pg.locator('[data-testid="tool-scrub"]').count():
+            pg.locator('[data-testid="tools-more"]').first.tap(); pg.wait_for_timeout(300)
         pg.locator('[data-testid="tool-scrub"]').first.tap(); pg.wait_for_timeout(300)
         ok("Tablette · outil Scrubber au doigt", tool_on(pg, "tool-scrub"))
         set_zoom(pg, 100)
@@ -451,7 +465,8 @@ def run_tab(b):
         # La barre d'outils d'édition coupait déjà « 1/4 (temps) » à 1024 px avec le navigateur ouvert
         # (avant R17) : on vérifie que la page ne défile pas en largeur et que le bouton Scrub est visible.
         ov = [o for o in overflow_report(pg) if o["kind"] == "page-hscroll"]
-        sb = pg.locator('[data-testid="tool-scrub"]').first.bounding_box()
+        # Barre allégée : Scrub est dans « Outils ▾ », dont le bouton montre l'outil actif.
+        sb = (pg.locator('[data-testid="tool-scrub"]').first if pg.locator('[data-testid="tool-scrub"]').count() else pg.locator('[data-testid="tools-more"]').first).bounding_box()
         ok("Tablette · pas de défilement horizontal, bouton Scrub visible", not ov and sb and sb["x"] + sb["width"] <= 1024, {"page": ov[:2], "scrub_droite": sb and round(sb["x"] + sb["width"])})
         errs = log.errors()
         ok("Tablette · aucune erreur de page", not errs, errs[:3])

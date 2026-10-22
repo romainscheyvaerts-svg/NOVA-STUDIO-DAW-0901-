@@ -303,7 +303,8 @@ export const defaultBuiltinParams = (type: PluginType, bpm = 120): Record<string
     case 'LIMITER': return { ceiling: -1, inputGain: 0, release: 100, lookahead: 3, oversample: 4, isEnabled: true };
     case 'PROEQ12': {
       const f = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
-      return { isEnabled: true, masterGain: 1, bands: f.map((frequency, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency, gain: 0, q: 1, isEnabled: true, isSolo: false })) };
+      // Q en convention v2 (engine/eqQ.ts) : coupe-bas / haut Butterworth, −3 dB pile à la fréquence.
+      return { isEnabled: true, masterGain: 1, qVersion: 2, bands: f.map((frequency, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency, gain: 0, q: i === 0 || i === 11 ? Math.SQRT1_2 : 1, isEnabled: true, isSolo: false })) };
     }
     default: return { isEnabled: true };
   }

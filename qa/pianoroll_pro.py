@@ -9,7 +9,7 @@ et clair. Pour chaque écran :
      GLISSÉS posés pendant la note tenue (bouton « Glissé ») : notes marquées, portées, courbe dessinée ;
   3. pinceau (bureau) : une rangée de notes peinte en un geste ;
   4. accords dans la gamme : « Accord de la gamme », 1er renversement, un clic = 3 notes de La mineur ;
-  5. vélocité : rampe au couloir (bureau : outil ligne ; téléphone : crayon au doigt), Alt + molette (bureau) ;
+  5. vélocité : rampe au couloir (bureau : outil ligne ; téléphone : crayon au doigt), Maj + Alt + molette (bureau) ;
   6. humaniser puis quantifier (grille 1/16, force 100 %) : toutes les notes retombent sur la grille ;
   7. dupliquer à la suite (Ctrl+B / bouton « 2x ») ; pincer pour zoomer (téléphone) ;
   8. écouter (▶ : la tête avance, le synthé sonne), exporter le clip en .mid (fichier MThd) ;
@@ -233,7 +233,8 @@ class Roll:
 
 
 def click(page, sel, phone):
-    loc = page.locator(sel).first
+    # Piano roll pratique : une commande rangée dans un menu (Outils ▾, Notes ▾…) est d'abord rendue visible.
+    loc = qalib.roll_reveal(page, sel) if ("data-nova-roll=" in sel or "data-nova-roll-tool" in sel) else page.locator(sel).first
     loc.scroll_into_view_if_needed()
     if phone:
         b = loc.bounding_box(); page.touchscreen.tap(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
@@ -267,13 +268,13 @@ def run(vp, theme, res):
             r["preset"] = page.evaluate("(tid) => window.__novaEdit.getState().tracks.find(x => x.id === tid).novaSynth.presetId", tid)
             page.locator("[data-nova-pianoroll]").wait_for(timeout=8000)
             r["aide_clip_vide"] = page.locator("[data-nova-roll=vide]").is_visible()
+            # Piano roll pratique : l'outil actif dans la barre, la liste des outils dans son menu.
+            page.locator("[data-nova-roll-menu-btn=outil]").first.click(); page.wait_for_timeout(200)
             r["outils"] = page.locator("[data-nova-roll-tool]").count()
-            r["barre_avancee_ouverte"] = page.locator("[data-nova-roll=barre-avancee]").count() > 0
-            ok(f"{tag} : piste Synthé NOVA (Reese drill), piano roll avec 5 outils et l'aide du clip vide",
-               r["preset"] == "reese-drill" and r["outils"] == 5 and r["aide_clip_vide"], r)
+            page.keyboard.press("Escape"); page.wait_for_timeout(150)
+            ok(f"{tag} : piste Synthé NOVA (Reese drill), piano roll avec ses outils (menu « Outil ») et l'aide du clip vide",
+               r["preset"] == "reese-drill" and r["outils"] >= 7 and r["aide_clip_vide"], r)
             shot(page, f"{tag}_01_vide")
-            if not r["barre_avancee_ouverte"]:
-                click(page, "[data-nova-roll=plus]", phone)
             roll = Roll(page, phone)
 
             # 2. Beat de 808 + glissés
@@ -363,12 +364,12 @@ def run(vp, theme, res):
                 roll.show_pitch(36)
                 x, y = roll.xy(0.5, 33)
                 va = page.evaluate(STATE_NOTES, tid)["notes"]
-                page.mouse.move(x, y); page.keyboard.down("Alt"); page.mouse.wheel(0, -100); page.mouse.wheel(0, -100); page.keyboard.up("Alt")
+                page.mouse.move(x, y); page.keyboard.down("Shift"); page.keyboard.down("Alt"); page.mouse.wheel(0, -100); page.mouse.wheel(0, -100); page.keyboard.up("Alt"); page.keyboard.up("Shift")
                 page.wait_for_timeout(200)
                 vb = page.evaluate(STATE_NOTES, tid)["notes"]
                 da = [x["v"] for x in va if x["p"] == 33 and x["s"] == 0]; db = [x["v"] for x in vb if x["p"] == 33 and x["s"] == 0]
                 r["alt_molette"] = [da, db]
-                ok(f"{tag} : Alt + molette sur une note monte sa vélocité", da and db and db[0] > da[0], r["alt_molette"])
+                ok(f"{tag} : Maj + Alt + molette sur une note monte sa vélocité", da and db and db[0] > da[0], r["alt_molette"])
             shot(page, f"{tag}_04_velocite")
 
             # 6. Humaniser puis quantifier (1/16, 100 %)

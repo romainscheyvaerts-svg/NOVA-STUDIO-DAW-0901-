@@ -147,7 +147,9 @@ describe('Latences déclarées (PDC) et registre', () => {
     for (const t of types) {
       const reg = getRegisteredPlugin(t)!;
       expect(reg).toBeTruthy();
-      expect(reg.description).toMatch(/comme/);
+      expect(reg.description.length).toBeGreaterThan(20);
+      // Aucun nom de logiciel concurrent visible (22/10/2026).
+      expect(reg.description).not.toMatch(/\bLogic\b|FL Studio|Ableton|\bLive\b|Gross Beat|AlterBoy|Pitcher|Vocal Transformer|Beat Repeat|ShaperBox|Redux|Bitcrusher/);
       expect(registryMenuItems().some(i => i.id === t)).toBe(true);
       expect(registryBrowserItems().some(i => i.id === t)).toBe(true);
       expect(NOVA_FX_NAMES[t]).toBeTruthy();

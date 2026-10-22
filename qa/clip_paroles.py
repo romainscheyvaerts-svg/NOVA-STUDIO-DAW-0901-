@@ -345,7 +345,12 @@ def run_bureau(p, zpath):
         # Échap ferme ; fenêtre de partage → bouton du clip.
         page.keyboard.press("Escape"); page.wait_for_timeout(400)
         if page.get_by_test_id("lyric-clip").count(): ko("Échap ne ferme pas la fenêtre du clip")
-        page.get_by_role("button", name="Partager le projet").locator("visible=true").first.click()
+        share = page.get_by_role("button", name="Partager le projet").locator("visible=true")
+        if share.count():
+            share.first.click()
+        else:  # mode avancé allégé : « Partager » est dans le menu ☰
+            page.locator("[data-testid=transport-menu]").locator("visible=true").first.click(); page.wait_for_timeout(400)
+            page.get_by_role("button", name="Partager", exact=True).locator("visible=true").first.click()
         page.get_by_test_id("share-lyric-clip").wait_for(timeout=6000)
         page.screenshot(path=str(OUT / "A4_fenetre_partage.png"))
         tap(page, "share-lyric-clip")

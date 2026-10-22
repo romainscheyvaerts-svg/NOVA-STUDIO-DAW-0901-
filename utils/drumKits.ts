@@ -1,7 +1,8 @@
 import { DRUM_LIBRARY, DRUM_LIBRARY_STYLES, LibCategory, libUrl } from './drumLibrary';
 import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
-import { rowStepsPerBar } from './drumPatterns';
+import { rowStepsPerBar, STEP_LANES } from './drumPatterns';
+import { cleanSampler } from './padSampler';
 import { isKitRef, kitSoundLabel } from './drumKitLibrary';
 
 /**
@@ -56,14 +57,27 @@ export interface DrumRow {
   len?: number;
   /** Swing propre de la rangée (0 … 0.6). Absent : le swing global. */
   swing?: number;
+  // --- Séquenceur pro (22/10/2026), champs optionnels : absents = comportement d'avant ---
+  /** Probabilité de jouer chaque pas (0 … 100 %, absent = 100). Tirage déterministe (lecture = export). */
+  stepProb?: number[];
+  /** Décalage fin de chaque pas (−50 … +50 % d'un pas de la rangée ; + = en retard). */
+  stepNudge?: number[];
+  /** Longueur de note de chaque pas, en pas de la rangée (0 = son entier, comme avant). */
+  stepGate?: number[];
+  /** Glisse de hauteur depuis le pas joué précédent (1 = oui), pour 808 et percus accordées. */
+  stepGlide?: number[];
+  /** Décalage de toute la rangée (−50 … +50 % d'une double-croche). */
+  shift?: number;
+  /** Sampler du pad (enveloppes, filtre, hauteur, couches…). Absent = le son brut, comme avant. */
+  smp?: import('./padSampler').PadSamplerParams;
 }
 
 export interface DrumMachine {
   /** Tempo utilisé pour le dernier clip (régénération si le tempo change). */
   bpmUsed?: number;
   kitId: string;
-  /** Longueur du motif affiché (les anciennes versions ne connaissent que 1 ou 2). */
-  bars: 1 | 2 | 4;
+  /** Longueur du motif affiché (les anciennes versions ne connaissent que 1 ou 2 ; 8 depuis le séquenceur pro). */
+  bars: 1 | 2 | 4 | 8;
   swing: number; // 0 - 0.6
   /** Pads + pas du motif affiché (le motif actif : c'est ce que lit une ancienne version). */
   rows: DrumRow[];
@@ -79,6 +93,10 @@ export interface DrumMachine {
   grooveAmount?: number;
   /** Samples perso des pads (le son est gardé à part, sauvé avec le projet). */
   samples?: Record<string, import('./drumSamples').PadSampleInfo>;
+  /** Tirage des probabilités (« Nouveau tirage ») : même graine = mêmes coups, en lecture et à l'export. */
+  seed?: number;
+  /** Carte des tempos utilisée pour le dernier clip (régénération si elle change). */
+  tempoUsed?: string;
 }
 
 export interface DrumKitDef {
@@ -217,7 +235,7 @@ export function makeDrumMachine(kitId: string): DrumMachine {
 }
 
 /** Passe le motif à 1, 2 ou 4 mesures (les mesures ajoutées reprennent les premières). */
-export function setBars(dm: DrumMachine, bars: 1 | 2 | 4): DrumMachine {
+export function setBars(dm: DrumMachine, bars: 1 | 2 | 4 | 8): DrumMachine {
   const ext = (a: number[] | undefined, len: number, d: number) => Array.from({ length: len }, (_, i) => a?.[i] ?? a?.[i % Math.max(1, a.length)] ?? d);
   return {
     ...dm, bars,
@@ -225,13 +243,9 @@ export function setBars(dm: DrumMachine, bars: 1 | 2 | 4): DrumMachine {
       // Rangée à longueur propre (polymétrie) : elle ne change pas avec le motif.
       if (r.len && r.len > 0) return r;
       const len = rowStepsPerBar(r) * bars;
-      return {
-        ...r,
-        steps: ext(r.steps, len, 0),
-        ratchet: ext(r.ratchet, len, 1),
-        ...(r.stepPan ? { stepPan: ext(r.stepPan, len, 0) } : {}),
-        ...(r.stepPitch ? { stepPitch: ext(r.stepPitch, len, 0) } : {}),
-      };
+      const out: DrumRow = { ...r, steps: ext(r.steps, len, 0), ratchet: ext(r.ratchet, len, 1) };
+      for (const l of STEP_LANES) { const v = r[l.row]; if (v) out[l.row] = ext(v, len, l.dflt); }
+      return out;
     }),
   };
 }
@@ -243,6 +257,8 @@ export function drumPadsFor(dm: DrumMachine): DrumPad[] {
     isMuted: !!r.muted, isSolo: !!r.solo, tune: r.tune || 0, decay: r.decay ?? 1, midiNote: 60 + i, audioRef: `nova-drum:${r.sound}`,
     // le groupe de choke voyage avec le pad (lu par DrumRackNode)
     ...(r.choke ? { chokeGroup: r.choke } as any : {}),
+    // Sampler du pad (séquenceur pro) : lu par DrumRackNode ; absent = le son brut d'avant.
+    ...(r.smp && cleanSampler(r.smp) ? { smp: cleanSampler(r.smp) } as any : {}),
   }));
 }
 
@@ -314,7 +330,8 @@ export function padFxPlugins(r: DrumRow): { id: string; name: string; type: 'PRO
     Object.assign(bands[1], { type: 'lowshelf', frequency: 100, gain: m.eqLow, q: 0.71, isEnabled: !!m.eqLow });
     Object.assign(bands[4], { type: 'peaking', frequency: 1000, gain: m.eqMid, q: 0.9, isEnabled: !!m.eqMid });
     Object.assign(bands[8], { type: 'highshelf', frequency: 8000, gain: m.eqHigh, q: 0.71, isEnabled: !!m.eqHigh });
-    out.push({ id: `${r.id}-eq`, name: 'EQ', type: 'PROEQ12', isEnabled: true, latency: 0, params: { isEnabled: true, masterGain: 1, bands } });
+    // qVersion 2 : Q en convention v2 (engine/eqQ.ts), largeur de la cloche exacte.
+    out.push({ id: `${r.id}-eq`, name: 'EQ', type: 'PROEQ12', isEnabled: true, latency: 0, params: { isEnabled: true, masterGain: 1, qVersion: 2, bands } });
   }
   if (m.comp > 0) {
     // Compression « punch » : attaque lente qui laisse passer le transitoire,

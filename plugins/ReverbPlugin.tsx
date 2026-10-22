@@ -221,6 +221,29 @@ const MODE_SHAPES: Record<ReverbMode, { attack: (size: number) => number; hf: nu
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const safeNum = (v: number, def: number) => (Number.isFinite(v) ? v : def);
 
+/**
+ * Filtre de Butterworth du 4e ordre (deux biquads, Q = 0,5412 et 1,3065, transformée
+ * bilinéaire) : passe-bas et passe-haut à la même fréquence sont complémentaires en
+ * puissance (|PB|² + |PH|² = 1). Renvoie une fonction échantillon → échantillon.
+ */
+function butter4(sr: number, f0: number, type: 'lowpass' | 'highpass'): (x: number) => number {
+  const w = 2 * Math.PI * f0 / sr, c = Math.cos(w), sn = Math.sin(w);
+  const st = [0.5411961001461969, 1.3065629648763766].map(Q => {
+    const al = sn / (2 * Q), a0 = 1 + al;
+    const b0 = (type === 'lowpass' ? (1 - c) / 2 : (1 + c) / 2) / a0;
+    const b1 = (type === 'lowpass' ? 1 - c : -(1 + c)) / a0;
+    return { b0, b1, b2: b0, a1: -2 * c / a0, a2: (1 - al) / a0, x1: 0, x2: 0, y1: 0, y2: 0 };
+  });
+  return (x: number) => {
+    let v = x;
+    for (const f of st) {
+      const y = f.b0 * v + f.b1 * f.x1 + f.b2 * f.x2 - f.a1 * f.y1 - f.a2 * f.y2;
+      f.x2 = f.x1; f.x1 = v; f.y2 = f.y1; f.y1 = y; v = y;
+    }
+    return v;
+  };
+}
+
 export class ReverbNode {
   private readonly createdAt: number;
   private setP(param: AudioParam, value: number, tau: number) {
@@ -352,7 +375,7 @@ export class ReverbNode {
 
     // Modulation
     this.modDelay = ctx.createDelay(0.01); // tampon court : position de lecture interpolée plus précise (lecture = export)
-    this.modDelay.delayTime.value = 0.005;
+    this.modDelay.delayTime.value = this.modBase;
     this.modDepthGain = ctx.createGain();
     this.modDepthGain.gain.value = 0;
     this.modLFO = new TimelineLfo(ctx, this.modDepthGain, 0.5);
@@ -361,12 +384,14 @@ export class ReverbNode {
     this.lowCutFilter = ctx.createBiquadFilter();
     this.lowCutFilter.type = 'highpass';
     this.lowCutFilter.frequency.value = 160;
-    this.lowCutFilter.Q.value = 0.707;
+    // Q en dB pour ces filtres (spec Web Audio) : −3,01 dB = Butterworth, −3 dB pile à la
+    // fréquence affichée. Avant : 0,707 (lu comme 0,707 dB) donnait +0,7 dB À la coupure.
+    this.lowCutFilter.Q.value = -3.0103;
 
     this.highCutFilter = ctx.createBiquadFilter();
     this.highCutFilter.type = 'lowpass';
     this.highCutFilter.frequency.value = 10000;
-    this.highCutFilter.Q.value = 0.707;
+    this.highCutFilter.Q.value = -3.0103;
 
     this.bassBoostFilter = ctx.createBiquadFilter();
     this.bassBoostFilter.type = 'lowshelf';
@@ -414,24 +439,32 @@ export class ReverbNode {
 
     this.links = {
       wet: { on: false, timer: null, connect: () => this.input.connect(this.preDelayNode), disconnect: () => this.input.disconnect(this.preDelayNode) },
-      er: { on: false, timer: null, connect: () => this.erDelays.forEach(d => this.input.connect(d)), disconnect: () => this.erDelays.forEach(d => this.input.disconnect(d)) },
+      // Réflexions primaires APRÈS le pré-délai (comme la queue) : rien n'arrive avant le temps affiché.
+      er: { on: false, timer: null, connect: () => this.erDelays.forEach(d => this.preDelayNode.connect(d)), disconnect: () => this.erDelays.forEach(d => this.preDelayNode.disconnect(d)) },
       mod: { on: false, timer: null, connect: () => this.modDepthGain.connect(this.modDelay.delayTime), disconnect: () => this.modDepthGain.disconnect(this.modDelay.delayTime) },
     };
     this.setupChain();
     this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain, map: mixWet }, { param: this.dryGain.gain, map: mixDry }], { min: 0, max: 1, value: 0.3, inverse: mixFromWet }));
-    this.auto.add('preDelay', new MappedParam(ctx, [{ param: this.preDelayNode.delayTime }], { min: 0, max: 0.45, value: 0.025, affine: true }));
+    // Le retard de la ligne de modulation (modBase) fait partie du pré-délai : déduit ici.
+    this.auto.add('preDelay', new MappedParam(ctx, [{ param: this.preDelayNode.delayTime, map: v => Math.max(0, v - this.modBase) }], { min: 0, max: 0.45, value: 0.025, affine: true }));
     this.ducker = new EnvelopeDucker(ctx, this.input, this.duckGain.gain);
     this.regenerateImpulse(true);
     this.applyLiveParams();
   }
 
   /**
-   * Reponse impulsionnelle procedurale : bruit stereo decorrele (gauche et
-   * droite independants) decoupe en deux bandes qui decroissent a des vitesses
-   * differentes. Damping raccourcit la queue des aigus comme dans une vraie
-   * piece, au lieu de simplement baisser le volume (ancien comportement, qui
-   * donnait une queue de souffle blanc metallique). Le temps « decay » est un
-   * vrai RT60 (-60 dB), et la reponse n'est plus tronquee a -26 dB.
+   * Réponse impulsionnelle procédurale : bruit stéréo décorrélé (gauche et droite
+   * indépendants) réparti en TROIS bandes à puissance complémentaire (Butterworth du
+   * 4e ordre à 250 Hz et 3 kHz : la somme reste un bruit blanc), chacune avec sa propre
+   * décroissance :
+   *  - médiums (250 Hz – 3 kHz) : RT60 = « Durée », exactement (ISO 3382 : la durée d'une
+   *    salle se donne à 500 Hz – 1 kHz) ;
+   *  - graves (< 250 Hz) : Durée × multiplicateur des graves du mode (salle, cathédrale :
+   *    plus longs ; plaque, ressort : plus courts) ;
+   *  - aigus (> 3 kHz) : Durée × multiplicateur des aigus du mode, raccourcie par l'amorti.
+   * Avant (22/10/2026), deux bandes séparées en douceur à 2,5 kHz, dont la bande « grave »
+   * (tout jusqu'à ~2 kHz) prenait déjà le multiplicateur du mode : la durée mesurée aux
+   * médiums s'écartait de l'affichage de −31 % (ressort) à +27 % (shimmer).
    */
   private buildImpulse(): AudioBuffer {
     const sr = this.ctx.sampleRate;
@@ -444,16 +477,19 @@ export class ReverbNode {
     const diffusion = clamp(safeNum(p.diffusion, 0.8), 0, 1);
     const shape = MODE_SHAPES[p.mode] || MODE_SHAPES.HALL;
 
-    const length = Math.max(64, Math.floor(sr * Math.min(10, decay * 1.1 + 0.05)));
-    const ir = this.ctx.createBuffer(2, length, sr);
+    const rtMid = decay;
     const rtLow = decay * shape.lf;
     const rtHigh = Math.max(0.05, decay * (1 - 0.8 * damping) * shape.hf);
+    // Toute la queue jusqu'à −60 dB dans la bande la plus longue (10 s au plus).
+    const length = Math.max(64, Math.floor(sr * Math.min(10, Math.max(rtLow, rtMid, rtHigh) * 1.1 + 0.05)));
+    const ir = this.ctx.createBuffer(2, length, sr);
     const kLow = Math.exp(-6.9078 / (rtLow * sr));
+    const kMid = Math.exp(-6.9078 / (rtMid * sr));
     const kHigh = Math.exp(-6.9078 / (rtHigh * sr));
-    const split = 1 - Math.exp(-2 * Math.PI * 2500 / sr); // separation grave/aigu (2 poles a 2,5 kHz)
     const attack = Math.max(0.001, shape.attack(size));
     const attackN = Math.floor(attack * sr);
     const earlyN = Math.floor(0.08 * sr);
+    const fadeN = Math.min(length, Math.round(0.05 * sr)); // fin sans marche si la queue est coupée à 10 s
 
     // Bruit REPRODUCTIBLE : mêmes réglages = même réponse, à chaque rendu (export,
     // gel, Commit, bus imprimé : deux rendus du même son sont identiques à
@@ -462,26 +498,27 @@ export class ReverbNode {
     for (let ch = 0; ch < 2; ch++) {
       const data = ir.getChannelData(ch);
       const random = seededRandom(`${sig}|${sr}|${ch}`);
-      let lp1 = 0, lp2 = 0, eL = 1, eH = 1;
+      const lo = butter4(sr, 250, 'lowpass');
+      const midHp = butter4(sr, 250, 'highpass'), midLp = butter4(sr, 3000, 'lowpass');
+      const hiHp = butter4(sr, 250, 'highpass'), hiHp2 = butter4(sr, 3000, 'highpass');
+      let eL = 1, eM = 1, eH = 1;
       for (let i = 0; i < length; i++) {
-        let n = random() + random() - 1;
-        // Debut de queue plus « granuleux » quand la diffusion est faible
+        // Trois bruits indépendants (bandes à puissance complémentaire : somme plate).
+        const n1 = random() + random() - 1, n2 = random() + random() - 1, n3 = random() + random() - 1;
+        let v = lo(n1) * eL + midLp(midHp(n2)) * eM + hiHp2(hiHp(n3)) * eH;
+        eL *= kLow; eM *= kMid; eH *= kHigh;
+        // Début de queue plus « granuleux » quand la diffusion est faible
         if (i < earlyN && diffusion < 1) {
           const sparse = random() < 0.1 ? 1.8 : diffusion;
           const w = i / earlyN;
-          n *= sparse + (1 - sparse) * w;
+          v *= sparse + (1 - sparse) * w;
         }
-        // Separation a 12 dB/oct : la bande lente ne laisse pas fuir d'aigus,
-        // sinon le damping ne s'entendait presque pas.
-        lp1 += split * (n - lp1);
-        lp2 += split * (lp1 - lp2);
-        let v = lp2 * eL + (n - lp2) * eH;
-        eL *= kLow;
-        eH *= kHigh;
         if (i < attackN) {
-          const s = Math.sin(0.5 * Math.PI * (i / attackN));
+          // (i + 1) : le tout premier échantillon sonne déjà (la queue démarre AU pré-délai, pas un échantillon après)
+          const s = Math.sin(0.5 * Math.PI * ((i + 1) / attackN));
           v *= s * s;
         }
+        if (i >= length - fadeN) v *= 0.5 * (1 + Math.cos(Math.PI * (i - (length - fadeN) + 1) / fadeN));
         data[i] = v;
       }
       if (shape.spring) {
@@ -508,7 +545,12 @@ export class ReverbNode {
   private irWaitKey = '';
   private irWaitOff: (() => void) | null = null;
   /** Ligne de modulation mise à 0 (réponse importée). */
-  private modDelayZero = false;
+  /**
+   * Retard de repos de la ligne de modulation (s), COMPTÉ dans le pré-délai : 5 ms (balayage de
+   * ±1,5 ms autour), moins quand le pré-délai affiché est plus court, 0 avec une réponse importée.
+   * Avant (22/10/2026), ces 5 ms s'ajoutaient au pré-délai affiché (25 ms → 30 ms mesurées).
+   */
+  private modBase = 0.005;
 
   /**
    * Met en forme la réponse importée (fréquence du contexte, longueur, fondu).
@@ -720,9 +762,16 @@ export class ReverbNode {
     const p = this.params;
 
     const stKey = `${p.isEnabled ? 1 : 0}`;
-    const force = stKey !== this.autoState;
+    let force = stKey !== this.autoState;
     this.autoState = stKey;
-    this.auto.get('preDelay')?.setStatic(Math.round(clamp(safeNum(p.preDelay, 0.025), 0, 0.45) * this.ctx.sampleRate) / this.ctx.sampleRate, { force, tau: T });  // à l'échantillon : copie exacte
+    const sr = this.ctx.sampleRate;
+    const userIrOn = isUserIrKey(p.irUser);
+    const pd = Math.round(clamp(safeNum(p.preDelay, 0.025), 0, 0.45) * sr) / sr; // à l'échantillon : copie exacte
+    // Ligne de modulation : 5 ms au repos ; plus courte si le pré-délai l'est (au moins le balayage).
+    const sweep = userIrOn ? 0 : clamp(safeNum(p.modDepth, 0.1), 0, 1) * 0.0015;
+    const base = userIrOn ? 0 : Math.round(Math.min(0.005, Math.max(pd, sweep > 0 ? sweep + 2 / sr : 0)) * sr) / sr;
+    if (base !== this.modBase) { this.modBase = base; this.setP(this.modDelay.delayTime, base, T); force = true; }
+    this.auto.get('preDelay')?.setStatic(pd, { force, tau: T });
     this.setP(this.lowCutFilter.frequency, clamp(safeNum(p.lowCut, 160), 20, 2000), T);
     this.setP(this.highCutFilter.frequency, clamp(safeNum(p.highCut, 10000), 500, 20000), T);
     // Réponse importée : elle sonne telle quelle (ni graves ajoutés, ni réflexions, ni modulation).
@@ -732,9 +781,6 @@ export class ReverbNode {
     // Modulation : ~0 a 3 ms de balayage, quelques cents au plus
     const rate = clamp(safeNum(p.modRate, 0.5), 0.05, 5);
     const depth = userIr ? 0 : clamp(safeNum(p.modDepth, 0.1), 0, 1);
-    // Ligne de modulation (5 ms au repos) : sans modulation, une réponse importée garde SON timing exact.
-    // (Posé seulement quand ça change : une réverbe calculée garde son réglage d'origine, intouché.)
-    if (userIr !== this.modDelayZero) { this.modDelayZero = userIr; this.setP(this.modDelay.delayTime, userIr ? 0 : 0.005, T); }
     // Fréquence fixe (pas de glissement) : la phase reste une fonction exacte de la position.
     this.modLFO.setFrequency(rate);
     this.setP(this.modDepthGain.gain, depth * 0.0015, 0.05);
@@ -811,7 +857,8 @@ export class ReverbNode {
       // Arrondi à l'échantillon : retard fixe = copie exacte (sans interpolation, dont l'arrondi
       // dépendait de la position dans le tampon : lecture ≠ export de près d'1 LSB 16 bits).
       const sr = this.ctx.sampleRate;
-      this.setP(this.erDelays[i].delayTime, Math.round(baseERTimes[i] * timeMult * (0.8 + size * 0.4) * sr) / sr, SMOOTH);
+      // (le pré-délai alimente les réflexions modBase plus tôt que le temps affiché : on le rajoute)
+      this.setP(this.erDelays[i].delayTime, Math.round((baseERTimes[i] * timeMult * (0.8 + size * 0.4) + this.modBase) * sr) / sr, SMOOTH);
       const pan = (i % 2 === 0 ? -1 : 1) * clamp((0.35 + 0.1 * i) * width, 0, 1);
       this.setP(this.erPanners[i].pan, pan, SMOOTH);
     }
@@ -1018,12 +1065,12 @@ const ReverbScreen: React.FC<{ p: ReverbParams }> = ({ p }) => {
       c.stroke(); c.setLineDash([]);
     };
     outline(decay, '#ede9fe', [], 1.6);
-    if (!frozen) outline(Math.max(0.05, decay * shape.hf * (1 - 0.75 * damp)), 'rgba(125,211,252,0.95)', [5, 4], 1.4);
+    if (!frozen) outline(Math.max(0.05, decay * shape.hf * (1 - 0.8 * damp)), 'rgba(125,211,252,0.95)', [5, 4], 1.4);
     // Premières réflexions
     const erl = clamp(safeNum(p.erLevel, 0.3), 0, 1);
     c.fillStyle = '#ffffff';
     for (const t0 of RV_ER_TIMES) {
-      const t = t0 * RV_ER_MULT[mode] * (0.8 + sizeV * 0.4);
+      const t = pre + t0 * RV_ER_MULT[mode] * (0.8 + sizeV * 0.4);
       const x = xOf(t);
       const hh = erl * 0.8 * (bottom - top);
       c.globalAlpha = 0.85; c.fillRect(x - 1, bottom - hh, 2, hh); c.globalAlpha = 1;

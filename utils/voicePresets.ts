@@ -161,7 +161,8 @@ export function buildEqBands(s: EqShape) {
   const bands = EQ_FREQS.map((frequency, id) => ({
     id,
     type: (id === 0 ? 'highpass' : id === 11 ? 'lowpass' : 'peaking') as string,
-    frequency, gain: 0, q: id === 0 || id === 11 ? 0.71 : 1.0, isEnabled: id === 0, isSolo: false,
+    // Q en convention v2 (engine/eqQ.ts) : Butterworth = coupe-bas à −3 dB pile à la fréquence de la recette.
+    frequency, gain: 0, q: id === 0 || id === 11 ? Math.SQRT1_2 : 1.0, isEnabled: id === 0, isSolo: false,
   }));
   bands[0].frequency = s.hp;
   if (s.lp) Object.assign(bands[11], { frequency: s.lp, isEnabled: true });
@@ -202,7 +203,7 @@ export function presetChain(p: PresetDef, calib: VoicePresetCalib = NEUTRAL_CALI
   // jamais sur un bus voix (son coupe-bas couperait le grave du lead).
   if (!p.bus) {
     const eq = p.eq || { hp: p.role === 'lead' ? HOUSE_RULES.leadHighpassHz : HOUSE_RULES.otherHighpassHz };
-    out.push({ type: 'PROEQ12', params: { masterGain: 1, bands: buildEqBands(eq) } });
+    out.push({ type: 'PROEQ12', params: { masterGain: 1, qVersion: 2, bands: buildEqBands(eq) } });
   }
   if (p.comp1) {
     out.push({

@@ -2,6 +2,7 @@ import type { DrumRow } from './drumKits';
 import { loadDrumSound } from './drumSounds';
 import { audioBufferRegistry } from './audioBufferRegistry';
 import { clipRegionChannels, hasRegion, newSampleId, padLoadKey, padSampleKey, PadSampleInfo, regionOf, renderRegion, sampleLabel, userSampleId } from './drumSamples';
+import { bakeChannels, needsBake } from './padSampler';
 
 /**
  * Côté navigateur : son prêt à jouer d'un pad (bibliothèque, son Nova ou
@@ -29,13 +30,17 @@ export async function padSourceBuffer(row: Pick<DrumRow, 'sound'>, ctx: BaseAudi
   return loadDrumSound(row.sound, ctx, root);
 }
 
-/** Son prêt à jouer (mis en cache par réglage de zone). */
+/** Son prêt à jouer (mis en cache par réglage de zone et de sampler). */
 export function loadPadBuffer(row: DrumRow, ctx: BaseAudioContext, root = 0): Promise<AudioBuffer> {
-  if (!hasRegion(row)) return padSourceBuffer(row, ctx, root);
+  const bake = needsBake(row.smp, row.tune || 0);
+  if (!hasRegion(row) && !bake) return padSourceBuffer(row, ctx, root);
   const key = `${padLoadKey(row, root)}|${ctx.sampleRate}`;
   let p = ready.get(key);
   if (!p) {
-    p = padSourceBuffer(row, ctx, root).then(src => bufferFrom(ctx, renderRegion(channelsOf(src), src.sampleRate, regionOf(row)), src.sampleRate));
+    p = padSourceBuffer(row, ctx, root).then(src => {
+      const region = hasRegion(row) ? renderRegion(channelsOf(src), src.sampleRate, regionOf(row)) : channelsOf(src);
+      return bufferFrom(ctx, bake ? bakeChannels(region, src.sampleRate, row.smp, row.tune || 0) : region, src.sampleRate);
+    });
     ready.set(key, p);
     p.catch(() => ready.delete(key));
     if (ready.size > 96) ready.delete(ready.keys().next().value as string);
@@ -64,3 +69,12 @@ export function sampleFromClip(ctx: BaseAudioContext, source: AudioBuffer, clip:
   const r = registerPadSample(buffer, clip.name || 'Clip');
   return { ...r, buffer };
 }
+
+/** Sons des couches du sampler de pad (même zone et même traitement que le son du pad). */
+export function loadPadLayerBuffers(row: DrumRow, ctx: BaseAudioContext, root = 0): Promise<(AudioBuffer | null)[]> {
+  const ls = row.smp?.layers || [];
+  return Promise.all(ls.map(l => loadPadBuffer({ ...row, sound: l.sound }, ctx, root).catch(() => null)));
+}
+
+/** Clé de chargement des couches d'un pad (vide sans couche). */
+export const padLayersKey = (row: DrumRow, root: number) => (row.smp?.layers?.length ? row.smp.layers.map(l => padLoadKey({ ...row, sound: l.sound }, root)).join('#') : '');

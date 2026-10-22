@@ -24,7 +24,7 @@ try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-from qalib import APP_MODULE_INIT, OUT, launch, new_page, Log  # noqa: E402
+from qalib import APP_MODULE_INIT, OUT, launch, new_page, Log, ouvrir_menu_range  # noqa: E402
 from scenarios import open_studio, close_welcome  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -82,7 +82,8 @@ ENGINE_VALUE = """async (a) => { const { audioEngine: e } = await window.__novaA
 
 
 def set_mode(pg, track_id, label):
-    btn = pg.locator(f"[data-testid='automation-mode-{track_id}']").first
+    ouvrir_menu_range(pg, f"[data-testid='automation-mode-{track_id}']", piste=track_id)  # « ⋯ » (barre allégée)
+    btn = pg.locator(f"[data-testid='automation-mode-{track_id}']").locator("visible=true").first
     btn.scroll_into_view_if_needed(); btn.click(); pg.wait_for_timeout(300)
     pg.locator("[role=menu] [role=menuitemradio]").filter(has_text=re.compile(label, re.I)).first.click()
     pg.wait_for_timeout(300)

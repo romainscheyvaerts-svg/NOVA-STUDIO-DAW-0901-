@@ -151,7 +151,8 @@ export function eqCorrections(balance: Record<string, number>, amount: number, c
 export function eqParamsFor(moves: EqMove[]): Record<string, any> {
   const g = (id: string) => moves.find(m => m.band === id)?.gainDb || 0;
   const bands = [
-    { id: 0, type: 'highpass', frequency: 22, gain: 0, q: 0.7, isEnabled: true, isSolo: false },
+    // Q en convention v2 (engine/eqQ.ts) : coupe-bas Butterworth (−3 dB pile à 22 Hz), largeurs des cloches exactes.
+    { id: 0, type: 'highpass', frequency: 22, gain: 0, q: Math.SQRT1_2, isEnabled: true, isSolo: false },
     { id: 1, type: 'lowshelf', frequency: 55, gain: g('sub'), q: 0.7, isEnabled: true, isSolo: false },
     { id: 2, type: 'peaking', frequency: 110, gain: g('bass'), q: 0.8, isEnabled: true, isSolo: false },
     { id: 3, type: 'peaking', frequency: 400, gain: g('lowmid'), q: 0.7, isEnabled: true, isSolo: false },
@@ -159,8 +160,8 @@ export function eqParamsFor(moves: EqMove[]): Record<string, any> {
     { id: 5, type: 'peaking', frequency: 5000, gain: g('presence'), q: 0.8, isEnabled: true, isSolo: false },
     { id: 6, type: 'highshelf', frequency: 10000, gain: g('air'), q: 0.7, isEnabled: true, isSolo: false },
   ];
-  for (let i = 7; i < 12; i++) bands.push({ id: i, type: i === 11 ? 'lowpass' : 'peaking', frequency: [6000, 8000, 10000, 12000, 18000][i - 7] || 18000, gain: 0, q: 1, isEnabled: false, isSolo: false });
-  return { isEnabled: true, masterGain: 1, bands };
+  for (let i = 7; i < 12; i++) bands.push({ id: i, type: i === 11 ? 'lowpass' : 'peaking', frequency: [6000, 8000, 10000, 12000, 18000][i - 7] || 18000, gain: 0, q: i === 11 ? Math.SQRT1_2 : 1, isEnabled: false, isSolo: false });
+  return { isEnabled: true, masterGain: 1, qVersion: 2, bands };
 }
 
 export function compParamsFor(a: MixAnalysis, character: MasterCharacter): Record<string, any> {

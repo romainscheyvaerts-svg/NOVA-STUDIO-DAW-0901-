@@ -211,7 +211,7 @@ def seance(b):
     log = Log("seance_rec")
     ctx, page = new_page(b, "pc", log=log, touch=False)
     open_project(page, f)
-    page.mouse.click(700, 860); page.wait_for_timeout(200)
+    page.mouse.click(420, 860); page.wait_for_timeout(200)  # zone vide du bandeau du bas (barre allégée : « Piste voix » est vers x = 700)
     page.keyboard.press("Escape")
     M = res["mesures"]
 

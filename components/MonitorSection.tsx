@@ -135,7 +135,7 @@ export const SoloListenChoice: React.FC<{ dense?: boolean }> = ({ dense }) => {
 };
 
 /** Panneau complet (popover de la barre). */
-const MonitorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+export const MonitorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const m = useMonitor();
   return (
     <div className="space-y-3" data-testid="monitor-panel">

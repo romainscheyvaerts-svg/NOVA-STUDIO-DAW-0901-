@@ -5,7 +5,7 @@ import os, re, sys, json
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("NOVA_URL", "http://localhost:3417/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-v14-v15")
-from qalib import launch, new_page, shot, overflow_report, BASE  # noqa: E402
+from qalib import launch, new_page, shot, overflow_report, BASE, ouvrir_master_nova  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -22,7 +22,7 @@ with sync_playwright() as p:
     if dr.count():
         cl = dr.locator("button[aria-label^='Fermer'], button[title^='Fermer']")
         (cl.first.click() if cl.count() else pg.keyboard.press("Escape")); pg.wait_for_timeout(600)
-    pg.locator("[data-nova-open-master]").first.click(); pg.wait_for_timeout(600)
+    ouvrir_master_nova(pg); pg.wait_for_timeout(600)
     pg.locator("[data-nova-master-run]").first.click()
     pg.locator("[data-nova-master-rapport]").first.wait_for(timeout=240000)
     pg.locator("[data-nova-master-apply]").first.click(); pg.wait_for_timeout(800)

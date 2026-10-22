@@ -43,7 +43,7 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
 import { setModulatorSourceResolver } from '../utils/modulators';
-import { DrumRackNode } from './DrumRackNode'; // NEW
+import { DrumRackNode, type DrumNoteEx } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
@@ -1818,6 +1818,8 @@ export class AudioEngine {
         const liveRack = this.tracksDSP.get(track.id)?.drumRack;
         if (liveRack) {
           liveRack.getBuffers().forEach((buf, padId) => rt.drumRack!.loadSample(padId, buf));
+          // Couches du sampler de pad (vélocité / alternance) : les mêmes sons qu'en lecture.
+          rt.drumRack.copyLayers(liveRack.getLayers());
         }
         rt.drumRack.output.connect(input);
       }
@@ -2057,7 +2059,7 @@ export class AudioEngine {
             rt.sampler.triggerAttack(note.pitch, note.velocity, attackAt);
             rt.sampler.triggerRelease(note.pitch, releaseAt);
           } else if (rt.drumRack) {
-            rt.drumRack.trigger(note.pitch, note.velocity, attackAt, note);
+            rt.drumRack.trigger(note.pitch, note.velocity, attackAt, note as DrumNoteEx);
           } else if (rt.melodicSampler) {
             rt.melodicSampler.triggerAttack(note.pitch, note.velocity, attackAt, note);
             rt.melodicSampler.triggerRelease(note.pitch, releaseAt);
@@ -3894,7 +3896,7 @@ export class AudioEngine {
       else if (dsp.synth) dsp.synth.triggerAttack(pitch, velocity, now);
       else if (dsp.melodicSampler) dsp.melodicSampler.triggerAttack(pitch, velocity, now, ex);
       else if (dsp.drumSampler) dsp.drumSampler.trigger(velocity, now);
-      else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now, ex);
+      else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now, ex as DrumNoteEx);
       else if (dsp.sampler) dsp.sampler.triggerAttack(pitch, velocity, now);
   }
 
@@ -3945,6 +3947,11 @@ export class AudioEngine {
       }
   }
   
+  /** Sampler de pad : son d'une couche (`index` ≥ 1, `count` couches en tout ; null = retirée). */
+  public loadDrumRackLayer(trackId: string, padId: number, index: number, buffer: AudioBuffer | null, count?: number) {
+    this.tracksDSP.get(trackId)?.drumRack?.loadLayer(padId, index, buffer, count);
+  }
+
   public getDrumRackNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumRack || null; }
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
@@ -4633,7 +4640,7 @@ export class AudioEngine {
       case 'DEESSER': node = new DeEsserNode(ctx); break;
       case 'DENOISER': node = new DenoiserNode(ctx); break;
       case 'PROEQ12':
-        const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: 1.0, isEnabled: true, isSolo: false })) };
+        const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: i === 0 || i === 11 ? Math.SQRT1_2 : 1.0, isEnabled: true, isSolo: false })), qVersion: 2 };
         const eqParams = plugin.params && plugin.params.bands ? plugin.params : eqDefaultParams;
         node = new ProEQ12Node(ctx, eqParams as any);
         break;

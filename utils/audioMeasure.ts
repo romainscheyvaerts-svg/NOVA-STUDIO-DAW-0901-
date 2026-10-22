@@ -2,9 +2,10 @@
  * Mesures audio sur des canaux bruts (Float32Array), utilisables dans le
  * navigateur ET dans les tests : loudness intégrée (LUFS, BS.1770 via
  * `utils/loudness.ts`), crête vraie (dBTP) par suréchantillonnage à sinus
- * cardinal long, dynamique (PLR) et étendue de loudness (LRA simplifiée).
+ * cardinal long, dynamique (PLR) et étendue de loudness (LRA, EBU Tech 3342).
  */
-import { integratedLufs, truePeakChannels } from './loudness';
+import { integratedLufs, kWeighted, truePeakChannels } from './loudness';
+import { loudnessRange } from '../engine/meters/loudness';
 
 type Chans = Float32Array[];
 
@@ -29,26 +30,28 @@ export function samplePeakOf(ch: Chans): number {
 }
 
 /**
- * Étendue de loudness simplifiée (LRA, EBU Tech 3342) : écart entre les
- * percentiles 10 et 95 des loudness court terme (3 s, pas de 1 s), après
- * portillon absolu -70 LUFS et relatif -20 LU. Non pondérée K (estimation).
+ * Étendue de loudness (LRA, EBU Tech 3342) : écart entre les centiles 10 et 95 des
+ * loudness court terme (fenêtres de 3 s, pas de 100 ms) PONDÉRÉES K, après portillon
+ * absolu −70 LUFS et relatif −20 LU. Même calcul que le mètre en direct
+ * (engine/meters/loudness.loudnessRange) : l'export et la fenêtre Loudness affichent le même LRA.
+ *
+ * Avant (22/10/2026) : sans pondération K et au pas de 1 s (« estimation ») : un passage
+ * de graves puis d'aigus au même niveau crête (4 à 7 LU d'écart réel) donnait 0 LU.
  */
 export function loudnessRangeOf(ch: Chans, sampleRate: number): number {
-  const win = Math.round(3 * sampleRate), hop = Math.round(sampleRate);
   const n = ch[0]?.length || 0;
-  const vals: number[] = [];
-  for (let s = 0; s + win <= n; s += hop) {
-    let z = 0;
-    for (const x of ch) { let a = 0; for (let i = s; i < s + win; i++) a += x[i] * x[i]; z += a / win; }
-    const l = -0.691 + 10 * Math.log10(Math.max(z, 1e-20));
-    if (l > -70) vals.push(l);
+  const win = Math.round(3 * sampleRate), hop = Math.max(1, Math.round(0.1 * sampleRate));
+  if (n < win) return 0;
+  // Somme cumulée de l'énergie pondérée K (poids 1,0 par canal, deux canaux au plus).
+  const cum = new Float64Array(n + 1);
+  for (const x of ch.slice(0, 2)) {
+    const k = kWeighted(x, sampleRate);
+    let acc = 0;
+    for (let i = 0; i < n; i++) { acc += k[i] * k[i]; cum[i + 1] += acc; }
   }
-  if (vals.length < 2) return 0;
-  const mean = 10 * Math.log10(vals.reduce((a, l) => a + Math.pow(10, l / 10), 0) / vals.length);
-  const g = vals.filter(l => l > mean - 20).sort((a, b) => a - b);
-  if (g.length < 2) return 0;
-  const pct = (q: number) => g[Math.min(g.length - 1, Math.max(0, Math.round(q * (g.length - 1))))];
-  return pct(0.95) - pct(0.1);
+  const energies: number[] = [];
+  for (let s = 0; s + win <= n; s += hop) energies.push((cum[s + win] - cum[s]) / win);
+  return loudnessRange(energies, energies.length);
 }
 
 export interface LoudnessReport {

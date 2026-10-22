@@ -200,6 +200,9 @@ BATTERIE = [
     # 22/10/2026 · tour beatmaking : « Nouveau beat » / « Faire un beat », pas peints au glisser, clic allumé ↔ éteint,
     # pads au clavier < 5 ms, piano roll (Maj + flèches, Ctrl+L, Ctrl + glisser = copie, Q sans étape vide), métronome O.
     ("beat_gestes", []),
+    # 22/10/2026 · séquenceur de batterie pro (menus du pas / du pad, motifs, rythmes publiés, enregistrement, mesures à l'export)
+    # et sampler des pads (enveloppes, filtre, hauteur, couches : chaque valeur affichée mesurée sur le rendu d'export).
+    ("sequenceur_pro", []), ("sampler_pads", []),
     # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
     # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
     ("modulateurs", []),
@@ -239,6 +242,12 @@ BATTERIE = [
     # 22/10/2026 : tour « édition et navigation » (zoom du morceau à l'échantillon, Z, annuler par geste, sélection
     # glissée entre pistes, Ctrl+D / couper-coller de plusieurs clips, bord qui défile, suivi de la tête, 60 pistes).
     ("audit_edition", []),
+    # 22/10/2026 · piano roll pratique : 3 tâches mesurées (mélodie de 8 mesures à la souris et au pas à pas, suite
+    # d'accords, 808 avec glissés : gestes + temps estimé, résultat vérifié note par note), barre épurée (outil, grille,
+    # gamme, Outils ▾ / Notes ▾ / Vue ▾), clic droit = menu, double-clic = propriétés, Alt + molette / Alt + glisser,
+    # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
+    # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
+    ("pianoroll_pratique", []),
     # 22/10/2026 · tour tactile : iPhone 390 × 844 (sombre, clair), iPhone couché 844 × 390, petit Android 360 × 800,
     # iPad 820 × 1180 / 1180 × 820, iPad mini 744 × 1133, au doigt (encoche et barre d'accueil simulées) : parcours
     # instru → 2 prises → écoute → export compté, cibles < 32 px, recouverts, sous l'encoche, défilement parasite,

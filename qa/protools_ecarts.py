@@ -44,6 +44,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
 from nova_pro_lib import app_state, track_point  # noqa: E402  (géométrie seule, aucun réseau)
+import qalib  # noqa: E402  (ouvrir_menu_range : barre allégée)
 
 BASE = os.environ.get("NOVA_URL", "http://127.0.0.1:3493/")
 OUT = Path(os.environ.get("QA_OUT", r"D:\1 WORK\CONTENU\nova-protools-ecarts"))
@@ -1169,6 +1170,7 @@ def scen_couverture(page, vp, theme):
     cv("cv_audiosuite", audiosuite)
 
     def mode_auto():
+        qalib.ouvrir_menu_range(page, "[data-testid=automation-mode-lead]", tap=touch, piste="lead")  # « ⋯ » de la piste (barre allégée)
         b = page.locator("[data-testid=automation-mode-lead]").locator("visible=true").first
         before = st(page, "s => s.tracks.find(t => t.id === 'lead').automationMode || null")
         tap_or_click(b, touch); page.wait_for_timeout(300)

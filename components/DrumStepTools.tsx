@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { DrumMachine, DrumRow } from '../utils/drumKits';
-import { rowStepsPerBar, setRowLength, setRowRate, setStepParam, StepParam, StepRate, STEP_RATES, STEPS_PER_BAR } from '../utils/drumPatterns';
+import { MAX_ROW_BARS, rowStepsPerBar, setRowLength, setRowRate, setStepParam, stepParamOf, StepParam, StepRate, STEP_RATES, STEPS_PER_BAR } from '../utils/drumPatterns';
 import { padSampleKey } from '../utils/drumSamples';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { applyKit, deleteKit, getKit, kitFromDrumMachine, kitFromFile, KIT_EXT, kitToFile, listKits, onKitsChange, renameKit, saveKit, UserKit } from '../utils/userKits';
@@ -137,71 +137,94 @@ export const KitBar: React.FC<{
   );
 };
 
-// ===== Éditeur de graphe (FL : Graph Editor) =====
+// ===== Éditeur de graphe (comme le Graph Editor de FL) =====
 
-const PARAMS: { id: StepParam; label: string; hint: string }[] = [
-  { id: 'vel', label: 'Vélocité', hint: 'Force de chaque pas' },
-  { id: 'pan', label: 'Pan', hint: 'Panoramique de chaque pas, ajouté à celui du pad' },
-  { id: 'pitch', label: 'Hauteur', hint: 'Hauteur de chaque pas en demi-tons, ajoutée à l’accordage du pad' },
+const PARAMS: { id: StepParam; label: string; hint: string; bipolar?: boolean; color: string }[] = [
+  { id: 'vel', label: 'Vélocité', hint: 'Force de chaque pas (1-127)', color: 'bg-cyan-400' },
+  { id: 'prob', label: 'Probabilité', hint: 'Chance que le pas joue (0-100 %), tirée pareil à la lecture et à l’export', color: 'bg-emerald-400' },
+  { id: 'nudge', label: 'Décalage', hint: 'Décalage fin de chaque pas (±50 % d’un pas), en avance ou en retard', bipolar: true, color: 'bg-sky-400' },
+  { id: 'gate', label: 'Longueur', hint: 'Longueur de la note en pas (0 = le son entier)', color: 'bg-amber-300' },
+  { id: 'pitch', label: 'Hauteur', hint: 'Hauteur de chaque pas en demi-tons, ajoutée à l’accordage du pad', bipolar: true, color: 'bg-violet-400' },
+  { id: 'pan', label: 'Pan', hint: 'Panoramique de chaque pas, ajouté à celui du pad', bipolar: true, color: 'bg-amber-400' },
+  { id: 'glide', label: 'Glisse', hint: 'Glisse de hauteur depuis le coup précédent (808, percus accordées)', color: 'bg-fuchsia-400' },
 ];
+/** Étendue affichée par le graphe (le menu du pas va plus loin pour la hauteur : ±24). */
+const GRAPH_RANGE: Record<StepParam, [number, number]> = { vel: [1, 127], prob: [0, 100], nudge: [-50, 50], gate: [0, 8], pitch: [-12, 12], pan: [-1, 1], glide: [0, 1] };
 
 export const StepGraph: React.FC<{
   dm: DrumMachine;
   rowIndex: number;
-  /** Pas affichés (index dans la rangée) et largeur d'un pas 1/16 (px, 0 = flexible). */
+  /** Pas affichés (index dans la rangée). */
   cells: number[];
   onChange: (dm: DrumMachine) => void;
   playStep?: number;
-}> = ({ dm, rowIndex, cells, onChange, playStep }) => {
+  /** Tempo : le décalage s'affiche aussi en millisecondes. */
+  bpm?: number;
+}> = ({ dm, rowIndex, cells, onChange, playStep, bpm = 120 }) => {
   const [param, setParam] = useState<StepParam>('vel');
   const row = dm.rows[rowIndex];
   const box = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const latest = useRef(dm); latest.current = dm;
   if (!row) return null;
-  const valueOf = (i: number) => (param === 'vel' ? row.steps[i] || 0 : param === 'pan' ? row.stepPan?.[i] || 0 : row.stepPitch?.[i] || 0);
+  const def = PARAMS.find(p => p.id === param)!;
+  const [lo, hi] = GRAPH_RANGE[param];
+  const cellMs = (60 / bpm / 4) * (STEPS_PER_BAR / rowStepsPerBar(row)) * 1000;
   const setAt = (e: React.PointerEvent) => {
     const el = box.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const k = Math.floor(((e.clientX - r.left) / r.width) * cells.length);
     const i = cells[Math.max(0, Math.min(cells.length - 1, k))];
+    if (!(latest.current.rows[rowIndex]?.steps[i] > 0)) return; // seuls les pas allumés se règlent
     const y = 1 - Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
-    const v = param === 'vel' ? 1 + y * 126 : param === 'pan' ? y * 2 - 1 : Math.round(y * 24 - 12);
+    const v = param === 'glide' ? (y >= 0.5 ? 1 : 0) : lo + y * (hi - lo);
     const next = setStepParam(latest.current, rowIndex, i, param, v);
     if (next !== latest.current) { latest.current = next; onChange(next); }
   };
-  const fmt = (v: number) => (param === 'vel' ? String(Math.round(v)) : param === 'pan' ? (Math.abs(v) < 0.02 ? 'C' : `${v < 0 ? 'G' : 'D'}${Math.round(Math.abs(v) * 100)}`) : `${v > 0 ? '+' : ''}${v}`);
+  const fmt = (v: number) => {
+    switch (param) {
+      case 'vel': return String(Math.round(v));
+      case 'prob': return `${Math.round(v)} %`;
+      case 'nudge': return v ? `${v > 0 ? '+' : '−'}${Math.round((Math.abs(v) * cellMs) / 100)} ms` : 'calé';
+      case 'gate': return v ? `${v} pas` : 'son entier';
+      case 'pitch': return `${v > 0 ? '+' : ''}${v} dt`;
+      case 'pan': return Math.abs(v) < 0.02 ? 'C' : `${v < 0 ? 'G' : 'D'}${Math.round(Math.abs(v) * 100)}`;
+      default: return v ? 'oui' : 'non';
+    }
+  };
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-2" data-testid="step-graph">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-[11px] font-bold text-slate-400 mr-1 truncate">Graphe · {row.name}</span>
-        <div className="flex rounded-lg overflow-hidden border border-white/10 ml-auto" role="group" aria-label="Paramètre du graphe">
-          {PARAMS.map(p => (
-            <button key={p.id} type="button" onClick={() => setParam(p.id)} aria-pressed={param === p.id} title={p.hint} data-testid={`graph-${p.id}`}
-              className={`h-9 px-2.5 text-[11px] font-bold ${param === p.id ? 'bg-violet-400 text-black' : 'bg-white/5 text-slate-300'}`}>{p.label}</button>
-          ))}
-        </div>
+        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-400" title={def.hint}>
+          <span className="hidden sm:inline">Réglage</span>
+          <select value={param} onChange={e => setParam(e.target.value as StepParam)} data-testid="graph-param" aria-label="Réglage par pas affiché dans le graphe"
+            className="h-10 rounded-lg bg-white/5 border border-white/10 px-2 text-[12px] font-bold text-white">
+            {PARAMS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </label>
       </div>
       <div ref={box} className="relative h-20 flex gap-0.5 touch-none select-none cursor-ns-resize" data-own-longpress=""
         onPointerDown={e => { dragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); setAt(e); }}
         onPointerMove={e => { if (dragging.current) setAt(e); }}
         onPointerUp={() => { dragging.current = false; }} onPointerCancel={() => { dragging.current = false; }}
-        role="slider" aria-label={`${PARAMS.find(p => p.id === param)?.label} par pas de ${row.name}`} aria-valuemin={param === 'vel' ? 1 : param === 'pan' ? -1 : -12} aria-valuemax={param === 'vel' ? 127 : param === 'pan' ? 1 : 12}>
-        {param !== 'vel' && <div className="absolute inset-x-0 top-1/2 h-px bg-white/15 pointer-events-none" />}
+        role="slider" aria-label={`${def.label} par pas de ${row.name}`} aria-valuemin={lo} aria-valuemax={hi}>
+        {def.bipolar && <div className="absolute inset-x-0 top-1/2 h-px bg-white/15 pointer-events-none" />}
         {cells.map(i => {
           const on = (row.steps[i] || 0) > 0;
-          const v = valueOf(i);
-          const h = param === 'vel' ? (v / 127) * 100 : param === 'pan' ? Math.abs(v) * 50 : (Math.abs(v) / 12) * 50;
-          const top = param === 'vel' ? 100 - h : v >= 0 ? 50 - h : 50;
+          const v = stepParamOf(row, i, param);
+          const span = hi - lo;
+          const h = def.bipolar ? (Math.abs(v) / (span / 2)) * 50 : ((v - lo) / span) * 100;
+          const top = def.bipolar ? (v >= 0 ? 50 - h : 50) : 100 - h;
           return (
             <div key={i} className={`relative flex-1 rounded-sm ${playStep === i ? 'bg-white/10' : 'bg-white/[0.03]'}`} title={on ? `Pas ${i + 1} : ${fmt(v)}` : `Pas ${i + 1} éteint`}>
-              {on && <div className={`absolute inset-x-0 rounded-sm ${param === 'vel' ? 'bg-cyan-400' : param === 'pan' ? 'bg-amber-400' : 'bg-violet-400'}`} style={{ top: `${top}%`, height: `${Math.max(2, h)}%` }} />}
+              {on && <div className={`absolute inset-x-0 rounded-sm ${def.color}`} style={{ top: `${Math.max(0, Math.min(100, top))}%`, height: `${Math.max(2, Math.min(100, h))}%` }} />}
             </div>
           );
         })}
       </div>
-      <p className="mt-1 text-[10px] text-slate-500">Glisse sur les barres pour régler chaque pas allumé.</p>
+      <p className="mt-1 text-[10px] text-slate-500">Glisse sur les barres pour régler chaque pas allumé. {def.hint}.</p>
     </div>
   );
 };
@@ -247,8 +270,9 @@ export const RowTiming: React.FC<{ dm: DrumMachine; rowIndex: number; onChange: 
 /** Pas d'une rangée à afficher : tout le motif (ordinateur) ou une demi-mesure (téléphone, page 0, 1…). */
 export function rowCells(row: DrumRow, bars: number, page: number | null): { cells: number[]; usable: number } {
   const spb = rowStepsPerBar(row);
-  const usable = row.len && row.len > 0 ? Math.min(row.len, spb * 4) : spb * bars;
-  if (page === null) return { cells: Array.from({ length: spb * bars }, (_, i) => i), usable };
+  const usable = row.len && row.len > 0 ? Math.min(row.len, spb * MAX_ROW_BARS) : spb * bars;
+  // Rangée plus longue que le motif (polymétrie : 64 pas sur un motif d'une mesure) : tous ses pas.
+  if (page === null) return { cells: Array.from({ length: Math.max(spb * bars, usable) }, (_, i) => i), usable };
   const per = (8 * spb) / STEPS_PER_BAR;
   return { cells: Array.from({ length: per }, (_, i) => page * per + i), usable };
 }

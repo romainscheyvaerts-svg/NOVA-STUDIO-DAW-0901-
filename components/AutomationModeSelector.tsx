@@ -124,6 +124,7 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
           aria-label={`Automation de ${track.name}`}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
+          data-toolbar-menu-keep=""
           className="fixed z-[900] w-64 overflow-y-auto rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl"
           style={menuStyle}
         >

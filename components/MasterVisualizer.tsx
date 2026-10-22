@@ -115,12 +115,12 @@ const MasterVisualizer: React.FC = () => {
     <div
       className="w-32 h-10 bg-black/60 rounded-lg border border-white/10 relative overflow-hidden cursor-pointer group"
       onClick={() => setMode(m => m === 'SPECTRUM' ? 'WAVE' : 'SPECTRUM')}
-      title="Click to toggle visualizer mode"
+      title="Clic : spectre ou forme d'onde"
     >
        <canvas ref={canvasRef} className="w-full h-full" />
        <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-black/20 pointer-events-none" />
-       <div className="absolute top-0.5 right-1 text-[6px] font-mono text-cyan-500/50 group-hover:text-cyan-400 transition-colors">
-          {mode}
+       <div className="absolute top-0.5 right-1 text-[6px] font-mono text-cyan-500/50 [[data-theme=light]_&]:text-cyan-900 group-hover:text-cyan-400 transition-colors">
+          {mode === 'SPECTRUM' ? 'SPECTRE' : 'ONDE'}
        </div>
     </div>
   );

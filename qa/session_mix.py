@@ -19,7 +19,7 @@ os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3491/")
 PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\session_mix")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
+from qalib import launch, new_page, OUT, Log, BASE, ouvrir_menu_range  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 from scenarios import close_welcome, wait_text_gone, DEFAULT_BEAT  # noqa: E402
 from nova_pro_lib import Chrono, visible_first, open_by_palette, via_menu, track_point, app_state, save_json  # noqa: E402
@@ -71,6 +71,7 @@ def run(page, log, ch, zpath):
 
     # 3. VCA des voix ------------------------------------------------------------------------
     ch.start("Mix", "VCA des 6 voix (lead, double, 4 backs)", protools="Sélection des 6 pistes (2 clics), Piste › Nouvelle VCA, affectation au groupe : ≈ 6 gestes")
+    ouvrir_menu_range(page, "[data-testid=dock-track-list]")  # « Session ▾ » du bandeau (barre allégée)
     b = visible_first(page, "[data-testid=dock-track-list]")
     if b: ch.click(b, "Pistes")
     elif not open_by_palette(ch, "liste des pistes", "pal.trackList"): ch.fail("liste des pistes introuvable")
@@ -93,7 +94,11 @@ def run(page, log, ch, zpath):
     ch.start("Mix", "Envoi Reverb sur la lead, Écho sur la double", protools="Insérer un envoi (2 clics : sélecteur d'envoi › bus), régler le niveau (1 glisser), ×2")
     for tid, ret, lab in (("t8", "ret-verb", "Reverb"), ("t9", "ret-echo", "Écho")):
         scroll_to(page, tid)
-        eb = page.locator(f"[data-track-header='{tid}'] button[title^='Envois']").locator("visible=true")
+        # Barre allégée : « Envois » est dans le menu « ⋯ » de la piste.
+        if not page.locator(f"[data-track-header='{tid}'] button[title^='Envois']").locator("visible=true").count():
+            mb = page.locator(f"[data-testid=track-more-{tid}]").locator("visible=true")
+            if mb.count(): ch.click(mb.first, "⋯ (piste)")
+        eb = page.locator(f"[data-track-header='{tid}'] button[title^='Envois'], [data-toolbar-menu='track-more-{tid}'] button[title^='Envois']").locator("visible=true")
         if not eb.count(): ch.fail(f"bouton Envois de la piste {tid} introuvable"); continue
         ch.click(eb.first, f"Envois ({lab})")
         panel = page.locator(f"[data-testid=sends-panel-{tid}]")
@@ -115,7 +120,11 @@ def run(page, log, ch, zpath):
     # 5. Automation ----------------------------------------------------------------------------
     ch.start("Mix", "Automation du volume de la lead (Latch, fader pendant 3 s de lecture)", protools="Mode Latch (2 clics), lecture, fader, stop (1 glisser + 2 touches)")
     scroll_to(page, "t8")
-    sel_btn = page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true")
+    # Barre allégée : sur « Lecture » sans automation écrite, le sélecteur est dans le « ⋯ » de la piste.
+    if not page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true").count():
+        mb = page.locator("[data-testid=track-more-t8]").locator("visible=true")
+        if mb.count(): ch.click(mb.first, "⋯ (piste)")
+    sel_btn = page.locator("[data-track-header='t8'] button[aria-label^=\"Mode d'automation\"], [data-toolbar-menu='track-more-t8'] button[aria-label^=\"Mode d'automation\"]").locator("visible=true")
     if sel_btn.count():
         ch.click(sel_btn.first, "mode d'automation")
         latch = page.locator("button, [role=menuitem], [role=option]", has_text=re.compile(r"^\s*(Latch|LATCH)")).locator("visible=true")
@@ -188,7 +197,9 @@ def run(page, log, ch, zpath):
 
     # 8. Master Nova -----------------------------------------------------------------------------
     ch.start("Master", "Master Nova, cible Spotify", protools="Pas de mastering intégré (Ozone en insert : ≈ 5 gestes)")
-    mb = visible_first(page, "[data-nova-open-master]")
+    mb = visible_first(page, "[data-nova-open-master]") or visible_first(page, "[data-testid=transport-menu]")
+    if mb and mb.get_attribute("data-testid") == "transport-menu":  # Master Nova rangé dans le menu ☰
+        ch.click(mb, "☰"); mb = visible_first(page, "[data-testid=menu-master-nova]")
     if mb: ch.click(mb, "Master Nova")
     elif not open_by_palette(ch, "master", "pal.masterNova"): ch.fail("Master Nova introuvable")
     ch.wait_js("() => !!document.querySelector('[data-nova-master]')", 5000, "Master Nova")

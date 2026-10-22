@@ -48,13 +48,13 @@ export const MB_SPECS: MixFxSpec[] = [
 for (const b of range(MB_BANDS)) {
   MB_SPECS.push(
     { id: `b${b}Thr`, label: `Bande ${b} · seuil`, min: -60, max: 0, step: 0.1, unit: 'dB', auto: true,
-      hint: `Niveau à partir duquel la bande ${b} est comprimée. Baisse-le jusqu'à voir la réduction voulue sur le mètre de la bande.` },
+      hint: `Niveau de crête (dBFS) à partir duquel la bande ${b} est comprimée : un sinus tenu dont la crête dépasse le seuil de 8 dB à 4:1 est réduit de 6 dB. Baisse-le jusqu'à voir la réduction voulue sur le mètre de la bande.` },
     { id: `b${b}Ratio`, label: `Bande ${b} · taux`, min: 1, max: 20, step: 0.1, unit: ':1', auto: true, log: true,
       hint: `Force de la compression de la bande ${b}. 1:1 = la bande ne compresse pas.` },
     { id: `b${b}Att`, label: `Bande ${b} · attaque`, min: 0.1, max: 200, step: 0.1, unit: 'ms', log: true,
-      hint: `Vitesse à laquelle la bande ${b} réagit. Rapide = attrape les crêtes ; lent = laisse passer l'attaque.` },
+      hint: `Vitesse à laquelle la bande ${b} réagit (constante de temps : 63 % de la montée du niveau détecté). Rapide = attrape les crêtes ; lent = laisse passer l'attaque.` },
     { id: `b${b}Rel`, label: `Bande ${b} · relâchement`, min: 5, max: 2000, step: 1, unit: 'ms', log: true,
-      hint: `Vitesse de retour de la bande ${b} après la compression.` },
+      hint: `Vitesse de retour de la bande ${b} après la compression (constante de temps : 63 % du retour du niveau détecté).` },
     { id: `b${b}Gain`, label: `Bande ${b} · gain`, min: -24, max: 24, step: 0.1, unit: 'dB', auto: true,
       hint: `Volume de la bande ${b} après sa compression (rattrapage ou correction de timbre).` },
     { id: `b${b}Solo`, label: `Bande ${b} · solo`, min: 0, max: 1, step: 1, unit: '', hint: `N'écouter que la bande ${b} (plusieurs bandes peuvent être en solo).` },
@@ -94,13 +94,13 @@ for (const b of range(DYN_BANDS)) {
     { id: `d${b}Freq`, label: `Bande ${b} · fréquence`, min: 20, max: 20000, step: 1, unit: 'Hz', auto: true, log: true,
       hint: `Centre de la cloche de la bande ${b}. Astuce : « Écouter » la bande et balaie la fréquence jusqu'à entendre la résonance.` },
     { id: `d${b}Q`, label: `Bande ${b} · Q`, min: 0.3, max: 12, step: 0.01, unit: '', log: true,
-      hint: `Largeur de la bande ${b} : Q élevé = étroit (une résonance précise), Q bas = large.` },
+      hint: `Largeur de la bande ${b} : Q élevé = étroit (une résonance précise), Q bas = large. C'est le Q de la bande écoutée (−3 dB) ; la cloche se resserre quand elle creuse (à −6 dB, Q × 1,4) et s'élargit quand elle renforce.` },
     { id: `d${b}Thr`, label: `Bande ${b} · seuil`, min: -60, max: 0, step: 0.1, unit: 'dB', auto: true,
-      hint: `Niveau de la bande ${b} au-delà duquel le gain bouge. Sous le seuil, la bande ne change rien.` },
+      hint: `Niveau de crête (dBFS) de la bande ${b} au-delà duquel le gain bouge (1 dB de dépassement = 1 dB de gain, genou de 3 dB). Sous le seuil, la bande ne change rien.` },
     { id: `d${b}Range`, label: `Bande ${b} · plage`, min: -24, max: 24, step: 0.1, unit: 'dB', auto: true,
       hint: `Gain maximal appliqué quand la bande dépasse le seuil : négatif = la résonance est baissée (au plus de cette valeur), positif = renforcée. 0 = la bande ne fait rien.` },
-    { id: `d${b}Att`, label: `Bande ${b} · attaque`, min: 0.1, max: 200, step: 0.1, unit: 'ms', log: true, hint: `Vitesse à laquelle le gain de la bande ${b} réagit.` },
-    { id: `d${b}Rel`, label: `Bande ${b} · relâchement`, min: 5, max: 2000, step: 1, unit: 'ms', log: true, hint: `Vitesse de retour du gain de la bande ${b}.` },
+    { id: `d${b}Att`, label: `Bande ${b} · attaque`, min: 0.1, max: 200, step: 0.1, unit: 'ms', log: true, hint: `Vitesse à laquelle le gain de la bande ${b} réagit (constante de temps : 63 % de la montée du niveau détecté).` },
+    { id: `d${b}Rel`, label: `Bande ${b} · relâchement`, min: 5, max: 2000, step: 1, unit: 'ms', log: true, hint: `Vitesse de retour du gain de la bande ${b} (constante de temps : 63 % du retour du niveau détecté).` },
   );
 }
 
@@ -144,3 +144,43 @@ export const mixFxAutomatable = (kind: MixFxKind) =>
 /** Nom français d'un réglage (automation). */
 export const mixFxParamLabel = (kind: string, key: string): string | null =>
   isMixFxKind(kind) ? MIXFX_SPECS[kind].find(s => s.id === key)?.label ?? null : null;
+
+/**
+ * Coupures RÉELLES du multibande (Hz), telles que le cœur les applique (engine/mixfx/multibandCore.ts) :
+ * bornées à 20 Hz – 20 kHz et à 0,45 × fréquence d'échantillonnage, et écartées d'au moins 1/3
+ * d'octave (×1,26). La fenêtre affiche ces valeurs (avant le 22/10/2026 elle affichait le réglage
+ * brut : « 220 Hz » quand le son coupait à 252 Hz).
+ */
+export function mbEffectiveCrossovers(p: Record<string, any>, sampleRate = 48000): [number, number, number] {
+  const num = (v: any, d: number) => { const x = +v; return Number.isFinite(x) ? x : d; };
+  const cl = (x: number) => Math.max(20, Math.min(20000, x));
+  const xs = [cl(num(p.x1, 200)), cl(num(p.x2, 4000)), cl(num(p.x3, 10000))];
+  if (xs[1] < xs[0] * 1.26) xs[1] = xs[0] * 1.26;
+  if (xs[2] < xs[1] * 1.26) xs[2] = xs[1] * 1.26;
+  return xs.map(f => Math.min(f, sampleRate * 0.45)) as [number, number, number];
+}
+
+/**
+ * Réponse (dB) d'une bande de l'EQ dynamique à la fréquence f : cloche y = x + (g − 1)·passe-bande,
+ * passe-bande de Q donné avec largeur préwarpée — EXACTEMENT le filtre du cœur (engine/mixfx/dynEqCore.ts).
+ */
+export function dynBandDb(f: number, fc: number, q: number, gDb: number, sampleRate = 48000): number {
+  if (!gDb) return 0;
+  const sr = sampleRate;
+  const f0 = Math.max(20, Math.min(fc, sr * 0.45));
+  const w0 = 2 * Math.PI * f0 / sr, sw = Math.sin(w0);
+  const Q = Math.max(0.1, Math.min(40, q));
+  const xq = 1 / (2 * Q), bwOct = 2 / Math.LN2 * Math.log(xq + Math.sqrt(xq * xq + 1));
+  const al = sw * Math.sinh(Math.LN2 / 2 * bwOct * w0 / sw), a0 = 1 + al;
+  const b0 = al / a0, a1 = -2 * Math.cos(w0) / a0, a2 = (1 - al) / a0;
+  const w = 2 * Math.PI * f / sr;
+  const c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
+  // BP = b0 (1 − z⁻²) / (1 + a1 z⁻¹ + a2 z⁻²)
+  const nr = b0 * (1 - c2), ni = b0 * s2;
+  const dr = 1 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
+  const den = dr * dr + di * di;
+  const br = (nr * dr + ni * di) / den, bi = (ni * dr - nr * di) / den;
+  const gm1 = Math.pow(10, gDb / 20) - 1;
+  const hr = 1 + gm1 * br, hi = gm1 * bi;
+  return 10 * Math.log10(hr * hr + hi * hi + 1e-30);
+}

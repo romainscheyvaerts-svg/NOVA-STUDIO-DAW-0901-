@@ -396,7 +396,7 @@ def run():
             pins = E.locator("[data-testid=comment-pin]").count()
             check("G2 l'ingé rouvre sa page : commentaires (réponses, résolus, archivés) et versions identiques, puces revenues",
                   same_e and pins >= 1, {"identique": same_e, "puces_visibles": pins, "commentaires": len(comments(E)), "versions": [v["line"] for v in cm(E, "c.versions()") or []]})
-            E.get_by_test_id("dock-reviews").click()
+            qalib.ouvrir_menu_range(E, "[data-testid=dock-reviews]"); E.get_by_test_id("dock-reviews").click()
             E.wait_for_timeout(500)
             shot(E, "E9_apres_reouverture")
             T.goto(link, wait_until="domcontentloaded", timeout=180000)
