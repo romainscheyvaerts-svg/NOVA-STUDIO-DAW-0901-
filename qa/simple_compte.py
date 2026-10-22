@@ -233,7 +233,7 @@ def run_case(p, case, vp, theme):
 
     def save_zip(name):
         dest = OUT / f"sc_{name}.zip"
-        page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+        page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
         loc = page.get_by_role("button", name=re.compile("cet appareil", re.I)).first
         with page.expect_download(timeout=90000) as dl:
             loc.click()
@@ -441,7 +441,7 @@ def run_case(p, case, vp, theme):
             page.wait_for_timeout(1500); close_welcome(page); wait_text_gone(page, "Chargement", 60); close_welcome(page)
             page.wait_for_function("() => !!window.__novaEdit", timeout=30000)
             page.wait_for_timeout(1000)
-            page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+            page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
             body = page.locator("body").inner_text()
             check("« Sauvegarder » : la séance en ligne Make Music est proposée, plus « Se connecter / Créer un compte »",
                   visible("[data-testid=save-takehome]") and "Se connecter / Créer un compte" not in body)

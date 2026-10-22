@@ -235,7 +235,7 @@ def open_project_file(page, f, res, label):
 
 
 def save_zip(page, dest: Path):
-    page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+    page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
     loc = page.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
     with page.expect_download(timeout=90000) as dl:
         loc.click()

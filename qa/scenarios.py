@@ -111,7 +111,7 @@ def count_clips(page):
 def project_clips(page, res, label):
     """Sauvegarde locale (.zip) puis lecture de project.json : liste réelle des clips par piste."""
     import zipfile
-    page.keyboard.press("Control+s"); page.wait_for_timeout(800)
+    page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(800)
     loc = page.get_by_role("button", name=re.compile("(Export local|cet appareil)", re.I)).first
     with page.expect_download(timeout=30000) as dl:
         loc.click()
@@ -501,7 +501,7 @@ def s_sauvegarde(page, log, res, vp):
         open_studio(page, res, vp=vp)
         do_take(page, res, "prise", first=True)
     with step(res, "Ctrl+S → fenêtre de sauvegarde"):
-        page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+        page.keyboard.press("Control+Shift+s"); page.wait_for_timeout(900)
         shot(page, f"{res['name']}_01_fenetre")
         res["save_txt"] = body(page)[-900:]
     with step(res, "sauver un fichier sur l'appareil (.zip)"):
