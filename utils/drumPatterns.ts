@@ -68,9 +68,10 @@ export function mapPatternRecords(p: DrumPattern, fn: (rec: Record<string, numbe
 
 // ===== R18 · Résolution et longueur par rangée (FL Studio, Bitwig, Live) =====
 
-/** Résolution d'une rangée : 1/16, 1/32, triolets de croches (1/8 T) ou de doubles-croches (1/16 T). */
-export type StepRate = '16' | '32' | '8t' | '16t';
+/** Résolution d'une rangée : 1/8, 1/16, 1/32, triolets de croches (1/8 T) ou de doubles-croches (1/16 T). */
+export type StepRate = '8' | '16' | '32' | '8t' | '16t';
 export const STEP_RATES: { id: StepRate; label: string; perBar: number; hint: string }[] = [
+  { id: '8', label: '1/8', perBar: 8, hint: 'Croches : grille large (kicks, claps, cloches).' },
   { id: '16', label: '1/16', perBar: 16, hint: 'Doubles-croches : la grille classique du beatmaking.' },
   { id: '32', label: '1/32', perBar: 32, hint: 'Triples-croches : hi-hats trap très rapides.' },
   { id: '16t', label: '1/16 T', perBar: 24, hint: 'Triolets de doubles-croches (rolls drill).' },

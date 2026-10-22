@@ -12108,6 +12108,8 @@ function Studio() {
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
         projectKey={typeof state.projectKey === 'number' ? state.projectKey : null}
+        metronomeOn={!!state.metronome?.enabled}
+        onToggleMetronome={() => { void handleToggleMetronome(); }}
         kitsSignal={kitsSignal}
       />
       </MountWhenOpened>

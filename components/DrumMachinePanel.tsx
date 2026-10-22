@@ -1,9 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS, libraryChoices, libSoundLabel, makeDrumMachine } from '../utils/drumKits';
-import { ensurePatterns, GROOVES, whereAt, rowStepAt, rowStepsPerBar, STEPS_PER_BAR, STEP_RATES } from '../utils/drumPatterns';
-import { KitBar, StepGraph, RowTiming, rowCells } from './DrumStepTools';
+import {
+  duplicatePattern, ensurePatterns, GROOVES, whereAt, rowStepAt, rowStepsPerBar, selectPattern, setRowLength, setRowRate, setStepParam, stepParamOf,
+  STEPS_PER_BAR, STEP_RATES, type StepParam, type StepRate,
+} from '../utils/drumPatterns';
+import {
+  clearPattern, clearRow, copyPattern, copyRow, clipboard, fillEvery, paste, recordHit, reverseRow, rotatePattern, rotateRow,
+} from '../utils/drumEdit';
+import { KitBar, StepGraph, rowCells } from './DrumStepTools';
 import { requestSampler } from '../utils/samplerPanelStore';
-import { assignSample, MAX_PADS, userSampleId } from '../utils/drumSamples';
+import { assignSample, MAX_PADS, removePad, userSampleId } from '../utils/drumSamples';
 import { reorderSlices, shuffledOrder } from '../utils/chop';
 import { sampleFromFile } from '../utils/padBuffers';
 import { isTypingTarget, padIndexForCode, padKeyCodes, padKeyLabel } from '../utils/padKeys';
@@ -15,6 +21,10 @@ import { DRUM_SOUNDS, DrumCategory } from '../utils/drumSounds';
 import { audioEngine } from '../engine/AudioEngine';
 import DrumKitBrowser from './DrumKitBrowser';
 import { applyKitDef, isKitRef, KIT_DRAG_TYPE, kitIndexIfLoaded, KitDef, KitIndex, loadKitIndex, setPadKitSound } from '../utils/drumKitLibrary';
+import { DrumMenu, menuAt, menuUnder, type DrumMenuItem, type DrumMenuState } from './DrumMenu';
+import PadSamplerEditor from './PadSamplerEditor';
+import { useSimpleMode } from '../utils/simpleMode';
+import { tempoMapStore, timeToQuarters } from '../utils/tempoMap';
 
 interface DrumMachinePanelProps {
   open: boolean;
@@ -43,6 +53,9 @@ interface DrumMachinePanelProps {
   projectKey?: number | null;
   /** Change de valeur pour ouvrir le navigateur des kits (bouton « Kits » hors du panneau). */
   kitsSignal?: number;
+  /** Métronome du projet (la touche O est prise par les pads quand la batterie est ouverte). */
+  metronomeOn?: boolean;
+  onToggleMetronome?: () => void;
 }
 
 const CAT_OF: Record<string, DrumCategory[]> = {
@@ -50,17 +63,47 @@ const CAT_OF: Record<string, DrumCategory[]> = {
   hatc: ['hat-closed'], hato: ['hat-open', 'cymbal'], perc: ['perc', 'hat-closed', 'snare'], fx: ['snare', 'cymbal', 'perc'],
 };
 
+/** Largeur de l'en-tête d'une rangée (nom + M / S / ⋯) sur ordinateur. */
+const HEAD_W = 196;
+/** Point d'ouverture d'un menu sous un bouton. */
+const atEl = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return { clientX: Math.max(8, r.right - 280), clientY: r.bottom + 4 }; };
+const QUANT_KEY = 'nova_drum_quantize';
+
+/** Raccourcis de la boîte à rythmes (aussi listés dans le menu ⋯ › Raccourcis). */
+export const DRUM_SHORTCUTS: [string, string][] = [
+  ['Clic', 'allumer / éteindre un pas'],
+  ['Glisser', 'peindre plusieurs pas'],
+  ['Maj + clic', 'accent léger ↔ fort'],
+  ['Clic droit / appui long', 'réglages du pas (roll, probabilité, décalage, longueur, hauteur, glisse)'],
+  ['Clic droit sur un pad', 'menu de la rangée (mute, solo, résolution, nombre de pas…)'],
+  ['Double-clic sur un pad', 'éditer le son (sampler)'],
+  ['Rangée du milieu du clavier', 'jouer les pads 1 à 10'],
+  ['Maj + ← / →', 'décaler la rangée choisie'],
+  ['Maj + Alt + ← / →', 'décaler tout le motif'],
+  ['Suppr', 'effacer la rangée choisie (Maj + Suppr : tout le motif)'],
+  ['Ctrl + C / Ctrl + V', 'copier / coller le motif'],
+  ['Ctrl + D', 'dupliquer le motif'],
+  ['[ / ]', 'motif précédent / suivant'],
+  ['Espace', 'lecture / pause'],
+];
+
 /**
- * Boîte à rythmes Make Music : un clic allume un pas, un deuxième l'éteint (comme dans
- * toutes les boîtes à rythmes) ; Maj + clic passe un pas en accent léger (ou le remet
- * fort). Glisser sur les pas les peint (allumés ou éteints, comme le premier touché).
- * Sur les hi-hats, l'appui long (ou clic droit) fait un « roll » ×2 ×3 ×4.
+ * Boîte à rythmes Make Music (séquenceur de pas pro) : un clic allume un pas, un deuxième l'éteint ;
+ * Maj + clic : accent ; glisser : peindre. Clic droit (ou appui long) sur un pas : roll, probabilité,
+ * décalage fin, longueur, hauteur, glisse. Clic droit sur un pad : mute / solo, résolution, nombre de
+ * pas, swing et décalage de la rangée, étouffement… Les commandes rares sont dans les menus ⋯.
  */
 const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
+  const { simple } = useSimpleMode();
   const [playStep, setPlayStep] = useState(-1);
   const [soundMenu, setSoundMenu] = useState<number | null>(null);
+  const [samplerFor, setSamplerFor] = useState<number | null>(null);
+  const [menu, setMenu] = useState<DrumMenuState | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   /** Tour beatmaking (22/10/2026) : coup de pinceau sur les pas (souris), comme dans les step sequencers. */
   const strokeRef = useRef<{ on: boolean; painting: boolean; ri: number; si: number; dm: DrumMachine | null } | null>(null);
   useEffect(() => {
@@ -102,22 +145,25 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     return () => window.removeEventListener('resize', checkScroll);
   }, [p.open, p.dm?.bars, !!p.dm, narrow]);
 
+  /** Carte des tempos : seulement si le projet a des changements (sinon le tempo constant, comme le clip). */
+  const tempoMap = () => { const m = tempoMapStore.get(); return m && m.segments.length > 1 ? m : null; };
+
   // Tête de lecture : pas du motif affiché (s'il joue à cet endroit) et mesure du morceau.
+  // Léger : la boucle d'affichage ne tourne QUE pendant la lecture (rien à l'arrêt).
   const [playBar, setPlayBar] = useState(-1);
   // R18 : position fine (rangées en 1/32, triolets, longueurs propres).
   const [playW, setPlayW] = useState<{ pos16: number; runBars: number } | null>(null);
   useEffect(() => {
-    if (!p.open || !p.dm) return;
+    if (!p.open || !p.dm || !p.isPlaying) { setPlayStep(-1); setPlayBar(-1); setPlayW(null); return; }
     let raf = 0;
     const dmP = ensurePatterns(p.dm);
+    const map = tempoMap();
     const tick = () => {
-      if (p.isPlaying) {
-        const w = whereAt(dmP, p.bpm, audioEngine.getCurrentTime() - p.clipStart);
-        const here = !!w && w.patternId === dmP.activePattern;
-        setPlayStep(here ? w!.step : -1);
-        setPlayW(prev => (here ? (prev && Math.floor(prev.pos16 * 6) === Math.floor(w!.pos16 * 6) ? prev : { pos16: w!.pos16, runBars: w!.runBars }) : null));
-        setPlayBar(w ? w.bar : -1);
-      } else { setPlayStep(-1); setPlayBar(-1); setPlayW(null); }
+      const w = whereAt(dmP, p.bpm, audioEngine.getCurrentTime() - p.clipStart, map);
+      const here = !!w && w.patternId === dmP.activePattern;
+      setPlayStep(here ? w!.step : -1);
+      setPlayW(prev => (here ? (prev && Math.floor(prev.pos16 * 6) === Math.floor(w!.pos16 * 6) ? prev : { pos16: w!.pos16, runBars: w!.runBars }) : null));
+      setPlayBar(w ? w.bar : -1);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -130,6 +176,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [keysOn, setKeysOn] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches);
   const [layout, setLayout] = useState<Map<string, string> | null>(null);
   const [flash, setFlash] = useState(-1);
+  // Enregistrement en direct : les pads frappés pendant la lecture s'écrivent dans le motif affiché.
+  const [rec, setRec] = useState(false);
+  const [quantize, setQuantize] = useState(() => { try { return localStorage.getItem(QUANT_KEY) !== '0'; } catch { return true; } });
+  const setQuant = (q: boolean) => { setQuantize(q); try { localStorage.setItem(QUANT_KEY, q ? '1' : '0'); } catch { /* */ } };
   // R18 · Roulement (FL : Note Repeat, MPC : Note Repeat) : tenir un pad le rejoue en rythme.
   const [repeat, setRepeat] = useState<0 | 4 | 8 | 16 | 32 | 24>(0);
   const repeatTimer = useRef<number | null>(null);
@@ -157,21 +207,41 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   useEffect(() => {
     try { (navigator as any).keyboard?.getLayoutMap?.().then((m: any) => setLayout(new Map(m))).catch(() => {}); } catch { /* navigateur sans l'API */ }
   }, []);
-  const auditionRef = useRef(p.onAudition);
-  auditionRef.current = p.onAudition;
+  // Dernier état connu (plusieurs frappes avant le rendu suivant pendant l'enregistrement).
+  const dmRef = useRef(p.dm);
+  dmRef.current = p.dm;
+  const liveRef = useRef<{ rec: boolean; quantize: boolean; playing: boolean; bpm: number; clipStart: number; sel: number }>({ rec, quantize, playing: p.isPlaying, bpm: p.bpm, clipStart: p.clipStart, sel: selPad });
+  liveRef.current = { rec, quantize, playing: p.isPlaying, bpm: p.bpm, clipStart: p.clipStart, sel: selPad };
+  /** Coup sur un pad : pré-écoute, roulement, éclair ; en enregistrement pendant la lecture, le pas est écrit. */
+  const hitPad = (ri: number) => {
+    p.onAudition(ri);
+    const L = liveRef.current;
+    const d = dmRef.current;
+    if (!L.rec || !L.playing || !d) return;
+    const out = audioEngine.videoSyncInfo?.()?.outputSide || 0;
+    const t = audioEngine.getCurrentTime() - out - L.clipStart;
+    const map = tempoMap();
+    const abs16 = map ? timeToQuarters(map, Math.max(0, t)) * 4 : t / (60 / L.bpm / 4);
+    const next = recordHit(d, ri, abs16, L.quantize);
+    dmRef.current = next;
+    p.onChange(next);
+  };
+  const hitRef = useRef(hitPad);
+  hitRef.current = hitPad;
   const visibleRows = (d: DrumMachine) => d.rows.map((r, ri) => ({ r, ri })).filter(({ r }) => r.id !== '808' || r.steps.some(v => v > 0)).map(x => x.ri);
   useEffect(() => {
     if (!p.open || !keysOn || !p.dm) return;
     const visible = visibleRows(p.dm);
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      if (document.querySelector('[data-testid=drum-menu]')) return;
       const k = padIndexForCode(e.code, visible.length);
       if (k < 0) return;
       // Le pad prend la touche (sinon R = enregistrer, L = boucle…).
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat) return;
       const ri = visible[k];
-      auditionRef.current(ri);
+      hitRef.current(ri);
       repeatStartRef.current(ri);
       setFlash(ri);
       window.setTimeout(() => setFlash(f => (f === ri ? -1 : f)), 140);
@@ -183,6 +253,40 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   }, [p.open, keysOn, p.dm]);
   const repeatStartRef = useRef(startRepeat);
   repeatStartRef.current = startRepeat;
+
+  // Raccourcis d'édition (focus dans la batterie) : décaler, effacer, copier / coller, dupliquer, motif suivant.
+  const changeRef = useRef(p.onChange);
+  changeRef.current = p.onChange;
+  const notifyRef = useRef(p.notify);
+  notifyRef.current = p.notify;
+  useEffect(() => {
+    if (!p.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      const d = dmRef.current;
+      if (!d || isTypingTarget(e.target) || document.querySelector('[data-testid=drum-menu]')) return;
+      if (!rootRef.current?.contains(document.activeElement)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const ri = Math.min(liveRef.current.sel, d.rows.length - 1);
+      const dP = ensurePatterns(d);
+      const pats = dP.patterns!;
+      const ai = pats.findIndex(x => x.id === dP.activePattern);
+      let next: DrumMachine | null = null;
+      let msg = '';
+      if (mod && !e.shiftKey && !e.altKey && e.code === 'KeyC') { copyPattern(d); msg = `Motif ${pats[ai]?.name || ''} copié : Ctrl+V pour le coller dans un autre motif.`; }
+      else if (mod && !e.shiftKey && !e.altKey && e.code === 'KeyV') { next = paste(d, ri); if (!next) msg = 'Rien à coller : copie d\'abord un motif (Ctrl+C) ou une rangée (clic droit sur un pad).'; }
+      else if (mod && !e.shiftKey && !e.altKey && e.code === 'KeyD') next = duplicatePattern(d, dP.activePattern!);
+      else if (!mod && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { const dir = e.key === 'ArrowRight' ? 1 : -1; next = e.altKey ? rotatePattern(d, dir) : rotateRow(d, ri, dir); }
+      else if (!mod && !e.altKey && (e.key === 'Delete' || e.key === 'Backspace')) next = e.shiftKey ? clearPattern(d) : clearRow(d, ri);
+      else if (!mod && !e.altKey && (e.key === '[' || e.key === ']') && pats.length > 1) next = selectPattern(d, pats[(ai + (e.key === ']' ? 1 : -1) + pats.length) % pats.length].id);
+      else if (!mod && e.key === '?') { setHelpOpen(v => !v); }
+      else return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (next) { dmRef.current = next; changeRef.current(next); }
+      if (msg) notifyRef.current?.(msg);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [p.open]);
 
   if (!p.open) return null;
   const dm = p.dm;
@@ -199,12 +303,13 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       for (const [i, f] of (rowIndex !== null ? audio.slice(0, 1) : audio).entries()) {
         const s = await sampleFromFile(audioEngine.ctx, f);
         const r = assignSample(cur, s.id, s.info, { rowIndex: rowIndex !== null && i === 0 ? rowIndex : null });
-        if (!r) { p.notify?.(`${MAX_PADS} pads au plus : pose ton son sur un pad existant (bouton réglages du pad → « Ton son »).`); break; }
+        if (!r) { p.notify?.(`${MAX_PADS} pads au plus : pose ton son sur un pad existant (clic droit sur le pad → « Son et mix »).`); break; }
         cur = r.dm; last = r.rowIndex;
       }
       if (last < 0) return;
       p.onChange(cur);
-      setSelPad(last); setSoundMenu(last);
+      setSelPad(last);
+      if (samplerFor === null) setSoundMenu(last);
       window.setTimeout(() => p.onAudition(last), 200);
       p.notify?.(`🥁 ${audio.length > 1 && rowIndex === null ? `${audio.length} sons ajoutés` : `« ${cur.rows[last].name} » posé`} sur ${rowIndex === null ? 'de nouveaux pads' : 'le pad'} : allume ses pas dans la grille. Annuler (Ctrl+Z) pour revenir.`);
     } catch {
@@ -267,7 +372,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     p.onChange(s.dm);
   };
   const stepDown = (e: React.PointerEvent, ri: number, si: number) => {
-    startPress(ri, si);
+    if (e.button === 2) return;
+    startPress(e, ri, si);
     strokeRef.current = e.pointerType === 'mouse' && e.button === 0 && dm ? { on: !(dm.rows[ri]?.steps[si] > 0), painting: false, ri, si, dm } : null;
   };
   const stepEnter = (e: React.PointerEvent, ri: number, si: number) => {
@@ -281,38 +387,201 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     paintStep(ri, si);
   };
   const stepUp = (e: React.PointerEvent, ri: number, si: number) => {
+    if (e.button === 2) return;
     const s = strokeRef.current;
     strokeRef.current = null;
     if (s?.painting) return;
     endPress(ri, si, e.shiftKey);
   };
-  const cycleRoll = (ri: number, si: number) => editRow(ri, r => {
-    const n = r.ratchet[si] || 1;
-    r.ratchet[si] = n >= 4 ? 1 : n + 1;
-    if (!r.steps[si]) r.steps[si] = 90;
-    return r;
-  });
 
-  const startPress = (ri: number, si: number) => {
+  /** Appui long (doigt) : le menu du pas, comme le clic droit. */
+  const startPress = (e: React.PointerEvent, ri: number, si: number) => {
     longPressed.current = false;
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
-    pressTimer.current = window.setTimeout(() => { longPressed.current = true; cycleRoll(ri, si); }, 450);
+    const at = { clientX: e.clientX, clientY: e.clientY };
+    pressTimer.current = window.setTimeout(() => { longPressed.current = true; strokeRef.current = null; openStepMenu(at, ri, si); }, 450);
   };
   const endPress = (ri: number, si: number, accent = false) => {
     if (pressTimer.current) window.clearTimeout(pressTimer.current);
     if (!longPressed.current) toggleStep(ri, si, accent);
   };
 
+  // ── Menus (clic droit, appui long, ⋯) ──────────────────────────────────────────────
+  const setParam = (ri: number, si: number, param: StepParam, v: number) => {
+    const d = dmRef.current;
+    if (!d) return;
+    let next = d;
+    // Un réglage sur un pas éteint l'allume (comme dans les autres séquenceurs).
+    if (param !== 'vel' && !(next.rows[ri]?.steps[si] > 0)) next = { ...next, rows: next.rows.map((r, i) => (i === ri ? { ...r, steps: r.steps.map((x, k) => (k === si ? 110 : x)) } : r)) };
+    next = setStepParam(next, ri, si, param, v);
+    dmRef.current = next;
+    p.onChange(next);
+  };
+  const stepMenuItems = (ri: number, si: number): DrumMenuItem[] => {
+    const d = dmRef.current;
+    const r = d?.rows[ri];
+    if (!d || !r) return [];
+    const v = r.steps[si] || 0;
+    const roll = r.ratchet[si] || 1;
+    const cellMs = (60 / p.bpm / 4) * (STEPS_PER_BAR / rowStepsPerBar(r)) * 1000;
+    const val = (k: StepParam) => stepParamOf(r, si, k);
+    const refresh = () => setMenu(m => (m ? { ...m, items: stepMenuItems(ri, si) } : m));
+    const pick = (k: StepParam) => (x: string | number) => { setParam(ri, si, k, Number(x)); window.setTimeout(refresh, 0); };
+    return [
+      { kind: 'choices', label: 'Force', value: v >= 100 ? 110 : v > 0 ? 70 : 0, testId: 'step-vel', options: [{ label: 'Éteint', value: 0 }, { label: 'Léger', value: 70 }, { label: 'Fort', value: 110 }, { label: 'Max', value: 127 }],
+        onPick: x => { const n = Number(x); const dd = dmRef.current!; const next = { ...dd, rows: dd.rows.map((row, i) => (i === ri ? { ...row, steps: row.steps.map((s0, k) => (k === si ? n : s0)), ratchet: n ? row.ratchet : row.ratchet.map((q, k) => (k === si ? 1 : q)) } : row)) }; dmRef.current = next; p.onChange(next); window.setTimeout(refresh, 0); } },
+      { kind: 'choices', label: 'Roll (répétitions dans le pas)', value: roll, testId: 'step-roll', options: [1, 2, 3, 4].map(n => ({ label: n === 1 ? 'Non' : `×${n}`, value: n })),
+        onPick: x => { const n = Number(x); const dd = dmRef.current!; const next = { ...dd, rows: dd.rows.map((row, i) => (i === ri ? { ...row, steps: row.steps.map((s0, k) => (k === si && !s0 ? 90 : s0)), ratchet: row.ratchet.map((q, k) => (k === si ? n : q)) } : row)) }; dmRef.current = next; p.onChange(next); window.setTimeout(refresh, 0); } },
+      { kind: 'choices', label: 'Probabilité de jouer', value: val('prob'), testId: 'step-prob', options: [100, 75, 50, 25, 10].map(n => ({ label: `${n} %`, value: n })), onPick: pick('prob') },
+      { kind: 'choices', label: `Décalage fin (1 pas = ${Math.round(cellMs)} ms à ${Math.round(p.bpm)} BPM)`, value: val('nudge'), testId: 'step-nudge',
+        options: [-25, -10, 0, 10, 25].map(n => ({ label: n === 0 ? 'Calé' : `${n > 0 ? '+' : '−'}${Math.round(Math.abs(n) * cellMs / 100)} ms`, value: n, hint: `${n > 0 ? '+' : ''}${n} % d'un pas` })), onPick: pick('nudge') },
+      { kind: 'choices', label: 'Longueur de la note', value: val('gate'), testId: 'step-gate', options: [{ label: 'Son entier', value: 0 }, { label: '½ pas', value: 0.5 }, { label: '1 pas', value: 1 }, { label: '2 pas', value: 2 }, { label: '4 pas', value: 4 }, { label: '8 pas', value: 8 }], onPick: pick('gate') },
+      { kind: 'choices', label: 'Hauteur (demi-tons)', value: val('pitch'), testId: 'step-pitch', options: [-12, -7, -5, -2, 0, 2, 3, 5, 7, 12].map(n => ({ label: n === 0 ? '0' : `${n > 0 ? '+' : '−'}${Math.abs(n)}`, value: n })), onPick: pick('pitch') },
+      { label: 'Glisse depuis le coup précédent', checked: val('glide') > 0, hint: 'La hauteur glisse depuis le coup précédent du pad (808, percus accordées). Temps de glisse : sampler du pad › Hauteur.', testId: 'step-glide',
+        onClick: () => { setParam(ri, si, 'glide', val('glide') > 0 ? 0 : 1); window.setTimeout(refresh, 0); }, keepOpen: true },
+      { kind: 'sep' },
+      { label: 'Éditer le son du pad…', icon: 'fa-wave-square', onClick: () => openSampler(ri) },
+    ];
+  };
+  const openStepMenu = (e: { clientX: number; clientY: number }, ri: number, si: number) => {
+    const r = dmRef.current?.rows[ri];
+    if (!r) return;
+    setSelPad(ri);
+    setMenu(menuAt(e, `${r.name} · pas ${si + 1}`, stepMenuItems(ri, si)));
+  };
+  const openSampler = (ri: number) => { setSoundMenu(null); setSelPad(ri); setSamplerFor(ri); };
+  const rowMenuItems = (ri: number): DrumMenuItem[] => {
+    const d = dmRef.current;
+    const r = d?.rows[ri];
+    if (!d || !r) return [];
+    const spb = rowStepsPerBar(r);
+    const full = spb * (d.bars || 1);
+    const len = r.len && r.len > 0 ? r.len : full;
+    const edit = (patch: Partial<DrumRow>) => { const dd = dmRef.current!; const next = { ...dd, rows: dd.rows.map((x, i) => (i === ri ? { ...x, ...patch } : x)) }; dmRef.current = next; p.onChange(next); };
+    const apply = (next: DrumMachine | null) => { if (!next) return; dmRef.current = next; p.onChange(next); };
+    const refresh = () => window.setTimeout(() => setMenu(m => (m ? { ...m, items: rowMenuItems(ri) } : m)), 0);
+    const counts = [12, 16, 24, 32, 48, 64].filter(n => n <= spb * 8);
+    const stepMs = (60 / p.bpm / 4) * 1000;
+    return [
+      { label: 'Éditer le son (sampler)…', icon: 'fa-wave-square', kbd: 'Double-clic', onClick: () => openSampler(ri), testId: 'row-edit-sound' },
+      { label: 'Son et mix du pad…', icon: 'fa-sliders-h', onClick: () => { setSamplerFor(null); setSoundMenu(ri); setSelPad(ri); } },
+      { kind: 'sep' },
+      { label: 'Muet (mute)', checked: !!r.muted, onClick: () => { edit({ muted: !r.muted }); refresh(); }, keepOpen: true, testId: 'row-mute' },
+      { label: 'Solo', checked: !!r.solo, onClick: () => { edit({ solo: !r.solo }); refresh(); }, keepOpen: true, testId: 'row-solo' },
+      { kind: 'node', node: <QuickMix row={r} onEdit={edit} /> },
+      { kind: 'choices', label: 'Résolution de la rangée', value: r.rate || '16', testId: 'row-rate', options: STEP_RATES.map(x => ({ label: x.label, value: x.id, hint: x.hint })),
+        onPick: x => { apply(setRowRate(dmRef.current!, ri, x as StepRate)); refresh(); } },
+      { kind: 'choices', label: `Nombre de pas (polymétrie) : ${len}`, value: r.len && r.len > 0 ? r.len : 0, testId: 'row-steps',
+        options: [{ label: 'Motif', value: 0, hint: 'La rangée suit la longueur du motif' }, ...counts.map(n => ({ label: String(n), value: n }))],
+        onPick: x => { apply(setRowLength(dmRef.current!, ri, Number(x))); refresh(); } },
+      { kind: 'choices', label: 'Swing de la rangée', value: typeof r.swing === 'number' ? r.swing : -1, testId: 'row-swing',
+        options: [{ label: 'Global', value: -1 }, ...[0, 0.15, 0.3, 0.45, 0.6].map(s => ({ label: `${Math.round(s * 100)} %`, value: s }))],
+        onPick: x => { const v = Number(x); edit({ swing: v < 0 ? undefined : v }); refresh(); } },
+      { kind: 'choices', label: 'Décalage de toute la rangée', value: r.shift || 0, testId: 'row-shift',
+        options: [-20, -10, -5, 0, 5, 10, 20].map(n => ({ label: n === 0 ? 'Calée' : `${n > 0 ? '+' : '−'}${(Math.abs(n) * stepMs / 100).toFixed(1).replace('.', ',')} ms`, value: n, hint: `${n > 0 ? 'En retard' : n < 0 ? 'En avance' : 'Sur la grille'} de ${Math.abs(n)} % d'une double-croche` })),
+        onPick: x => { const v = Number(x); edit({ shift: v || undefined }); refresh(); } },
+      { kind: 'choices', label: 'Groupe d\'étouffement (un pad du groupe coupe les autres)', value: r.choke || 0, testId: 'row-choke',
+        options: [{ label: 'Aucun', value: 0 }, ...[1, 2, 3, 4].map(n => ({ label: String(n), value: n, hint: n === 1 ? 'Groupe des hi-hats' : undefined }))],
+        onPick: x => { edit({ choke: Number(x) || undefined }); refresh(); } },
+      { kind: 'sep' },
+      { label: 'Décaler la rangée vers la gauche', icon: 'fa-arrow-left', kbd: 'Maj+←', onClick: () => apply(rotateRow(dmRef.current!, ri, -1)), keepOpen: true },
+      { label: 'Décaler la rangée vers la droite', icon: 'fa-arrow-right', kbd: 'Maj+→', onClick: () => apply(rotateRow(dmRef.current!, ri, 1)), keepOpen: true },
+      { label: 'Inverser la rangée', icon: 'fa-right-left', onClick: () => apply(reverseRow(dmRef.current!, ri)) },
+      { kind: 'choices', label: 'Remplir : un coup tous les…', value: '', options: [2, 3, 4, 8].map(n => ({ label: `${n} pas`, value: n })), onPick: x => apply(fillEvery(dmRef.current!, ri, Number(x))) },
+      { label: 'Copier la rangée', icon: 'fa-copy', onClick: () => { copyRow(dmRef.current!, ri); p.notify?.(`Rangée « ${r.name} » copiée : clic droit sur un autre pad › Coller.`); } },
+      { label: 'Coller sur cette rangée', icon: 'fa-paste', kbd: 'Ctrl+V', disabled: !clipboard(), onClick: () => apply(paste(dmRef.current!, ri)) },
+      { label: 'Effacer la rangée', icon: 'fa-eraser', kbd: 'Suppr', onClick: () => apply(clearRow(dmRef.current!, ri)) },
+      ...(d.rows.length > 1 ? [{ label: 'Retirer le pad', icon: 'fa-trash', danger: true, onClick: () => { apply(removePad(dmRef.current!, ri)); setSelPad(0); setSamplerFor(null); setSoundMenu(null); } } as DrumMenuItem] : []),
+    ];
+  };
+  const openRowMenu = (e: { clientX: number; clientY: number }, ri: number) => {
+    const r = dmRef.current?.rows[ri];
+    if (!r) return;
+    setSelPad(ri);
+    setMenu(menuAt(e, `Pad « ${r.name} »`, rowMenuItems(ri)));
+  };
+  const panelMenu = (el: HTMLElement) => setMenu(menuUnder(el, 'Batterie', [
+    { label: 'Métronome', checked: !!p.metronomeOn, onClick: () => p.onToggleMetronome?.(), disabled: !p.onToggleMetronome, testId: 'drum-metronome' },
+    { label: 'Enregistrement quantifié (calé sur la grille)', checked: quantize, onClick: () => setQuant(!quantize), testId: 'drum-quantize',
+      hint: 'Coché : chaque coup enregistré tombe sur le pas le plus proche. Décoché : le décalage fin garde ton jeu.' },
+    { kind: 'sep' },
+    { label: 'Découper une boucle sur les pads…', icon: 'fa-cut', onClick: () => setChop('new') },
+    { label: 'Ajouter un pad avec ton son…', icon: 'fa-plus', disabled: !!dm && dm.rows.length >= MAX_PADS, onClick: () => padFileRef.current?.click() },
+    ...(sliceCount > 1 ? [{ label: 'Remixer les tranches', icon: 'fa-dice', onClick: () => dm && p.onChange(reorderSlices(dm, shuffledOrder(sliceCount, Date.now()))) } as DrumMenuItem] : []),
+    ...(!narrow && dm ? [{ label: 'Jouer les pads au clavier', checked: keysOn, onClick: () => setKeysOn(v => !v) } as DrumMenuItem] : []),
+    { label: 'Raccourcis clavier', icon: 'fa-keyboard', kbd: '?', onClick: () => setHelpOpen(true) },
+    { kind: 'sep' },
+    ...(dm ? [{ label: 'Retirer la batterie', icon: 'fa-trash', danger: true, onClick: p.onRemove } as DrumMenuItem] : []),
+  ]));
+
   const len = dm ? 16 * dm.bars : 16;
   // Largeur d'un pas 1/16 sur ordinateur (w-8 + gap-1 ; tablette au doigt : w-9 + gap-1).
   const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
-  const step16Px = coarse ? 40 : 36;
+  const step16Px = coarse ? 44 : 36;
+  // Tablette (au doigt) : en-tête de rangée = nom + ⋯ (mute / solo dans le menu du pad), cibles de 44 px.
+  const headW = coarse ? 156 : HEAD_W;
   const pages = len / 8;
   const curPage = Math.min(page, pages - 1);
   const shownSteps = narrow ? Array.from({ length: 8 }, (_, i) => curPage * 8 + i) : Array.from({ length: len }, (_, i) => i);
   const pad = dm?.rows[Math.min(selPad, (dm?.rows.length || 1) - 1)];
   // Ancienne rangée 808 (projets d'avant la piste 808) : visible tant qu'elle joue.
   const shownRows = dm ? dm.rows.map((r, ri) => ({ r, ri })).filter(({ r }) => r.id !== '808' || r.steps.some(v => v > 0)) : [];
+  const recOn = rec && p.isPlaying;
+
+  /** Repères d'un pas allumé : force (hauteur du remplissage), roll, probabilité, décalage, longueur, hauteur, glisse. */
+  const stepMarks = (r: DrumRow, si: number, v: number, roll: number) => {
+    if (v <= 0) return null;
+    const prob = r.stepProb?.[si] ?? 100;
+    const nudge = r.stepNudge?.[si] || 0;
+    const gate = r.stepGate?.[si] || 0;
+    const pitch = r.stepPitch?.[si] || 0;
+    const glide = (r.stepGlide?.[si] || 0) > 0;
+    return (
+      <>
+        <span className={`absolute inset-x-0 bottom-0 rounded-[3px] pointer-events-none ${v >= 100 ? 'bg-cyan-400' : 'bg-cyan-300/80'}`} style={{ height: `${Math.max(18, (v / 127) * 100)}%`, opacity: prob < 100 ? 0.35 + (prob / 100) * 0.65 : 1 }} />
+        {gate > 0 && <span className="absolute left-0 top-0.5 h-[3px] rounded-full bg-amber-300 pointer-events-none z-[1]" style={{ width: `calc(${gate * 100}% + ${(gate - 1) * 4}px)` }} />}
+        {nudge !== 0 && <span className="absolute bottom-0.5 w-[2px] h-2 bg-black/70 pointer-events-none" style={{ left: `calc(${50 + nudge}% - 1px)` }} />}
+        {prob < 100 && <span className="absolute top-0.5 left-0.5 text-[8px] leading-none font-black text-black pointer-events-none">{prob}</span>}
+        {glide && <span className="absolute top-0 right-0.5 text-[9px] leading-none font-black text-black pointer-events-none">↗</span>}
+        {pitch !== 0 && <span className="absolute bottom-0.5 left-0.5 text-[8px] leading-none font-black text-black pointer-events-none">{pitch > 0 ? '+' : ''}{pitch}</span>}
+        {roll > 1 && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-black pointer-events-none">×{roll}</span>}
+      </>
+    );
+  };
+  const stepLabel = (r: DrumRow, si: number, v: number, roll: number) => {
+    if (!v) return '';
+    const bits = [roll > 1 ? `roll ×${roll}` : 'actif'];
+    if (v < 100) bits.push('léger');
+    const prob = r.stepProb?.[si] ?? 100; if (prob < 100) bits.push(`${prob} %`);
+    const n = r.stepNudge?.[si] || 0; if (n) bits.push(`décalé ${n > 0 ? '+' : ''}${n} %`);
+    const g = r.stepGate?.[si] || 0; if (g) bits.push(`${g} pas`);
+    const h = r.stepPitch?.[si] || 0; if (h) bits.push(`${h > 0 ? '+' : ''}${h} dt`);
+    if ((r.stepGlide?.[si] || 0) > 0) bits.push('glisse');
+    return `, ${bits.join(', ')}`;
+  };
+
+  /**
+   * Case d'un pas. Le bouton est la cible (au téléphone : collées, sans zone morte entre deux pas) ;
+   * la case visible est dedans (écart visuel de 2 px). Tablette : 40 × 44 px ; téléphone : toute la largeur / 8 × 44 px.
+   */
+  const stepCell = (r: DrumRow, ri: number, si: number, playing: boolean, beat: boolean, off: boolean, scaled: boolean) => {
+    const v = r.steps[si] || 0;
+    const roll = r.ratchet[si] || 1;
+    const size = narrow || scaled ? `flex-1 min-w-0 ${narrow ? 'h-11' : coarse ? 'h-11' : 'h-9'}` : coarse ? 'shrink-0 w-10 h-11' : 'shrink-0 w-8 h-9';
+    return (
+      <button key={si} type="button" disabled={off} data-own-longpress=""
+        aria-label={`${r.name}, pas ${si + 1}${off ? ' (hors de la longueur de la rangée)' : stepLabel(r, si, v, roll)}`}
+        onPointerDown={e => stepDown(e, ri, si)} onPointerUp={e => stepUp(e, ri, si)} onPointerEnter={e => stepEnter(e, ri, si)}
+        onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
+        onContextMenu={e => { e.preventDefault(); if (!off) openStepMenu(e, ri, si); }}
+        className={`relative ${size} ${off ? 'opacity-40' : ''}`}>
+        <span className={`absolute ${narrow || scaled ? 'inset-[1px]' : 'inset-0'} rounded-md overflow-visible transition-colors ${playing ? 'ring-2 ring-white/70' : ''} ${
+          off ? 'bg-white/[0.015]' : v > 0 ? (scaled ? 'bg-violet-400/25' : 'bg-cyan-400/25') : beat ? 'bg-white/[0.09]' : 'bg-white/[0.04]'}`}>
+          {!off && stepMarks(r, si, v, roll)}
+        </span>
+      </button>
+    );
+  };
 
   // Ordinateur : panneau en bas, sans fond qui bloque (la barre de transport
   // reste cliquable). Téléphone : feuille plein écran avec fond.
@@ -323,10 +592,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       : 'fixed inset-x-0 bottom-0 z-[560] flex justify-center px-4 pb-3 pointer-events-none'}
       onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title"
       onDragOver={allowDrop} onDrop={e => onDropFiles(e, null)}>
-      <div className={`w-full flex flex-col bg-nv-surface border border-white/[0.06] shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
-        {/* En-tête */}
+      <div ref={rootRef} className={`w-full flex flex-col bg-nv-surface border border-white/[0.06] shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
+        {/* En-tête : seules les commandes de chaque instant ; le reste est dans ⋯ */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
-          <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>
+          <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap min-w-0 truncate">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>
           {/* Ordinateur : bouton dans l'en-tête. Téléphone : grand bouton en haut du panneau (en-tête trop étroit). */}
           {!narrow && (
             <button type="button" onClick={() => setKitsOpen(v => !v)} aria-expanded={kitsOpen} data-testid="open-kits"
@@ -337,31 +606,29 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
           )}
           {p.onOpen808 && (
             <button type="button" onClick={p.onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
-              className="h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black bg-white/[0.06] text-slate-200 hover:bg-white/10">
+              className={`shrink-0 h-10 ${narrow ? 'px-2' : 'px-3'} rounded-xl whitespace-nowrap text-[12px] font-black bg-white/[0.06] text-slate-200 hover:bg-white/10`}>
               <i className="fas fa-wave-square mr-1.5 text-fuchsia-400" aria-hidden />808{p.has808 ? '' : ' +'}
             </button>
           )}
-          <button type="button" onClick={() => setChop(chop ? null : 'new')} aria-expanded={!!chop}
-            title="Découper une boucle en tranches sur des pads"
-            className={`h-10 px-3 rounded-xl text-[12px] font-black ${chop ? 'bg-pink-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
-            <i className={`fas fa-cut ${chop ? '' : 'text-pink-400'}`} aria-hidden /><span className="hidden sm:inline"> Découper</span>
-          </button>
-          {dm && !narrow && (
-            <button type="button" onClick={() => setKeysOn(v => !v)} aria-pressed={keysOn}
-              title={keysOn ? "Clavier de l'ordinateur → pads : activé (rangée du milieu = pads 1 à 10). Clique pour le couper." : "Jouer les pads au clavier de l'ordinateur"}
-              className={`h-10 px-3 rounded-xl text-[12px] font-black ${keysOn ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
-              <i className="fas fa-keyboard" />
+          {dm && !simple && (
+            <button type="button" aria-pressed={rec} data-testid="drum-rec"
+              onClick={() => { const on = !rec; setRec(on); if (on && !p.isPlaying) p.onTogglePlay(); if (on) p.notify?.(`● Enregistrement : frappe les pads (clavier ou clic) pendant la lecture, ils s'écrivent dans le motif affiché${quantize ? ', calés sur la grille' : ', avec ton décalage'}.`); }}
+              title="Enregistrer en direct : les pads frappés pendant la lecture s'écrivent dans le motif affiché (⋯ › Enregistrement quantifié)"
+              className={`shrink-0 h-10 ${narrow ? 'w-10' : 'px-3'} rounded-xl text-[12px] font-black whitespace-nowrap ${recOn ? 'bg-red-500 text-white animate-pulse' : rec ? 'bg-red-500/80 text-white' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
+              <i className={`fas fa-circle ${rec ? '' : 'text-red-400'}`} aria-hidden /><span className="hidden sm:inline ml-1.5">Enr.</span>
             </button>
           )}
           {dm && (
-            <button type="button" onClick={p.onTogglePlay} className={`h-10 px-4 rounded-xl text-[12px] font-black ${p.isPlaying ? 'bg-white text-black' : 'bg-cyan-500 text-black'}`}>
-              <i className={`fas ${p.isPlaying ? 'fa-pause' : 'fa-play'} mr-1.5`} />{p.isPlaying ? 'Pause' : 'Écouter'}
+            <button type="button" onClick={p.onTogglePlay} aria-label={p.isPlaying ? 'Pause' : 'Écouter'} className={`shrink-0 h-10 ${narrow ? 'w-11' : 'px-4'} rounded-xl text-[12px] font-black ${p.isPlaying ? 'bg-white text-black' : 'bg-cyan-500 text-black'}`}>
+              <i className={`fas ${p.isPlaying ? 'fa-pause' : 'fa-play'} ${narrow ? '' : 'mr-1.5'}`} />{narrow ? '' : p.isPlaying ? 'Pause' : 'Écouter'}
             </button>
           )}
-          <button type="button" onClick={p.onClose} aria-label="Fermer la batterie" title="Fermer (Échap)" className="w-10 h-10 rounded-xl bg-white/[0.06] text-slate-300 hover:text-white"><i className="fas fa-times" /></button>
+          <button type="button" onClick={e => panelMenu(e.currentTarget)} aria-label="Plus d'options de la batterie" aria-haspopup="menu" data-testid="drum-more"
+            className="shrink-0 w-10 h-10 rounded-xl bg-white/[0.06] text-slate-200 hover:bg-white/10"><i className="fas fa-ellipsis" aria-hidden /></button>
+          <button type="button" onClick={p.onClose} aria-label="Fermer la batterie" title="Fermer (Échap)" className="shrink-0 w-10 h-10 rounded-xl bg-white/[0.06] text-slate-300 hover:text-white"><i className="fas fa-times" /></button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-3 space-y-3">
+        <div className={`overflow-y-auto ${narrow ? 'px-3' : 'px-4'} py-3 space-y-3`}>
           {/* Kits */}
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Style de batterie">
             {DRUM_KITS.map(k => (
@@ -389,7 +656,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />
           )}
 
-          <KitBar dm={dm} onChange={p.onChange} ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />
+          {!simple && <KitBar dm={dm} onChange={p.onChange} ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />}
 
           <input ref={padFileRef} type="file" multiple accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
             onChange={e => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length) void importFiles(fs, null); }} />
@@ -408,7 +675,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
             </div>
           ) : (
             <>
-              <DrumPatternBar dm={dm} onChange={p.onChange} bpm={p.bpm} loopEnd={p.loopEnd || 0} markers={p.markers} playBar={playBar} />
+              <DrumPatternBar dm={dm} onChange={p.onChange} bpm={p.bpm} loopEnd={p.loopEnd || 0} markers={p.markers} playBar={playBar}
+                simple={simple} narrow={narrow} notify={p.notify} />
 
               {/* Téléphone : choix de la moitié de mesure + réglages du pad choisi */}
               {narrow && (
@@ -417,7 +685,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     {Array.from({ length: pages }, (_, pi) => (
                       <button key={pi} type="button" onClick={() => setPage(pi)} aria-pressed={curPage === pi}
                         aria-label={`Pas ${pi * 8 + 1} à ${pi * 8 + 8}`}
-                        className={`relative h-10 min-w-[48px] px-2 text-[12px] font-black tabular-nums ${curPage === pi ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>
+                        className={`relative h-11 min-w-[48px] px-2 text-[12px] font-black tabular-nums ${curPage === pi ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>
                         {pi * 8 + 1}–{pi * 8 + 8}
                         {/* Point = la lecture joue dans cette page */}
                         {playStep >= pi * 8 && playStep < pi * 8 + 8 && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-cyan-400" />}
@@ -425,9 +693,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     ))}
                   </div>
                   {pad && (
-                    <button type="button" onClick={() => setSoundMenu(soundMenu === null ? Math.min(selPad, dm.rows.length - 1) : null)}
-                      aria-expanded={soundMenu !== null} title="Son et mix du pad choisi"
-                      className={`ml-auto min-w-0 h-10 px-3 rounded-xl text-[12px] font-bold truncate ${soundMenu !== null ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-200'}`}>
+                    <button type="button" onClick={e => openRowMenu(atEl(e.currentTarget), Math.min(selPad, dm.rows.length - 1))}
+                      aria-haspopup="menu" title="Réglages du pad choisi (mute, solo, son, sampler…)"
+                      className="ml-auto min-w-0 h-11 px-3 rounded-xl text-[12px] font-bold truncate bg-white/5 text-slate-200">
                       <i className="fas fa-sliders-h mr-1.5" />{pad.name}
                     </button>
                   )}
@@ -436,86 +704,67 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
               {/* Grille. Bureau : la flèche « pas suivants » a sa propre colonne à droite (elle recouvrait
                   les dernières cases visibles quand elle était posée par-dessus la grille). */}
-              <div className={narrow ? 'relative' : 'flex items-stretch gap-1'}>
+              <div className={narrow ? 'relative' : 'flex items-stretch gap-1'} data-testid="drum-grid">
               <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'min-w-0 flex-1 overflow-x-auto no-scrollbar'}>
                 <div className={narrow ? '' : 'inline-block min-w-full'}>
                   {shownRows.map(({ r, ri }) => (
-                    <div key={r.id} className="flex items-center gap-1 mb-1">
+                    <div key={r.id} className="flex items-center gap-1 mb-1" data-row={r.id}>
                       {narrow ? (
-                        <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
+                        <button type="button" onClick={() => { hitPad(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
                           onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat} data-own-longpress=""
-                          aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad"
-                          className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
+                          onContextMenu={e => { e.preventDefault(); stopRepeat(); openRowMenu(e, ri); }}
+                          aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad (appui long : réglages du pad)"
+                          className={`shrink-0 w-11 h-11 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
                           {r.solo && <span className="text-amber-300"> S</span>}
                         </button>
                       ) : (
-                      <div className="sticky left-0 z-10 bg-nv-surface pr-1 flex items-center gap-1 w-[150px] shrink-0">
-                        <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); }}
+                      <div className="sticky left-0 z-10 bg-nv-surface pr-1 flex items-center gap-0.5 shrink-0" style={{ width: headW - 4 }}>
+                        <button type="button" onClick={() => { hitPad(ri); setSelPad(ri); }}
+                          onDoubleClick={() => openSampler(ri)}
+                          onContextMenu={e => { e.preventDefault(); stopRepeat(); openRowMenu(e, ri); }}
                           onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat} data-own-longpress=""
                           aria-pressed={selPad === ri}
-                          title={`${r.name} : écouter le son et le choisir pour le graphe${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
+                          title={`${r.name} : écouter le son et le choisir pour le graphe${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Double-clic : éditer le son. Clic droit : réglages de la rangée. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
                           onDragOver={allowDrop} onDrop={e => onDropFiles(e, ri)}
-                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/50' : 'bg-white/[0.04] text-white hover:bg-white/[0.08]'}`}>
+                          className={`flex-1 min-w-0 ${coarse ? 'h-11' : 'h-9'} rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/50' : 'bg-white/[0.04] text-white hover:bg-white/[0.08]'}`}>
                           {r.rate && r.rate !== '16' && <span className="mr-1 text-[9px] text-violet-300">{STEP_RATES.find(x => x.id === r.rate)?.label}</span>}
+                          {r.len ? <span className="mr-1 text-[9px] text-violet-300">{r.len}</span> : null}
                           {keyOf(ri) && <span className="mr-1 inline-block min-w-[14px] px-0.5 rounded bg-white/10 text-[9px] text-center text-slate-300">{keyOf(ri)}</span>}
                           {userSampleId(r.sound) && <i className={`fas ${r.slice ? 'fa-cut text-pink-300' : 'fa-user text-amber-300'} mr-1 text-[9px]`} />}
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
-                          {r.solo && <span className="ml-1 text-amber-300">S</span>}
-                          {r.mix && Object.values(r.mix).some(v => v) && <span className="ml-1 text-violet-300" title="Effets sur ce pad">✦</span>}
+                          {(r.mix && Object.values(r.mix).some(v => v)) || r.smp ? <span className="ml-1 text-violet-300" title="Son réglé (mix ou sampler)">✦</span> : null}
                         </button>
-                        <button type="button" onClick={() => setSoundMenu(soundMenu === ri ? null : ri)} aria-label={`Son et mix du pad ${r.name}`} title="Son et mix du pad"
-                          className={`nova-hit-tactile w-7 h-9 rounded-lg text-[11px] ${soundMenu === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-sliders-h" /></button>
+                        {!simple && !coarse && (
+                          <>
+                            <button type="button" onClick={() => editRow(ri, x => ({ ...x, muted: !x.muted }))} aria-pressed={!!r.muted} aria-label={`Muet : ${r.name}`} title="Muet (mute)"
+                              className={`nova-hit-tactile w-7 h-9 [@media(pointer:coarse)]:h-10 rounded-md text-[10px] font-black ${r.muted ? 'bg-red-500 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}>M</button>
+                            <button type="button" onClick={() => editRow(ri, x => ({ ...x, solo: !x.solo }))} aria-pressed={!!r.solo} aria-label={`Solo : ${r.name}`} title="Solo"
+                              className={`nova-hit-tactile w-7 h-9 [@media(pointer:coarse)]:h-10 rounded-md text-[10px] font-black ${r.solo ? 'bg-amber-400 text-black' : 'bg-white/5 text-slate-400 hover:text-white'}`}>S</button>
+                          </>
+                        )}
+                        <button type="button" onClick={e => openRowMenu(atEl(e.currentTarget), ri)} aria-haspopup="menu"
+                          aria-label={`Réglages du pad ${r.name}`} title="Réglages du pad : son, sampler, résolution, nombre de pas, swing, étouffement…"
+                          className={`${coarse ? 'w-11 h-11' : 'w-7 h-9'} rounded-md text-[11px] ${soundMenu === ri || samplerFor === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-ellipsis-vertical" aria-hidden /></button>
                       </div>
                       )}
                       {(rowStepsPerBar(r) !== STEPS_PER_BAR || (r.len || 0) > 0) ? (() => {
-                        // R18 : rangée en 1/32 / triolets / longueur propre : cases à l'échelle du temps.
+                        // R18 : rangée en 1/8, 1/32 / triolets / longueur propre : cases à l'échelle du temps.
                         const { cells, usable } = rowCells(r, dm.bars, narrow ? curPage : null);
                         const ps = playW ? rowStepAt(r, playW, dm.bars) : -1;
                         return (
-                          <div className={`flex gap-0.5 ${narrow ? 'flex-1 min-w-0' : 'shrink-0'}`} style={narrow ? undefined : { width: `${len * step16Px - 4}px` }}>
+                          <div className={`flex ${narrow ? 'flex-1 min-w-0' : 'shrink-0'}`} style={narrow ? undefined : { width: `${Math.max(len, (cells.length * STEPS_PER_BAR) / rowStepsPerBar(r)) * step16Px - 4}px` }}>
                             {cells.map(si => {
-                              const v = r.steps[si] || 0;
-                              const roll = r.ratchet[si] || 1;
                               const off = si >= usable;
-                              return (
-                                <button key={si} type="button" disabled={off} data-own-longpress=""
-                                  aria-label={`${r.name}, pas ${si + 1}${off ? ' (hors de la longueur de la rangée)' : v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                                  onPointerDown={e => stepDown(e, ri, si)} onPointerUp={e => stepUp(e, ri, si)} onPointerEnter={e => stepEnter(e, ri, si)}
-                                  onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
-                                  onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
-                                  className={`relative flex-1 min-w-0 rounded-[4px] ${narrow ? 'h-10' : 'h-9 [@media(pointer:coarse)]:h-10'} ${ps === si ? 'ring-2 ring-white/70' : ''} ${
-                                    off ? 'bg-white/[0.015] opacity-40' : v >= 100 ? 'bg-violet-400' : v > 0 ? 'bg-violet-400/45' : (si * STEPS_PER_BAR / rowStepsPerBar(r)) % 4 === 0 ? 'bg-white/[0.09]' : 'bg-white/[0.04]'}`}>
-                                  {roll > 1 && v > 0 && <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-black">×{roll}</span>}
-                                </button>
-                              );
+                              return stepCell(r, ri, si, ps === si, (si * STEPS_PER_BAR / rowStepsPerBar(r)) % 4 === 0, off, true);
                             })}
                           </div>
                         );
-                      })() : shownSteps.map(si => {
-                        const v = r.steps[si] || 0;
-                        const roll = r.ratchet[si] || 1;
-                        const beatStart = si % 4 === 0;
-                        return (
-                          <button
-                            key={si}
-                            type="button"
-                            data-own-longpress=""
-                            aria-label={`${r.name}, pas ${si + 1}${v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
-                            onPointerDown={e => stepDown(e, ri, si)}
-                            onPointerUp={e => stepUp(e, ri, si)}
-                            onPointerEnter={e => stepEnter(e, ri, si)}
-                            onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
-                            onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
-                            className={`relative rounded-md border transition-colors ${narrow ? 'nova-hit flex-1 min-w-0 h-10' : 'nova-hit-tactile shrink-0 w-8 h-9 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-10'} ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
-                              v >= 100 ? 'bg-cyan-400 border-transparent'
-                              : v > 0 ? 'bg-cyan-400/40 border-transparent'
-                              : beatStart ? 'bg-white/[0.09] border-transparent' : 'bg-white/[0.04] border-transparent'}`}
-                          >
-                            {roll > 1 && v > 0 && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-black">×{roll}</span>}
-                          </button>
-                        );
-                      })}
+                      })() : (
+                        <div className={`flex ${narrow ? 'flex-1 min-w-0' : 'shrink-0 gap-1'}`}>
+                          {shownSteps.map(si => stepCell(r, ri, si, playStep === si, si % 4 === 0, false, false))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -529,21 +778,27 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               )}
               </div>
 
-              {/* R18 · Éditeur de graphe du pad choisi (vélocité, pan, hauteur par pas). */}
-              {dm.rows[Math.min(selPad, dm.rows.length - 1)] && (() => {
+              {/* R18 · Éditeur de graphe du pad choisi (vélocité, probabilité, décalage, longueur, hauteur, pan par pas). */}
+              {!simple && dm.rows[Math.min(selPad, dm.rows.length - 1)] && (() => {
                 const gi = Math.min(selPad, dm.rows.length - 1);
                 const gr = dm.rows[gi];
                 const plain = rowStepsPerBar(gr) === STEPS_PER_BAR && !((gr.len || 0) > 0);
                 const cells = plain ? shownSteps : rowCells(gr, dm.bars, narrow ? curPage : null).cells.filter(i => i < gr.steps.length);
                 return (
                   <div className={narrow ? '' : 'overflow-x-auto no-scrollbar'}>
-                    <div style={narrow ? undefined : { width: `${154 + len * step16Px}px`, paddingLeft: '154px' }}>
-                      <StepGraph dm={dm} rowIndex={gi} cells={cells} onChange={p.onChange}
+                    <div style={narrow ? undefined : { width: `${headW + len * step16Px}px`, paddingLeft: `${headW}px` }}>
+                      <StepGraph dm={dm} rowIndex={gi} cells={cells} onChange={p.onChange} bpm={p.bpm}
                         playStep={playW ? rowStepAt(gr, playW, dm.bars) : -1} />
                     </div>
                   </div>
                 );
               })()}
+
+              {samplerFor !== null && dm.rows[samplerFor] && (
+                <PadSamplerEditor dm={dm} rowIndex={samplerFor} onChange={p.onChange} onAudition={() => p.onAudition(samplerFor)}
+                  onClose={() => setSamplerFor(null)} ensureEngine={p.ensureEngine || (async () => {})} notify={p.notify} narrow={narrow}
+                  projectKey={p.projectKey ?? null} onDropFiles={e => onDropFiles(e, samplerFor)} allowDrop={allowDrop} />
+              )}
 
               {soundMenu !== null && dm.rows[soundMenu] && (
                 <PadEditor
@@ -554,69 +809,109 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   onClose={() => setSoundMenu(null)}
                   extra={
                     <>
-                    <RowTiming dm={dm} rowIndex={soundMenu} onChange={p.onChange} />
                     <PadSampleTools dm={dm} rowIndex={soundMenu} onChange={d => { p.onChange(d); if (!d.rows[soundMenu]) setSoundMenu(null); }}
                       onAudition={() => p.onAudition(soundMenu)} sessionClips={p.sessionClips || []}
                       ensureEngine={p.ensureEngine || (async () => {})} onChop={src => setChop(src)} notify={p.notify} />
-                    <button type="button" onClick={() => { requestSampler({ kind: 'from-pad', rowIndex: soundMenu }); p.onClose(); }} data-testid="pad-to-sampler"
-                      title="Met le son de ce pad dans un sampler sur une nouvelle piste : il se joue sur tout le clavier (808 mélodique, perc accordée)"
-                      className="nova-hit h-10 px-3 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[12px] font-bold hover:bg-amber-500/25">
-                      <i className="fas fa-wave-square mr-1.5" />Convertir en sampler
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => openSampler(soundMenu)} data-testid="pad-open-sampler"
+                        className="nova-hit h-10 px-3 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 text-[12px] font-bold hover:bg-cyan-500/25">
+                        <i className="fas fa-wave-square mr-1.5" />Éditer le son (enveloppes, filtre, hauteur…)
+                      </button>
+                      <button type="button" onClick={() => { requestSampler({ kind: 'from-pad', rowIndex: soundMenu }); p.onClose(); }} data-testid="pad-to-sampler"
+                        title="Met le son de ce pad dans un sampler sur une nouvelle piste : il se joue sur tout le clavier (808 mélodique, perc accordée)"
+                        className="nova-hit h-10 px-3 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[12px] font-bold hover:bg-amber-500/25">
+                        <i className="fas fa-keyboard mr-1.5" />Convertir en sampler (piste)
+                      </button>
+                    </div>
                     </>
                   }
                 />
               )}
 
-              {/* Réglages */}
+              {/* Réglages de chaque instant : longueur, swing, groove, roulement */}
               <div className="flex flex-wrap items-center gap-3 text-[12px] text-slate-300">
-                <div className="flex rounded-xl overflow-hidden border border-white/10">
-                  {[1, 2, 4].map(b => (
-                    <button key={b} type="button" onClick={() => p.onChange(setBars(dm, b as 1 | 2 | 4))} title={`Motif de ${b} mesure${b > 1 ? 's' : ''}`}
-                      className={`h-10 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b} mesure{b > 1 ? 's' : ''}</button>
+                <div className="flex rounded-xl overflow-hidden border border-white/10" role="group" aria-label="Longueur du motif">
+                  {[1, 2, 4, 8].map(b => (
+                    <button key={b} type="button" onClick={() => p.onChange(setBars(dm, b as 1 | 2 | 4 | 8))} title={`Motif de ${b} mesure${b > 1 ? 's' : ''} (${b * 16} pas)`} aria-pressed={dm.bars === b}
+                      className={`h-10 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b}<span className="hidden sm:inline"> mes.</span></button>
                   ))}
                 </div>
-                <label className="flex items-center gap-2" title="Swing : décale les doubles-croches paires">
+                <label className="flex items-center gap-2" title="Swing : retarde les doubles-croches paires (50 % = droit, comme sur les boîtes à rythmes : 66 % = triolet)">
                   Swing
-                  <input type="range" min={0} max={0.6} step={0.05} value={dm.swing} onChange={e => p.onChange({ ...dm, swing: parseFloat(e.target.value) })} />
-                  <span className="tabular-nums w-8">{Math.round(dm.swing * 100)}%</span>
+                  <input type="range" min={0} max={0.6} step={0.01} value={dm.swing} onChange={e => p.onChange({ ...dm, swing: parseFloat(e.target.value) })} className="w-24 accent-cyan-400" aria-label="Swing" />
+                  <span className="tabular-nums w-10">{Math.round(dm.swing * 100)} %</span>
                 </label>
-                <label className="flex items-center gap-1.5" title={`Groove : ${GROOVES.find(g => g.id === (dm.groove || 'none'))?.hint}`}>
-                  Groove
-                  <select value={dm.groove || 'none'} onChange={e => p.onChange({ ...dm, groove: e.target.value === 'none' ? undefined : e.target.value })}
-                    className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
-                    {GROOVES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                  {dm.groove && dm.groove !== 'none' && (
-                    <input type="range" min={0} max={1} step={0.05} value={dm.grooveAmount ?? 1} aria-label="Dosage du groove"
-                      onChange={e => p.onChange({ ...dm, grooveAmount: parseFloat(e.target.value) })} className="w-20" />
-                  )}
-                </label>
-                <label className="flex items-center gap-1.5" title="Roulement : tiens un pad (ou sa touche) et il se rejoue en rythme, calé sur le tempo.">
-                  <i className="fas fa-repeat text-violet-300" aria-hidden />Roulement
-                  <select value={repeat} onChange={e => setRepeat(parseInt(e.target.value, 10) as 0 | 4 | 8 | 16 | 32 | 24)} data-testid="note-repeat"
-                    className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
-                    <option value={0}>Non</option><option value={4}>1/4</option><option value={8}>1/8</option><option value={16}>1/16</option><option value={24}>1/16 T</option><option value={32}>1/32</option>
-                  </select>
-                </label>
-                <button type="button" onClick={() => padFileRef.current?.click()} disabled={dm.rows.length >= MAX_PADS}
-                  title="Ajouter un pad avec TON son (fichier audio). Tu peux aussi glisser des fichiers sur la batterie."
-                  className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:text-white disabled:opacity-40"><i className="fas fa-plus mr-1" />Pad</button>
-                {sliceCount > 1 && (
-                  <button type="button" onClick={() => p.onChange(reorderSlices(dm, shuffledOrder(sliceCount, Date.now())))}
-                    title="Rejoue les tranches dans un autre ordre. Annuler pour revenir."
-                    className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:bg-white/10">🎲 Remixer</button>
+                {!simple && (
+                  <label className="flex items-center gap-1.5" title={`Groove : ${GROOVES.find(g => g.id === (dm.groove || 'none'))?.hint}`}>
+                    Groove
+                    <select value={dm.groove || 'none'} onChange={e => p.onChange({ ...dm, groove: e.target.value === 'none' ? undefined : e.target.value })}
+                      className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
+                      {GROOVES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                    {dm.groove && dm.groove !== 'none' && (
+                      <input type="range" min={0} max={1} step={0.05} value={dm.grooveAmount ?? 1} aria-label="Dosage du groove"
+                        onChange={e => p.onChange({ ...dm, grooveAmount: parseFloat(e.target.value) })} className="w-20" />
+                    )}
+                  </label>
                 )}
-                <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/[0.06] text-slate-300 hover:text-red-300">Retirer la batterie</button>
+                {!simple && (
+                  <label className="flex items-center gap-1.5" title="Roulement : tiens un pad (ou sa touche) et il se rejoue en rythme, calé sur le tempo.">
+                    <i className="fas fa-repeat text-violet-300" aria-hidden />Roulement
+                    <select value={repeat} onChange={e => setRepeat(parseInt(e.target.value, 10) as 0 | 4 | 8 | 16 | 32 | 24)} data-testid="note-repeat"
+                      className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
+                      <option value={0}>Non</option><option value={4}>1/4</option><option value={8}>1/8</option><option value={16}>1/16</option><option value={24}>1/16 T</option><option value={32}>1/32</option>
+                    </select>
+                  </label>
+                )}
               </div>
               <p className="text-[11px] text-slate-500">
-                {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
-                Motifs : crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Clic : allumer / éteindre ; glisse sur les pas pour en peindre plusieurs ; Maj + clic : accent léger. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
+                {narrow
+                  ? "Touche un pas pour l'allumer, appui long pour ses réglages ; touche le nom d'un pad pour l'écouter (appui long : réglages du pad). 1–8 / 9–16 change de moitié de mesure."
+                  : <>Clic : allumer / éteindre · glisser : peindre · Maj + clic : accent · clic droit sur un pas : roll, probabilité, décalage, longueur, hauteur, glisse · double-clic sur un pad : éditer le son. <button type="button" className="underline text-slate-400 hover:text-white" onClick={() => setHelpOpen(true)}>Tous les raccourcis (?)</button></>}
               </p>
             </>
           )}
         </div>
       </div>
+      <DrumMenu menu={menu} onClose={closeMenu} narrow={narrow} />
+      {helpOpen && (
+        <div className="fixed inset-0 z-[650] flex items-center justify-center bg-black/50 p-4 pointer-events-auto" onClick={e => { e.stopPropagation(); setHelpOpen(false); }} role="dialog" aria-modal="true" aria-label="Raccourcis de la batterie">
+          <div className="w-full max-w-md max-h-[80vh] overflow-y-auto rounded-2xl border border-white/10 bg-nv-raised p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center mb-2">
+              <p className="text-[14px] font-black text-white mr-auto">Raccourcis de la batterie</p>
+              <button type="button" onClick={() => setHelpOpen(false)} aria-label="Fermer les raccourcis" className="w-11 h-11 rounded-xl bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
+            </div>
+            <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[12px]">
+              {DRUM_SHORTCUTS.map(([k, v]) => <React.Fragment key={k}><dt className="font-bold text-cyan-300 whitespace-nowrap">{k}</dt><dd className="text-slate-300">{v}</dd></React.Fragment>)}
+            </dl>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Volume, pan et envoi réverb du pad, dans son menu (réglage rapide sans ouvrir le mix). */
+const QuickMix: React.FC<{ row: DrumRow; onEdit: (patch: Partial<DrumRow>) => void }> = ({ row, onEdit }) => {
+  const [v, setV] = useState({ volume: row.volume, pan: row.pan, verb: row.mix?.verb || 0 });
+  const db = v.volume > 0 ? 20 * Math.log10(v.volume) : -Infinity;
+  return (
+    <div className="grid grid-cols-3 gap-2" data-testid="row-quick-mix">
+      <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+        <span className="flex justify-between"><span>Volume</span><span className="tabular-nums text-slate-200">{Number.isFinite(db) ? `${db > 0 ? '+' : ''}${db.toFixed(1)} dB` : '−∞'}</span></span>
+        <input type="range" min={0} max={1.2} step={0.01} value={v.volume} aria-label="Volume du pad" className="w-full h-8 accent-cyan-400"
+          onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, volume: x })); onEdit({ volume: x }); }} />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+        <span className="flex justify-between"><span>Pan</span><span className="tabular-nums text-slate-200">{Math.abs(v.pan) < 0.025 ? 'C' : `${v.pan < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v.pan) * 100)}`}</span></span>
+        <input type="range" min={-1} max={1} step={0.05} value={v.pan} aria-label="Panoramique du pad" className="w-full h-8 accent-cyan-400"
+          onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, pan: x })); onEdit({ pan: x }); }} />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+        <span className="flex justify-between"><span>Réverb</span><span className="tabular-nums text-slate-200">{Math.round(v.verb * 100)} %</span></span>
+        <input type="range" min={0} max={1} step={0.01} value={v.verb} aria-label="Envoi réverb du pad" className="w-full h-8 accent-cyan-400"
+          onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, verb: x })); onEdit({ mix: { ...(row.mix || {}), verb: x } }); }} />
+      </label>
     </div>
   );
 };
