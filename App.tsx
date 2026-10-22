@@ -342,7 +342,7 @@ import { signUpMakeMusic } from './services/makeMusicSignup';
 import { cloudRoute, MM_CLOUD_NOTICE, LOGIN_CLOUD_NOTICE } from './utils/cloudAccount';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
-import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
+import { planRecording, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds, recordReturnPoint } from './utils/punch';
 import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/trackPlaylists';
 import { useProToolsEcarts } from './hooks/useProToolsEcarts';
 import { useProToolsEcarts2 } from './hooks/useProToolsEcarts2';
@@ -3032,7 +3032,9 @@ function Studio() {
       playAt = ci.endsAt ?? undefined;
     }
     if (success) {
-      recStartRef.current = startAt;
+      // Retour après la prise : le point d'enregistrement, pas le début du pré-roll (sinon chaque
+      // reprise reculait du pré-roll : 10 s → 8 s → 6 s avec 2 s de pré-roll).
+      recStartRef.current = recordReturnPoint(plan);
       track('rec_started', { role: getVocalRole(armedTrack), punch: !!punchRecRef.current });
       audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
       if (stateRef.current.metronome.enabled) metronomeService.start(startAt);
@@ -3129,7 +3131,7 @@ function Studio() {
     midiRecMetaRef.current = { trackId, loop, isPunch: plan.isPunch, startAt };
     // La prise écoute dès maintenant (une note jouée un poil avant le 1er temps est gardée).
     midiInput.startRecording({ trackId, anchor: (playAt ?? ((audioEngine.ctx?.currentTime ?? 0) + 0.01)) - startAt, recStart: startAt, loop, keepFrom, keepTo: loop ? null : plan.keepTo });
-    recStartRef.current = startAt;
+    recStartRef.current = recordReturnPoint(plan);
     punchRecRef.current = plan.isPunch ? { in: plan.keepFrom, out: plan.keepTo, isPunch: true, autoStopAt: plan.autoStopAt } : null;
     audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
     midiInput.setAnchor(audioEngine.getPlaybackOrigin());

@@ -130,6 +130,15 @@ export function planRecording(opts: { playhead: number; punch?: PunchSettings | 
   };
 }
 
+/**
+ * Position où revient la tête de lecture après la prise (STOP ou REC) : le point
+ * d'enregistrement, comme dans un DAW. Le début du pré-roll ne sert qu'au départ :
+ * y revenir faisait reculer chaque reprise du pré-roll (10 s → 8 s → 6 s). En punch,
+ * le début du pré-roll (la zone décide de toute façon de ce qui est gardé).
+ */
+export const recordReturnPoint = (plan: Pick<RecordPlan, 'startAt' | 'keepFrom' | 'isPunch'>): number =>
+  plan.isPunch ? plan.startAt : (plan.keepFrom ?? plan.startAt);
+
 type TakeLike = Pick<Clip, 'start' | 'duration' | 'offset' | 'fadeIn' | 'fadeOut'>;
 
 /**
