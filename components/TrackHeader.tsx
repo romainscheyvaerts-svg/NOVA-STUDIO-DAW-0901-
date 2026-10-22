@@ -13,7 +13,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * Glissière horizontale « position absolue » (clic = la valeur sous le pointeur),
- * avec Maj enfoncée = réglage fin relatif, double-clic = valeur par défaut.
+ * avec Maj ou Ctrl enfoncée = réglage fin relatif, double-clic = valeur par défaut.
  * pos : 0…1 sur la largeur de l'élément.
  */
 const dragHorizontal = (e: React.MouseEvent, startPos: number, apply: (pos: number) => void, onEnd?: () => void) => {
@@ -21,9 +21,10 @@ const dragHorizontal = (e: React.MouseEvent, startPos: number, apply: (pos: numb
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   let pos = startPos;
   let lastX = e.clientX;
-  if (!e.shiftKey) { pos = clamp((e.clientX - rect.left) / rect.width); apply(pos); }
+  const fine = (k: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => k.shiftKey || k.ctrlKey || k.metaKey;
+  if (!fine(e)) { pos = clamp((e.clientX - rect.left) / rect.width); apply(pos); }
   const onMouseMove = (m: MouseEvent) => {
-    pos = m.shiftKey ? clamp(pos + ((m.clientX - lastX) / rect.width) * 0.1) : clamp((m.clientX - rect.left) / rect.width);
+    pos = fine(m) ? clamp(pos + ((m.clientX - lastX) / rect.width) * 0.1) : clamp((m.clientX - rect.left) / rect.width);
     lastX = m.clientX;
     apply(pos);
   };
@@ -123,7 +124,7 @@ const HorizontalSendFader: React.FC<{
       role="slider"
       aria-label={`Envoi ${label}`}
       aria-valuetext={gainToDbText(shown)}
-      title={`Envoi ${label} : glisser (Maj = fin), molette, double-clic = 0 dB`}
+      title={`Envoi ${label} : glisser (Ctrl ou Maj = fin), molette, double-clic = 0 dB`}
       className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader transition-all hover:border-white/20 touch-none"
     >
       <div 
@@ -793,7 +794,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         <div
           {...panKnob.bind}
           ref={(el) => { panHostRef.current = el; panKnob.bind.ref(el); }}
-          title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
+          title={`Panoramique ${panToText(track.pan)} : glisser (Ctrl ou Maj = fin), molette, double-clic = centre`}
           role="slider"
           aria-label={`Panoramique ${track.name}`}
           aria-valuetext={panToText(track.pan)}
@@ -826,7 +827,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onTouchMove={handleVolumeTouchMove}
             onTouchEnd={handleVolumeTouchEnd}
             data-nova-target={`vol-${track.id}`}
-            title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+            title="Volume : glisser (Ctrl ou Maj = fin), molette, double-clic = 0 dB"
             role="slider"
             aria-label={`Volume ${track.name}`}
             aria-valuetext={gainToDbText(track.volume)}

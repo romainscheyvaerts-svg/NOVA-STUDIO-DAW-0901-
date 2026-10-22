@@ -70,6 +70,8 @@ import { dailyChallengeId } from './utils/dailyChallenge';
 import { detectSections, sectionColor } from './utils/songSections';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge, BridgePlugin, SeparationResult } from './services/NovaBridge';
+import { vstMenuEntries, vstMetadata } from './utils/vstMenu';
+import { cascadeAfter, setPluginWindowOffset } from './utils/pluginWindowPos';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
 import { useSynthPanelTrack, openSynthPanel, closeSynthPanel } from './utils/synthPanelStore';
@@ -1432,6 +1434,38 @@ function Studio() {
   }, [pausePlayback]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
+  // Fenêtres d'effet gardées ouvertes en plus de celle du moment (Maj+clic, punaise) et leur ordre d'empilement.
+  const [keptPlugins, setKeptPlugins] = useState<{ trackId: string; plugin: PluginInstance; offset?: { x: number; y: number } }[]>([]);
+  const [pluginZOrder, setPluginZOrder] = useState<string[]>([]);
+  const bringPluginToFront = useCallback((key: string) => setPluginZOrder(o => [...o.filter(k => k !== key), key].slice(-24)), []);
+  const closeAllPluginWindows = useCallback(() => { setActivePlugin(null); setKeptPlugins([]); }, []);
+  /** Ouvre un effet : dans la fenêtre du moment, ou (keep) dans une fenêtre de plus, en cascade. */
+  const keptPluginsRef = useRef(keptPlugins);
+  keptPluginsRef.current = keptPlugins;
+  const openPluginWindow = useCallback((trackId: string, plugin: PluginInstance, keep?: boolean) => {
+    const key = `${trackId}:${plugin.id}`;
+    bringPluginToFront(key);
+    if (keptPluginsRef.current.some(k => `${k.trackId}:${k.plugin.id}` === key)) return; // déjà ouverte : seulement devant
+    if (!keep) { setActivePlugin({ trackId, plugin }); return; }
+    setActivePlugin(a => (a && `${a.trackId}:${a.plugin.id}` === key ? null : a));
+    setKeptPlugins(ks => {
+      const n = ks.length + 1;
+      return [...ks, { trackId, plugin, offset: { x: (n % 8) * 36 - 120, y: (n % 8) * 30 - 90 } }].slice(-12);
+    });
+  }, [bringPluginToFront]);
+  /** Punaise : la fenêtre du moment reste ouverte (le prochain effet s'ouvre à côté), ou redevient celle du moment. */
+  const toggleKeepPlugin = useCallback((w: { trackId: string; plugin: PluginInstance; kept: boolean }, offset: { x: number; y: number }) => {
+    const key = `${w.trackId}:${w.plugin.id}`;
+    if (!w.kept) {
+      setKeptPlugins(ks => [...ks.filter(k => `${k.trackId}:${k.plugin.id}` !== key), { trackId: w.trackId, plugin: w.plugin, offset }].slice(-12));
+      setActivePlugin(null);
+      setPluginWindowOffset(cascadeAfter(offset));
+    } else {
+      setKeptPlugins(ks => ks.filter(k => `${k.trackId}:${k.plugin.id}` !== key));
+      setActivePlugin({ trackId: w.trackId, plugin: w.plugin });
+    }
+    bringPluginToFront(key);
+  }, [bringPluginToFront]);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   // Chaque annonce a son identifiant : la même phrase deux fois de suite
   // (« Aucun blanc à retirer ici ») était avalée la seconde fois.
@@ -3445,6 +3479,7 @@ function Studio() {
     if (activePlugin?.plugin.id === pid) {
         setActivePlugin(null);
     }
+    setKeptPlugins(ks => (ks.some(k => k.plugin.id === pid) ? ks.filter(k => k.plugin.id !== pid) : ks));
   }, [setState, activePlugin]);
   
   /**
@@ -9653,6 +9688,7 @@ function Studio() {
 
       case 'CLOSE_PLUGIN':
         setActivePlugin(null);
+        setKeptPlugins([]);
         break;
 
       case 'RESET_FX': {
@@ -10441,7 +10477,7 @@ function Studio() {
   const onSetLoopStable = useLatestCallback((start: number, end: number) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true })));
   const onSelectTrackStable = useLatestCallback((id: string) => setState(p => ({ ...p, selectedTrackId: id })));
   const onDropPluginOpenUI = useLatestCallback((trackId: string, type: PluginType, metadata?: any) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true }));
-  const onOpenPluginUI = useLatestCallback(async (tid: string, p: PluginInstance) => { await ensureAudioEngine(); setActivePlugin({ trackId: tid, plugin: p }); });
+  const onOpenPluginUI = useLatestCallback(async (tid: string, p: PluginInstance, opts?: { keep?: boolean }) => { await ensureAudioEngine(); openPluginWindow(tid, p, !!opts?.keep && !isMobile); });
   const onRequestAddPluginMenu = useLatestCallback((tid: string, x: number, y: number) => setAddPluginMenu({ trackId: tid, x, y }));
   const onEditClipStable = useLatestCallback(handleEditClip);
   const onEditMidiStable = useLatestCallback((trackId: string, clipId: string) => setMidiEditorOpen({ trackId, clipId }));
@@ -12189,9 +12225,12 @@ function Studio() {
       </Suspense>
       
       {addPluginMenu && <AddEffectMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)}
-        effects={[...AVAILABLE_FX_MENU, ...araMenuPlugins().map((p, i) => ({ id: `ara:${i}`, name: p.name, icon: 'fa-wand-magic-sparkles', cat: 'Voix', kind: 'ARA, insert de piste', also: 'ara melodyne vocalign justesse alignement insert piste' }))]}
+        effects={[...AVAILABLE_FX_MENU, ...araMenuPlugins().map((p, i) => ({ id: `ara:${i}`, name: p.name, icon: 'fa-wand-magic-sparkles', cat: 'Voix', kind: 'ARA, insert de piste', also: 'ara melodyne vocalign justesse alignement insert piste' })),
+          // VST du PC (appli Windows, pont prêt) : proposés ici aussi, rangés par éditeur (utils/vstMenu).
+          ...(novaBridge.isConnected() ? vstMenuEntries(novaBridge.getCachedPlugins()) : [])]}
         onPick={(id) => {
           if (id.startsWith('ara:')) { const p = araMenuPlugins()[Number(id.slice(4))]; if (p) handleAddPluginFromContext(addPluginMenu.trackId, 'VST3', araInsertMetadata(p), { openUI: true }); return; }
+          if (id.startsWith('vst:')) { const e = vstMenuEntries(novaBridge.getCachedPlugins()).find(v => v.id === id); if (e) handleAddPluginFromContext(addPluginMenu.trackId, 'VST3', vstMetadata(e.plugin), { openUI: true }); return; }
           handleAddPluginFromContext(addPluginMenu.trackId, id as PluginType, {}, { openUI: true });
         }} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
@@ -12253,19 +12292,43 @@ function Studio() {
           </div>
       )}
       
-      {activePlugin && (
-        // Fenêtre d'effet NON modale sur ordinateur (G18) : pas de voile, la console
-        // et les pistes restent utilisables derrière ; on la déplace par sa barre.
-        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-nv-bg' : 'pointer-events-none'}`}>
-           <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
-              <PanelBoundary key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} name="la fenêtre d'effet" onClose={() => setActivePlugin(null)}>
-              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-nv-surface border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
-              <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} allTracks={state.tracks} />
-              </Suspense>
-              </PanelBoundary>
-           </div>
-        </div>
-      )}
+      {(() => {
+        // Fenêtres d'effet NON modales sur ordinateur (G18) : pas de voile, la console et les pistes
+        // restent utilisables derrière ; on les déplace par leur barre. Audit mix 22/10 : plusieurs
+        // fenêtres à la fois (Maj+clic sur un effet, ou punaise « Garder ouverte »), la dernière
+        // touchée devant, Échap ferme celle de devant, Maj+Échap ou « Tout fermer » les ferme toutes.
+        const wins: { trackId: string; plugin: PluginInstance; kept: boolean; offset?: { x: number; y: number } }[] = [
+          ...keptPlugins.map(k => ({ ...k, kept: true })),
+          ...(activePlugin ? [{ ...activePlugin, kept: false }] : []),
+        ];
+        if (!wins.length) return null;
+        const keyOf = (w: { trackId: string; plugin: PluginInstance }) => `${w.trackId}:${w.plugin.id}`;
+        const rank = (k: string) => { const i = pluginZOrder.indexOf(k); return i < 0 ? pluginZOrder.length : i; };
+        const sorted = [...wins].sort((a, b) => rank(keyOf(a)) - rank(keyOf(b)));
+        const frontKey = keyOf(sorted[sorted.length - 1]);
+        return sorted.map((w, i) => {
+          const key = keyOf(w);
+          const close = w.kept ? () => setKeptPlugins(ks => ks.filter(k => keyOf(k) !== key)) : () => setActivePlugin(null);
+          return (
+            <div key={key} data-plugin-window={key} data-plugin-front={key === frontKey ? '1' : undefined}
+              className={`fixed inset-0 flex items-center justify-center ${isMobile ? 'bg-nv-bg' : 'pointer-events-none pt-[7.5rem] pb-4'}`} style={{ zIndex: 200 + i }}>
+              <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`}
+                onPointerDownCapture={() => { if (key !== frontKey) bringPluginToFront(key); }} onMouseDown={e => e.stopPropagation()}>
+                <PanelBoundary key={key} name="la fenêtre d'effet" onClose={close}>
+                <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-nv-surface border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
+                <PluginEditor key={key} plugin={w.plugin} trackId={w.trackId} onClose={close} onUpdateParams={(p) => handleUpdatePluginParams(w.trackId, w.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === w.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass}
+                  onOpenPlugin={(tid, p) => { if (w.kept) { setKeptPlugins(ks => ks.map(k => keyOf(k) === key ? { ...k, trackId: tid, plugin: p } : k)); bringPluginToFront(`${tid}:${p.id}`); } else setActivePlugin({ trackId: tid, plugin: p }); }}
+                  allTracks={state.tracks}
+                  kept={w.kept} initialOffset={w.offset} escapeActive={key === frontKey} openCount={wins.length}
+                  onToggleKeep={isMobile ? undefined : (offset) => toggleKeepPlugin(w, offset)}
+                  onCloseAll={closeAllPluginWindows} />
+                </Suspense>
+                </PanelBoundary>
+              </div>
+            </div>
+          );
+        });
+      })()}
 
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}

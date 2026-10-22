@@ -85,7 +85,7 @@ export const SendFader: React.FC<{
         if (!d.moved && Math.abs(dx) < 4) return;
         if (!d.moved) { d.moved = true; if (longTimer.current) { window.clearTimeout(longTimer.current); longTimer.current = null; } }
         const w = ref.current?.getBoundingClientRect().width || 120;
-        set(dragSendLevel(d.l0, dx, w, fingers.current.size > 1 || e.shiftKey));
+        set(dragSendLevel(d.l0, dx, w, fingers.current.size > 1 || e.shiftKey || e.ctrlKey || e.metaKey));
       }}
       onPointerUp={(e) => { fingers.current.delete(e.pointerId); if (drag.current?.id === e.pointerId) end(); }}
       onPointerCancel={(e) => { fingers.current.delete(e.pointerId); if (drag.current?.id === e.pointerId) end(); }}

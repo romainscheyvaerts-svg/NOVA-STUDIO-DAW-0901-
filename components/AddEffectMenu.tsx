@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { normText } from '../utils/commandPalette';
+import { fxPrefs, useFxPrefs } from '../utils/fxFavorites';
 
 /**
  * Menu « Ajouter un effet » d'une piste : rangé comme une chaîne de mix (nettoyage, égaliseur,
@@ -42,12 +43,25 @@ const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
   MASTERTRANSIENT: { cat: 'Master', kind: 'limiteur multibande', also: 'mastering transient' },
 };
 const CAT_ORDER = ['Nettoyage', 'Égaliseur', 'Dynamique', 'Voix', 'Saturation et couleur', 'Modulation', 'Espace', 'Effets trap', 'Master', 'Autres'];
-const info = (e: EffectEntry) => KIND[e.id] || { cat: e.cat && CAT_ORDER.includes(e.cat) ? e.cat : 'Autres', kind: e.kind || '', also: e.also };
+/** Rubrique des VST du PC : une par éditeur (« VST · Waves »), après les effets NOVA. */
+const isVstCat = (c?: string) => !!c && c.startsWith('VST');
+const info = (e: EffectEntry) => KIND[e.id] || { cat: e.cat && (CAT_ORDER.includes(e.cat) || isVstCat(e.cat)) ? e.cat : 'Autres', kind: e.kind || '', also: e.also };
 
 export function groupEffects(list: EffectEntry[], query: string): { cat: string; items: EffectEntry[] }[] {
   const words = normText(query).split(/\s+/).filter(Boolean);
   const hit = (e: EffectEntry) => { const i = info(e); const hay = normText(`${e.name} ${i.kind} ${i.cat} ${i.also || ''} ${e.id}`); return words.every(w => hay.includes(w)); };
-  return CAT_ORDER.map(cat => ({ cat, items: list.filter(e => info(e).cat === cat && hit(e)) })).filter(g => g.items.length);
+  const vstCats = [...new Set(list.map(e => info(e).cat).filter(isVstCat))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const order = [...CAT_ORDER.slice(0, -1), ...vstCats, 'Autres'];
+  return order.map(cat => ({ cat, items: list.filter(e => info(e).cat === cat && hit(e)) })).filter(g => g.items.length);
+}
+
+/** Rubriques « Favoris » et « Récents » en tête (sans recherche) : un effet courant en 2 clics. Pur. */
+export function quickEffects(list: EffectEntry[], favorites: string[], recents: string[]): { cat: string; items: EffectEntry[] }[] {
+  const byId = new Map(list.map(e => [e.id, e]));
+  const pick = (ids: string[]) => ids.map(id => byId.get(id)).filter((e): e is EffectEntry => !!e);
+  const fav = pick(favorites);
+  const rec = pick(recents).filter(e => !favorites.includes(e.id));
+  return [{ cat: 'Favoris', items: fav }, { cat: 'Récents', items: rec }].filter(g => g.items.length);
 }
 
 const AddEffectMenu: React.FC<{ x: number; y: number; effects: EffectEntry[]; onPick: (id: string) => void; onClose: () => void }> = ({ x, y, effects, onPick, onClose }) => {
@@ -56,8 +70,11 @@ const AddEffectMenu: React.FC<{ x: number; y: number; effects: EffectEntry[]; on
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
   const [pos, setPos] = useState({ x, y });
+  const prefs = useFxPrefs();
+  const quick = useMemo(() => (q.trim() ? [] : quickEffects(effects, prefs.favorites, prefs.recents)), [effects, q, prefs]);
   const groups = useMemo(() => groupEffects(effects, q), [effects, q]);
-  const flat = useMemo(() => groups.flatMap(g => g.items), [groups]);
+  const all = useMemo(() => [...quick.map(g => ({ ...g, quick: true })), ...groups.map(g => ({ ...g, quick: false }))], [quick, groups]);
+  const flat = useMemo(() => all.flatMap(g => g.items), [all]);
   useEffect(() => { setIdx(0); }, [q]);
   useEffect(() => { inputRef.current?.focus(); }, []);
   useLayoutEffect(() => {
@@ -72,7 +89,7 @@ const AddEffectMenu: React.FC<{ x: number; y: number; effects: EffectEntry[]; on
   }, [onClose]);
   useEffect(() => { ref.current?.querySelector(`[data-fx-index="${idx}"]`)?.scrollIntoView({ block: 'nearest' }); }, [idx]);
 
-  const pick = (e?: EffectEntry) => { if (!e) return; onClose(); onPick(e.id); };
+  const pick = (e?: EffectEntry) => { if (!e) return; fxPrefs.noteUsed(e.id); onClose(); onPick(e.id); };
   const onKey = (e: React.KeyboardEvent) => {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); onClose(); }
@@ -92,20 +109,30 @@ const AddEffectMenu: React.FC<{ x: number; y: number; effects: EffectEntry[]; on
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1 custom-scroll">
         {groups.length === 0 && <p className="px-3 py-4 text-center text-[12px] text-nv-muted">Aucun effet pour « {q} ».</p>}
-        {groups.map(g => (
-          <div key={g.cat} role="group" aria-label={g.cat}>
-            <p className="px-2 pb-0.5 pt-2 text-[10px] font-black uppercase tracking-widest text-nv-muted">{g.cat}</p>
+        {all.map(g => (
+          <div key={`${g.quick ? 'q' : 'c'}-${g.cat}`} role="group" aria-label={g.cat}>
+            <p className="px-2 pb-0.5 pt-2 text-[10px] font-black uppercase tracking-widest text-nv-muted">{g.cat === 'Favoris' && g.quick ? '★ Favoris' : g.cat}</p>
             {g.items.map(e => {
               n++;
               const i = n;
+              const fav = prefs.favorites.includes(e.id);
               return (
-                <button key={e.id} type="button" role="menuitem" data-fx-index={i} data-fx-id={e.id}
-                  onMouseMove={() => { if (idx !== i) setIdx(i); }} onClick={() => pick(e)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 text-left ${i === idx ? 'bg-nv-accent/15' : ''}`}>
-                  {e.icon && <i className={`fas ${e.icon} w-4 text-center text-[10px] text-nv-muted`} aria-hidden="true" />}
-                  <span className="text-[12px] font-semibold">{e.name}</span>
-                  <span className="ml-auto truncate text-[11px] text-nv-muted">{info(e).kind}</span>
-                </button>
+                <div key={e.id} className={`group/fx flex w-full items-center rounded-lg ${i === idx ? 'bg-nv-accent/15' : ''}`} onMouseMove={() => { if (idx !== i) setIdx(i); }}>
+                  <button type="button" role="menuitem" data-fx-index={i} {...(g.quick ? { 'data-fx-quick': e.id } : { 'data-fx-id': e.id })}
+                    onClick={() => pick(e)}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 text-left">
+                    {e.icon && <i className={`fas ${e.icon} w-4 text-center text-[10px] text-nv-muted`} aria-hidden="true" />}
+                    <span className="truncate text-[12px] font-semibold">{e.name}</span>
+                    <span className="ml-auto truncate text-[11px] text-nv-muted">{info(e).kind}</span>
+                  </button>
+                  {/* Étoile : favori (en tête du menu, ici et dans la liste des VST). */}
+                  <button type="button" tabIndex={-1} onClick={ev => { ev.stopPropagation(); fxPrefs.toggleFavorite(e.id); }}
+                    aria-pressed={fav} aria-label={fav ? `Retirer ${e.name} des favoris` : `Mettre ${e.name} en favori`} data-fx-star={e.id}
+                    title={fav ? 'Retirer des favoris' : 'Mettre en favori : il apparaîtra en tête de ce menu'}
+                    className={`mr-1 h-7 w-7 shrink-0 rounded text-[11px] ${fav ? 'text-amber-300' : 'text-nv-muted opacity-0 group-hover/fx:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-60'}`}>
+                    <i className={`${fav ? 'fas' : 'far'} fa-star`} aria-hidden="true" />
+                  </button>
+                </div>
               );
             })}
           </div>

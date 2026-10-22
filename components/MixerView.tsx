@@ -3,19 +3,21 @@ import { MixScenesPanel, type SceneAction } from './MixScenesPanel';
 import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
+import { dbTextToGain } from '../plugins/hw/valueEntry';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginName } from './PluginName';
 import { VstLateBadge } from './VstLateAlert';
 import TrackCpuBadge from './TrackCpuBadge';
+import StripLatency from './meters/StripLatency';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { getLive, liveKey, useLiveParam, useLiveView } from '../utils/automationLiveStore';
 import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
-import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
+import { consoleSections, insertAreaHeight, MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStructureButtons, pluginStateClass, pluginStateHelp, pluginStateMenuItems, SendSlotsPopover, SendViewPicker, SendViewStrip, TrackIOSelectors, useLongPress, VcaStrip } from './TrackStructure';
 import { sendSlots, shownTrackIds } from '../utils/trackStructure';
 import TrackMeter from './meters/TrackMeter';
@@ -57,10 +59,25 @@ const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElemen
     </div>
   );
 };
-const LiveDbText: React.FC<{ track: Track }> = ({ track }) => {
+const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = ({ track, onSet }) => {
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
+  // Saisie au clavier (comme la case de volume d'une console de DAW) : clic, « -3,5 », Entrée.
+  const [editing, setEditing] = useState(false);
+  const done = useRef(false);
+  const commit = (v: string) => { if (done.current) return; done.current = true; setEditing(false); const g = dbTextToGain(v); if (g !== null) onSet?.(g); };
+  if (editing) {
+    return (
+      <input autoFocus defaultValue={text.replace(/ dB$/, '')} aria-label={`Volume de ${track.name} en dB`} data-testid={`fader-db-input-${track.id}`}
+        onFocus={e => e.currentTarget.select()}
+        onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget.value); } if (e.key === 'Escape') { e.preventDefault(); done.current = true; setEditing(false); } }}
+        onBlur={e => commit(e.currentTarget.value)}
+        className="mt-2 h-4 w-full rounded border border-cyan-500/60 bg-black/70 text-center text-[10px] font-mono tabular-nums text-white outline-none" />
+    );
+  }
   // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la tranche.
-  return <div className="mt-2 h-4 leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300" style={{ contain: 'strict' }}>{text}</div>;
+  return <button type="button" disabled={!onSet} onClick={() => { done.current = false; setEditing(true); }} data-testid={`fader-db-${track.id}`}
+    title="Clic pour taper le volume en dB (ex. -3,5 puis Entrée)" aria-label={`Volume de ${track.name} : ${text}. Clic pour le taper`}
+    className="mt-2 block h-4 w-full leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
 };
 const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);
@@ -75,13 +92,13 @@ const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = (
       <textarea autoFocus defaultValue={c} maxLength={500} aria-label={`Commentaire de ${track.name}`} data-testid={`strip-comment-input-${track.id}`}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); } }}
         onBlur={e => { setEditing(false); const n = withTrackComment(track, e.currentTarget.value); if (n !== track) onUpdate(n); }}
-        className="mt-1.5 h-10 w-full resize-none rounded border border-cyan-500/50 bg-black/60 px-1 text-[10px] leading-tight text-white outline-none" />
+        className="mt-1 h-10 shrink-0 w-full resize-none rounded border border-cyan-500/50 bg-black/60 px-1 text-[10px] leading-tight text-white outline-none" />
     );
   }
   return (
     <button type="button" onClick={() => setEditing(true)} data-testid={`strip-comment-${track.id}`}
       title={c ? `Commentaire : ${c} (clic pour modifier ; Comments)` : 'Ajouter un commentaire (micro, consigne…) — Comments'}
-      className={`mt-1.5 h-10 w-full overflow-hidden rounded px-1 text-left text-[10px] leading-tight ${c ? 'bg-white/[0.04] text-slate-200 italic' : 'text-slate-500 hover:text-slate-300'}`}>
+      className={`mt-1 ${c ? 'h-10' : 'h-5'} shrink-0 w-full overflow-hidden rounded px-1 text-left text-[10px] leading-tight ${c ? 'bg-white/[0.04] text-slate-200 italic' : 'text-slate-500 hover:text-slate-300'}`}>
       <span className="line-clamp-3 break-words">{c || '+ commentaire'}</span>
     </button>
   );
@@ -246,7 +263,7 @@ const ChannelStrip: React.FC<{
   allTracks: Track[],
   onUpdate: (t: Track) => void, 
   isMaster?: boolean, 
-  onOpenPlugin?: (trackId: string, p: PluginInstance) => void,
+  onOpenPlugin?: (trackId: string, p: PluginInstance, opts?: { keep?: boolean }) => void,
   onToggleBypass?: (trackId: string, pluginId: string) => void,
   onRemovePlugin?: (trackId: string, pluginId: string) => void,
   onDropPlugin?: (trackId: string, type: PluginType, metadata?: any) => void,
@@ -257,8 +274,12 @@ const ChannelStrip: React.FC<{
   autoRename?: boolean,
   onRenameDone?: () => void,
   /** Send View (Pro Tools) : envoi a-j affiché en grand (null : vue normale). */
-  sendViewSlot?: number | null
-}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins, autoRename, onRenameDone, sendViewSlot = null }) => {
+  sendViewSlot?: number | null,
+  /** Lignes d'effets de la console (les mêmes sur toutes les tranches : faders alignés). */
+  insertRowsShown?: number,
+  /** Zone des envois affichée (au moins une tranche de la console a un envoi). */
+  showSends?: boolean
+}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins, autoRename, onRenameDone, sendViewSlot = null, insertRowsShown, showSends = true }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   // Menu d'un effet (clic droit, appui long) : actif / bypass / inactif.
   const [fxMenu, setFxMenu] = useState<{ x: number; y: number; p: PluginInstance } | null>(null);
@@ -272,13 +293,15 @@ const ChannelStrip: React.FC<{
   useEffect(() => { if (autoRename) setRenaming(true); }, [autoRename]);
   const faderTrackRef = useRef<HTMLDivElement>(null);
   const [insertList, setInsertList] = useState<DOMRect | null>(null);
-  const insertRows = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? MIXER_INSERT_ROWS.touch : MIXER_INSERT_ROWS.mouse;
+  const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  const insertRows = insertRowsShown ?? (coarse ? MIXER_INSERT_ROWS.touch : MIXER_INSERT_ROWS.mouse);
   const { shown: shownInserts, hidden: hiddenInserts } = splitInserts(track.plugins, insertRows);
   
 
+  // Maj+clic : l'effet s'ouvre dans une fenêtre de plus (les autres restent ouvertes).
   const handleFXClick = (e: React.MouseEvent | React.TouchEvent, p: PluginInstance) => {
     e.stopPropagation();
-    onOpenPlugin?.(track.id, p);
+    onOpenPlugin?.(track.id, p, { keep: 'shiftKey' in e && e.shiftKey });
   };
 
   const handleEmptySlotClick = (e: React.MouseEvent | React.TouchEvent) => {
@@ -296,7 +319,7 @@ const ChannelStrip: React.FC<{
   };
 
   // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
-  // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
+  // (le fader ne saute plus sous le clic), Ctrl ou Maj = fin, molette, double-clic ou Alt+clic = 0 dB.
   // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
   // Valeur entendue lue au moment du geste ; l'affichage suit seul (LiveFaderCap, LivePanKnob).
   const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
@@ -341,14 +364,18 @@ const ChannelStrip: React.FC<{
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
       data-inactive={track.isInactive ? '1' : undefined}
-      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col h-full [@media(max-height:820px)]:h-auto [@media(max-height:820px)]:min-h-[920px] transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
+      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col min-h-full [@media(max-height:820px)]:min-h-[920px] transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
       
       {!isMaster && <InactiveStripVeil track={track} all={allTracks} />}
       {!isMaster && sendViewSlot !== null && (
         <div className="h-[104px] shrink-0 bg-cyan-500/[0.04] border-b border-white/[0.04] p-2 overflow-hidden"><SendViewStrip track={track} all={allTracks} slot={sendViewSlot} /></div>
       )}
-      {!isMaster && sendViewSlot === null && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
+      {!isMaster && sendViewSlot === null && showSends && !(track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
+        // Même hauteur que les envois des pistes audio : les faders de toute la console restent alignés.
+        <div className="h-[104px] shrink-0 border-b border-white/[0.04]" aria-hidden="true" />
+      )}
+      {!isMaster && sendViewSlot === null && showSends && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
         <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden [@media(pointer:coarse)]:gap-1 [@media(pointer:coarse)]:overflow-y-auto">
           {track.sends.map((s, i) => <SendKnob key={`${s.id}-${s.slot ?? i}`} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
@@ -356,11 +383,13 @@ const ChannelStrip: React.FC<{
       
       {/* Effets : tous visibles (8 lignes à la souris, 5 au doigt), sinon « +N »
           qui ouvre la liste complète (audit B5). Hauteur fixe : les faders restent alignés. */}
-      <div className="h-[200px] shrink-0 border-b border-white/[0.04] px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden">
+      <div className="shrink-0 border-b border-white/[0.04] px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden" style={{ height: insertAreaHeight(insertRows, coarse) }} data-insert-rows={insertRows}>
         <div className="flex items-center justify-between px-1 mb-0.5">
           <span className="text-[8px] font-black text-slate-500 uppercase leading-3">{track.type === TrackType.BUS ? 'Effets du bus' : (isMaster ? 'Chaîne du master' : 'Effets')}</span>
           <span className="flex items-center gap-1">
           {/* Charge processeur de la piste (chantier 13) : détail par effet, veille, « geler ». */}
+          {/* Latence des effets (PDC) : affichée dès qu'un effet retarde le son. */}
+          {track.plugins.length > 0 && <StripLatency track={track} />}
           {!isMaster && track.type !== TrackType.BUS && track.type !== TrackType.SEND && <TrackCpuBadge track={track} />}
           {track.plugins.length >= insertRows && (
             <button type="button" onClick={handleEmptySlotClick} title="Ajouter un effet" aria-label={`Ajouter un effet sur ${track.name}`}
@@ -504,13 +533,14 @@ const ChannelStrip: React.FC<{
            <LivePanKnob track={track} onUpdate={onUpdate} />
         </div>
 
-        <div className="flex-1 flex space-x-3 px-2">
+        {/* Le fader garde au moins 150 px : si l'écran est trop bas, la console défile (le nom reste lisible). */}
+        <div className="flex-1 min-h-[150px] flex space-x-3 px-2" data-fader-zone="">
            <div className="flex-1 relative flex flex-col items-center">
               <div 
                 data-nova-target={`vol-${track.id}`}
                 {...fader.bind}
                 ref={(el) => { faderTrackRef.current = el; fader.wheelRef(el); }}
-                title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+                title="Volume : glisser (Ctrl ou Maj = fin), molette, double-clic ou Alt+clic = 0 dB ; clic sur la valeur pour la taper"
                 role="slider"
                 aria-label={`Volume ${track.name}`}
                 aria-valuetext={gainToDbText(track.volume)}
@@ -526,7 +556,7 @@ const ChannelStrip: React.FC<{
              label={isMaster ? 'Sortie master' : track.name} className={isMaster ? 'w-[44px]' : 'w-[30px]'} />
         </div>
 
-        <LiveDbText track={track} />
+        <LiveDbText track={track} onSet={(g) => onUpdate({ ...track, volume: g })} />
         {isMaster && (
           <button type="button" onClick={() => loudnessPanel.toggle()} data-testid="mixer-loudness"
             title="Fenêtre Loudness : LUFS intégré / court terme / momentané, LRA, crête vraie, corrélation, goniomètre, spectre"
@@ -542,7 +572,7 @@ const ChannelStrip: React.FC<{
            <button {...sm.soloProps} onClick={(e) => { if (sm.soloConsumed()) return; const k = isMaster ? 'toggle' : soloClickKind(e); if (k === 'all') { runEditCommand('soloAll', { on: !track.isSolo }); return; } if (k === 'safe') { runEditCommand('soloSafe', { trackIds: [track.id] }); return; } onUpdate({...track, isSolo: !track.isSolo}); }} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}${track.soloSafe ? ' (solo safe)' : ''}`} data-solo-safe={track.soloSafe ? '1' : undefined} className={`nova-hit-tactile relative flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-cyan-400/70 text-cyan-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? "N'écouter que cette tranche" : `${track.soloSafe ? 'Solo safe : reste audible quand une autre tranche est en solo. ' : ''}${listenMode !== 'sip' ? `Écoute ${listenMode.toUpperCase()}, sans couper le mix ni changer l'export : ` : ''}N'écouter que cette tranche — Alt+clic : tous les solos ; Ctrl+clic : solo safe ; appui long : menu`}>{track.soloSafe && <i className="fas fa-shield-alt mr-0.5 text-[8px]" aria-hidden="true" />}{!isMaster && listenMode !== 'sip' ? listenMode.toUpperCase() : 'Solo'}</button>
         </div>
         
-        <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-transparent text-amber-400' : 'bg-white/[0.05] border-transparent text-white'}`}>
+        <div className={`mt-2 h-8 shrink-0 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-transparent text-amber-400' : 'bg-white/[0.05] border-transparent text-white'}`}>
            <div className="w-1.5 h-full mr-2 rounded-full shrink-0" style={{ backgroundColor: track.color }} />
            {renaming && !isMaster ? (
              <input ref={el => { if (el && document.activeElement !== el) { el.focus({ preventScroll: true }); el.select(); } }} defaultValue={track.name} aria-label={`Nouveau nom de ${track.name}`} data-testid={`strip-rename-${track.id}`}
@@ -730,7 +760,7 @@ const VirtualStrip: React.FC<{
 const MixerView: React.FC<{ 
   tracks: Track[], 
   onUpdateTrack: (t: Track) => void, 
-  onOpenPlugin?: (tid: string, p: PluginInstance) => void, 
+  onOpenPlugin?: (tid: string, p: PluginInstance, opts?: { keep?: boolean }) => void, 
   onToggleBypass?: (tid: string, pid: string) => void, 
   onRemovePlugin?: (tid: string, pid: string) => void, 
   onDropPluginOnTrack?: (tid: string, type: PluginType, metadata?: any) => void, 
@@ -765,6 +795,14 @@ const MixerView: React.FC<{
   const virtual = audioTracks.length + busTracks.length + sendTracks.length >= MIXER_VIRTUALIZE_FROM;
   // Tranches montées tout de suite (sans attendre l'observateur) : ce que l'écran montre.
   const eagerCount = Math.ceil((typeof window !== 'undefined' ? window.innerWidth : 1600) / 176) + 2;
+  // Zones du haut à la taille de la séance (mêmes sur toutes les tranches) : le fader garde la place.
+  const stripTracks = [...audioTracks, ...busTracks, ...sendTracks];
+  const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  const { insertRows: insertRowsShown, showSends } = consoleSections(
+    Math.max(0, ...stripTracks.map(t => t.plugins.length), masterTrack?.plugins.length || 0),
+    audioTracks.some(t => (t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER) && t.sends.length > 0),
+    coarse, sendViewSlot !== null);
+  const layout = { insertRowsShown, showSends };
 
   // Get selected tracks for grouping
   const [selectedForGroup, setSelectedForGroup] = useState<Set<string>>(new Set());
@@ -803,7 +841,7 @@ const MixerView: React.FC<{
   }, [onUpdateTrack]);
   
   return (
-    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory [@media(max-height:820px)]:overflow-y-auto [@media(max-height:820px)]:pb-20">
+    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto overflow-y-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory [@media(max-height:820px)]:pb-20">
       {/* Track Groups Panel (inspired by Pro Tools) */}
       {trackGroups.length > 0 && (
         <div className="flex border-r border-white/10 bg-black/20">
@@ -845,6 +883,7 @@ const MixerView: React.FC<{
               onCopyPluginToTrack={onCopyPluginToTrack}
               onReorderPlugins={onReorderPlugins}
               sendViewSlot={sendViewSlot}
+              {...layout}
             />
           </VirtualStrip>
         );
@@ -939,14 +978,14 @@ const MixerView: React.FC<{
          )}
       </div>
 
-      {busTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual && renameBusId !== t.id} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></VirtualStrip>)}
+      {busTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual && renameBusId !== t.id} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} {...layout} /></VirtualStrip>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
-      {sendTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></VirtualStrip>)}
+      {sendTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} {...layout} /></VirtualStrip>)}
       {vcaTracks.length > 0 && <div className="w-2 bg-black/30 border-r border-white/5" />}
       {vcaTracks.map(v => <div key={v.id} className="snap-start"><VcaStrip vca={v} all={tracks} /></div>)}
       <div className="w-10 shrink-0 bg-black/50 border-r border-white/5" />
       {/* Master toujours visible à droite (G20), comme Logic / Pro Tools. */}
-      <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)] [[data-theme=light]_&]:shadow-[-10px_0_18px_rgba(15,23,42,0.08)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
+      <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)] [[data-theme=light]_&]:shadow-[-10px_0_18px_rgba(15,23,42,0.08)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} insertRowsShown={insertRowsShown} /></div>
     </div>
   );
 };
