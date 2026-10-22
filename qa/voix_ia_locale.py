@@ -445,7 +445,7 @@ def measure_deverb(raw, clip):
     """Voix rendue par NOVA après « Appliquer » (dosage par défaut) vs voix sèche et voix de la pièce."""
     sys.path.insert(0, str(R24 / "scripts"))
     import deverb_eval as d
-    with wave.open(io.BytesIO(raw)) as w:
+    with wav_compat(raw) as w:
         sr, n, ch = w.getframerate(), w.getnframes(), w.getnchannels()
         sw = w.getsampwidth()
         frames = w.readframes(n)

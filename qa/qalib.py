@@ -389,3 +389,34 @@ def roll_reveal(page, sel):
             return loc.first
         page.keyboard.press("Escape"); page.wait_for_timeout(120)
     return page.locator(sel).first
+
+
+# ── Sons des projets sans perte (audit de nuit, 22/10/2026) ─────────────────────
+# Le .zip garde chaque son à l'identique : 16 bits, 24 bits ou FLOTTANT 32 bits (format 3), que le module
+# `wave` de Python refuse (« unknown format: 3 »). wav_compat(raw) s'utilise comme wave.open(io.BytesIO(raw)) :
+# même interface, et un WAV flottant est rendu en échantillons '<f4' avec getsampwidth() == 4.
+class _WavFloat:
+    def __init__(self, raw):
+        import io as _io
+        import soundfile as _sf
+        data, sr = _sf.read(_io.BytesIO(raw), dtype="float32", always_2d=True)
+        self._sr, self._ch, self._n = sr, data.shape[1], data.shape[0]
+        self._bytes = data.astype("<f4").tobytes()
+
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def getframerate(self): return self._sr
+    def getnchannels(self): return self._ch
+    def getnframes(self): return self._n
+    def getsampwidth(self): return 4
+    def readframes(self, n): return self._bytes[: n * self._ch * 4]
+    def close(self): pass
+
+
+def wav_compat(raw):
+    import io as _io
+    import wave as _wave
+    try:
+        return _wave.open(_io.BytesIO(raw))
+    except _wave.Error:
+        return _WavFloat(raw)
