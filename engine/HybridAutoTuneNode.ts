@@ -104,7 +104,7 @@ export class HybridAutoTuneNode {
       const mon = !!p.lowLatency;
       if (mon !== this.monitoring) { this.monitoring = mon; this.reroute(); }
     }
-    const keys = ['rootKey', 'scale', 'speed', 'humanize', 'mix'];
+    const keys = ['rootKey', 'scale', 'speed', 'humanize', 'mix', 'flex', 'transpose'];
     if (keys.some(k => k in p && p[k] !== before[k]) && this.vst) this.scheduleApply(60);
     else this.publish();
   }
@@ -119,6 +119,10 @@ export class HybridAutoTuneNode {
     return (this.nova as any).automationParam?.(key) ?? null;
   }
   restoreStatic() { (this.nova as any).restoreStatic?.(); }
+
+  /** Piste d'accords (notes cibles « accords du morceau ») : AudioParam de l'autotune de NOVA. */
+  chordParam(): AudioParam | null { return this.nova.chordParam(); }
+  followsChords(): boolean { return this.nova.followsChords(); }
 
   /** Ouvre la fenêtre du plugin du PC (Auto-Tune Pro, MetaTune…) qui traite la voix. */
   async openVstEditor(): Promise<void> {
@@ -234,6 +238,8 @@ export class HybridAutoTuneNode {
         root: Number(this.params.rootKey) || 0, scale,
         speed: Number(this.params.speed ?? 0.1), humanize: Number(this.params.humanize ?? 0.2), mix: Number(this.params.mix ?? 1),
         lowLatency: this.quality !== 'max-quality',
+        flex: Number(this.params.flex) || 0,
+        transpose: Number(this.params.transpose) || 0,
       });
       if (r.keyMethod === 'none' && scale !== 'CHROMATIC') {
         autotunePrefs.markUnavailable(cand.key, 'Ne permet pas de régler la gamme automatiquement');

@@ -248,6 +248,8 @@ BATTERIE = [
     # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
     # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
     ("pianoroll_pratique", []),
+    # 22/10/2026 : Nova Tune (fenêtre sobre, réglages avancés repliés, préréglages sourcés, notes cibles), bureau et téléphone.
+    ("nova_tune", []),
 ]
 
 
