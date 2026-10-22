@@ -19,8 +19,14 @@
  * additionnées (LP3² + HP3² = AP3) et traitées par le compresseur de la bande 3. Passer de
  * 3 à 4 bandes ne change donc pas la phase (aucun clic), seulement qui compresse l'aigu.
  *
- * Compresseur de chaque bande : détecteur crête stéréo couplé (max |G|, |D|), enveloppe à
- * attaque / relâchement (un pôle, en linéaire), loi statique en dB à genou doux
+ * Compresseur de chaque bande : détecteur crête stéréo couplé (max |G|, |D|), puis enveloppe :
+ *   crête p = max(|x|, p relâchée vers |x| en « relâchement » (un pôle)) ;
+ *   niveau e monte vers p en « attaque » (un pôle) et suit p dès qu'elle redescend.
+ * Sur un son tenu, e = la crête (le seuil affiché est le vrai seuil, à ±0,05 dB) ; attaque et
+ * relâchement sont les constantes de temps (63 %) de la montée et du retour du niveau détecté.
+ * (Avant le 22/10/2026 : un seul pôle à deux vitesses sur |x|, qui se calait SOUS la crête :
+ * −0,8 dB à 10 / 200 ms, −15 dB à 200 / 5 ms — le seuil réel n'était pas celui affiché.)
+ * Loi statique en dB à genou doux
  * (Giannoulis, Massberg et Reiss, « Digital Dynamic Range Compressor Design — A Tutorial
  * and Analysis », JAES 2012) : réduction = (1 − 1/taux) × dépassement, genou de largeur W.
  * Sous le genou, aucun logarithme n'est calculé (seuil linéaire précalculé).
@@ -78,7 +84,7 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
   var Pn = new Int32Array(NP);
   var ramping = 0;
   // --- détecteurs ------------------------------------------------------------------------
-  var env = new Float64Array(NB);
+  var env = new Float64Array(NB), pk = new Float64Array(NB);
   var cA = new Float64Array(NB), cR = new Float64Array(NB);
   var grNow = new Float64Array(NB), grMax = new Float64Array(NB);
   var linLo = new Float64Array(NB);
@@ -257,8 +263,11 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
           var dl = D[b * BLK + t], dr = D[oK + b * BLK + t];
           var lv = dl < 0 ? -dl : dl, lr = dr < 0 ? -dr : dr;
           if (lr > lv) lv = lr;
+          var p1 = pk[b];
+          p1 = lv > p1 ? lv : p1 + (lv - p1) * cR[b];
+          pk[b] = p1;
           var e = env[b];
-          e += (lv - e) * (lv > e ? cA[b] : cR[b]);
+          e = p1 > e ? e + (p1 - e) * cA[b] : p1;
           env[b] = e;
           var gr = 0;
           if (e > linLo[b]) {
@@ -286,11 +295,11 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
         if (outR) outR[i] = yr;
       }
     }
-    for (var z = 0; z < NB; z++) if (env[z] < 1e-30) env[z] = 0;
+    for (var z = 0; z < NB; z++) { if (env[z] < 1e-30) env[z] = 0; if (pk[z] < 1e-30) pk[z] = 0; }
   }
 
   function reset() {
-    S.fill(0); KS.fill(0); env.fill(0); grNow.fill(0); grMax.fill(0); inPk = 0; outPk = 0;
+    S.fill(0); KS.fill(0); env.fill(0); pk.fill(0); grNow.fill(0); grMax.fill(0); inPk = 0; outPk = 0;
     // Réglages et coupures posés tout de suite (instance neuve).
     for (var q = 0; q < NP; q++) { Pc[q] = Pt[q]; Pn[q] = 0; }
     ramping = 0;
@@ -317,20 +326,21 @@ export function createMultibandCore(sampleRate: number): MultibandCore {
       if (ramping > 0 || gliding) return false;
       for (var i = 0; i < S.length; i++) { var v = S[i]; if (v > 1e-12 || v < -1e-12) return false; }
       // Enveloppes sous le genou : aucune réduction, la sortie d'une entrée muette est muette.
-      for (var b = 0; b < NB; b++) if (env[b] > linLo[b] * 0.5 || grNow[b] !== 0) return false;
+      for (var b = 0; b < NB; b++) if (env[b] > linLo[b] * 0.5 || pk[b] > linLo[b] * 0.5 || grNow[b] !== 0) return false;
       return true;
     },
     catchUp: function (K: number) {
-      // Entrée muette : chaque enveloppe relâche (même calcul que process jusqu'à 512 blocs).
+      // Entrée muette : chaque crête relâche, le niveau la suit (même calcul que process jusqu'à 512 blocs).
       var blocks = Math.floor(K / 128);
       for (var b = 0; b < NB; b++) {
-        var e = env[b];
-        for (var k = 0; k < blocks && e !== 0; k++) {
-          if (k < 512) { for (var j = 0; j < 128; j++) e += (0 - e) * cR[b]; }
-          else e *= Math.pow(1 - cR[b], 128);
+        var p = pk[b], e = env[b];
+        for (var k = 0; k < blocks && (p !== 0 || e !== 0); k++) {
+          if (k < 512) { for (var j = 0; j < 128; j++) { p += (0 - p) * cR[b]; e = p > e ? e + (p - e) * cA[b] : p; } }
+          else { p *= Math.pow(1 - cR[b], 128); e = p > e ? e + (p - e) * (1 - Math.pow(1 - cA[b], 128)) : p; }
+          if (p < 1e-30) p = 0;
           if (e < 1e-30) e = 0;
         }
-        env[b] = e;
+        pk[b] = p; env[b] = e;
       }
     },
   };
