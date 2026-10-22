@@ -1436,7 +1436,10 @@ function Studio() {
   // Chaque annonce a son identifiant : la même phrase deux fois de suite
   // (« Aucun blanc à retirer ici ») était avalée la seconde fois.
   const [aiNotice, setAiNotice] = useState<{ text: string; id: number } | null>(null);
+  // Heure de la dernière annonce : une annonce secondaire (sauvegarde auto) n'écrase pas celle d'une prise.
+  const lastNoticeAtRef = useRef(0);
   const setAiNotification = useCallback((text: string | null) => {
+    if (text) lastNoticeAtRef.current = Date.now();
     setAiNotice(text ? { text, id: Date.now() + Math.random() } : null);
   }, []);
   // « Feat à distance » (défini plus bas avec la collaboration) : jamais de prise sur
@@ -4616,7 +4619,22 @@ function Studio() {
       switch (id) {
         // Lecture / pause : la touche ne doit ni défiler la page ni re-déclencher le bouton qui a le focus.
         case 'nova.play': e.preventDefault(); if (e.repeat) return; spaceDown = e.code === 'Space'; handleTogglePlay(); return;
-        case 'nova.undo': e.preventDefault(); undo(); return;
+        case 'nova.undo': {
+          e.preventDefault();
+          // Ctrl+Z juste après une prise : on dit laquelle est partie (l'annonce « Prise 11 enregistrée »
+          // restait affichée, on ne savait pas si l'annulation avait pris la prise ou autre chose).
+          const before = new Map(stateRef.current.tracks.map(t => [t.id, listLanes(t as Track)]));
+          undo();
+          setTimeout(() => {
+            const gone: string[] = [];
+            for (const t of stateRef.current.tracks) {
+              const now = new Set(listLanes(t as Track).map(l => l.n));
+              for (const l of before.get(t.id) || []) if (!now.has(l.n)) gone.push(l.name);
+            }
+            if (gone.length) setAiNotification(`↩️ ${gone.length > 1 ? `${gone.length} prises retirées (${gone.slice(0, 3).join(', ')}${gone.length > 3 ? '…' : ''})` : `${gone[0]} retirée`} — Ctrl+Y pour ${gone.length > 1 ? 'les' : 'la'} remettre.`);
+          }, 60);
+          return;
+        }
         case 'nova.redo': e.preventDefault(); redo(); return;
         case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
         // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
@@ -5613,7 +5631,8 @@ function Studio() {
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (r) afterVersionSaved(r.versionId);
-      if (!autosaveNotified.current) {
+      // Une annonce récente (« Prise 1 enregistrée », « 3 prises en boucle ») reste lisible : celle-ci attend.
+      if (!autosaveNotified.current && Date.now() - lastNoticeAtRef.current > 8000) {
         autosaveNotified.current = true;
         // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
         if (!named) setAiNotification("💾 Sauvegarde automatique active sur cet appareil, prises comprises : rien n'est perdu, même après un plantage.");
