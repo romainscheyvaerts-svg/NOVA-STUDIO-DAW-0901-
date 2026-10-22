@@ -807,6 +807,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           return;
       }
 
+      // Projet NOVA (.novaproj.zip) glissé sur le studio : il s'ouvre (comme une session glissée sur
+      // un logiciel de studio). Avant : « 1 fichier ignoré (pas de l'audio) ».
+      const projectDropped = Array.from(e.dataTransfer.files || []).filter(f => /\.novaproj(\s*\(\d+\))?\.zip$/i.test(f.name));  // « Mon son.novaproj (1).zip » : 2e téléchargement
+      if (projectDropped.length) {
+          window.dispatchEvent(new CustomEvent('nova:open-project-file', { detail: projectDropped[0] }));
+          return;
+      }
       // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
       const midiDropped = Array.from(e.dataTransfer.files || []).filter(isMidiFile);
       midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: targetTrackId, time: dropTime }));

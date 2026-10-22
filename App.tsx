@@ -1906,6 +1906,13 @@ function Studio() {
       }
   }, [handleLoadProject]);
 
+  // Projet .zip glissé sur l'arrangement (components/ArrangementView) : ouvert comme par « Ouvrir ».
+  useEffect(() => {
+    const on = (e: Event) => { const f = (e as CustomEvent).detail; if (f instanceof File) void handleLoadLocalFile(f); };
+    window.addEventListener('nova:open-project-file', on);
+    return () => window.removeEventListener('nova:open-project-file', on);
+  }, [handleLoadLocalFile]);
+
   const handleLoadCloud = useCallback(async (id: string) => {
       setExternalImportNotice("Chargement depuis le cloud...");
       try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
