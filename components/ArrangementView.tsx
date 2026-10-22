@@ -1377,7 +1377,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 const onFadeCorner = inFadeRow && (x - clipStartX < FADE_HANDLE_PX || clipEndX - x < FADE_HANDLE_PX);
                 if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && relY < zoomV * 0.5 && !onGainHandle && !nearEdge && !onFadeCorner)) {
                     // Simple clic (sans glisser) dans le haut du clip : le clip est sélectionné, comme avant.
-                    startRange(t.id, time, useSnap, { trackId: t.id, clip });
+                    startRange(t.id, time, e.shiftKey ? extendSnap(e) : useSnap, e.shiftKey ? undefined : { trackId: t.id, clip }, e.shiftKey);
                     return;
                 }
                 editSelectionStore.set({ time: null });
@@ -1435,7 +1435,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         laneY += aboveH(t);
         const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
-          if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, useSnap); return; }
+          if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, e.shiftKey ? extendSnap(e) : useSnap, undefined, e.shiftKey); return; }
           break;
         }
         laneY += laneH;
@@ -1454,8 +1454,33 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 };
 
 /** Début d'une sélection de plage (point d'ancrage) : la tête de lecture y va, comme dans Pro Tools. */
-const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickClip?: { trackId: string; clip: Clip }) => {
+/** Maj+clic d'extension : la grille du mode en cours (Maj n'inverse pas l'aimantation ici). */
+const extendSnap = (e: { ctrlKey?: boolean; metaKey?: boolean }) => snapsToGrid(effectiveMode(editModeStore.get(), !!(e.ctrlKey || e.metaKey)));
+const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickClip?: { trackId: string; clip: Clip }, extend = false) => {
     const t0 = Math.max(0, getSnappedTime(rawTime, bpm, gridSize, useSnap));
+    // Maj+clic (Sélecteur, haut du Smart Tool) : la plage s'étend jusqu'au clic, depuis la plage en
+    // cours (son bord le plus éloigné) ou depuis la tête de lecture et la piste choisie, comme dans
+    // les DAW. Avant : Maj+clic repartait de zéro (aucune plage).
+    if (extend) {
+        const order = visibleTracks.map(t => t.id);
+        const cur = editSelectionStore.get().time;
+        let anchor: number, anchorTrack: string;
+        if (cur && cur.trackIds.length) {
+            anchor = Math.abs(t0 - cur.start) > Math.abs(t0 - cur.end) ? cur.start : cur.end;
+            const i = order.indexOf(trackId), first = cur.trackIds[0], last = cur.trackIds[cur.trackIds.length - 1];
+            anchorTrack = Math.abs(order.indexOf(first) - i) >= Math.abs(order.indexOf(last) - i) ? first : last;
+        } else {
+            anchor = playheadStore.get();
+            anchorTrack = selectedTrackId && order.includes(selectedTrackId) ? selectedTrackId : trackId;
+        }
+        if (Math.abs(anchor - t0) > 1e-6) {
+            rangeDragRef.current = { anchor, anchorTrack };
+            setSelectedClip(null); setSelectedClipIds(new Set()); setActiveClip(null);
+            editSelectionStore.set({ time: makeSelection(anchor, t0, tracksBetween(order, anchorTrack, trackId)) });
+            setDragAction('RANGE');
+            return;
+        }
+    }
     rangeDragRef.current = { anchor: t0, anchorTrack: trackId, clickClip };
     setSelectedClip(null); setSelectedClipIds(new Set()); setActiveClip(null);
     editSelectionStore.set({ time: null });
