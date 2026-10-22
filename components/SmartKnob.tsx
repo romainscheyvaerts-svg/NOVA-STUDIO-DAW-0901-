@@ -36,7 +36,7 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
     internalValueRef.current = value;
   }, [value]);
 
-  // GESTES : glisser, Maj = fin, molette, double-clic = défaut.
+  // GESTES : glisser, Ctrl ou Maj = fin, molette, double-clic ou Alt+clic = défaut.
   // Pendant la lecture, sur une piste en Touch / Latch / Write / Trim, l'appui
   // et le relâchement bornent l'écriture d'automation (services/AutomationManager).
   const knob = useKnobInteraction(visualValue, (newVal) => {

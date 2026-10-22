@@ -3,9 +3,10 @@ import { useCallback, useRef } from 'react';
 /**
  * Gestes « console » communs à tous les potards et faders :
  * - glisser vertical (souris ou doigt) pour régler ;
- * - Maj enfoncée pendant le glissement = réglage fin (10x plus précis) ;
- * - molette = petit pas (Maj + molette = pas fin) ;
- * - double-clic (ou double tape) = valeur par défaut.
+ * - Maj ou Ctrl enfoncée pendant le glissement = réglage fin (10x plus précis), comme dans les
+ *   DAW sous Windows (Ctrl) et sur Mac (Maj / Cmd) ;
+ * - molette = petit pas (Maj ou Ctrl + molette = pas fin) ;
+ * - double-clic (ou double tape), ou Alt+clic = valeur par défaut.
  *
  * La valeur par défaut est `defaultValue` si fourni, sinon 0 pour une plage
  * bipolaire (pan, gain en dB…), sinon la valeur qu'avait le potard à
@@ -34,7 +35,10 @@ export interface KnobOptions {
   valueNow?: () => number;
 }
 
-export const KNOB_HINT = 'Glisser pour régler · Maj : réglage fin · molette · double-clic : valeur par défaut';
+export const KNOB_HINT = 'Glisser pour régler · Ctrl ou Maj : réglage fin · molette · double-clic ou Alt+clic : valeur par défaut';
+
+/** Réglage fin : Maj, Ctrl ou Cmd enfoncée (Windows : Ctrl ; Mac : Cmd / Maj). */
+export const isFineKey = (e: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }): boolean => !!(e.shiftKey || e.ctrlKey || e.metaKey);
 
 export const useKnobInteraction = (
   value: number,
@@ -78,8 +82,8 @@ export const useKnobInteraction = (
     if (c.disabled || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    // Double-clic : le second appui remet la valeur par défaut, sans glissement.
-    if (e.detail >= 2) { reset(); return; }
+    // Double-clic (le second appui) ou Alt+clic : valeur par défaut, sans glissement.
+    if (e.detail >= 2 || e.altKey) { reset(); return; }
 
     let last = c.horizontal ? e.clientX : e.clientY;
     let norm = c.toNorm(current());
@@ -91,7 +95,7 @@ export const useKnobInteraction = (
       const pos = c.horizontal ? m.clientX : m.clientY;
       const delta = c.horizontal ? pos - last : last - pos;
       last = pos;
-      norm = Math.max(0, Math.min(1, norm + (delta / c.sens) * (m.shiftKey ? 0.1 : 1)));
+      norm = Math.max(0, Math.min(1, norm + (delta / c.sens) * (isFineKey(m) ? 0.1 : 1)));
       emit(c.fromNorm(norm));
     };
     const onMouseUp = () => {
@@ -149,7 +153,7 @@ export const useKnobInteraction = (
     if (c.disabled || w.deltaY === 0) return;
     w.preventDefault();
     w.stopPropagation();
-    const step = (latest.current.options.wheelStep ?? 0.01) * (w.shiftKey ? 0.1 : 1);
+    const step = (latest.current.options.wheelStep ?? 0.01) * (isFineKey(w) ? 0.1 : 1);
     const n = c.toNorm(current()) + (w.deltaY < 0 ? step : -step);
     emit(c.fromNorm(n));
   });

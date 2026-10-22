@@ -118,6 +118,8 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
     e.stopPropagation();
     boxRef.current?.focus({ preventScroll: true });
     help.show();
+    // Alt+clic : valeur d'origine (comme dans les DAW), sans glissement.
+    if (e.altKey) { reset(); return; }
     if (e.pointerType !== 'mouse') {
       const now = performance.now();
       if (now - lastTap.current < 320) { lastTap.current = 0; reset(); return; }
@@ -136,7 +138,7 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
     const travel = e.pointerType === 'mouse' ? 200 : 240;
     // Crans : course plus courte par position (un cran tous les ~28 px).
     const span = r.detents && r.detents.length > 1 ? Math.min(travel, 28 * (r.detents.length - 1)) : travel;
-    d.n = Math.max(0, Math.min(1, d.n + (dy / span) * (e.shiftKey ? 0.1 : 1)));
+    d.n = Math.max(0, Math.min(1, d.n + (dy / span) * (e.shiftKey || e.ctrlKey || e.metaKey ? 0.1 : 1)));
     emit(fromNorm(r, d.n));
   };
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -153,7 +155,7 @@ const KnobImpl: React.FC<KnobProps> = (props) => {
     if (p.disabled || w.deltaY === 0) return;
     w.preventDefault();
     w.stopPropagation();
-    emit(nudge(r, p.value, w.deltaY < 0 ? 1 : -1, { fine: w.shiftKey }));
+    emit(nudge(r, p.value, w.deltaY < 0 ? 1 : -1, { fine: w.shiftKey || w.ctrlKey || w.metaKey }));
     flash();
   });
   const setBox = useCallback((el: HTMLDivElement | null) => {

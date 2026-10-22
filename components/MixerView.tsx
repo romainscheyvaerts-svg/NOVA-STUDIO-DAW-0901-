@@ -301,7 +301,7 @@ const ChannelStrip: React.FC<{
   };
 
   // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
-  // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
+  // (le fader ne saute plus sous le clic), Ctrl ou Maj = fin, molette, double-clic ou Alt+clic = 0 dB.
   // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
   // Valeur entendue lue au moment du geste ; l'affichage suit seul (LiveFaderCap, LivePanKnob).
   const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
