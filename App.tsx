@@ -5265,6 +5265,20 @@ function Studio() {
   // Kits NOVA : ouverture du navigateur depuis l'extérieur du panneau (bouton « Kits »).
   const [kitsSignal, setKitsSignal] = useState(0);
   const openKits = useCallback(() => { setDrumsOpen(true); setKitsSignal(n => n + 1); }, []);
+  /**
+   * Tour beatmaking (22/10/2026) : « Faire un beat » sans mélodie du catalogue. Avant, un projet vierge
+   * n'avait AUCUN bouton de beat (Batterie, Kits, 808, Synthé, Sampler n'apparaissaient qu'en partant
+   * d'une mélodie) : il fallait taper « batterie » dans Ctrl+K. Le projet passe en mode beat (ces
+   * boutons dans la barre du bas) et la boîte à rythmes s'ouvre. Pas d'étape d'annulation : c'est un mode.
+   */
+  const startBeatMode = useCallback(() => {
+    if (stateRef.current.projectMode !== 'BEATMAKING') {
+      setSilently(s => ({ ...s, projectMode: 'BEATMAKING' }));
+      stateRef.current = { ...stateRef.current, projectMode: 'BEATMAKING' };
+    }
+    setDrumsOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const DRUM_TRACK_ID = 'track-drums';
 
   /** Fin de la boucle de batterie : fin du beat / de la mélodie, au moins 8 mesures. */
@@ -10769,6 +10783,7 @@ function Studio() {
         user={user}
         account={barUser}
         onEnterStudio={handleEnterStudio}
+        onEnterBeat={() => { handleEnterStudio(); startBeatMode(); }}
         onEnterWithInstrumental={handleEnterWithInstrumental}
         onEnterWithMelody={handleEnterWithMelody}
         onEnterWithAudioFile={handleEnterWithAudioFile}
@@ -11011,7 +11026,7 @@ function Studio() {
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)} onOpenQuickMaster={() => setQuickMasterOpen(true)}
-          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')} onOpenVideoTake={() => setVideoTakeOpen(true)}
+          onOpenWarmup={() => setVocalCoach('echauffement')} onOpenTuner={() => setVocalCoach('accordeur')} onStartBeat={state.projectMode === 'BEATMAKING' ? undefined : startBeatMode} onOpenVideoTake={() => setVideoTakeOpen(true)}
           onSendToStudio={() => setStudioSendOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}

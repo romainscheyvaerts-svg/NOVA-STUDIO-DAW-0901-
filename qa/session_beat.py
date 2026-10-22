@@ -63,7 +63,7 @@ def run(page, log, ch):
     ch.start("Batterie", "Ouvrir la boîte à rythmes", protools="FL : F6 (Channel rack) ; Pro Tools : nouvelle piste instrument + plug-in (≈ 5 gestes)")
     b = reachable(ch, "button[aria-label='Batterie'], button[title^='Boîte à rythmes']", "Batterie")
     if b: ch.click(b, "Batterie")
-    elif via_menu(ch, "Batterie|Boîte à rythmes"): pass
+    elif via_menu(ch, "Faire un beat|Batterie|Boîte à rythmes"): pass
     elif open_by_palette(ch, "batterie", "pal.drums"): pass
     else:
         # Détour d'un beatmaker qui ne trouve pas : repartir d'une mélodie du catalogue (mode beat).

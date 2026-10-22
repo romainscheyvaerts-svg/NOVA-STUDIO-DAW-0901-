@@ -59,6 +59,8 @@ interface TransportProps {
   /** « Voix et flow » (lot 11) : échauffement de la voix et du flow, accordeur. */
   onOpenWarmup?: () => void;
   onOpenTuner?: () => void;
+  /** Tour beatmaking : « Faire un beat » (projet en mode beat + boîte à rythmes). Absent quand le projet y est déjà. */
+  onStartBeat?: () => void;
   /** « 🎥 Filmer la prise » (caméra pendant la prise) : entrée du menu (la pastille flottante n'existe qu'en mode avancé). */
   onOpenVideoTake?: () => void;
   isPlaying: boolean;
@@ -268,7 +270,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onOpenHowTo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onOpenVideoTake, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenReviews, reviewsLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onOpenQuickMaster, onOpenWarmup, onOpenTuner, onStartBeat, onOpenVideoTake, onShareProject, onSendToStudio, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -444,6 +446,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               {onOpenQuickMaster && (
                 <button onClick={() => { onOpenQuickMaster(); setIsMobileMenuOpen(false); }} data-testid="menu-quick-master" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                   <span className="w-5 text-center" aria-hidden="true">🎚️</span><span className="flex-1">Masteriser un morceau</span><span className="text-[10px] font-normal text-slate-400">un fichier, sans projet</span>
+                </button>
+              )}
+              {onStartBeat && !simple && (
+                <button onClick={() => { onStartBeat(); setIsMobileMenuOpen(false); }} data-testid="menu-start-beat" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-orange-400/10 border border-orange-400/30 hover:bg-orange-400/20 text-orange-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <span className="w-5 text-center" aria-hidden="true">🥁</span><span className="flex-1">Faire un beat</span><span className="text-[10px] font-normal text-orange-200/70">batterie, 808, synthé</span>
                 </button>
               )}
               {onOpenWarmup && (

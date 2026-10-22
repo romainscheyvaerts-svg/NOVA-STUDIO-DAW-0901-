@@ -356,7 +356,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
           {!dm ? (
             <div className="space-y-2">
-              <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité de ta mélodie.</p>
+              <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité du projet.</p>
               <button type="button" onClick={() => padFileRef.current?.click()}
                 className="w-full rounded-2xl border-2 border-dashed border-white/15 hover:border-cyan-400/60 px-4 py-4 text-[13px] font-bold text-slate-200">
                 <i className="fas fa-file-import mr-2" />Ou commence avec TES sons : choisis ou glisse ici tes fichiers audio (un pad par son)
