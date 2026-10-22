@@ -1772,7 +1772,7 @@ function Studio() {
     if (route !== 'legacy') { if (route === 'makemusic') setTakeHomeOpen(true); setAiNotification(route === 'makemusic' ? MM_CLOUD_NOTICE : LOGIN_CLOUD_NOTICE); return; }
     setSaveState({ isSaving: true, progress: 10, message: 'Création de la copie...' });
     try {
-      const copyName = `${n} (Copy)`;
+      const copyName = `${n} (copie)`;
       const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       // Une copie est un autre projet : elle n'hérite pas du déblocage de l'export payant.
       const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName, exportKey: newExportKey() };
@@ -3328,7 +3328,7 @@ function Studio() {
         const newTrack: Track = {
             ...track,
             id: `track-${Date.now()}`,
-            name: `${track.name} (Copy)`,
+            name: `${track.name} (copie)`,
             clips: track.clips.map(clip => ({
                 ...clip,
                 id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`

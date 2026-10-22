@@ -182,7 +182,7 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                                             {(session.name || 'U').charAt(0).toUpperCase()}
                                         </div>
                                         <div>
-                                            <h4 className="text-xs font-bold text-white group-hover:text-cyan-400 transition-colors">{session.name || 'Projet Sans Nom'}</h4>
+                                            <h4 className="text-xs font-bold text-white group-hover:text-cyan-400 transition-colors">{session.name || 'Projet sans nom'}</h4>
                                             <p className="text-[9px] text-slate-500 mt-0.5">
                                                 <i className="far fa-clock mr-1"></i> {formatDate(session.updated_at)}
                                             </p>

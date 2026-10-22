@@ -826,7 +826,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const audioUrl = e.dataTransfer.getData('audio-url');
       
       if (audioUrl && onAudioDrop) {
-          const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
+          const audioName = e.dataTransfer.getData('audio-name') || 'Son importé';
           onAudioDrop(targetTrackId, audioUrl, audioName, dropTime);
           return;
       }
