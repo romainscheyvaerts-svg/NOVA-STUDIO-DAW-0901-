@@ -118,3 +118,12 @@ export const latencyPreroll = (lat: number, sampleRate: number, clips: Iterable<
   // Latences = nombres entiers d'échantillons : l'epsilon évite l'échantillon de trop (2048,0000001 → 2049).
   return Math.ceil(lat * sampleRate - 1e-6) / sampleRate;
 };
+
+/**
+ * Pré-roulement au retour de boucle (22/10/2026), même règle que latencyPreroll : une piste à
+ * latence compensée `lat` reçoit le début de la boucle `lat` secondes AVANT le retour (à la place de
+ * ce qui suit la fin de boucle), sinon chaque tour perd ses `lat` premières secondes.
+ * @returns la latence à pré-rouler (s), 0 = rien (latence nulle ou anormale, boucle plus courte qu'elle)
+ */
+export const loopPrerollLatency = (lat: number, loopStart: number, loopEnd: number): number =>
+  lat > 0 && lat <= PREROLL_MAX_SECONDS && loopEnd - loopStart > lat + 1e-6 ? lat : 0;
