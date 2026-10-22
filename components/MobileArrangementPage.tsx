@@ -681,7 +681,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   return (
     // pb : la barre de navigation du bas (fixed, h-16) recouvrait la barre
     // d'édition du clip sélectionné.
-    <div className="flex flex-col h-full bg-nv-bg select-none pb-[var(--nv-nav-h,4rem)]">
+    <div className="nv-phone-text flex flex-col h-full bg-nv-bg select-none pb-[var(--nv-nav-h,4rem)]">
       {/* === BARRE D'OUTILS : une seule rangée ===
           Avant : deux rangées (horloge + BPM + zoom, puis outils) = 88 px de haut sur un écran de 844,
           et l'horloge doublait celle du transport (un toucher sur celle-ci montre mesures et temps).
@@ -1213,7 +1213,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <button
               onClick={handleCopyClip}
               aria-label="Copier le clip"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
             >
               <i className="fas fa-copy text-cyan-400 text-sm mb-0.5"></i>
               <span className="text-[11px] font-semibold text-white/75">COPIER</span>
@@ -1224,7 +1224,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={handlePasteClip}
               aria-label="Coller le clip copié"
               disabled={!clipboard}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 clipboard 
                   ? 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20' 
                   : 'bg-white/5 opacity-40'
@@ -1239,7 +1239,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={handleDuplicateClip}
               data-testid="mobile-dup"
               aria-label="Dupliquer le clip (copie juste après)"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
             >
               <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
               <span className="text-[11px] font-semibold text-white/75">DOUBLER</span>
@@ -1249,7 +1249,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <button
               onClick={handleSplitClip}
               aria-label="Couper le clip en deux à la tête de lecture"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
             >
               <i className="fas fa-cut text-yellow-400 text-sm mb-0.5"></i>
               <span className="text-[11px] font-semibold text-white/75">COUPER</span>
@@ -1259,7 +1259,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <button
               onClick={handleReverseClip}
               aria-label="Inverser le clip (lecture à l'envers)"
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isReversed 
                   ? 'bg-purple-500/30 border border-purple-500/50' 
                   : 'bg-white/5 hover:bg-white/10 active:bg-purple-500/20'
@@ -1276,7 +1276,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Nettoyer la voix : bruit de fond et niveau"
                 title={CLEAN_TOOLTIP}
                 data-testid="mobile-clip-clean"
-                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 active:bg-cyan-500/30 transition-all"
+                className="flex-shrink-0 flex flex-col items-center justify-center w-[4.5rem] h-12 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 active:bg-cyan-500/30 transition-all"
               >
                 <i className="fas fa-wand-magic-sparkles text-cyan-300 text-sm mb-0.5" aria-hidden></i>
                 <span className="text-[10px] font-bold text-cyan-100">NETTOYER</span>
@@ -1290,7 +1290,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Justesse : corriger la voix dans la gamme"
                 title="Comme Flex Pitch dans Logic : ramène ta voix dans la gamme"
                 data-testid="mobile-clip-pitch"
-                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.pitchEdit ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
                 }`}
               >
@@ -1319,7 +1319,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Changer la tonalité du clip"
                 title="Plus aigu ou plus grave, sans changer le tempo (Live : Transpose · FL : Pitch)"
                 data-testid="mobile-clip-transpose"
-                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
                 }`}
               >
@@ -1335,7 +1335,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
                 isMuted: !selectedClip.clip.isMuted 
               })}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isMuted 
                   ? 'bg-red-500/30 border border-red-500/50' 
                   : 'bg-white/5 hover:bg-white/10'

@@ -17,7 +17,7 @@ const MobileContainer: React.FC<MobileContainerProps> = ({ children, title, head
     // pb : la barre d'onglets du bas est fixe (64 px + barre d'accueil de l'iPhone ; 0 quand elle est en colonne
     // à gauche, téléphone couché) : la zone qui défile s'arrête au-dessus, plus rien ne passe dessous (avant,
     // le dernier effet / le dernier son restait sous les onglets, impossible à toucher).
-    <div className="h-full w-full flex flex-col bg-nv-bg overflow-hidden safe-area-inset pb-[var(--nv-nav-h,4rem)]">
+    <div className="nv-phone-text h-full w-full flex flex-col bg-nv-bg overflow-hidden safe-area-inset pb-[var(--nv-nav-h,4rem)]">
       {/* Header centré */}
       {title && (
         <div className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-white/10 bg-nv-surface safe-area-inset-left safe-area-inset-right">

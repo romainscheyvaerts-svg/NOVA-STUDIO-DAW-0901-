@@ -124,7 +124,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         >
           <span className="text-base leading-none">{style ? style.emoji : '🎚️'}</span>
           {/* Style choisi : on garde « Mix auto » au-dessus, sinon le bouton ne disait plus ce qu'il fait (« Trap autotune » seul). */}
-          <span data-dock-label className="text-xs font-black leading-tight text-left">{style ? <><span className="block text-[9px] font-bold uppercase tracking-wider opacity-70">Mix auto</span>{style.name}</> : 'Mix auto'}</span>
+          <span data-dock-label className="text-xs font-black leading-tight text-left">{style ? <><span className="block text-[9px] [body[data-view-mode=MOBILE]_&]:text-[11px] font-bold uppercase tracking-wider opacity-70">Mix auto</span>{style.name}</> : 'Mix auto'}</span>
         </button>
       )}
     </div>
