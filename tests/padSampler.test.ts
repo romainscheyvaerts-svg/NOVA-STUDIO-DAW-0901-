@@ -137,6 +137,10 @@ describe('traitement du son (calculé une fois, lecture = export)', () => {
     expect(y.length).toBe(19200);
     expect(bakeChannels(x, SR, { stretch: true }, 12)[0].length).toBe(19200);
     expect(needsBake({ stretch: true }, 0)).toBe(false);
+    // La hauteur ne bouge pas : 440 Hz étiré ×2 compte toujours 440 passages par zéro montants par seconde.
+    const ups = (z: Float32Array, a: number, b: number) => { let n = 0; for (let i = a + 1; i < b; i++) if (z[i - 1] < 0 && z[i] >= 0) n++; return n; };
+    const f = ups(y, 2400, 2400 + SR / 4) * 4;
+    expect(Math.abs(f - 440)).toBeLessThanOrEqual(4);
   });
   it('fondu de boucle : la fin de boucle rejoint en douceur ce qui précède le début de boucle', () => {
     const x = [Float32Array.from({ length: 4800 }, (_, i) => i / 4800)];

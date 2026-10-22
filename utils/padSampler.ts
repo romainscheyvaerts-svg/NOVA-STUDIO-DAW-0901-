@@ -333,32 +333,47 @@ export function peakOf(ch: Float32Array[]): number {
 }
 
 /**
- * Étirement sans changer la hauteur (superposition de grains, fenêtres de Hann) : la durée est
- * multipliée par `factor`. Utilisé pour « garder la durée » quand on accorde le pad.
+ * Étirement sans changer la hauteur (WSOLA : grains de 30 ms recalés sur la forme d'onde, fenêtres de
+ * Hann à 50 %) : la durée est multipliée par `factor`, la période du son est gardée (pas de battement
+ * de phase entre grains). Utilisé pour « garder la durée » quand on accorde le pad.
  */
 export function timeStretch(ch: Float32Array[], sr: number, factor: number): Float32Array[] {
   if (Math.abs(factor - 1) < 1e-6) return ch.map(c => new Float32Array(c));
-  const N = Math.max(256, Math.round(sr * 0.04) & ~1);
-  const hs = N >> 2; // pas de synthèse (recouvrement 75 %)
+  const N = Math.max(256, Math.round(sr * 0.03) & ~1);
+  const hs = N >> 1; // pas de synthèse (recouvrement 50 % : les fenêtres de Hann s'additionnent à 1)
   const ha = hs / factor; // pas d'analyse
+  const tol = Math.round(sr * 0.008);
   const len = ch[0]?.length || 0;
   const outLen = Math.max(1, Math.round(len * factor));
   const win = new Float32Array(N);
   for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / N);
-  return ch.map(x => {
-    const y = new Float32Array(outLen + N);
-    const norm = new Float32Array(outLen + N);
-    for (let k = 0; k * hs < outLen; k++) {
-      const a = Math.round(k * ha), s = k * hs;
-      for (let i = 0; i < N; i++) {
-        const v = x[a + i] ?? 0;
-        y[s + i] += v * win[i];
-        norm[s + i] += win[i];
-      }
+  const mono = new Float32Array(len);
+  ch.forEach(c => { for (let i = 0; i < len; i++) mono[i] += c[i] / ch.length; });
+  const at = (i: number) => (i >= 0 && i < len ? mono[i] : 0);
+  // Positions des grains : chacun prolonge au mieux le précédent (corrélation normalisée).
+  const frames = Math.ceil(outLen / hs) + 1;
+  const pos: number[] = [];
+  let prev = 0;
+  for (let k = 0; k < frames; k++) {
+    const target = Math.round(k * ha);
+    let p = target;
+    if (k > 0) {
+      const nat = prev + hs;
+      let best = -Infinity;
+      const score = (s0: number) => { let c = 0, e = 1e-12; for (let i = 0; i < hs; i += 2) { const v = at(s0 + i); c += v * at(nat + i); e += v * v; } return c / Math.sqrt(e); };
+      for (let d = -tol; d <= tol; d += 2) { const s0 = target + d; if (s0 < 0) continue; const c = score(s0); if (c > best) { best = c; p = s0; } }
+      for (const s0 of [p - 1, p + 1]) { if (s0 >= 0) { const c = score(s0); if (c > best) { best = c; p = s0; } } }
     }
-    const out = new Float32Array(outLen);
-    for (let i = 0; i < outLen; i++) out[i] = norm[i] > 1e-3 ? y[i] / norm[i] : y[i];
-    return out;
+    pos.push(p); prev = p;
+  }
+  return ch.map(x => {
+    const y = new Float32Array(frames * hs + N);
+    for (let k = 0; k < frames; k++) {
+      const a = pos[k], o = k * hs;
+      // 1er grain : pas de fondu d'entrée (l'attaque du son reste entière).
+      for (let i = 0; i < N; i++) y[o + i] += (a + i < len && a + i >= 0 ? x[a + i] : 0) * (k === 0 && i < hs ? 1 : win[i]);
+    }
+    return y.slice(0, outLen);
   });
 }
 

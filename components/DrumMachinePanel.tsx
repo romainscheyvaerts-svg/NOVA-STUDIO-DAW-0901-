@@ -22,7 +22,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import DrumKitBrowser from './DrumKitBrowser';
 import { applyKitDef, isKitRef, KIT_DRAG_TYPE, kitIndexIfLoaded, KitDef, KitIndex, loadKitIndex, setPadKitSound } from '../utils/drumKitLibrary';
 import { DrumMenu, menuAt, menuUnder, type DrumMenuItem, type DrumMenuState } from './DrumMenu';
-import PadSamplerEditor from './PadSamplerEditor';
+import PadSamplerEditor, { TOUCH_RANGE } from './PadSamplerEditor';
 import { useSimpleMode } from '../utils/simpleMode';
 import { tempoMapStore, timeToQuarters } from '../utils/tempoMap';
 
@@ -891,6 +891,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   );
 };
 
+const coarseNow = () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+
 /** Volume, pan et envoi réverb du pad, dans son menu (réglage rapide sans ouvrir le mix). */
 const QuickMix: React.FC<{ row: DrumRow; onEdit: (patch: Partial<DrumRow>) => void }> = ({ row, onEdit }) => {
   const [v, setV] = useState({ volume: row.volume, pan: row.pan, verb: row.mix?.verb || 0 });
@@ -899,17 +901,17 @@ const QuickMix: React.FC<{ row: DrumRow; onEdit: (patch: Partial<DrumRow>) => vo
     <div className="grid grid-cols-3 gap-2" data-testid="row-quick-mix">
       <label className="flex flex-col gap-1 text-[11px] text-slate-400">
         <span className="flex justify-between"><span>Volume</span><span className="tabular-nums text-slate-200">{Number.isFinite(db) ? `${db > 0 ? '+' : ''}${db.toFixed(1)} dB` : '−∞'}</span></span>
-        <input type="range" min={0} max={1.2} step={0.01} value={v.volume} aria-label="Volume du pad" className="w-full h-8 accent-cyan-400"
+        <input type="range" min={0} max={1.2} step={0.01} value={v.volume} aria-label="Volume du pad" className="w-full h-8 accent-cyan-400" style={coarseNow() ? TOUCH_RANGE : undefined}
           onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, volume: x })); onEdit({ volume: x }); }} />
       </label>
       <label className="flex flex-col gap-1 text-[11px] text-slate-400">
         <span className="flex justify-between"><span>Pan</span><span className="tabular-nums text-slate-200">{Math.abs(v.pan) < 0.025 ? 'C' : `${v.pan < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v.pan) * 100)}`}</span></span>
-        <input type="range" min={-1} max={1} step={0.05} value={v.pan} aria-label="Panoramique du pad" className="w-full h-8 accent-cyan-400"
+        <input type="range" min={-1} max={1} step={0.05} value={v.pan} aria-label="Panoramique du pad" className="w-full h-8 accent-cyan-400" style={coarseNow() ? TOUCH_RANGE : undefined}
           onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, pan: x })); onEdit({ pan: x }); }} />
       </label>
       <label className="flex flex-col gap-1 text-[11px] text-slate-400">
         <span className="flex justify-between"><span>Réverb</span><span className="tabular-nums text-slate-200">{Math.round(v.verb * 100)} %</span></span>
-        <input type="range" min={0} max={1} step={0.01} value={v.verb} aria-label="Envoi réverb du pad" className="w-full h-8 accent-cyan-400"
+        <input type="range" min={0} max={1} step={0.01} value={v.verb} aria-label="Envoi réverb du pad" className="w-full h-8 accent-cyan-400" style={coarseNow() ? TOUCH_RANGE : undefined}
           onChange={e => { const x = parseFloat(e.target.value); setV(s => ({ ...s, verb: x })); onEdit({ mix: { ...(row.mix || {}), verb: x } }); }} />
       </label>
     </div>

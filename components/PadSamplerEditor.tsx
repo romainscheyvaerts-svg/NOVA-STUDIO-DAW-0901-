@@ -29,6 +29,10 @@ export const fmtHz = (hz: number) => (hz >= 1000 ? `${fr(hz / 1000, hz >= 10000 
 export const fmtDb = (db: number) => (Number.isFinite(db) ? `${db > 0 ? '+' : db < 0 ? '−' : ''}${fr(Math.abs(db), 1)} dB` : '−∞ dB');
 const fmtSt = (st: number) => `${st > 0 ? '+' : st < 0 ? '−' : ''}${Math.abs(st)} dt`;
 
+/** Au doigt : curseur de 44 px de haut (la règle générale de l'appli en donne 40), piste fine au milieu. */
+const COARSE = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+export const TOUCH_RANGE: React.CSSProperties = { height: 44, padding: '19px 0', backgroundClip: 'content-box' };
+
 /** Curseur au doigt (44 px), valeur exacte affichée, retour à la valeur par défaut d'un clic sur la valeur. */
 const Ctl: React.FC<{
   label: string; value: number; min: number; max: number; step?: number; fmt: (v: number) => string; onChange: (v: number) => void; dflt?: number;
@@ -41,6 +45,12 @@ const Ctl: React.FC<{
   const toV = (x: number) => {
     let v = log ? Math.exp(x) : x;
     if (log && v <= min * 1.0001) v = min;
+    if (log) {
+      // Échelle logarithmique : valeurs « rondes » (3 chiffres, et 1 kHz plutôt que 998 Hz).
+      v = +v.toPrecision(3);
+      const two = +v.toPrecision(2);
+      if (Math.abs(v - two) / v < 0.004) v = two;
+    }
     if (step) v = Math.round(v / step) * step;
     return Math.max(min, Math.min(max, +v.toPrecision(6)));
   };
@@ -49,11 +59,11 @@ const Ctl: React.FC<{
       <span className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
         <span className="truncate">{label}</span>
         <button type="button" disabled={disabled} onClick={() => dflt !== undefined && onChange(dflt)} title={dflt !== undefined ? `Revenir à ${fmt(dflt)}` : undefined}
-          className="tabular-nums text-[12px] font-bold text-slate-100 hover:text-cyan-300 min-h-[28px]" data-value="">{fmt(value)}</button>
+          className="tabular-nums text-[12px] font-bold text-slate-100 hover:text-cyan-300 min-h-[28px] [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:px-2" data-value="">{fmt(value)}</button>
       </span>
-      <input type="range" disabled={disabled} min={lo} max={hi} step={log ? (hi - lo) / 1000 : step || (max - min) / 1000} value={pos}
+      <input type="range" disabled={disabled} min={lo} max={hi} step={log ? (hi - lo) / 4000 : step || (max - min) / 1000} value={pos}
         aria-label={label} aria-valuetext={fmt(value)}
-        onChange={e => onChange(toV(parseFloat(e.target.value)))} className="w-full h-9 accent-cyan-400" />
+        onChange={e => onChange(toV(parseFloat(e.target.value)))} className="w-full h-9 accent-cyan-400" style={COARSE ? TOUCH_RANGE : undefined} />
     </label>
   );
 };
@@ -64,7 +74,7 @@ const Seg: React.FC<{ label: string; value: string | number; options: { label: s
     <div className="flex flex-wrap rounded-xl overflow-hidden border border-white/10 w-fit max-w-full" role="radiogroup" aria-label={label}>
       {options.map(o => (
         <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} onClick={() => onPick(o.value)} title={o.hint}
-          className={`min-h-[44px] px-3 text-[12px] font-bold ${o.value === value ? 'bg-white text-black' : 'bg-white/5 text-white hover:bg-white/10'}`}>{o.label}</button>
+          className={`min-h-[44px] min-w-[44px] px-3 text-[12px] font-bold ${o.value === value ? 'bg-white text-black' : 'bg-white/5 text-white hover:bg-white/10'}`}>{o.label}</button>
       ))}
     </div>
   </div>
