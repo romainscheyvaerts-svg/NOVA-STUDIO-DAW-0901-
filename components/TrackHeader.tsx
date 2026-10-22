@@ -752,7 +752,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 title="Envois : écho et reverbs"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
+                // Au doigt : dans le menu « ⋯ » de la piste (Envois), pour laisser 44 px à chaque bouton de la rangée.
+                className={`nova-hit-tactile [@media(pointer:coarse)]:hidden w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
             </button>

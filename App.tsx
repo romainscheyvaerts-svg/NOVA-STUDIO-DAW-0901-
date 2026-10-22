@@ -1603,10 +1603,13 @@ function Studio() {
   };
   // Un téléphone en paysage (≈ 844 px) passait en TABLET, dont les vues sont
   // utilisables seulement à la souris : écran tactile + petit côté < 600 px = MOBILE.
+  // Tablette au doigt (petit côté ≥ 600 px) : la vue tablette (arrangement, console, piano roll),
+  // même en portrait sous 768 px (iPad mini : 744 px), qui avait jusqu'ici la vue du téléphone.
   const autoViewMode = (): ViewMode => {
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const shortSide = Math.min(window.innerWidth, window.innerHeight);
-    if (window.innerWidth < 768 || (coarse && shortSide < 600)) return 'MOBILE';
+    if (coarse) return shortSide < 600 ? 'MOBILE' : window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
+    if (window.innerWidth < 768) return 'MOBILE';
     return window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
   };
   const [viewMode, setViewMode] = useState<ViewMode>(() => readSavedViewMode() ?? autoViewMode());
@@ -11474,7 +11477,8 @@ function Studio() {
           onNewSynthTrack={handleNewSynthTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
-          onOpenLyrics={() => setLyricsOpen(o => !o)}
+          // Mode simple : « Paroles » est déjà un onglet de la barre du bas (pas deux fois le même bouton).
+          onOpenLyrics={simpleMode ? undefined : () => setLyricsOpen(o => !o)}
           lyricsOpen={lyricsOpen}
           currentStyleId={state.vocalMixStyle}
         />
@@ -11552,8 +11556,34 @@ function Studio() {
           {/* Bandeau du bas (ordinateur / tablette) : Collaborer, session en ligne et
               les gestes voix (Piste voix, Paroles, Mix auto). Il prend sa propre place
               sous la grille : plus rien ne flotte sur les clips ni sur le catalogue. */}
+          {/* Bande réservée (ordinateur / tablette), dans le flux juste au-dessus du bandeau du bas : « Et
+              maintenant ? », l'avancement d'un import et les messages de Nova y prennent leur place le temps
+              qu'ils sont là, puis la bande disparaît. En flottant, ils recouvraient la timeline, les clips, les
+              faders de la console. */}
           {!isMobile && (
-            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
+            <div data-nova-band className="shrink-0 flex flex-col empty:hidden" style={{ backgroundColor: 'var(--bg-surface)' }}>
+              {externalImportNotice && (
+                <div role="status" aria-live="polite" data-testid="band-status"
+                  className="mx-3 mt-1.5 self-start px-3 py-1.5 rounded-xl bg-nv-raised border border-white/10 flex items-center gap-2.5 text-[12px] font-medium text-slate-200">
+                  {!/^[✅❌]/.test(externalImportNotice) && <i className="fas fa-circle-notch fa-spin text-cyan-400" aria-hidden="true"></i>}
+                  <span>{externalImportNotice}</span>
+                </div>
+              )}
+              <NextStepCard inline band
+                open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
+                trigger={nextStep || 'take'}
+                actions={nextStepActions}
+                beatTitle={getCatalogBeat(state.tracks)?.title}
+                isMobile={false}
+                besideSidebar={isSidebarOpen}
+                onAction={handleNextStep}
+                onClose={() => setNextStep(null)}
+                footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} row /> : null}
+              />
+            </div>
+          )}
+          {!isMobile && (
+            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-[11rem] border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
                 {/* Mode simple : Pistes, Groupes, Temps, Session, Collaborer et Retours sont rangés (menu ☰,
                     Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
@@ -11822,7 +11852,7 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {/* Téléphone, page Morceau : posé dans la page (MobileStatusInline) ; en flottant, il couvrait la barre du clip. */}
-      {externalImportNotice && !(isMobile && activeMobileTab === 'ARRANGEMENT') && (
+      {externalImportNotice && isMobile && activeMobileTab !== 'ARRANGEMENT' && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
@@ -11843,17 +11873,6 @@ function Studio() {
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
-      <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && (activeMobileTab === 'NOVA' || activeMobileTab === 'ARRANGEMENT'))}
-        trigger={nextStep || 'take'}
-        actions={nextStepActions}
-        beatTitle={getCatalogBeat(state.tracks)?.title}
-        isMobile={isMobile}
-        besideSidebar={isSidebarOpen}
-        onAction={handleNextStep}
-        onClose={() => setNextStep(null)}
-        footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null}
-      />
       <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
         onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
         busy={!!nextStep || countInBeat !== null} simple={simpleMode} />

@@ -27,6 +27,9 @@ interface Props {
  * morceau (comme la Playlist de FL) : on peint les mesures avec le motif choisi.
  * Les commandes rares (dupliquer, copier, doubler, décaler, inverser, rythmes publiés…) sont dans « ⋯ ».
  */
+// Au doigt : cases de mesure de 40 px (au lieu de 28) pour les toucher ou les peindre sans viser.
+const CELL_W = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 40 : 28;
+
 const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, markers, playBar, simple, narrow, notify }) => {
   const dm = useMemo(() => ensurePatterns(raw), [raw]);
   const patterns = dm.patterns!;
@@ -212,7 +215,7 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
             {sections.length > 0 && (
               <div className="relative h-4" aria-hidden="true">
                 {sections.map((s, i) => {
-                  const x = (b: number) => b * 30 + (Math.floor(b / 4) + 1) * 3;
+                  const x = (b: number) => b * (CELL_W + 2) + (Math.floor(b / 4) + 1) * 3;
                   const a = Math.round(s.start / barSec), z = Math.max(a + 1, Math.round(s.end / barSec));
                   return (
                     <span key={i} className="absolute top-0 text-[9px] font-bold text-slate-400 truncate border-l border-white/20 pl-0.5"
@@ -227,8 +230,8 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
                 <div key={b} data-bar={b} role="button" tabIndex={0}
                   aria-label={`Mesure ${b + 1} : ${id ? `motif ${nameOf(id)}` : 'silence'}`}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); const next = [...song]; next[b] = song[b] === active.id ? '' : active.id; onChange({ ...dm, song: next }); } }}
-                  className={`relative shrink-0 w-[28px] h-10 mr-[2px] rounded-md flex items-center justify-center text-[11px] font-black cursor-pointer ${b % 4 === 0 ? 'ml-[3px]' : ''} ${playBar === b ? 'ring-2 ring-white' : ''}`}
-                  style={id ? { background: colorOf(id) || '#475569', color: '#000' } : { background: 'rgba(255,255,255,0.04)', color: '#64748b' }}>
+                  className={`relative shrink-0 h-10 [@media(pointer:coarse)]:h-11 mr-[2px] rounded-md flex items-center justify-center text-[11px] font-black cursor-pointer ${b % 4 === 0 ? 'ml-[3px]' : ''} ${playBar === b ? 'ring-2 ring-white' : ''}`}
+                  style={{ width: CELL_W, ...(id ? { background: colorOf(id) || '#475569', color: '#000' } : { background: 'rgba(255,255,255,0.04)', color: '#64748b' }) }}>
                   {id ? nameOf(id).slice(0, 3) : '·'}
                   {b % 4 === 0 && <span className="absolute -bottom-0 left-0.5 text-[8px] font-bold text-black/50">{b + 1}</span>}
                 </div>

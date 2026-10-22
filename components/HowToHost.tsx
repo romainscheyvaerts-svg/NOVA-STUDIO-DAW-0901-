@@ -104,16 +104,16 @@ export const HowToNudgeCard: React.FC<{ inline?: boolean; blocked?: boolean }> =
  * export), « Montre-moi » en un tap, et « Ne plus montrer ». Une seule fois par moment.
  * Posée dans la carte « Et maintenant ? » (components/NextStepCard) et dans la carte « Et après ? ».
  */
-export const HowToNextRow: React.FC<{ moment: HowToMoment; onPicked?: () => void; bare?: boolean }> = ({ moment, onPicked, bare }) => {
+export const HowToNextRow: React.FC<{ moment: HowToMoment; onPicked?: () => void; bare?: boolean; /** Une seule rangée (bande réservée du bureau). */ row?: boolean }> = ({ moment, onPicked, bare, row }) => {
   useHowTo();
   const [hidden] = useState(() => nextStepPrefs.off() || (!bare && nextStepPrefs.seen(moment)));
   useEffect(() => { if (!hidden && !bare) nextStepPrefs.markSeen(moment); }, [hidden, bare, moment]);
   const guides = nextGuidesFor(moment);
   if (hidden || nextStepPrefs.off() || !guides.length) return null;
   return (
-    <div className={bare ? 'mt-2' : 'mt-2 border-t border-nv-line/10 pt-2'} data-testid="howto-next" data-moment={moment}>
+    <div className={row ? 'flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-nv-line/10 pt-1' : bare ? 'mt-2' : 'mt-2 border-t border-nv-line/10 pt-2'} data-testid="howto-next" data-moment={moment}>
       <p className="text-[11px] font-bold text-nv-muted">Comment faire la suite, pas à pas :</p>
-      <div className="mt-1.5 flex flex-wrap gap-2">
+      <div className={row ? 'flex flex-wrap gap-2' : 'mt-1.5 flex flex-wrap gap-2'}>
         {guides.map(g => (
           <button key={g.id} type="button" data-testid={`howto-next-${g.id}`}
             onClick={() => { track('howto_next_clicked', { moment, guide: g.id }); onPicked?.(); howTo.showMe(g.id); }}
@@ -123,7 +123,7 @@ export const HowToNextRow: React.FC<{ moment: HowToMoment; onPicked?: () => void
         ))}
       </div>
       <button type="button" data-testid="howto-next-off" onClick={() => { nextStepPrefs.setOff(); onPicked?.(); }}
-        className="mt-1 min-h-11 px-1 text-[11px] font-semibold text-nv-muted underline-offset-2 hover:text-nv-ink hover:underline">
+        className={`${row ? '' : 'mt-1 '}min-h-11 px-1 text-[11px] font-semibold text-nv-muted underline-offset-2 hover:text-nv-ink hover:underline`}>
         Ne plus montrer ces suggestions
       </button>
     </div>
