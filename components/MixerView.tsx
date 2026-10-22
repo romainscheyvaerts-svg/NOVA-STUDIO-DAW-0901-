@@ -4,7 +4,7 @@ import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
 import { dbTextToGain } from '../plugins/hw/valueEntry';
-import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
+import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup, ContextMenuItem } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginName } from './PluginName';
@@ -458,7 +458,7 @@ const ChannelStrip: React.FC<{
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
                {/* Move Up/Down Buttons (toujours visibles au doigt : pas de survol) */}
-               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:hidden transition-opacity">
                   <button 
                     onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
                     className={`w-4 h-2.5 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
@@ -478,7 +478,8 @@ const ChannelStrip: React.FC<{
                </div>
                <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-4 h-4 [@media(pointer:coarse)]:w-8 [@media(pointer:coarse)]:h-8 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
+            {/* Au doigt : « Retirer l'effet » dans le menu de l'insert (appui long), pas de croix de 18 px posée sur le bord. */}
+            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx [@media(pointer:coarse)]:hidden" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
         ))}
         {hiddenInserts.length > 0 && (
@@ -502,7 +503,19 @@ const ChannelStrip: React.FC<{
         )}
         {fxMenu && (
           <FloatingMenu x={fxMenu.x} y={fxMenu.y} title={fxMenu.p.name || fxMenu.p.type} onClose={() => setFxMenu(null)}
-            items={[...pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p)), 'separator', ...insertCopyMenuItems(track, fxMenu.p, allTracks, (fn, label) => applyTracks(fn, label))]} />
+            items={[...pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p)), 'separator', ...insertCopyMenuItems(track, fxMenu.p, allTracks, (fn, label) => applyTracks(fn, label)),
+              // Au doigt, les petites flèches ↑ ↓ et la croix de l'insert sont masquées (2 × 16 px empilés : on
+              // touchait l'une pour l'autre) : monter, descendre et retirer passent par ce menu (appui long).
+              ...(() => {
+                const i = track.plugins.findIndex(x => x.id === fxMenu.p.id);
+                const extra: (ContextMenuItem | 'separator')[] = ['separator'];
+                if (onReorderPlugins) extra.push(
+                  { label: 'Monter', icon: 'fa-chevron-up', disabled: i <= 0, onClick: () => onReorderPlugins(track.id, i, i - 1) },
+                  { label: 'Descendre', icon: 'fa-chevron-down', disabled: i < 0 || i >= track.plugins.length - 1, onClick: () => onReorderPlugins(track.id, i, i + 1) },
+                );
+                if (onRemovePlugin) extra.push({ label: 'Retirer l’effet', icon: 'fa-times', onClick: () => onRemovePlugin(track.id, fxMenu.p.id) });
+                return extra.length > 1 ? extra : [];
+              })()]} />
         )}
         {insertList && (
           <InsertListPopover anchor={insertList} title={`Effets de ${track.name}`} plugins={track.plugins}
