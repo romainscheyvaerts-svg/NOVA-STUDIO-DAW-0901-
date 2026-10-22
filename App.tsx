@@ -8515,8 +8515,9 @@ function Studio() {
   }
   /** Le talkback a un sens ici : en collaboration (les deux rôles), ou en mode avancé (studio). */
   const talkAvailable = !!collab || !talkSimple;
-  const talkPress = useCallback(() => talkLatchRef.current!.press('key'), []);
-  const talkRelease = useCallback(() => talkLatchRef.current!.release('key'), []);
+  // Heures de la touche (event.timeStamp) : court / maintenu jugé sur l'appui réel, pas sur le rendu qui suit.
+  const talkPress = useCallback((at?: number) => talkLatchRef.current!.press('key', at), []);
+  const talkRelease = useCallback((at?: number) => talkLatchRef.current!.release('key', at), []);
   useTalkbackKey(talkAvailable, talkPress, talkRelease);
   /** Bouton (barre, panneau Collaboration, écran de l'artiste, cabine) : même comportement que la touche. */
   const talkButton = useCallback((down: boolean) => { const l = talkLatchRef.current!; if (down) l.press('button'); else l.release('button'); }, []);

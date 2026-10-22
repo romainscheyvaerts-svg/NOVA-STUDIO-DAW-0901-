@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { useTalkbackKey } from '../hooks/useTalkbackKey';
 import { __resetKeymapForTests, keymapStore } from '../utils/keymapStore';
+import { TalkbackLatch } from '../utils/talkback';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -110,5 +111,22 @@ describe('touche du talkback (hooks/useTalkbackKey)', () => {
     key('keydown', { key: 't', code: 'KeyT', altKey: true });
     key('keyup', { key: 't', code: 'KeyT' });
     expect(log).toEqual(['appui', 'relâche']);
+  });
+
+  it('appui court jugé sur l’heure des touches (event.timeStamp), pas sur le moment où le relâchement est traité', () => {
+    // Le studio redessine après l'appui : sur un PC chargé, le relâchement d'un appui de 110 ms
+    // était traité 400 ms plus tard et lu comme « maintenu » (le talkback se refermait).
+    const latch = new TalkbackLatch();
+    const Live: React.FC = () => { useTalkbackKey(true, at => latch.press('key', at), at => latch.release('key', at)); return null; };
+    act(() => { root.render(React.createElement(Live)); });
+    const d = key('keydown', { key: 'n', code: 'KeyN' });
+    expect(latch.open).toBe(true);
+    const busyUntil = Date.now() + 400;
+    while (Date.now() < busyUntil) { /* rendu lourd entre l'appui et le relâchement */ }
+    const u = new KeyboardEvent('keyup', { key: 'n', code: 'KeyN', bubbles: true, cancelable: true });
+    Object.defineProperty(u, 'timeStamp', { value: d.timeStamp + 110 });
+    act(() => { document.body.dispatchEvent(u); });
+    expect(latch.open).toBe(true);
+    expect(latch.latched).toBe(true);
   });
 });
