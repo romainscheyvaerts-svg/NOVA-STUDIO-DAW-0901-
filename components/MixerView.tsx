@@ -10,6 +10,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginName } from './PluginName';
 import { VstLateBadge } from './VstLateAlert';
 import TrackCpuBadge from './TrackCpuBadge';
+import StripLatency from './meters/StripLatency';
 import { pluginDisplayName } from '../utils/pluginLabel';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
@@ -387,6 +388,8 @@ const ChannelStrip: React.FC<{
           <span className="text-[8px] font-black text-slate-500 uppercase leading-3">{track.type === TrackType.BUS ? 'Effets du bus' : (isMaster ? 'Chaîne du master' : 'Effets')}</span>
           <span className="flex items-center gap-1">
           {/* Charge processeur de la piste (chantier 13) : détail par effet, veille, « geler ». */}
+          {/* Latence des effets (PDC) : affichée dès qu'un effet retarde le son. */}
+          {track.plugins.length > 0 && <StripLatency track={track} />}
           {!isMaster && track.type !== TrackType.BUS && track.type !== TrackType.SEND && <TrackCpuBadge track={track} />}
           {track.plugins.length >= insertRows && (
             <button type="button" onClick={handleEmptySlotClick} title="Ajouter un effet" aria-label={`Ajouter un effet sur ${track.name}`}
