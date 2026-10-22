@@ -1326,6 +1326,12 @@ function Studio() {
   // Fermer l'onglet ou recharger detruisait toute la session sans le moindre
   // avertissement, alors que le projet ne vit qu'en memoire.
   const hasUnsavedChangesRef = useRef(false);
+  /**
+   * Avant d'ouvrir un autre projet : les dernières modifications du projet ouvert sont
+   * écrites dans ses versions (défini avec la sauvegarde automatique, plus bas). Avant,
+   * jusqu'à 15 s de travail (une version toutes les 15 s) partaient avec le changement.
+   */
+  const flushCurrentProjectRef = useRef<() => Promise<void>>(async () => {});
   const unsavedMountRef = useRef(false);
 
 
@@ -1791,6 +1797,8 @@ function Studio() {
     const rate = projectRateOf(loadedState);
     rateLoadingRef.current++;
     return (async () => {
+      // Le projet encore ouvert garde ses dernières modifications (versions de la session).
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try { await audioEngine.setSampleRate(rate); } catch (e) { console.warn('[Ouverture] fréquence du projet', e); }
       // Un raté du câblage audio (métronome, sorties) ne doit jamais empêcher le projet de
       // s'ouvrir : avant, l'erreur interrompait la suite et l'ancien projet restait affiché.
@@ -1848,6 +1856,8 @@ function Studio() {
 
   const handleLoadLocalFile = useCallback(async (file: File) => {
       setExternalImportNotice("Chargement du projet...");
+      // Avant de décoder l'autre projet (fréquence du moteur, sons) : le projet ouvert est écrit.
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try {
           const loadedProject = await ProjectIO.loadProject(file);
           if (loadedProject) {
@@ -1867,6 +1877,7 @@ function Studio() {
 
   const handleLoadCloud = useCallback(async (id: string) => {
       setExternalImportNotice("Chargement depuis le cloud...");
+      try { await flushCurrentProjectRef.current(); } catch { /* jamais bloquant */ }
       try {
           const loadedProject = await supabaseManager.loadUserSession(id);
           if (loadedProject) {
@@ -5552,6 +5563,12 @@ function Studio() {
   }, [user]);
   const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
+  flushCurrentProjectRef.current = async () => {
+    // Sauvegarde en cours : on l'attend (sinon l'écriture demandée partirait sur le NOUVEAU projet).
+    for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
+    // Rien de changé depuis la dernière version, projet vide : rien n'est écrit (autosaveNow le sait).
+    await autosaveNow('close');
+  };
   // Avant de quitter la page (paiement Stripe, portail d'abonnement) : sauvegarde d'abord
   // (utils/saveBeforeLeave). Rien à garder : on peut partir ; échec : la page reste.
   useEffect(() => {
