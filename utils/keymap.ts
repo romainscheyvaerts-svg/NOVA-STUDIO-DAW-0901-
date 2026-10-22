@@ -61,10 +61,10 @@ const WHITE = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => [0, 2, 4, 5, 7, 
 const BLACK = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => ![0, 2, 4, 5, 7, 9, 11].includes(n % 12));
 /** Raccourcis du clavier MIDI : pour l'aide, et pour vérifier qu'ils ne se marchent pas dessus. */
 export const MIDI_KEYBOARD_SHORTCUTS: ShortcutDef[] = [
-  m({ id: 'midi.white', keys: WHITE.map(([c]) => letterOf(c)), label: `Touches blanches : ${WHITE.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Q S D F G H J K L M ù)`, pt: 'Live : Computer MIDI Keyboard', overridesNova: true }),
-  m({ id: 'midi.black', keys: BLACK.map(([c]) => letterOf(c)), label: `Touches noires : ${BLACK.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Z E T Y U O P)`, pt: 'Live : rangée du dessus', overridesNova: true }),
-  m({ id: 'midi.octave', keys: [letterOf(OCTAVE_DOWN), letterOf(OCTAVE_UP)], label: 'Octave − / + (en AZERTY : W / X)', pt: 'Live : Z / X', overridesNova: true }),
-  m({ id: 'midi.velocity', keys: [letterOf(VELOCITY_DOWN), letterOf(VELOCITY_UP)], label: 'Vélocité − / + (20, 40… 127)', pt: 'Live : C / V', overridesNova: true }),
+  m({ id: 'midi.white', keys: WHITE.map(([c]) => letterOf(c)), label: `Touches blanches : ${WHITE.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Q S D F G H J K L M ù)`, overridesNova: true }),
+  m({ id: 'midi.black', keys: BLACK.map(([c]) => letterOf(c)), label: `Touches noires : ${BLACK.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Z E T Y U O P)`, overridesNova: true }),
+  m({ id: 'midi.octave', keys: [letterOf(OCTAVE_DOWN), letterOf(OCTAVE_UP)], label: 'Octave − / + (en AZERTY : W / X)', overridesNova: true }),
+  m({ id: 'midi.velocity', keys: [letterOf(VELOCITY_DOWN), letterOf(VELOCITY_UP)], label: 'Vélocité − / + (20, 40… 127)', overridesNova: true }),
 ];
 
 export const KEYMAP: ShortcutDef[] = [
@@ -272,7 +272,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'view.arrangement', keys: [], label: 'Afficher l’arrangement', pt: 'Fenêtre › Édition', category: 'Fenêtres' }),
   nova({ id: 'view.mixer', keys: [], label: 'Afficher la console de mixage', pt: 'Fenêtre › Mixage', category: 'Fenêtres' }),
   nova({ id: 'view.browser', keys: ['ctrl+alt+b'], label: 'Afficher / masquer le navigateur (sons, effets)', pt: 'Aucun raccourci', category: 'Fenêtres' }),
-  nova({ id: 'nova.metronome', keys: [], label: 'Métronome on / off', pt: 'Pavé 7 (Click)', category: 'Transport' }),
+  nova({ id: 'nova.metronome', keys: ['o'], label: 'Métronome on / off', pt: 'Pavé 7 (Click)', category: 'Transport' }),
 
   // --- Piano roll ouvert (components/PianoRoll) : passe avant les raccourcis globaux ---
   pr({ id: 'pr.close', keys: ['escape'], label: 'Fermer le piano roll' }),
