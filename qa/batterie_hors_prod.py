@@ -189,6 +189,9 @@ BATTERIE = [
     # 100 % des notes dans l'accord ou la gamme), accord changé → la basse suit, Ctrl+Z en une étape, curseurs par région,
     # export = notes figées (≤ 1e-6), tempo 140 → 150 (positions musicales gardées), sauvegarde + rechargement ; téléphone 390.
     ("seance", []),
+    # 22/10/2026 · tour beatmaking : « Nouveau beat » / « Faire un beat », pas peints au glisser, clic allumé ↔ éteint,
+    # pads au clavier < 5 ms, piano roll (Maj + flèches, Ctrl+L, Ctrl + glisser = copie, Q sans étape vide), métronome O.
+    ("beat_gestes", []),
     # 22/10/2026 · L3 modulateurs : LFO à la noire sur le volume (menu de la piste) ; export : l'enveloppe bat à 0,5 s à ±5 ms ;
     # lecture : le gain de la piste suit la même courbe ; coupé = son constant ; Ctrl+Z ; sauvegarde + rechargement ; téléphone.
     ("modulateurs", []),
