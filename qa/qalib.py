@@ -21,6 +21,8 @@ FAKE_WAV = r"D:\1 WORK\CONTENU\nova-promo-2026-10-04\micro_fake.wav"
 VIEWPORTS = {
     "pc": {"width": 1600, "height": 900},
     "pc1366": {"width": 1366, "height": 768},
+    # Grand écran de studio (audit de nuit 22/10/2026).
+    "pc1920": {"width": 1920, "height": 1080},
     "tel": {"width": 432, "height": 768},
     # Téléphone courant (iPhone 12 à 15) : 390 × 844, au doigt.
     "tel390": {"width": 390, "height": 844},

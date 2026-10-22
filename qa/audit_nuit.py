@@ -727,8 +727,8 @@ TEXTES = r"""(scope) => {
   for (const el of root.querySelectorAll('[title], [aria-label], [placeholder]')) if (vis(el)) for (const a of ['title', 'aria-label', 'placeholder']) { const v = el.getAttribute(a); if (v) out.add(v.slice(0, 200)); }
   return [...out];
 }"""
-FORMATS = [("pc1366", "dark"), ("pc", "light"), ("tab", "light"), ("tel390", "dark")]
-VPX = {"pc1366": (1366, 768), "pc": (1600, 900), "tab": (1024, 768), "tel390": (390, 844)}
+FORMATS = [("pc1366", "dark"), ("pc", "light"), ("pc1920", "dark"), ("tab", "light"), ("tel390", "dark")]
+VPX = {"pc1366": (1366, 768), "pc": (1600, 900), "pc1920": (1920, 1080), "tab": (1024, 768), "tel390": (390, 844)}
 
 
 def ecran(page, cas, nom, scope):
