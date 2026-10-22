@@ -405,3 +405,27 @@ export function stepResponse(proc: (x: Float32Array) => Float32Array, sr: number
   };
   return { grHold, attack: times(n0, n0 + n1, 0, grHold), release: times(n0 + n1, n, grHold, 0, win), gr };
 }
+
+/**
+ * Amplitudes (dB crête) de plusieurs raies ajustées ENSEMBLE par moindres carrés sur x[from..to) :
+ * une raie forte voisine ne fuit pas dans la mesure d'une raie faible (sondes à −50 dB d'un sinus fort).
+ */
+export function tonesDb(x: ArrayLike<number>, freqs: number[], sr: number, from = 0, to = x.length): number[] {
+  const k = freqs.length * 2, A = Array.from({ length: k }, () => new Float64Array(k)), b = new Float64Array(k);
+  const ws = freqs.map(f => (2 * Math.PI * f) / sr), basis = new Float64Array(k);
+  for (let i = from; i < to; i++) {
+    for (let j = 0; j < freqs.length; j++) { basis[2 * j] = Math.sin(ws[j] * i); basis[2 * j + 1] = Math.cos(ws[j] * i); }
+    const v = x[i];
+    for (let r = 0; r < k; r++) { b[r] += basis[r] * v; const Ar = A[r]; for (let c = r; c < k; c++) Ar[c] += basis[r] * basis[c]; }
+  }
+  for (let r = 0; r < k; r++) for (let c = 0; c < r; c++) A[r][c] = A[c][r];
+  // Élimination de Gauss avec pivot partiel.
+  for (let c = 0; c < k; c++) {
+    let p = c; for (let r = c + 1; r < k; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+    for (let r = c + 1; r < k; r++) { const f = A[r][c] / A[c][c]; if (!f) continue; for (let cc = c; cc < k; cc++) A[r][cc] -= f * A[c][cc]; b[r] -= f * b[c]; }
+  }
+  const sol = new Float64Array(k);
+  for (let r = k - 1; r >= 0; r--) { let s = b[r]; for (let c = r + 1; c < k; c++) s -= A[r][c] * sol[c]; sol[r] = s / A[r][r]; }
+  return freqs.map((_, j) => dbOf(Math.hypot(sol[2 * j], sol[2 * j + 1])));
+}
