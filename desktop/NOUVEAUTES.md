@@ -7,6 +7,12 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.14
+- Musiciens de séance : un batteur, un bassiste (808) et des claviers qui jouent tout seuls en suivant tes accords ; styles Trap, Drill UK, Drill FR, Boom bap, R&B, Afro ; intensité, complexité et remplissages par section.
+- Boucle avec un effet à latence : le début n'est plus coupé à chaque tour.
+- Automation : toucher un réglage d'un effet du rack parallèle l'écrit (Touch, Latch, Write).
+- Modulateurs : suiveur d'enveloppe (ex. le kick qui creuse le volume de la basse).
+
 ## 1.5.13
 - Lecture avec un effet à latence (EQ phase linéaire, limiteur) : le début des sons n'est plus coupé.
 - Piano roll : la grille suit les rampes de tempo.
