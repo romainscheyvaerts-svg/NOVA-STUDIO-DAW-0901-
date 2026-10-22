@@ -248,6 +248,12 @@ BATTERIE = [
     # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
     # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
     ("pianoroll_pratique", []),
+    # 22/10/2026 · audit de nuit (tour croisé) : beat → sampler → 808 → accords → 3 prises → console → exports WAV / MP3 / stems →
+    # .zip rouvert (état identique, prises au bit près, rendu ≤ −120 dBFS) → Ctrl+Z / Ctrl+Y jusqu'au bout ; raccourcis du piano roll
+    # et de la batterie sans effet sur l'arrangement caché ; bulle de Nova ; veille du moteur (CPU à l'arrêt) ; fuites des fenêtres ;
+    # formats 1366 / 1600 / tablette / téléphone, sombre et clair, aucun nom de concurrent ; collaboration à deux onglets avec coupure
+    # réseau ; séance de 20 pistes et ouverture des fenêtres ; mode simple / avancé.
+    ("audit_nuit", []),
 ]
 
 
