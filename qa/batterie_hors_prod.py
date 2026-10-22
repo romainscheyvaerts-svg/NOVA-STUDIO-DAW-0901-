@@ -239,6 +239,12 @@ BATTERIE = [
     # 22/10/2026 : tour « édition et navigation » (zoom du morceau à l'échantillon, Z, annuler par geste, sélection
     # glissée entre pistes, Ctrl+D / couper-coller de plusieurs clips, bord qui défile, suivi de la tête, 60 pistes).
     ("audit_edition", []),
+    # 22/10/2026 · piano roll pratique : 3 tâches mesurées (mélodie de 8 mesures à la souris et au pas à pas, suite
+    # d'accords, 808 avec glissés : gestes + temps estimé, résultat vérifié note par note), barre épurée (outil, grille,
+    # gamme, Outils ▾ / Notes ▾ / Vue ▾), clic droit = menu, double-clic = propriétés, Alt + molette / Alt + glisser,
+    # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
+    # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
+    ("pianoroll_pratique", []),
 ]
 
 

@@ -202,7 +202,7 @@ def scenario_pc(pg, errs):
     one = t1["clips"][0]["notes"]
     ok("note_dessinee", len(one) == 1 and abs(one[0]["d"] - 4 * beat) < beat * 0.3, one)
     # Outils → Chop 1/16
-    pg.locator("[data-nova-roll='outils']").click(); pg.wait_for_timeout(300)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='outils']").click(); pg.wait_for_timeout(300)
     shot(pg, f"v25_{vp}_04_menu_outils")
     pg.locator("[data-testid='tool-chop']").click(); pg.wait_for_timeout(200)
     pg.locator("[data-testid='opt-morceaux-1/16']").click(); pg.wait_for_timeout(300)
@@ -219,7 +219,7 @@ def scenario_pc(pg, errs):
     redone = len(next(t for t in tracks(pg) if t["id"] == tid)["clips"][0]["notes"])
     ok("outil_une_etape_annulation", undone == 1 and redone == 16, {"apres_ctrl_z": undone, "apres_ctrl_y": redone})
     # Swing MPC 58 %
-    pg.locator("[data-nova-roll='groove']").click(); pg.wait_for_timeout(400)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='groove']").click(); pg.wait_for_timeout(400)
     pg.locator("[data-testid='groove-mpc58']").click(); pg.wait_for_timeout(400)
     shot(pg, f"v25_{vp}_06_groove_mpc58")
     c = next(t for t in tracks(pg) if t["id"] == tid)["clips"][0]
@@ -248,11 +248,11 @@ def scenario_pc(pg, errs):
     draw_note(pg, 66, 4 * beat, beat, beat)
     c3b = next(t for t in tracks(pg) if t["id"] == tid)["clips"][0]
     last = max(c3b["notes"], key=lambda n: n["s"])
-    pg.locator("[data-nova-pianoroll] [data-nova-roll-tool='SELECT']").first.click(); pg.wait_for_timeout(150)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll-tool='SELECT']").click(); pg.wait_for_timeout(150)
     sl = pg.evaluate("() => document.querySelector('[data-nova-pianoroll] .custom-scroll').scrollLeft")
     pg.mouse.click(grid["x"] + (last["s"] * roll_zoom(pg) - sl + 10) * sc, yy); pg.wait_for_timeout(250)
     sel = pg.locator("[data-nova-pianoroll] .text-cyan-400").first.inner_text() if pg.locator("[data-nova-pianoroll] .text-cyan-400").count() else ""
-    pg.locator("[data-nova-roll='outils']").click(); pg.wait_for_timeout(300)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='outils']").click(); pg.wait_for_timeout(300)
     pg.locator("[data-testid='tool-roll']").click(); pg.wait_for_timeout(200)
     pg.locator("[data-testid='opt-vitesse-1/32']").click(); pg.wait_for_timeout(150)
     pg.locator("[data-testid='opt-rampe-up']").click(); pg.wait_for_timeout(300)
@@ -268,13 +268,13 @@ def scenario_pc(pg, errs):
     shot(pg, f"v25_{vp}_08_roll_applique")
 
     # --- 5. Capture : jouer au clavier de l'ordinateur sans enregistrer, puis « Capturer » ---
-    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(300)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(300)
     for code in ("KeyA", "KeyD", "KeyG", "KeyK"):
         pg.keyboard.down(code[-1].lower()); pg.wait_for_timeout(180); pg.keyboard.up(code[-1].lower()); pg.wait_for_timeout(140)
     badge = pg.evaluate("() => window.__novaMidi.captured()")
     shot(pg, f"v25_{vp}_09_capture_badge")
     nclips_before = len(next(t for t in tracks(pg) if t["id"] == tid)["clips"])
-    pg.locator("[data-nova-roll='capturer']").click(); pg.wait_for_timeout(600)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='capturer']").click(); pg.wait_for_timeout(600)
     t5 = next(t for t in tracks(pg) if t["id"] == tid)
     capt = [cl for cl in t5["clips"] if cl["name"] == "Capture"]
     host_notes = [n for cl in t5["clips"] for n in cl["notes"] if n["p"] in (60, 64, 67, 72)]
@@ -285,12 +285,12 @@ def scenario_pc(pg, errs):
     for k in ("s", "f", "h"):
         pg.keyboard.down(k); pg.wait_for_timeout(150); pg.keyboard.up(k); pg.wait_for_timeout(120)
     n_before = sum(len(cl["notes"]) for cl in next(t for t in tracks(pg) if t["id"] == tid)["clips"])
-    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)  # le clavier musical coupé, les raccourcis reviennent
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)  # le clavier musical coupé, les raccourcis reviennent
     pg.keyboard.press("Control+Shift+C"); pg.wait_for_timeout(500)
     n_after = sum(len(cl["notes"]) for cl in next(t for t in tracks(pg) if t["id"] == tid)["clips"])
     ok("capture_raccourci_ctrl_maj_c", n_after == n_before + 3, {"avant": n_before, "apres": n_after})
-    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
-    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
+    __import__("qalib").roll_reveal(pg, "[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
     pg.keyboard.press("Escape"); pg.wait_for_timeout(600)
 
     # --- 6. Menu MIDI de la barre de transport + export de toutes les pistes ---
