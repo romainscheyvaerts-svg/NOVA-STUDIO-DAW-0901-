@@ -191,9 +191,19 @@ export const KeptZoneStrip: React.FC<StripProps> = ({ track, count, candidate, i
           📌 Garder {candidate.name}
         </button>
       )}
+      {isRecording && <DiscardTakeButton />}
     </div>
   );
 };
+
+/** Pendant la prise : la jeter (Ctrl+.), rien n'est gardé, retour au début (App : discardTakeRef). */
+const DiscardTakeButton: React.FC<{ big?: boolean }> = ({ big }) => (
+  <button type="button" data-testid="rec-discard" onClick={() => window.dispatchEvent(new CustomEvent('nova:discard-take'))}
+    title="Jeter cette prise : rien n’est gardé, retour au début pour la refaire (Ctrl+.)"
+    className={`nova-hit-tactile shrink-0 rounded-full bg-white/10 text-red-200 font-black pointer-events-auto hover:bg-red-500/30 ${big ? 'h-10 px-3 text-[13px]' : 'h-6 px-2.5 text-[11px]'}`}>
+    🗑️ Jeter la prise
+  </button>
+);
 
 // ------------------------------------------------------------------ téléphone : carte pleine largeur
 
@@ -235,6 +245,7 @@ export const KeptTakesCard: React.FC<CardProps> = ({ track, lanes, open, api, ca
           <button type="button" data-testid="kept-keep-last" onClick={() => api.onKeep(track.id, candidate.n)}
             className="shrink-0 h-10 px-3 rounded-full bg-amber-400 text-black text-[13px] font-black">📌 Garder {candidate.name}</button>
         )}
+        {isRecording && <DiscardTakeButton big />}
       </div>
       {!count && <p className="mt-1 text-[12px] text-slate-400">{isRecording ? 'Prise en cours… tu pourras la garder juste après.' : 'Garde tes meilleures prises ici pour choisir à la fin.'}</p>}
       {open && count > 0 && (

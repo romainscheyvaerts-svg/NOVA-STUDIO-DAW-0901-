@@ -73,6 +73,8 @@ const RecordingCoach: React.FC<RecordingCoachProps> = ({ isRecording, trackId, t
   const color = advice.tone === 'bad' ? 'bg-red-500' : advice.tone === 'warn' ? 'bg-amber-400' : 'bg-emerald-400';
   const mm = Math.floor(elapsed / 60);
   const ss = Math.floor(elapsed % 60).toString().padStart(2, '0');
+  // Clavier et souris : rappel du raccourci « jeter la prise » (inutile au doigt).
+  const keyboardHint = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches;
 
   return (
     <div className="fixed left-1/2 -translate-x-1/2 top-[72px] md:top-auto md:bottom-28 z-[400] w-[min(92vw,420px)] pointer-events-none" role="status" aria-live="polite">
@@ -89,7 +91,7 @@ const RecordingCoach: React.FC<RecordingCoachProps> = ({ isRecording, trackId, t
           {advice.text}
         </div>
         <div className="mt-1 flex items-center justify-between gap-2 text-[10.5px] text-slate-400">
-          <span>Réappuie sur REC pour arrêter et réécouter.</span>
+          <span>Réappuie sur REC pour arrêter et réécouter{keyboardHint ? ' · Ctrl+. pour la jeter' : ''}.</span>
           <span data-nova-input={viaAsio ? "asio" : "browser"} className={viaAsio ? "text-purple-300 font-bold" : ""}>
             {viaAsio ? "Entrée : carte son (ASIO)" : "Entrée : micro de l'ordinateur"}
           </span>

@@ -302,7 +302,7 @@ const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayo
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
-  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake'] as const;
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette', 'nova.keepTake', 'nova.discardTake'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import { useControlSurface } from './hooks/useControlSurface';
@@ -3087,6 +3087,51 @@ function Studio() {
   }, [handleToggleRecordInner]);
   toggleRecordRef.current = handleToggleRecord;
 
+  /**
+   * 🗑️ Jeter la prise en cours (Ctrl+., comme dans les DAW de studio) : l'artiste rate sa
+   * première phrase, l'ingé jette la prise sans rien laisser derrière (ni couloir, ni
+   * numéro de prise consommé, ni ancienne prise coupée) et revient au début : R pour la
+   * refaire. Avant : STOP puis Ctrl+Z (2 gestes), ou une prise ratée de plus dans les couloirs.
+   */
+  const discardTakeRef = useRef<() => Promise<void>>(async () => {});
+  discardTakeRef.current = async () => {
+    if (countInBeat !== null) { countInCancelRef.current = true; setAiNotification('🗑️ Décompte annulé : rien n’a été enregistré.'); return; }
+    const st = stateRef.current;
+    if (!st.isRecording) {
+      setAiNotification(st.tracks.some(t => lastTakeNumber(t as Track) !== null)
+        ? '🗑️ Ctrl+. jette la prise PENDANT qu’elle s’enregistre. Pour enlever la dernière prise enregistrée : Ctrl+Z.'
+        : '🗑️ Ctrl+. jette la prise pendant qu’elle s’enregistre (rien n’est gardé).');
+      return;
+    }
+    const rec = punchRecRef.current;
+    punchRecRef.current = null;
+    if (rec) rec.stopping = true;
+    metronomeService.stop();
+    audioEngine.stopAll();
+    if (midiInput.isRecording) {
+      try { midiInput.stopRecording(); } catch { /* rien à garder */ }
+      midiRecMetaRef.current = null;
+    } else {
+      const results = await audioEngine.stopRecordingAll();
+      // Prise envoyée en direct (collaboration) : annulée chez les autres aussi.
+      try { ltFinishRef.current?.(results, []); } catch (e) { console.warn('[Prise en direct] prise jetée', e); }
+    }
+    const st2 = stateRef.current;
+    // Punch : la boucle avait été suspendue pendant la prise.
+    audioEngine.setLoop(st2.isLoopActive, st2.loopStart, st2.loopEnd);
+    const back = recStartRef.current ?? playheadStore.get();
+    audioEngine.seekTo(back, st2.tracks, false);
+    setState(produce(draft => { draft.isRecording = false; draft.isPlaying = false; draft.recStartTime = null; draft.currentTime = back; }));
+    track('rec_discarded', {});
+    setAiNotification('🗑️ Prise jetée : rien n’a été gardé (aucun couloir, aucun numéro de prise utilisé). Retour au début : R pour la refaire.');
+  };
+  // Bouton « 🗑️ Jeter » du bandeau de la piste pendant la prise.
+  useEffect(() => {
+    const on = () => { void discardTakeRef.current(); };
+    window.addEventListener('nova:discard-take', on);
+    return () => window.removeEventListener('nova:discard-take', on);
+  }, []);
+
   // ===== Prise MIDI armée (R16) : clavier MIDI / clavier de l'ordinateur → piste MIDI armée
   const midiRecMetaRef = useRef<{ trackId: string; loop: { start: number; end: number } | null; isPunch: boolean; startAt: number } | null>(null);
   const announceMidiArmRef = useRef<((t: Track, fromRec?: boolean) => Promise<void>) | null>(null);
@@ -4568,6 +4613,8 @@ function Studio() {
         // 📌 Garder la dernière prise de côté (zone « Prises gardées » au-dessus de la piste).
         case 'nova.keepTake': e.preventDefault(); if (e.repeat) return; keepLastTakeAsideRef.current(); return;
         case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
+        // 🗑️ Jeter la prise en cours (Ctrl+.) : rien n'est gardé, retour au début.
+        case 'nova.discardTake': e.preventDefault(); if (e.repeat) return; void discardTakeRef.current(); return;
         // Couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
         case 'nova.guide':
           if (isKeyboardFocus() || !stateRef.current.tracks.some(t => t.isGuide)) return;
@@ -10880,6 +10927,7 @@ function Studio() {
         a('Voix', 'pal.textEdit', '📝 Éditer la voix par le texte (effacer un mot, découper par phrase)', () => openNovaWindow('voice-text-edit', { targets: t ? [t] : [] }), { keywords: 'texte transcription paroles mot mots effacer supprimer couper découper phrase respiration silence corriger éditer text based editing whisper', disabledReason: t ? undefined : 'Sélectionne d’abord un clip voix transcrit (clic dessus).' }),
         a('Voix', 'pal.spectral', '🎨 Éditeur spectral (effacer un bruit précis)', () => openNovaWindow('spectral-editor', { targets: t ? [t] : [] }), { keywords: 'spectre spectral spectrogramme éditeur toux sonnerie téléphone chaise bruit effacer peindre zone fréquence spectral repair', disabledReason: t ? undefined : 'Sélectionne d’abord un clip audio (clic dessus).' })]; })(),
       a('Voix', 'nova.keepTake', '📌 Garder la dernière prise de côté (prises gardées, pour choisir à la fin)', () => { keepLastTakeAsideRef.current(); }, { keys: k('nova.keepTake'), pt: 'Playlists : noter / mettre de côté une prise', keywords: 'garder prise côté pin épingler playlist prises gardées favori meilleure take keep', disabledReason: st.tracks.some(t => lastTakeNumber(t as Track) !== null) ? undefined : 'Enregistre d’abord une prise.' }),
+      a('Voix', 'nova.discardTake', '🗑️ Jeter la prise en cours (rien n’est gardé, retour au début)', () => { void discardTakeRef.current(); }, { keys: k('nova.discardTake'), keywords: 'jeter prise annuler prise ratée rater recommencer refaire discard abandonner poubelle', disabledReason: st.isRecording ? undefined : 'Seulement pendant une prise (pour la dernière prise enregistrée : Ctrl+Z).' }),
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
