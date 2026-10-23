@@ -20,9 +20,20 @@
  */
 
 import { retireWorkletNode } from './workletGuard';
+import { takeRingSource, canShareMemory, createTakeRing } from './takeRing';
+import type { TakeWriterClient, TakeTarget, TakeWriterEnded } from './takeWriter';
 
-/** Code de l'AudioWorklet (exporté pour tests/novaRecorderClock.test.ts). */
-export const NOVA_RECORDER_WORKLET = `
+/**
+ * Code de l'AudioWorklet (exporté pour tests/novaRecorderClock.test.ts).
+ *
+ * Trois façons de sortir les échantillons du fil audio :
+ *  - « ring » (page isolée, SharedArrayBuffer) : anneau sans verrou lu par l'écrivain de prises
+ *    (engine/takeRing, engine/takeWriter.worker) ; AUCUNE allocation, aucun message pendant la prise ;
+ *  - « port » (sans isolation) : morceaux de 2048 images envoyés directement au Worker par un port
+ *    dédié, dans des tampons préalloués qu'il renvoie (réserve de 48, soit 2 s) ;
+ *  - « post » (ancien chemin) : morceaux de 8192 images postés à la page.
+ */
+export const NOVA_RECORDER_WORKLET = takeRingSource() + `
 class NovaRecorder extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -33,18 +44,50 @@ class NovaRecorder extends AudioWorkletProcessor {
     // silence au lieu d'être sauté ; sinon la suite de la prise glisserait plus tôt sur
     // l'horloge. keepClock: false = ancien comportement (gardé pour les tests de mesure).
     this.keepClock = o.keepClock !== false;
+    this.kk = Math.max(1, this.k);
+    this.mode = o.ring ? 'ring' : (o.pool ? 'port' : 'post');
     this.on = false;
     this.first = -1;
-    this.chunk = new Float32Array(8192);
-    this.chunks = [];
-    for (let c = 0; c < this.k; c++) this.chunks.push(new Float32Array(8192));
     this.n = 0;
+    this.allocs = 0;
+    // Secours (anneau) : si l'écrivain ne vide plus l'anneau (Worker figé : page gelée par le
+    // navigateur, ou pas encore démarré), les échantillons passent par la page, comme l'ancien
+    // chemin. Retour à l'anneau dès qu'il est VIDE : la position du segment suivant (images depuis
+    // le début de la prise − images déjà passées par l'anneau) est publiée dans l'en-tête AVANT
+    // les images (octets 40 à 47), l'écrivain repose chaque morceau à sa place.
+    this.rescue = false;
+    this.pos = 0;
+    this.ringFrames = 0;
+    this.rb = null; this.rn = 0; this.rpos = 0;
+    if (this.mode === 'ring') {
+      this.h = new Int32Array(o.ring.header);
+      this.d = new Float32Array(o.ring.data);
+      this.cap = o.ring.capacity;
+      this.f64 = new Float64Array(o.ring.header, 32, 1);
+      this.off = new Float64Array(o.ring.header, 40, 1);
+    } else if (this.mode === 'port') {
+      this.size = o.pool.frames;
+      this.free = [];
+      for (let i = 0; i < o.pool.count; i++) this.free.push(new Float32Array(this.size * this.kk));
+      this.cur = null;
+      this.wport = null;
+    } else {
+      this.chunk = new Float32Array(8192);
+      this.chunks = [];
+      for (let c = 0; c < this.k; c++) this.chunks.push(new Float32Array(8192));
+    }
     this.port.onmessage = (e) => {
-      if (e.data === 'start') { this.on = true; this.first = -1; this.n = 0; }
-      else if (e.data === 'stop') {
-        this.flush();
+      const m = e.data;
+      if (m === 'start') { this.on = true; this.first = -1; this.n = 0; }
+      else if (m === 'stop') {
+        if (this.mode === 'ring') { this.flushRescue(); Atomics.store(this.h, 3, 2); }
+        else if (this.mode === 'port') { if (this.n > 0) this.send(); if (this.wport) this.wport.postMessage({ eos: true, allocs: this.allocs }); }
+        else this.flush();
         this.on = false;
-        this.port.postMessage({ type: 'done', first: this.first });
+        this.port.postMessage({ type: 'done', first: this.first, allocs: this.allocs });
+      } else if (m && m.type === 'port' && e.ports && e.ports[0]) {
+        this.wport = e.ports[0];
+        this.wport.onmessage = (ev) => { const b = ev.data && ev.data.b; if (b && b.length === this.size * this.kk) this.free.push(b); };
       }
     };
   }
@@ -60,9 +103,84 @@ class NovaRecorder extends AudioWorkletProcessor {
       this.n = 0;
     }
   }
+  send() {
+    const b = this.cur;
+    this.cur = null;
+    if (b && this.wport) this.wport.postMessage({ f: this.first, n: this.n, b }, [b.buffer]);
+    this.n = 0;
+  }
+  /** Port : un bloc (canaux absents = silence ; mono = moyenne des canaux présents). */
+  portWrite(inp, len, mono) {
+    let i = 0;
+    while (i < len) {
+      if (!this.cur) { this.cur = this.free.pop() || null; if (!this.cur) { this.allocs++; this.cur = new Float32Array(this.size * this.kk); } }
+      const b = this.cur, size = this.size;
+      const m = Math.min(len - i, size - this.n);
+      if (mono) {
+        const nIn = inp ? inp.length : 0;
+        for (let j = 0; j < m; j++) { let v = 0; for (let c = 0; c < nIn; c++) v += inp[c][i + j]; b[this.n + j] = nIn > 1 ? v / nIn : v; }
+      } else {
+        for (let c = 0; c < this.k; c++) {
+          const src = inp && c < inp.length ? inp[c] : null, base = c * size + this.n;
+          if (src) for (let j = 0; j < m; j++) b[base + j] = src[i + j]; else for (let j = 0; j < m; j++) b[base + j] = 0;
+        }
+      }
+      this.n += m; i += m;
+      if (this.n === size) this.send();
+    }
+  }
+  /** Bloc capté, quel que soit le chemin. inp = null : silence (horloge gardée). */
+  write(inp, len, mono) {
+    if (this.mode === 'ring') {
+      const pending = (Atomics.load(this.h, 0) - Atomics.load(this.h, 1)) | 0;
+      if (!this.rescue && pending > this.cap * 0.75) {
+        this.rescue = true;
+        this.rescues = (this.rescues || 0) + 1;
+        if (this.rescues === 1) this.port.postMessage({ type: 'rescue-on', pos: this.pos });
+      } else if (this.rescue && pending === 0) {
+        this.flushRescue();
+        this.rescue = false;
+        this.off[0] = this.pos - this.ringFrames;
+      }
+      if (this.rescue) this.rescueWrite(inp, len, mono);
+      else if (ringWrite(this.h, this.d, this.cap, this.kk, inp, len, mono)) this.ringFrames += len;
+    } else this.portWrite(inp, len, mono);
+    this.pos += len;
+  }
+  rescueWrite(inp, len, mono) {
+    const size = 8192;
+    if (!this.rb) { this.rb = new Float32Array(size * this.kk); this.rn = 0; this.rpos = this.pos; this.allocs++; }
+    const b = this.rb, n = this.rn;
+    if (mono) {
+      const nIn = inp ? inp.length : 0;
+      for (let j = 0; j < len; j++) { let v = 0; for (let c = 0; c < nIn; c++) v += inp[c][j]; b[n + j] = nIn > 1 ? v / nIn : v; }
+    } else {
+      for (let c = 0; c < this.k; c++) {
+        const src = inp && c < inp.length ? inp[c] : null, base = c * size + n;
+        if (src) for (let j = 0; j < len; j++) b[base + j] = src[j]; else for (let j = 0; j < len; j++) b[base + j] = 0;
+      }
+    }
+    this.rn += len;
+    if (this.rn + 128 > size) this.flushRescue();
+  }
+  flushRescue() {
+    if (!this.rb || !this.rn) return;
+    this.port.postMessage({ type: 'rescue', pos: this.rpos, n: this.rn, size: 8192, b: this.rb }, [this.rb.buffer]);
+    this.rb = null; this.rn = 0;
+  }
+  begin() {
+    this.first = currentFrame;
+    if (this.mode === 'ring') { this.f64[0] = currentFrame; Atomics.store(this.h, 3, 1); }
+  }
   process(inputs, outputs) {
     const inp = inputs[0];
-    if (this.on && this.k > 0) {
+    if (this.on && this.mode !== 'post') {
+      const has = inp && inp.length;
+      const len = has ? inp[0].length : 128;
+      if (this.k > 0) { if (this.first < 0) this.begin(); this.write(has ? inp : null, len, false); }
+      else if (has) { if (this.first < 0) this.begin(); this.write(inp, len, true); }
+      else if (this.first >= 0 && this.keepClock) this.write(null, 128, true);
+    } else if (this.on && this.k > 0) {
       // Multipiste : chaque canal à part ; un canal absent (entrée débranchée) = silence.
       const len = inp && inp.length ? inp[0].length : 128;
       if (this.first < 0) this.first = currentFrame;
@@ -125,19 +243,113 @@ export class NovaRecorderSession {
   public readonly channels: number;
   /** N° (horloge du contexte) du 1er échantillon capté, connu dès le 1er morceau (-1 avant). */
   public firstFrame = -1;
+  /**
+   * Chemin des échantillons : « ring » (anneau partagé → écrivain de prises), « port » (port direct
+   * vers l'écrivain), « post » (ancien : morceaux postés à la page, aucun écrivain).
+   */
+  public readonly transport: 'ring' | 'port' | 'post';
+  /** Compte de l'écrivain à l'arrêt (images reçues, écrites durablement, perdues). */
+  public writerReport: TakeWriterEnded | null = null;
+  /** Avertissement de l'écrivain (base pleine…) : la prise continue, la récupération est moins sûre. */
+  public writerWarning: string | null = null;
+  private writer: TakeWriterClient | null = null;
+  private writerId = '';
+  private ringHeader: Int32Array | null = null;
+  private ringCap = 0;
+  /** Morceaux arrivés en avance (secours avant le reste de l'anneau) : livrés dans l'ordre des positions. */
+  private early = new Map<number, Float32Array[]>();
+  private nextPos = 0;
+  /** Images passées par le secours (Worker figé) ; 0 normalement. */
+  public rescuedFrames = 0;
 
-  /** `keepClock: false` : ancien comportement (blocs sans entrée sautés), pour la mesure seulement. */
-  constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number; keepClock?: boolean } = {}) {
+  /** Livre un morceau à sa position (images depuis le début de la prise), dans l'ordre. */
+  private deliver(pos: number, ch: Float32Array[]) {
+    this.early.set(pos, ch);
+    for (let c = this.early.get(this.nextPos); c; c = this.early.get(this.nextPos)) {
+      this.early.delete(this.nextPos);
+      this.nextPos += c[0]?.length || 0;
+      this.append(c);
+    }
+  }
+
+  private append(ch: Float32Array[]) {
+    if (this.channels > 0) { this.multi.push(ch); try { this.onChunks?.(ch); } catch { /* le journal ne doit jamais gêner la prise */ } }
+    else { this.chunks.push(ch[0]); try { this.onChunk?.(ch[0]); } catch { /* idem */ } }
+  }
+
+  /** Fin : ce qui reste (trou = images perdues) est posé à sa place, avec du silence dans le trou (horloge gardée). */
+  private flushEarly() {
+    const keys = [...this.early.keys()].sort((a, b) => a - b);
+    for (const p of keys) {
+      const c = this.early.get(p)!;
+      if (p > this.nextPos) { const gap = p - this.nextPos; this.append(c.map(() => new Float32Array(gap))); this.nextPos = p; }
+      this.early.delete(p);
+      if (p < this.nextPos) continue;   // recouvrement (ne doit pas arriver)
+      this.nextPos += c[0]?.length || 0;
+      this.append(c);
+    }
+  }
+
+  /** Anneau (prise en cours) : images publiées, en attente, perdues ; null hors anneau partagé. */
+  ringStatus(): { written: number; pending: number; lost: number; capacity: number } | null {
+    const h = this.ringHeader;
+    if (!h) return null;
+    const w = Atomics.load(h, 0), r = Atomics.load(h, 1);
+    return { written: w >>> 0, pending: (w - r) | 0, lost: Atomics.load(h, 2), capacity: this.ringCap };
+  }
+
+  /**
+   * `keepClock: false` : ancien comportement (blocs sans entrée sautés), pour la mesure seulement.
+   * `writer` : les échantillons partent du fil audio vers l'écrivain de prises (Worker), qui les écrit
+   * dans la base de récupération (`targets` : une prise du journal par piste) et les renvoie à la page.
+   */
+  constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number; keepClock?: boolean; writer?: TakeWriterClient | null; targets?: TakeTarget[] } = {}) {
     this.channels = Math.max(0, Math.min(32, Math.floor(opts.channels || 0)));
     const k = this.channels;
+    const writer = opts.writer || null;
+    const ring = writer && canShareMemory() ? createTakeRing(Math.max(1, k), ctx.sampleRate) : null;
+    this.transport = writer ? (ring ? 'ring' : 'port') : 'post';
+    if (ring) { this.ringHeader = new Int32Array(ring.header); this.ringCap = ring.capacity; }
+    const transportOpts = ring ? { ring: { header: ring.header, data: ring.data, capacity: ring.capacity } }
+      : writer ? { pool: { frames: 2048, count: 48 } } : {};
+    const po = { ...(k > 0 ? { channels: k } : {}), ...(opts.keepClock === false ? { keepClock: false } : {}), ...transportOpts };
     this.node = new AudioWorkletNode(ctx, 'nova-recorder', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-      ...(k > 0 ? { channelCount: k, channelCountMode: 'explicit' as ChannelCountMode, channelInterpretation: 'discrete' as ChannelInterpretation, processorOptions: { channels: k } }
-        : opts.keepClock === false ? { processorOptions: { keepClock: false } } : {}),
+      ...(k > 0 ? { channelCount: k, channelCountMode: 'explicit' as ChannelCountMode, channelInterpretation: 'discrete' as ChannelInterpretation } : {}),
+      ...(Object.keys(po).length ? { processorOptions: po } : {}),
     });
     this.donePromise = new Promise(r => { this.resolveDone = r; });
+    if (writer) {
+      this.writer = writer;
+      this.writerId = `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      let port: MessagePort | undefined;
+      if (!ring) {
+        const mc = new MessageChannel();
+        this.node.port.postMessage({ type: 'port' }, [mc.port1]);
+        port = mc.port2;
+      }
+      writer.begin({ id: this.writerId, k: Math.max(1, k), sr: ctx.sampleRate, ...(ring ? { ring: { header: ring.header, data: ring.data, capacity: ring.capacity } } : {}), ...(port ? { port } : {}), targets: opts.targets || [] }, {
+        onChunk: (ch, first, pos) => {
+          if (this.firstFrame < 0 && first >= 0) this.firstFrame = first;
+          this.deliver(typeof pos === 'number' ? pos : this.nextPos, ch);
+        },
+        onWarn: (m) => { this.writerWarning = m; console.warn('[Prise] écrivain :', m); },
+      });
+    }
     this.node.port.onmessage = (e) => {
       if (this.firstFrame < 0 && typeof e.data?.first === 'number' && e.data.first >= 0) this.firstFrame = e.data.first;
+      if (e.data?.type === 'rescue-on') { console.warn('[Prise] écrivain figé : les échantillons passent par la page (secours) à partir de l’image', e.data.pos); return; }
+      if (e.data?.type === 'rescue') {
+        const { pos, n, size, b } = e.data as { pos: number; n: number; size: number; b: Float32Array };
+        const kk = Math.max(1, k);
+        const ch: Float32Array[] = [];
+        for (let c = 0; c < kk; c++) ch.push(b.slice(c * size, c * size + n));
+        this.rescuedFrames += n;
+        this.deliver(pos, ch);
+        // Écrit aussi dans la base de récupération, à sa position (l'écrivain le fera dès qu'il repart).
+        this.writer?.inject(this.writerId, pos, ch.map(x => x.slice()));
+        return;
+      }
       if (e.data?.type === 'data') {
         const c = e.data.data as Float32Array;
         this.chunks.push(c);
@@ -165,7 +377,13 @@ export class NovaRecorderSession {
    */
   async stop(source: AudioNode): Promise<{ samples: Float32Array; firstFrame: number; channels?: Float32Array[] }> {
     this.node.port.postMessage('stop');
-    const firstFrame = await Promise.race([this.donePromise, new Promise<number>(r => setTimeout(() => r(-1), 2000))]);
+    let firstFrame = await Promise.race([this.donePromise, new Promise<number>(r => setTimeout(() => r(-1), 2000))]);
+    // Écrivain : l'anneau est vidé et le reste écrit ; ses derniers morceaux arrivent avant son compte.
+    if (this.writer) {
+      this.writerReport = await this.writer.end(this.writerId);
+      if (firstFrame < 0 && this.writerReport && this.writerReport.first >= 0) firstFrame = this.writerReport.first;
+      this.flushEarly();
+    }
     try { source.disconnect(this.node); } catch { /* déjà déconnecté */ }
     try { this.node.disconnect(); this.sink.disconnect(); } catch { /* */ }
     // Sinon le processeur de chaque prise restait vivant et calculé (fuite mesurée).

@@ -264,6 +264,11 @@ BATTERIE = [
     ("beat_doigt", []),
     # 22/10/2026 : Nova Tune (fenêtre sobre, réglages avancés repliés, préréglages sourcés, notes cibles), bureau et téléphone.
     ("nova_tune", []),
+    # 22/10/2026 · moteur web solide (banc qa/moteur_web.py, version courte) : page isolée, prise écrite au fil de l'eau
+    # par le Worker (images captées = écrites), calage de la prise par la boucle mesurée (0 échantillon), navigateur tué
+    # pendant une prise (perte < 0,5 s), 4 navigateurs en parallèle + panne de la sortie (lecture qui repart seule),
+    # toucher → son au téléphone. Les mesures longues (10 / 30 min) : --tests derive,charge.
+    ("moteur_web", ["--label", "batterie", "--tests", "isolation,prise,latence,latence_fige,crash,demarrage,toucher", "--n", "4"]),
 ]
 
 

@@ -1722,6 +1722,22 @@ function Studio() {
     setSilently(prev => ({ ...prev, tracks: prev.tracks.map(t => (old(t) ? { ...t, automationLanes: lanesForFormat(t.automationLanes, true, interpolateCurve) } : t)) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.tracks]);
+  // Studio ouvert : le moteur audio est préparé tout de suite (contexte, master, pistes recâblées,
+  // modules du fil audio, écrivain de prises), pas au premier ▶. Mesuré (qa/moteur_web.py, toucher) :
+  // au téléphone le 1er toucher sur Lecture mettait 240 à 340 ms à faire du son (création du moteur
+  // dans le geste) ; ensuite ~30 ms. L'ouverture du studio suit un geste (Nouveau projet, un beat…) :
+  // le contexte démarre ; sinon il attend le premier toucher (AudioEngine.hookAutoResume).
+  const ensureAudioEngineRef = useRef(ensureAudioEngine);
+  ensureAudioEngineRef.current = ensureAudioEngine;
+  useEffect(() => {
+    if (showLanding) return;
+    let live = true;
+    const t = window.setTimeout(() => {
+      if (!live) return;
+      void ensureAudioEngineRef.current().then(() => { if (live) audioEngine.prewarm(); }).catch(() => { /* au premier ▶ */ });
+    }, 0);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [showLanding]);
 
   // ─── Fréquence d'échantillonnage du projet (utils/projectRate, utils/hqAudio) ──────
   // Le moteur suit TOUJOURS la fréquence de l'état : réglage de session, opération de
@@ -6475,6 +6491,9 @@ function Studio() {
       annotate: (patch: Parameters<NonNullable<TakeJournalLike['annotate']>>[0]) => base?.annotate?.(patch),
       finish: async () => { try { cutter.flush(); } catch { /* */ } await base?.finish(); },
       discard: async () => { ltCancel(w); await base?.discard(); },
+      // Morceaux durables écrits par l'écrivain de prises (engine/takeWriter) ; le direct, lui, reçoit toujours push().
+      ...(base?.takeId ? { takeId: base.takeId } : {}),
+      ...(base?.external ? { external: () => base.external!() } : {}),
     };
   };
   /** STOP : la fin de chaque prise part après son dernier morceau (passage gardé, somme de contrôle). */
@@ -8672,6 +8691,36 @@ function Studio() {
     };
     window.addEventListener('nova:samplerate', on);
     return () => window.removeEventListener('nova:samplerate', on);
+  }, []);
+  // Moteur audio relancé (sortie audio qui ne répondait plus, engine/audioClockWatch) : la séance
+  // reste. Pistes recâblées sur le nouveau contexte, mixes casque, pistes armées, diffusion du mix,
+  // et la lecture repart de la même position si elle tournait.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      void (async () => {
+        await ensureAudioEngine();
+        const s = stateRef.current;
+        s.tracks.forEach(t => audioEngine.updateTrack(t, s.tracks));
+        if (s.cueMixes?.length) audioEngine.setCueMixes(s.cueMixes, s.tracks);
+        try { await rearmArmedRef.current?.(); } catch { /* armement signalé ailleurs */ }
+        const rtc = rtcRef.current;
+        if (rtc && rtc.isSending('mix')) {
+          const stream = audioEngine.getCollabMixStream();
+          if (stream) rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+        }
+        if (d.wasPlaying && stateRef.current.isPlaying && !stateRef.current.isRecording) {
+          const pos = typeof d.position === 'number' ? d.position : stateRef.current.currentTime;
+          // Le moteur a déjà repris la lecture lui-même (sinon : reprise ici).
+          if (!audioEngine.isPlayingNow()) audioEngine.startPlayback(pos, stateRef.current.tracks);
+          const mt = stateRef.current.metronome;
+          if (mt.enabled && mt.mode !== 'record') metronomeService.start(audioEngine.getCurrentTime());
+        }
+      })();
+    };
+    window.addEventListener('nova:audio-restarted', on);
+    return () => window.removeEventListener('nova:audio-restarted', on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   /**
    * Pendant l'écoute du mix de l'ingé : ce qui arrive vraiment (getStats, toutes les secondes).
