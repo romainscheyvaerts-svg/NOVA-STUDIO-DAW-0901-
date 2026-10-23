@@ -1732,10 +1732,17 @@ function Studio() {
   useEffect(() => {
     if (showLanding) return;
     let live = true;
+    // Après le changement de fréquence éventuel du projet ouvert (sinon : contexte créé à 48 kHz puis
+    // reconstruit aussitôt à 44,1 kHz, et ce qui s'armait à ce moment-là était coupé).
     const t = window.setTimeout(() => {
       if (!live) return;
-      void ensureAudioEngineRef.current().then(() => { if (live) audioEngine.prewarm(); }).catch(() => { /* au premier ▶ */ });
-    }, 0);
+      void rateJobRef.current.catch(() => {}).then(async () => {
+        if (!live) return;
+        if (!audioEngine.ctx) { try { await audioEngine.setSampleRate(projectRateOf(stateRef.current)); } catch { /* */ } }
+        await ensureAudioEngineRef.current();
+        if (live) audioEngine.prewarm();
+      }).catch(() => { /* au premier ▶ */ });
+    }, 800);
     return () => { live = false; window.clearTimeout(t); };
   }, [showLanding]);
 

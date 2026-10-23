@@ -10,14 +10,17 @@
  * Même principe que le moteur natif (Engine::housekeeping : pilote qui demande une remise à zéro,
  * horloge de l'échantillon comme seule référence) : on regarde l'horloge, pas l'état annoncé.
  *   - démarrage lent : l'horloge n'a pas encore bougé `slowMs` après la création → message
- *     « la sortie audio tarde » ; toujours rien à `restartMs` → contexte recréé (une fois) ;
- *   - arrêt : l'horloge avançait puis se fige `stallMs` (contexte « running », page visible)
- *     → contexte recréé ;
+ *     « la sortie audio tarde » et une reprise (resume) ; JAMAIS de contexte recréé : constaté le
+ *     23/10/2026 (batterie r1516e, service Audio de Windows en panne), recréer un contexte qui n'a
+ *     jamais démarré ne le fait pas démarrer (8 relances en 200 s, aucune utile), coupe ce qui
+ *     s'arme à ce moment-là et sollicite le service audio pour rien ;
+ *   - arrêt : l'horloge avançait puis se fige `stallMs` (3 s, contexte « running », page
+ *     visible) → contexte recréé ;
  *   - erreur du périphérique (événement « error » du contexte) → contexte recréé ;
  *   - « suspended » / « interrupted » sans qu'on l'ait demandé pendant la lecture → resume().
- * Jamais pendant une prise (la prise serait coupée) : l'artiste est prévenu, la relance attend
- * la fin de la prise. Au plus `maxRestarts` relances par minute (pas de boucle infinie si
- * aucune sortie ne marche : message clair à la place).
+ * Jamais pendant une prise ni pendant un armement (`busy`) : l'artiste est prévenu, la relance
+ * attend. Au plus `maxRestarts` relances par 5 minutes, et 30 s au moins entre deux (pas de boucle
+ * si aucune sortie ne marche : message clair à la place).
  *
  * Léger : un minuteur de 500 ms seulement quand le moteur a besoin de l'horloge (lecture,
  * prise, piste armée, ou démarrage pas encore confirmé) ; rien à l'arrêt.
@@ -31,6 +34,8 @@ export interface ClockWatchHost {
   active(): boolean;
   /** Une prise est en cours : aucune relance. */
   recording(): boolean;
+  /** Armement, reconstruction ou changement de fréquence en cours : la relance attend. */
+  busy?(): boolean;
   /** Page visible (une page masquée peut voir son horloge ralentie par le système). */
   visible(): boolean;
   /** Recrée le contexte audio (la session est gardée) ; rend false si impossible. */
@@ -50,6 +55,10 @@ export interface ClockWatchOptions {
   restartMs?: number;
   stallMs?: number;
   maxRestarts?: number;
+  /** Fenêtre (ms) du compte des relances. */
+  restartWindowMs?: number;
+  /** Écart minimal (ms) entre deux relances. */
+  restartGapMs?: number;
   setInterval?: (fn: () => void, ms: number) => any;
   clearInterval?: (id: any) => void;
 }
@@ -81,8 +90,10 @@ export class AudioClockWatch {
       tickMs: opts.tickMs ?? 500,
       slowMs: opts.slowMs ?? 2000,
       restartMs: opts.restartMs ?? 5000,
-      stallMs: opts.stallMs ?? 1500,
-      maxRestarts: opts.maxRestarts ?? 3,
+      stallMs: opts.stallMs ?? 3000,
+      maxRestarts: opts.maxRestarts ?? 2,
+      restartWindowMs: opts.restartWindowMs ?? 300_000,
+      restartGapMs: opts.restartGapMs ?? 30_000,
     };
     this.si = opts.setInterval || ((fn, ms) => setInterval(fn, ms));
     this.ci = opts.clearInterval || (id => clearInterval(id));
@@ -166,15 +177,22 @@ export class AudioClockWatch {
       void this.host.resume().catch(() => { /* attend un geste */ });
       return;
     }
-    if (issue === 'demarrage-lent' && t - this.bornAt < this.o.restartMs) {
+    if (issue === 'demarrage-lent') {
+      // Jamais de contexte recréé pour un démarrage lent (voir en tête) : un message, des reprises.
       if (!this.slowSaid && active) {
         this.slowSaid = true;
         this.log(issue, 'message', t - this.bornAt);
-        this.host.notify('🔊 La sortie audio de l\'ordinateur tarde à démarrer : NOVA attend qu\'elle réponde…');
+        this.host.notify('🔊 La sortie audio de l’ordinateur tarde à démarrer : NOVA attend qu’elle réponde…');
+      }
+      if (active && t - this.bornAt >= this.o.restartMs && !this.deferredSaid) {
+        this.deferredSaid = true;
+        this.log(issue, 'abandon', t - this.bornAt);
+        this.host.notify('🔇 La sortie audio ne démarre pas. Vérifie le casque ou la carte son (et ferme les autres applis qui l’utilisent) ; NOVA reprendra dès qu’elle répond.');
       }
       return;
     }
-    // Relance du contexte (démarrage trop long, horloge figée, erreur du périphérique).
+    // Relance du contexte (horloge figée, erreur du périphérique). Armement / reconstruction en cours : on attend.
+    if (this.host.busy?.()) return;
     if (this.host.recording()) {
       if (!this.deferredSaid) {
         this.deferredSaid = true;
@@ -183,7 +201,9 @@ export class AudioClockWatch {
       }
       return;
     }
-    this.restartsAt = this.restartsAt.filter(x => t - x < 60_000);
+    this.restartsAt = this.restartsAt.filter(x => t - x < this.o.restartWindowMs);
+    const last = this.restartsAt[this.restartsAt.length - 1];
+    if (last !== undefined && t - last < this.o.restartGapMs && this.restartsAt.length < this.o.maxRestarts) return;
     if (this.restartsAt.length >= this.o.maxRestarts) {
       if (this.incident !== null && !this.deferredSaid) {
         this.deferredSaid = true;

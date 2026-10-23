@@ -13,17 +13,18 @@ function fakeCtx() {
   };
 }
 
-function setup(opts: { active?: boolean; recording?: boolean } = {}) {
+function setup(opts: { active?: boolean; recording?: boolean; busy?: boolean } = {}) {
   let now = 0;
   let ctx = fakeCtx();
   const notes: string[] = [];
   const restarts: string[] = [];
   let resumes = 0;
-  const flags = { active: opts.active ?? true, recording: opts.recording ?? false };
+  const flags = { active: opts.active ?? true, recording: opts.recording ?? false, busy: opts.busy ?? false };
   const host: ClockWatchHost = {
     ctx: () => ctx as any,
     active: () => flags.active,
     recording: () => flags.recording,
+    busy: () => flags.busy,
     visible: () => true,
     restart: async (r) => { restarts.push(r); ctx = fakeCtx(); w.attach(ctx as any); return true; },
     resume: async () => { resumes++; ctx.state = 'running'; },
@@ -48,24 +49,38 @@ describe('garde de l\'horloge audio', () => {
     expect(s.restarts).toEqual([]);
   });
 
-  it('démarrage lent : message à 2 s, relance à 5 s, « Son rétabli » quand le nouveau contexte avance', async () => {
+  it('démarrage lent (service audio de Windows en panne) : messages, JAMAIS de contexte recréé, « Son rétabli » quand il démarre', async () => {
     const s = setup();
     s.wait(1000); s.wait(1000);
     expect(s.notes.length).toBe(1);
     expect(s.notes[0]).toMatch(/tarde à démarrer/);
-    s.wait(1000); s.wait(1000); s.wait(1000);
-    expect(s.restarts).toEqual(['demarrage-lent']);
-    await flush();
+    // 200 s sans démarrage (batterie r1516e, 23/10/2026) : avant, 8 contextes recréés pour rien.
+    for (let i = 0; i < 400; i++) s.wait(500);
+    expect(s.restarts).toEqual([]);
+    expect(s.notes.filter(n => /ne démarre pas/.test(n)).length).toBe(1);
     s.advance(500);
     expect(s.notes.at(-1)).toMatch(/Son rétabli/);
     expect(s.w.status().incident).toBeNull();
   });
 
-  it('horloge qui se fige pendant la lecture : relance après 1,5 s', async () => {
+  it('horloge qui se fige pendant la lecture : relance après 3 s, pas avant', async () => {
     const s = setup();
     s.advance(500); s.advance(500);
-    s.wait(500); s.wait(500); s.wait(500);
+    s.wait(500); s.wait(500); s.wait(500); s.wait(500); s.wait(500);
+    expect(s.restarts).toEqual([]);
+    s.wait(500);
     expect(s.restarts).toEqual(['arret']);
+  });
+
+  it("armement en cours (attente du micro) : la relance attend la fin de l'armement", async () => {
+    const s = setup({ busy: true });
+    s.advance(500);
+    s.ctx.fire('error');
+    for (let i = 0; i < 10; i++) s.wait(500);
+    expect(s.restarts).toEqual([]);
+    s.flags.busy = false;
+    s.wait(500);
+    expect(s.restarts).toEqual(['erreur']);
   });
 
   it('erreur du périphérique : relance immédiate', () => {
@@ -78,7 +93,7 @@ describe('garde de l\'horloge audio', () => {
   it('jamais de relance pendant une prise : message, puis relance après la prise', async () => {
     const s = setup({ recording: true });
     s.advance(500);
-    s.wait(1000); s.wait(1000);
+    s.wait(2000); s.wait(1500);
     expect(s.restarts).toEqual([]);
     expect(s.notes.some(n => /Arrête la prise/.test(n))).toBe(true);
     s.flags.recording = false;
@@ -95,10 +110,16 @@ describe('garde de l\'horloge audio', () => {
     expect(s.restarts).toEqual([]);
   });
 
-  it('au plus 3 relances par minute, puis un message clair', async () => {
+  it('pannes à répétition : au plus 2 relances en 5 min, 30 s au moins entre deux, puis un message clair', async () => {
     const s = setup();
-    for (let k = 0; k < 5; k++) { for (let i = 0; i < 11; i++) s.wait(500); await flush(); }
-    expect(s.restarts.length).toBe(3);
+    for (let k = 0; k < 8; k++) {
+      s.advance(500);              // le nouveau contexte démarre…
+      s.ctx.fire('error');         // … et retombe en panne
+      await flush();
+      for (let i = 0; i < 20; i++) s.wait(500);
+      await flush();
+    }
+    expect(s.restarts.length).toBe(2);
     expect(s.notes.some(n => /Aucune sortie audio ne répond/.test(n))).toBe(true);
   });
 
