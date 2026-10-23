@@ -282,6 +282,8 @@ CTX_STATE = "async () => { const { audioEngine } = await window.__novaAppModule(
 def cas_veille(p):
     b, ctx, page, log = studio(p, name="veille")
     try:
+        # Au premier plan, la veille attend 5 min (engine/idleSuspend) : délai ramené à 12 s pour la mesure.
+        page.add_init_script("try { localStorage.setItem('nova_veille_moteur_s', '12'); } catch (e) {}")
         bcdp = b.new_browser_cdp_session()
         new_beat(page)
         page.keyboard.press("Escape"); page.wait_for_timeout(500)

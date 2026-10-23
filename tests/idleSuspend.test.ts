@@ -38,13 +38,13 @@ class FakeCtx {
   externalResume() { this.state = 'running'; this.stateListeners.forEach(f => f()); }
 }
 
-function setup(o: { busy?: () => string | null; enabled?: boolean; work?: boolean; slow?: boolean } = {}) {
+function setup(o: { busy?: () => string | null; enabled?: boolean; work?: boolean; slow?: boolean; visible?: boolean } = {}) {
   let t = 0;
   const timers: { at: number; fn: () => void; id: number }[] = [];
   let seq = 0;
   let onInput: () => void = () => {};
   const idle = new IdleSuspender({ busy: o.busy || (() => null) }, {
-    idleMs: 20_000, checkMs: 2_000, now: () => t,
+    idleMs: 20_000, visibleIdleMs: 300_000, hidden: () => !o.visible, checkMs: 2_000, now: () => t,
     setTimeout: (fn, ms) => { const id = ++seq; timers.push({ at: t + ms, fn, id }); return id; },
     clearTimeout: (id) => { const i = timers.findIndex(x => x.id === id); if (i >= 0) timers.splice(i, 1); },
     enabled: () => o.enabled !== false,
@@ -186,5 +186,13 @@ describe('veille du moteur à l\'arrêt', () => {
     await ctx.suspend();
     expect(ctx.resumes).toBe(1);
     expect(ctx.state).toBe('running');
+  });
+
+  it('page au premier plan : veille seulement après 5 min sans rien faire', async () => {
+    const { ctx, advance } = setup({ visible: true });
+    await advance(60_000);
+    expect(ctx.state).toBe('running');
+    await advance(250_000);
+    expect(ctx.state).toBe('suspended');
   });
 });

@@ -6,7 +6,8 @@
  * des envois, chaînes d'effets tenues actives par engine/keepAlive pour que lecture = export) ;
  * le même projet, contexte suspendu : 2,5 %. Un PC portable chauffait et se vidait pour rien.
  *
- * Règle : le contexte n'est suspendu que si, depuis IDLE_MS, il n'y a eu AUCUN geste (pointeur,
+ * Règle : le contexte n'est suspendu que si, depuis IDLE_MS (page cachée) ou VISIBLE_IDLE_MS (page au
+ * premier plan), il n'y a eu AUCUN geste (pointeur,
  * clavier, molette, doigt), AUCUN son (toute source démarrée sur le contexte, même par une fenêtre
  * qui le prend directement : pré-écoute, Master rapide, référence…), et si rien n'a besoin du son en
  * continu (le moteur le dit : lecture, prise, piste armée, écoute de l'entrée, talkback, ASIO, écoute
@@ -20,8 +21,15 @@
  * Désactivable : localStorage « nova_veille_moteur » = « 0 ».
  */
 
-/** Calme demandé avant la veille (ms) : les queues de réverbe sont finies depuis longtemps. */
+/** Calme demandé avant la veille, page CACHÉE (fenêtre réduite, autre onglet) (ms). */
 export const IDLE_MS = 20_000;
+/**
+ * Calme demandé avant la veille, page VISIBLE (ms) : 5 min. Prudence (batterie QA du 22/10/2026) : sous
+ * forte charge, Chrome headless a signalé des erreurs du périphérique audio en reprenant un contexte
+ * suspendu ; au premier plan, on ne suspend donc qu'après un long moment sans rien faire.
+ * Réglable (tests, réglage avancé) : localStorage « nova_veille_moteur_s » = secondes (les deux cas).
+ */
+export const VISIBLE_IDLE_MS = 300_000;
 /** Intervalle de vérification tant que le moteur est éveillé et arrêté (ms). Rien ne tourne en veille. */
 export const CHECK_MS = 2_000;
 
@@ -32,6 +40,9 @@ export interface IdleHost {
 
 export interface IdleOptions {
   idleMs?: number;
+  visibleIdleMs?: number;
+  /** Page cachée ? (tests ; par défaut document.hidden). */
+  hidden?: () => boolean;
   checkMs?: number;
   now?: () => number;
   setTimeout?: (fn: () => void, ms: number) => any;
@@ -47,6 +58,7 @@ export interface IdleOptions {
 type Ctx = BaseAudioContext & { suspend?: () => Promise<void>; resume?: () => Promise<void> };
 
 const defaultEnabled = () => { try { return localStorage.getItem('nova_veille_moteur') !== '0'; } catch { return true; } };
+const overrideMs = (): number | null => { try { const v = Number(localStorage.getItem('nova_veille_moteur_s')); return v > 0 ? v * 1000 : null; } catch { return null; } };
 const defaultWorkWindow = () => typeof document !== 'undefined' && !!document.querySelector('[data-nova-transport]');
 
 export interface IdleStats { enabled: boolean; asleep: boolean; sleeps: number; wakes: number; liveSources: number; reason: string | null; idleForMs: number }
@@ -71,6 +83,8 @@ export class IdleSuspender {
   constructor(private host: IdleHost, opts: IdleOptions = {}) {
     this.o = {
       idleMs: opts.idleMs ?? IDLE_MS,
+      visibleIdleMs: opts.visibleIdleMs ?? VISIBLE_IDLE_MS,
+      hidden: opts.hidden ?? (() => typeof document !== 'undefined' && !!document.hidden),
       checkMs: opts.checkMs ?? CHECK_MS,
       now: opts.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now())),
       setTimeout: opts.setTimeout ?? ((fn, ms) => setTimeout(fn, ms)),
@@ -168,7 +182,8 @@ export class IdleSuspender {
     const c = this.ctx;
     if (!c || this.asleep || c.state !== 'running') return;
     if (!this.o.enabled() || this.reason()) { this.lastActivity = this.o.now(); this.schedule(); return; }
-    if (this.o.now() - this.lastActivity < this.o.idleMs) { this.schedule(); return; }
+    const limit = overrideMs() ?? (this.o.hidden() ? this.o.idleMs : this.o.visibleIdleMs);
+    if (this.o.now() - this.lastActivity < limit) { this.schedule(); return; }
     if (typeof c.suspend !== 'function') return;
     this.asleep = true;
     this.stats.sleeps++;
