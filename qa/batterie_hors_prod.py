@@ -268,7 +268,7 @@ BATTERIE = [
     # par le Worker (images captées = écrites), calage de la prise par la boucle mesurée (0 échantillon), navigateur tué
     # pendant une prise (perte < 0,5 s), 4 navigateurs en parallèle + panne de la sortie (lecture qui repart seule),
     # toucher → son au téléphone. Les mesures longues (10 / 30 min) : --tests derive,charge.
-    ("moteur_web", ["--label", "batterie", "--tests", "isolation,prise,latence,latence_fige,crash,demarrage,toucher", "--n", "4"]),
+    ("moteur_web", ["--label", "batterie", "--tests", "isolation,prise,latence,latence_fige,crash,demarrage,toucher", "--n", "1"]),
     # 23/10/2026 · Nova Pitch « Notes de la voix » : double-clic sur un clip de voix → éditeur en bas (analyse avec
     # avancement), note glissée (aimant gamme), Maj+↑ = 2 cents, ↑ = demi-ton, saisie « La2 +4 », Corriger la sélection,
     # réglages (gain, formant), élastique (×1,3, voisine qui s'adapte, double-clic = durée d'origine), couper / fusionner,

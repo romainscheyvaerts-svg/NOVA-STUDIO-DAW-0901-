@@ -316,7 +316,9 @@ def cas_veille(p):
         check("veille", page.evaluate(CTX_STATE) == "running" and tpos > 0.5, "lecture lancée sans geste (commande à distance) : le moteur se réveille et la tête avance", {"etat": page.evaluate(CTX_STATE), "position": tpos})
         page.evaluate("() => window.DAW_CONTROL.stop()"); page.wait_for_timeout(500)
         # Piste armée : jamais de veille (le micro et ses mètres doivent vivre).
-        page.evaluate("() => window.__novaTest.update(d => { const t = d.tracks.find(t => t.id === 'track-rec-main'); if (t) t.isTrackArmed = true; })")
+        # Armement par le VRAI chemin de l'interface (bouton R → handleUpdateTrack → moteur) : changer seulement
+        # l'état (__novaTest.update) n'ouvre pas le micro dans le moteur, qui se mettait donc en veille.
+        page.evaluate("() => { const s = window.DAW_CONTROL.getState(); const t = s.tracks.find(t => t.id === 'track-rec-main') || s.tracks.find(t => t.type === 'AUDIO'); if (t) window.DAW_CONTROL.updateTrack({ ...t, isTrackArmed: true }); return t ? t.id : null; }")
         page.wait_for_timeout(1500)
         page.mouse.move(8, 8)
         page.wait_for_timeout(15000)
