@@ -587,7 +587,8 @@ def main():
     ap.add_argument("--derive-min", dest="derive_min", type=float, default=10)
     ap.add_argument("--charge-min", dest="charge_min", type=float, default=30)
     ap.add_argument("--fond-min", dest="fond_min", type=float, default=10)
-    ap.add_argument("--n", type=int, default=12)
+    # Un seul navigateur à la fois par défaut (règle de Romain : les tests du son un par un) ; --n N pour la mesure en parallèle, machine dédiée.
+    ap.add_argument("--n", type=int, default=1)
     ap.add_argument("--sans-calibrage", dest="sans_calibrage", action="store_true")
     a = ap.parse_args()
     tests = [t.strip() for t in a.tests.split(",") if t.strip()]

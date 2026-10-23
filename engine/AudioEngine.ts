@@ -542,6 +542,7 @@ export class AudioEngine {
         // la veille relance elle-même le contexte ; ni « suspendu », ni « horloge figée » à signaler.
         active: () => !this.idle.isResting() && (this.isPlaying || !!this.recordingTrackId || !!this.recSession || (this.inputRouter?.size || 0) > 0),
         recording: () => !!this.recordingTrackId || !!this.recSession,
+        busy: () => !!this.armingPromise || !!this.rebuilding,
         visible: () => typeof document === 'undefined' || !document.hidden,
         restart: (reason) => this.restartAudio(reason),
         resume: () => this.resume(),
@@ -563,7 +564,10 @@ export class AudioEngine {
    * position). Jamais pendant une prise.
    */
   public async restartAudio(reason: ClockIssue | 'manuel' = 'manuel'): Promise<boolean> {
-    if (!this.ctx || this.recordingTrackId || this.recSession) return false;
+    if (!this.ctx || this.recordingTrackId || this.recSession || this.rebuilding) return false;
+    // Armement en cours (attente du micro) : il finit d'abord, la reconstruction le désarmerait en plein milieu.
+    if (this.armingPromise) { try { await this.armingPromise; } catch { /* signalé ailleurs */ } }
+    if (!this.ctx || this.recordingTrackId || this.recSession || this.rebuilding) return false;
     const wasPlaying = this.isPlaying;
     const position = wasPlaying ? this.getCurrentTime() : this.pausedAt;
     const armed = this.armedIds();
@@ -837,7 +841,23 @@ export class AudioEngine {
    * (App.ensureAudioEngine voit un nouveau contexte). Sert au changement de fréquence et à la
    * relance après une sortie audio qui ne répond plus (engine/audioClockWatch).
    */
+  /**
+   * Reconstruction en cours (changement de fréquence, relance) : l'armement et la prise l'attendent.
+   * `ctxGen` change à chaque nouveau contexte : un armement commencé sur l'ancien recommence.
+   */
+  private rebuilding: Promise<void> | null = null;
+  private ctxGen = 0;
   private async rebuildContext(): Promise<void> {
+    if (this.rebuilding) { await this.rebuilding; return; }
+    const run = (async () => {
+      if (this.armingPromise) { try { await this.armingPromise; } catch { /* signalé ailleurs */ } }
+      await this.rebuildContextNow();
+    })();
+    this.rebuilding = run;
+    try { await run; } finally { if (this.rebuilding === run) this.rebuilding = null; this.ctxGen++; }
+  }
+
+  private async rebuildContextNow(): Promise<void> {
     const old = this.ctx!;
     // Réglages du master à garder (le nouveau graphe naît avec les valeurs par défaut).
     const keep = { limiter: this.safetyLimiterOn, monitor: this.masterOutput?.gain.value ?? 1, collabMuted: this.collabOutputMuted, asio: this.asioStreamActive };
@@ -2315,6 +2335,8 @@ export class AudioEngine {
    * l'enregistrement echouait sans rien dire.
    */
   public async armTrack(trackId: string, opts: { spec?: RecordInput | null; alone?: boolean } = {}): Promise<string | null> {
+    // Reconstruction du contexte en cours (fréquence, relance) : l'armement attend le nouveau contexte.
+    if (this.rebuilding) { try { await this.rebuilding; } catch { /* */ } }
     if (!this.ctx) await this.init();
     this.idle.wake();
     if (this.ctx!.state !== 'running' && this.ctx!.state !== 'closed') await this.ctx!.resume();
@@ -2330,7 +2352,23 @@ export class AudioEngine {
     return erreur;
   }
 
-  private async _armTrackInternal(trackId: string, alone: boolean) {
+  private async _armTrackInternal(trackId: string, alone: boolean, retry = true): Promise<void> {
+    if (this.rebuilding) { try { await this.rebuilding; } catch { /* */ } }
+    const gen = this.ctxGen;
+    try {
+      await this._armTrackOnce(trackId, alone);
+    } finally {
+      // Contexte reconstruit pendant l'armement (attente du micro) : on réarme sur le nouveau, une fois.
+      if (retry && gen !== this.ctxGen && !this.inputRouter?.has(trackId)) {
+        this.armErrors.delete(trackId);
+        if (this.rebuilding) { try { await this.rebuilding; } catch { /* */ } }
+        for (let i = 0; i < 200 && !this.tracksDSP.get(trackId); i++) await new Promise(r => setTimeout(r, 15));
+        await this._armTrackInternal(trackId, alone, false);
+      }
+    }
+  }
+
+  private async _armTrackOnce(trackId: string, alone: boolean) {
     // Maj+clic (ou armement exclusif) : la piste seule.
     if (alone) for (const id of this.armedIds()) if (id !== trackId) this.disarmTrack(id);
     let dsp = this.tracksDSP.get(trackId);
@@ -2867,6 +2905,7 @@ export class AudioEngine {
     // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
     // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
     // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
+    if (this.rebuilding) { try { await this.rebuilding; } catch { /* */ } }
     if (this.armingPromise) { try { await this.armingPromise; } catch { /* erreur d'armement déjà signalée */ } }
     const wanted = Array.isArray(trackIds) ? trackIds : [trackIds];
     console.log("[AudioEngine] startRecording called - pistes:", wanted, "armées:", this.armedIds(), "recording:", this.recordingTrackId);
