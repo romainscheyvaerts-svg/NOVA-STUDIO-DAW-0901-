@@ -1,12 +1,15 @@
 {
-  "version": "1.5.15",
-  "url": "downloads/NovaStudioSetup-1.5.15.exe",
-  "sha256": "d75275671f46563da3b6fee5b59addbfc04c5569554c693e5a55ec18e8ee8368",
-  "size": 51281158,
-  "date": "2026-10-22T14:10:09+02:00",
+  "version": "1.5.16",
+  "url": "downloads/NovaStudioSetup-1.5.16.exe",
+  "sha256": "69e1753a30b467b7ed6915610b0f335ff1ff40ec6ba4669ef2ba82d9222beb63",
+  "size": 51397168,
+  "date": "2026-10-23T16:51:05+02:00",
   "notes": [
-    "Fenêtres de plugins comme dans un vrai DAW : plus d'icône par plugin dans la barre des tâches, elles restent devant Nova et se réduisent avec lui.",
-    "Plugins plus rapides à ouvrir : Waves 4 fois plus vite, Auto-Tune 2 fois plus vite ; un projet de 12 plugins se charge en 3,5 s au lieu de 12.",
-    "Un plugin qui se fige ne bloque plus Nova Studio."
+    "Studio allégé : les commandes rares sont rangées dans des menus (Options, Vue, Outils, Édition, Session, ⋯), rien n'a disparu.",
+    "Nouveau séquenceur de batterie pro (probabilité, rolls, fills, polymétrie) avec un sampler complet par pad, et un piano roll plus pratique.",
+    "Notes de la voix : corrige la justesse note par note au 2 cents près, et allonge ou raccourcis une note en mode élastique.",
+    "Nova Tune calé sur les meilleurs autotunes (vitesse, flex, vibrato naturel, formant, notes cibles) ; pan pro, double pan stéréo et faders jusqu'à +12 dB.",
+    "Effets mesurés : chaque réglage affiché est le vrai (coupe-bas, ratio, temps, LUFS…), lecture = export au bit près.",
+    "Plus fiable : prises écrites au fil de l'eau, son qui repart seul après une panne, tablette et téléphone revus au doigt."
   ]
 }
