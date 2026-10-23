@@ -377,7 +377,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const stepDown = (e: React.PointerEvent, ri: number, si: number) => {
     if (e.button === 2) return;
     startPress(e, ri, si);
-    strokeRef.current = e.pointerType === 'mouse' && e.button === 0 && dm ? { on: !(dm.rows[ri]?.steps[si] > 0), painting: false, ri, si, dm } : null;
+    // Au doigt aussi : glisser sur la rangée peint les pas. Le doigt est « capturé » par la 1re case
+    // (comportement du navigateur) : on le relâche pour que les cases suivantes reçoivent pointerenter.
+    if (e.pointerType !== 'mouse') { try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* déjà relâché */ } }
+    strokeRef.current = (e.pointerType !== 'mouse' || e.button === 0) && dm ? { on: !(dm.rows[ri]?.steps[si] > 0), painting: false, ri, si, dm } : null;
   };
   const stepEnter = (e: React.PointerEvent, ri: number, si: number) => {
     const s = strokeRef.current;
@@ -577,7 +580,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
         onPointerDown={e => stepDown(e, ri, si)} onPointerUp={e => stepUp(e, ri, si)} onPointerEnter={e => stepEnter(e, ri, si)}
         onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
         onContextMenu={e => { e.preventDefault(); if (!off) openStepMenu(e, ri, si); }}
-        className={`relative ${size} ${off ? 'opacity-40' : ''}`}>
+        // pan-y : un glisser horizontal peint les pas, un glisser vertical fait défiler les rangées.
+        className={`relative touch-pan-y ${size} ${off ? 'opacity-40' : ''}`}>
         <span className={`absolute ${narrow || scaled ? 'inset-[1px]' : 'inset-0'} rounded-md overflow-visible transition-colors ${playing ? 'ring-2 ring-white/70' : ''} ${
           off ? 'bg-white/[0.015]' : v > 0 ? (scaled ? 'bg-violet-400/25' : 'bg-cyan-400/25') : beat ? 'bg-white/[0.09]' : 'bg-white/[0.04]'}`}>
           {!off && stepMarks(r, si, v, roll)}
@@ -633,10 +637,12 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
         <div className={`overflow-y-auto ${narrow ? 'px-3' : 'px-4'} py-3 space-y-3`}>
           {/* Kits */}
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Style de batterie">
+          {/* Téléphone : une seule rangée qui défile au doigt (avant : 5 rangées de styles, 230 px, la grille des pas
+              commençait sous l'écran). */}
+          <div className={narrow ? '-mx-3 px-3 flex gap-1.5 overflow-x-auto no-scrollbar' : 'flex flex-wrap gap-1.5'} role="group" aria-label="Style de batterie">
             {DRUM_KITS.map(k => (
               <button key={k.id} type="button" onClick={() => p.onKit(k.id)} aria-pressed={dm?.kitId === k.id}
-                className={`nova-hit-tactile shrink-0 h-9 px-3 rounded-xl text-[12px] font-bold ${dm?.kitId === k.id ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/70' : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white'}`}>
+                className={`nova-hit-tactile shrink-0 h-9 [@media(pointer:coarse)]:h-11 px-3 rounded-xl text-[12px] font-bold whitespace-nowrap ${dm?.kitId === k.id ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/70' : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white'}`}>
                 {k.emoji} {k.name}
               </button>
             ))}
@@ -708,16 +714,18 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               {/* Grille. Bureau : la flèche « pas suivants » a sa propre colonne à droite (elle recouvrait
                   les dernières cases visibles quand elle était posée par-dessus la grille). */}
               <div className={narrow ? 'relative' : 'flex items-stretch gap-1'} data-testid="drum-grid">
-              <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'min-w-0 flex-1 overflow-x-auto no-scrollbar'}>
+              {/* Téléphone : la grille prend toute la largeur de la feuille et le nom du pad 38 px, pour des pas de
+                  44 px sur un écran de 390 (avant : 42). */}
+              <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-3' : 'min-w-0 flex-1 overflow-x-auto no-scrollbar'}>
                 <div className={narrow ? '' : 'inline-block min-w-full'}>
                   {shownRows.map(({ r, ri }) => (
-                    <div key={r.id} className="flex items-center gap-1 mb-1" data-row={r.id}>
+                    <div key={r.id} className={`flex items-center ${narrow ? 'gap-0.5' : 'gap-1'} mb-1`} data-row={r.id}>
                       {narrow ? (
                         <button type="button" onClick={() => { hitPad(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
                           onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat} data-own-longpress=""
                           onContextMenu={e => { e.preventDefault(); stopRepeat(); openRowMenu(e, ri); }}
                           aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad (appui long : réglages du pad)"
-                          className={`shrink-0 w-11 h-11 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
+                          className={`shrink-0 w-[38px] h-11 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
                           {r.solo && <span className="text-amber-300"> S</span>}
                         </button>
@@ -870,7 +878,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               <p className="text-[11px] text-slate-500">
                 {narrow
                   ? "Touche un pas pour l'allumer, appui long pour ses réglages ; touche le nom d'un pad pour l'écouter (appui long : réglages du pad). 1–8 / 9–16 change de moitié de mesure."
-                  : <>Clic : allumer / éteindre · glisser : peindre · Maj + clic : accent · clic droit sur un pas : roll, probabilité, décalage, longueur, hauteur, glisse · double-clic sur un pad : éditer le son. <button type="button" className="underline text-slate-400 hover:text-white" onClick={() => setHelpOpen(true)}>Tous les raccourcis (?)</button></>}
+                  : <>Clic : allumer / éteindre · glisser : peindre · Maj + clic : accent · clic droit sur un pas : roll, probabilité, décalage, longueur, hauteur, glisse · double-clic sur un pad : éditer le son. <button type="button" className="underline text-slate-400 hover:text-white [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-1" onClick={() => setHelpOpen(true)}>Tous les raccourcis (?)</button></>}
               </p>
             </>
           )}

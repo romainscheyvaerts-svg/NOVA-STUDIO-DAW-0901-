@@ -6,6 +6,7 @@ import {
   staticParamValue, trimValue, valueAtPoints, widenSpec,
 } from '../utils/automationWrite';
 import { rackAutomationChanges } from '../engine/fxRack';
+import { isStereoTrack, PAN_L, PAN_R, stereoPanOf } from '../utils/panLaw';
 
 /**
  * ÉCRITURE D'AUTOMATION (modes Touch / Latch / Write / Trim façon Pro Tools)
@@ -263,7 +264,14 @@ export class AutomationRecorder {
     if (!isWriteMode(automationModeOf(next))) return false;
     const changes: [string, number][] = [];
     if (prev.volume !== next.volume) changes.push(['volume', next.volume]);
-    if (prev.pan !== next.pan) changes.push(['pan', next.pan]);
+    if (prev.pan !== next.pan || prev.stereoPan !== next.stereoPan) {
+      // Piste stéréo : boutons G / D → voies « Pan G » / « Pan D » ; piste mono : « pan ».
+      if (isStereoTrack(next)) {
+        const a = stereoPanOf(prev), b = stereoPanOf(next);
+        if (a.l !== b.l) changes.push([PAN_L, b.l]);
+        if (a.r !== b.r) changes.push([PAN_R, b.r]);
+      } else if (prev.pan !== next.pan) changes.push(['pan', next.pan]);
+    }
     if (prev.sends !== next.sends) {
       const a = prev.sends || [], b = next.sends || [];
       if (a.length !== b.length) return false;
@@ -274,7 +282,7 @@ export class AutomationRecorder {
     }
     const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
     for (const k of keys) {
-      if (k === 'volume' || k === 'pan' || k === 'sends') continue;
+      if (k === 'volume' || k === 'pan' || k === 'stereoPan' || k === 'sends') continue;
       if ((prev as any)[k] !== (next as any)[k]) return false;
     }
     if (!changes.length) return false;

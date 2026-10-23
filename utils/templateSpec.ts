@@ -72,6 +72,7 @@
  * scripts/template_from_spec.ts fait le contrôle réel : réglage puis relecture
  * sur le pont VST, état du plugin capturé, rapport.
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import { NamedBus, PluginInstance, PluginType, Track, TrackSend, TrackType } from '../types';
 import { sanitizeRate } from './projectRate';
 import { groupNameKey, groupsFromSpec, SpecGroup, syncGroupFields } from './editGroups';
@@ -559,7 +560,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
     const id = ids.get(t)!;
     const type = typeOf(t);
     let volume = t.volumeDb === undefined ? (type === TrackType.SEND ? 0.8 : 1) : dbToGain(t.volumeDb);
-    if (volume > 1.5) { report.warnings.push(`${t.name} : fader à ${t.volumeDb} dB ramené à +3.5 dB (maximum de NOVA).`); volume = 1.5; }
+    if (volume > FADER_MAX_GAIN) { report.warnings.push(`${t.name} : fader à ${t.volumeDb} dB ramené à +12 dB (maximum de NOVA).`); volume = FADER_MAX_GAIN; }
     const plugins: PluginInstance[] = [];
     (t.inserts || []).forEach((ins, i) => {
       const pluginId = `pl-${id}-${i + 1}`;
@@ -641,7 +642,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
       const bus = busByName.get(compact(s.to));
       const to = byName.get(compact(s.to)) || (bus ? listenerOf(bus.id) : undefined);
       if (!to) report.warnings.push(`${t.name} : envoi vers « ${s.to} » introuvable (ignoré).`);
-      const level = s.levelDb !== undefined ? Math.min(1.5, dbToGain(s.levelDb)) : Math.max(0, Math.min(1.5, s.level ?? 0.25));
+      const level = s.levelDb !== undefined ? Math.min(FADER_MAX_GAIN, dbToGain(s.levelDb)) : Math.max(0, Math.min(FADER_MAX_GAIN, s.level ?? 0.25));
       const slot = slotOf(s.slot);
       return to ? {
         id: to, level, isEnabled: s.active !== false, ...(s.pre ? { preFader: true } : {}),

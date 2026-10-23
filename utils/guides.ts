@@ -183,7 +183,7 @@ export const GUIDES: Guide[] = [
       { text: 'Choisis « 🤖 Trap autotune » (effet robot). « Drill » et « Chant / R&B » en mettent une dose plus naturelle.', target: '[aria-labelledby="vocal-tools-title"]',
         done: { fact: 'hasAutotune' } },
       { text: 'Lance la lecture et écoute. Change de style pour comparer ; Ctrl+Z revient en arrière.', action: 'nova.play', hint: 'Barre d’espace, ou ▶ en haut.' },
-      { text: 'Note par note : clique un clip voix, puis « Justesse note par note du clip » (Ctrl+K).', action: 'pal.pitch', unless: 'simple', manual: true },
+      { text: 'Note par note : clique un clip voix, puis « Éditer les notes de la voix du clip » (Ctrl+K).', action: 'pal.pitch', unless: 'simple', manual: true },
     ],
     result: 'Ta voix est corrigée dans la tonalité du beat, du robot trap au naturel.',
     pitfalls: [

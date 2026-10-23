@@ -29,7 +29,8 @@ export const ALL_PARTS: ScenePart[] = SCENE_PARTS.map(p => p.id);
 
 export interface SceneSend { id: string; level: number; isEnabled: boolean; pan?: number; isMuted?: boolean }
 export interface ScenePlugin { id: string; type: string; isEnabled: boolean; params: Record<string, any> }
-export interface TrackScene { volume: number; pan: number; isMuted: boolean; sends: SceneSend[]; plugins: ScenePlugin[] }
+/** `stereoPan` : double pan G / D d'une piste stéréo (absent : pan unique, comme avant). */
+export interface TrackScene { volume: number; pan: number; stereoPan?: { l: number; r: number; at: number }; isMuted: boolean; sends: SceneSend[]; plugins: ScenePlugin[] }
 
 export interface SceneStamp { t: number; by: string }
 
@@ -54,6 +55,7 @@ export function trackSceneOf(t: Track): TrackScene {
   return {
     volume: num(t.volume, 1),
     pan: num(t.pan, 0),
+    ...(t.stereoPan ? { stereoPan: { ...t.stereoPan } } : {}),
     isMuted: !!t.isMuted,
     sends: (t.sends || []).map(s => ({ id: s.id, level: num(s.level, 0), isEnabled: !!s.isEnabled, ...(typeof s.pan === 'number' ? { pan: s.pan } : {}), ...(s.isMuted ? { isMuted: true } : {}) })),
     plugins: (t.plugins || []).map(pluginOf),
@@ -88,7 +90,12 @@ export function applyScene(tracks: Track[], scene: MixScene, parts: ScenePart[] 
     let nt: Track = t;
     const set = <K extends keyof Track>(k: K, v: Track[K]) => { if (nt[k] !== v) { if (nt === t) nt = { ...t }; (nt as any)[k] = v; } };
     if (want.has('volumes')) set('volume', s.volume);
-    if (want.has('pans')) set('pan', s.pan);
+    if (want.has('pans')) {
+      set('pan', s.pan);
+      // Double pan G / D : rappelé tel quel (une scène d'avant n'en a pas : le pan unique compte).
+      const sp = s.stereoPan && Number.isFinite(s.stereoPan.l) && Number.isFinite(s.stereoPan.r) ? s.stereoPan : undefined;
+      if (JSON.stringify(nt.stereoPan) !== JSON.stringify(sp)) { if (nt === t) nt = { ...t }; if (sp) nt.stereoPan = { ...sp }; else delete nt.stereoPan; }
+    }
     if (want.has('mutes')) set('isMuted', s.isMuted);
     if (want.has('sends') && t.sends?.length) {
       const byId = new Map(s.sends.map(x => [x.id, x]));

@@ -2,9 +2,12 @@
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Faceplate, HwSection, HwWindow, Knob, PushButton, useHwHelp } from './hw';
+import { Faceplate, HwLcdSelect, HwSection, HwWindow, Knob, PushButton, useHwHelp } from './hw';
+import { retuneMsFromSpeed, speedFromRetuneMs } from '../utils/tuneSpeed';
+import { NOVA_TUNE_PRESETS, novaTunePresetParams } from '../utils/novaTunePresets';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { cancelUiFrame, requestUiFrame } from '../utils/uiFrame';
+import { createPitchDetector } from '../engine/pitch/detect';
 
 // Export constants for use in other plugins (MasterSync)
 export const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -15,13 +18,15 @@ export const SCALE_LABELS: Record<string, string> = {
 };
 
 // --- WORKLET CODE INLINED TO PREVENT 404 ERRORS ---
-// Moteur v2 : detection YIN + transposition PSOLA (grains synchrones de la
-// periode). L'ancien moteur (autocorrelation brute + deux tetes de lecture)
-// se trompait d'octave, corrigeait aussi les consonnes et les silences, et ses
-// deux tetes decalees filtraient la voix en peigne meme sans correction.
+// Moteur v3 (22/10/2026) : detection de hauteur partagee (engine/pitch/detect.ts :
+// YIN + portes de voisement + garde d'octave + affinage) et transposition PSOLA
+// (grains synchrones de la periode), avec Flex (ne corrige que pres de la note,
+// loi mesuree sur la reference du marche), vibrato naturel, formant, transposition,
+// notes cibles (personnalisees ou accords du morceau).
 const WORKLET_CODE = `
 const MIN_F0 = 75;     // Hz : voix graves de rap comprises
 const MAX_F0 = 1000;   // Hz : aigus de chant
+const createPitchDetector = (${createPitchDetector.toString()});
 
 class AutoTuneProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -37,25 +42,16 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     this.pMax = Math.ceil(sr / MIN_F0);
     this.latency = 2 * this.pMax + 34;
     this.pUnvoiced = Math.round(sr * 0.005);
-    // Analyse sur un signal filtre puis decime (moins de calcul, moins
-    // d'erreurs d'octave dues aux formants).
-    this.D = sr > 60000 ? 4 : 2;
-    this.ar = sr / this.D;
-    this.tauMin = Math.max(2, Math.floor(this.ar / MAX_F0));
-    this.tauMax = Math.ceil(this.ar / MIN_F0);
-    this.W = Math.max(256, Math.round(this.ar * 0.011));
-    this.DSIZE = 4096;
-    this.DMASK = this.DSIZE - 1;
-    this.decBuf = new Float32Array(this.DSIZE);
-    this.frame = new Float32Array(this.W + this.tauMax + 2);
-    this.diff = new Float32Array(this.tauMax + 2);
-    const fc = Math.min(2500, 0.4 * this.ar);
-    const w0 = 2 * Math.PI * fc / sr;
-    const alpha = Math.sin(w0) / (2 * 0.7071);
-    const cw = Math.cos(w0);
-    const a0 = 1 + alpha;
-    this.lb0 = (1 - cw) / 2 / a0; this.lb1 = (1 - cw) / a0; this.lb2 = this.lb0;
-    this.la1 = -2 * cw / a0; this.la2 = (1 - alpha) / a0;
+    // Detection de hauteur (module partage avec l'editeur de notes et les analyses).
+    this.det = createPitchDetector(sr, { fMin: MIN_F0, fMax: MAX_F0 });
+    this.voiceType = 0;
+    // Accord en cours a chaque echantillon d'entree (piste d'accords suivie).
+    this.chordBuf = new Float32Array(this.SIZE);
+    this.chordCode = 0;
+    this.chordMask = new Uint8Array(12);
+    this.customCode = 0;
+    this.customMask = new Uint8Array(12);
+    this.maskRoot = 0;
     this.HOP = 256;
     this.HN = 64;
     this.histTime = new Float64Array(this.HN);
@@ -80,14 +76,14 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
   }
 
   reset() {
-    this.inBuf.fill(0); this.acc.fill(0); this.wsum.fill(0); this.decBuf.fill(0);
+    this.inBuf.fill(0); this.acc.fill(0); this.wsum.fill(0); this.chordBuf.fill(0);
+    this.det.reset();
     this.inCount = 0;
     this.outCount = 0;
     this.nextSynth = 0;
     this.anaMark = -this.latency;
-    this.decCount = 0; this.decPhase = 0;
-    this.lx1 = 0; this.lx2 = 0; this.ly1 = 0; this.ly2 = 0;
     this.hopCounter = 0;
+    this.mBar = 0; this.llMBar = 0; this.llWasVoiced = false;
     this.histCount = 0;
     this.prevP1 = 0; this.prevP2 = 0; this.unvoicedRun = 0;
     this.corr = 0; this.curTarget = -1; this.heldTime = 0;
@@ -108,51 +104,23 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       { name: 'scaleType', defaultValue: 0, minValue: 0, maxValue: 4 },
       { name: 'bypass', defaultValue: 0, minValue: 0, maxValue: 1 },
       { name: 'lowLatency', defaultValue: 0, minValue: 0, maxValue: 1 },
+      // Flex : 0 = corrige tout ; F > 0 = ecart > 50 - 50F cents laisse de plus en plus libre (1 : rien).
+      { name: 'flex', defaultValue: 0, minValue: 0, maxValue: 1 },
+      // Vibrato naturel : part du vibrato chante conservee (la correction vise le centre de la note).
+      { name: 'vibrato', defaultValue: 0, minValue: 0, maxValue: 2 },
+      // Formant (demi-tons) : timbre plus fin (+) ou plus gros (-), sans changer la hauteur.
+      { name: 'formant', defaultValue: 0, minValue: -12, maxValue: 12 },
+      // Transposition (demi-tons) appliquee apres la correction.
+      { name: 'transpose', defaultValue: 0, minValue: -12, maxValue: 12 },
+      // Type de voix : 0 auto (75-1000 Hz), 1 grave (75-400 Hz), 2 aigue (140-1000 Hz).
+      { name: 'voiceType', defaultValue: 0, minValue: 0, maxValue: 2 },
+      // Notes cibles personnalisees : masque de 12 bits (bit 0 = Do), 0 = la gamme.
+      { name: 'targetMask', defaultValue: 0, minValue: 0, maxValue: 4095 },
+      // Accord en cours (tonique x 4096 + masque, 0 = aucun) programme par le moteur (piste d'accords).
+      { name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' },
       // Départ de lecture : compteur programmé au bloc du départ, l'analyse repart à neuf (comme l'export).
       { name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' }
     ];
-  }
-
-  // YIN sur la trame decimee la plus recente. Renvoie la periode en
-  // echantillons d'entree, ou 0 si la trame n'est pas voisee.
-  detectPeriod() {
-    const W = this.W, tMax = this.tauMax, N = W + tMax;
-    if (this.decCount < N) return 0;
-    const f = this.frame;
-    const start = this.decCount - N;
-    for (let i = 0; i < N; i++) f[i] = this.decBuf[(start + i) & this.DMASK];
-    let energy = 0;
-    for (let i = 0; i < W; i++) energy += f[i] * f[i];
-    if (Math.sqrt(energy / W) < 0.004) return 0; // silence / souffle
-    const d = this.diff;
-    d[0] = 1;
-    let running = 0, cand = -1, last = tMax;
-    for (let tau = 1; tau <= tMax; tau++) {
-      let s = 0;
-      for (let j = 0; j < W; j++) { const x = f[j] - f[j + tau]; s += x * x; }
-      running += s;
-      d[tau] = running > 0 ? s * tau / running : 1;
-      if (tau >= this.tauMin) {
-        if (cand < 0) { if (d[tau] < 0.15) cand = tau; }
-        else if (d[tau] < d[cand]) cand = tau;
-        else { last = tau; break; }
-      }
-    }
-    if (cand < 0) {
-      // Pas de creux net : on prend le minimum global s'il reste credible.
-      let best = this.tauMin;
-      for (let tau = this.tauMin; tau <= tMax; tau++) if (d[tau] < d[best]) best = tau;
-      if (d[best] > 0.25) return 0;
-      cand = best;
-      last = tMax;
-    }
-    let tauF = cand;
-    if (cand > 1 && cand < last) {
-      const a = d[cand - 1], b = d[cand], c = d[cand + 1];
-      const den = a - 2 * b + c;
-      if (den > 1e-12) tauF = cand + Math.max(-1, Math.min(1, 0.5 * (a - c) / den));
-    }
-    return tauF * this.D;
   }
 
   pushEstimate(time, p) {
@@ -213,6 +181,38 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     return best;
   }
 
+  // Notes visees a l'instant t (echantillon d'entree) : accord en cours (piste
+  // d'accords suivie), sinon notes cibles personnalisees, sinon la gamme.
+  // Renvoie le masque ; this.maskRoot recoit la tonique a appliquer.
+  targetMaskAt(t, rootKey, mask) {
+    const code = this.chordBuf[Math.floor(t) & this.MASK];
+    if (code > 0) {
+      if (code !== this.chordCode) {
+        this.chordCode = code;
+        const bits = Math.round(code) & 4095;
+        for (let i = 0; i < 12; i++) this.chordMask[i] = (bits >> i) & 1;
+      }
+      this.maskRoot = 0;
+      return this.chordMask;
+    }
+    if (this.customCode > 0) { this.maskRoot = 0; return this.customMask; }
+    this.maskRoot = rootKey;
+    return mask;
+  }
+
+  // Ecart a corriger (cents) pour un ecart chante e (cents, + = trop haut), avec Flex.
+  // Loi mesuree sur la reference du marche (22/10/2026) : zone corrigee entierement
+  // |e| <= z = 0,98 (50 - 50 F) cents ; au-dela l'ecart laisse vaut 50 (|e| - z) / (50 - z),
+  // borne a |e| (rien n'est corrige a 50 cents et plus).
+  flexWant(e, flex) {
+    if (!(flex > 0.0005)) return -e;
+    const ae = Math.abs(e);
+    const z = 0.98 * (50 - 50 * Math.min(1, flex));
+    if (ae <= z) return -e;
+    const r = 50 - z > 1e-6 ? Math.min(ae, 50 * (ae - z) / (50 - z)) : ae;
+    return e > 0 ? -(ae - r) : (ae - r);
+  }
+
   // Hysteresis : on ne change de note cible que si la voix est nettement plus
   // proche de la nouvelle. Sans ca, une note tenue entre deux degres oscillait
   // d'une note a l'autre (le fameux "warble").
@@ -225,7 +225,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     return cur;
   }
 
-  placeGrains(blockEnd, speed, amount, humanize, rootKey, mask) {
+  placeGrains(blockEnd, speed, amount, humanize, rootKey, mask, flex, vib, fmt, tr) {
     const sr = sampleRate;
     for (let guard = 0; guard < 64; guard++) {
       const ts = this.nextSynth;
@@ -241,10 +241,18 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       if (voiced) {
         const f0 = sr / P;
         const midi = 69 + 12 * Math.log2(f0 / 440);
-        const tgt = this.chooseTarget(midi, rootKey, mask, this.curTarget);
+        // Centre de la note (vibrato naturel) : moyenne glissante de 200 ms, repartie a
+        // chaque nouvelle note (debut de voisement ou saut de plus d'un demi-ton).
+        if (!this.lastVoiced || Math.abs(midi - this.mBar) > 1) this.mBar = midi;
+        else this.mBar += (midi - this.mBar) * (1 - Math.exp(-dt / 0.2));
+        const tm = this.targetMaskAt(taNom, rootKey, mask);
+        // Vibrato garde : la note visee se choisit sur le centre (le vibrato ne fait pas changer de note).
+        const tgt = this.chooseTarget(vib > 0.0005 ? this.mBar : midi, this.maskRoot, tm, this.curTarget);
         if (tgt !== this.curTarget) { this.curTarget = tgt; this.heldTime = 0; }
         else this.heldTime += dt;
-        const want = (tgt - midi) * 100;
+        let want = (tgt - midi) * 100;
+        if (flex > 0.0005) want = this.flexWant((midi - tgt) * 100, flex);
+        if (vib > 0.0005) want = want * (1 - vib) + this.flexWant((this.mBar - tgt) * 100, flex) * vib;
         // Vitesse : 0 = instantane (effet robot), 1 = ~300 ms (naturel).
         // Humanize ralentit la correction sur les notes tenues pour garder
         // le vibrato et la vie de la voix, sans toucher aux attaques.
@@ -253,10 +261,10 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
         tau += humanize * humanize * 0.25 * hold;
         const a = tau < 0.0005 ? 1 : 1 - Math.exp(-dt / tau);
         this.corr += (want - this.corr) * a;
-        ratio = Math.pow(2, (this.corr * amount) / 1200);
+        ratio = Math.pow(2, (this.corr * amount + 100 * tr) / 1200);
         if (ratio < 0.5) ratio = 0.5; else if (ratio > 2) ratio = 2;
         this.lastDetectedFreq = f0;
-        this.lastTargetFreq = 440 * Math.pow(2, (tgt - 69) / 12);
+        this.lastTargetFreq = 440 * Math.pow(2, (tgt + tr - 69) / 12);
       } else {
         // Consonnes, souffles, silences : aucune transposition.
         this.corr *= Math.exp(-dt / 0.03);
@@ -278,22 +286,51 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       while (ta > limit) ta -= P;
       this.anaMark = ta;
 
+      // Grain pose a sa position EXACTE (fractionnaire) : le grain est relu decale de la partie
+      // fractionnaire et sa fenetre centree dessus. Avant (22/10/2026), la position etait arrondie a
+      // l'echantillon : periode de sortie juste en moyenne, mais tremblante de ±0,5 echantillon
+      // (±4 cents a 220 Hz, ±8 cents a 440 Hz, d'une periode a l'autre).
       const tsI = Math.round(ts);
-      const base = Math.floor(ta);
-      const frac = ta - base;
+      const delta = ts - tsI;
+      const taEff = ta - delta;
+      const base = Math.floor(taEff);
+      const frac = taEff - base;
       const Pi = Math.floor(P);
       const invP = Math.PI / P;
-      // Jamais d'ecriture dans des echantillons deja sortis.
-      const kStart = Math.max(-Pi + 1, this.outCount - tsI);
       const inB = this.inBuf, acc = this.acc, ws = this.wsum, M = this.MASK;
-      for (let k = kStart; k < Pi; k++) {
-        const w = 0.5 + 0.5 * Math.cos(k * invP);
-        const i0 = (base + k) & M;
-        const s0 = inB[i0];
-        const s = s0 + (inB[(i0 + 1) & M] - s0) * frac;
-        const o = (tsI + k) & M;
-        acc[o] += w * s;
-        ws[o] += w;
+      // Formant : le grain est relu f fois plus vite (fenetre de P/f), sans changer
+      // l'espacement des grains, donc sans changer la hauteur. Borne a 1,9 x le rapport
+      // de transposition : les fenetres se recouvrent toujours (pas de trou).
+      let ff = voiced && fmt !== 0 ? Math.pow(2, fmt / 12) : 1;
+      if (ff > 1.9 * ratio) ff = 1.9 * ratio;
+      if (ff === 1) {
+        // Jamais d'ecriture dans des echantillons deja sortis.
+        const kStart = Math.max(-Pi + 1, this.outCount - tsI);
+        for (let k = kStart; k < Pi; k++) {
+          const u = k - delta;
+          const w = u <= -P || u >= P ? 0 : 0.5 + 0.5 * Math.cos(u * invP);
+          const i0 = (base + k) & M;
+          const s0 = inB[i0];
+          const s = s0 + (inB[(i0 + 1) & M] - s0) * frac;
+          const o = (tsI + k) & M;
+          acc[o] += w * s;
+          ws[o] += w;
+        }
+      } else {
+        const half = P / ff, Hi = Math.floor(half) + 1, invH = Math.PI / half;
+        const kStart = Math.max(-Hi, this.outCount - tsI);
+        for (let k = kStart; k <= Hi; k++) {
+          const u = k - delta;
+          if (u <= -half || u >= half) continue;
+          const w = 0.5 + 0.5 * Math.cos(u * invH);
+          const x = ta + u * ff;
+          const xi = Math.floor(x), xf = x - xi;
+          const s0 = inB[xi & M];
+          const s = s0 + (inB[(xi + 1) & M] - s0) * xf;
+          const o = (tsI + k) & M;
+          acc[o] += w * s;
+          ws[o] += w;
+        }
       }
       this.nextSynth = ts + P / ratio;
     }
@@ -318,7 +355,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
   // ~27 ms de la PSOLA. Contrepartie : les formants suivent la correction
   // (quelques % pour un demi-ton), acceptable pour le retour casque ; la
   // lecture et l'export utilisent la PSOLA qui preserve les formants.
-  llProcess(n, speed, amount, humanize, rootKey, mask) {
+  llProcess(n, speed, amount, humanize, rootKey, mask, flex, vib, tr) {
     const sr = sampleRate;
     const dt = n / sr;
     // Derniere estimation (pas de recul d'analyse : on suit la voix au plus pres)
@@ -327,9 +364,16 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     if (voiced) {
       const f0 = sr / est;
       const midi = 69 + 12 * Math.log2(f0 / 440);
-      const tgt = this.chooseTarget(midi, rootKey, mask, this.llTarget);
-      if (tgt !== this.llTarget) { this.llTarget = tgt; this.llHeld = 0; } else this.llHeld += dt;
-      const want = (tgt - midi) * 100;
+      if (!this.llWasVoiced || Math.abs(midi - this.llMBar) > 1) this.llMBar = midi;
+      else this.llMBar += (midi - this.llMBar) * (1 - Math.exp(-dt / 0.2));
+      this.llWasVoiced = true;
+      const tm = this.targetMaskAt(this.inCount - 1, rootKey, mask);
+      const tgt = this.chooseTarget(vib > 0.0005 ? this.llMBar : midi, this.maskRoot, tm, this.llTarget);
+      if (tgt !== this.llTarget) { this.llTarget = tgt; this.llHeld = 0; }
+      else this.llHeld += dt;
+      let want = (tgt - midi) * 100;
+      if (flex > 0.0005) want = this.flexWant((midi - tgt) * 100, flex);
+      if (vib > 0.0005) want = want * (1 - vib) + this.flexWant((this.llMBar - tgt) * 100, flex) * vib;
       let tau = 0.3 * speed * speed;
       const hold = Math.max(0, Math.min(1, (this.llHeld - 0.08) / 0.25));
       tau += humanize * humanize * 0.25 * hold;
@@ -338,9 +382,11 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     } else {
       this.llCorr *= Math.exp(-dt / 0.03);
       this.llTarget = -1;
+      this.llWasVoiced = false;
     }
-    let ratio = Math.pow(2, (this.llCorr * amount) / 1200);
-    if (ratio < 0.7) ratio = 0.7; else if (ratio > 1.4) ratio = 1.4;
+    let ratio = Math.pow(2, (this.llCorr * amount + 100 * tr) / 1200);
+    const rLo = tr === 0 ? 0.7 : 0.5, rHi = tr === 0 ? 1.4 : 2;
+    if (ratio < rLo) ratio = rLo; else if (ratio > rHi) ratio = rHi;
     // Saut = une periode (au moins 2 ms pour un fondu propre) ; hors voisement, 6 ms.
     let Pj = voiced ? est : Math.round(0.006 * sr);
     const minJ = Math.round(0.002 * sr);
@@ -412,35 +458,44 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     const rootKey = Math.round(parameters.rootKey[0]);
     const scaleIdx = Math.max(0, Math.min(4, Math.round(parameters.scaleType[0])));
     const mask = this.scaleMask[scaleIdx];
+    const flex = parameters.flex ? Math.max(0, Math.min(1, parameters.flex[0])) : 0;
+    const vib = parameters.vibrato ? Math.max(0, Math.min(2, parameters.vibrato[0])) : 0;
+    const fmt = parameters.formant ? Math.max(-12, Math.min(12, parameters.formant[0])) : 0;
+    const tr = parameters.transpose ? Math.max(-12, Math.min(12, Math.round(parameters.transpose[0]))) : 0;
+    const vt = parameters.voiceType ? Math.round(parameters.voiceType[0]) : 0;
+    if (vt !== this.voiceType) {
+      this.voiceType = vt;
+      if (vt === 1) this.det.setRange(MIN_F0, 400); else if (vt === 2) this.det.setRange(140, MAX_F0); else this.det.setRange(MIN_F0, MAX_F0);
+    }
+    const cm = parameters.targetMask ? Math.round(parameters.targetMask[0]) & 4095 : 0;
+    if (cm !== this.customCode) {
+      this.customCode = cm;
+      for (let i = 0; i < 12; i++) this.customMask[i] = (cm >> i) & 1;
+    }
 
-    // 1. Ecriture de l'entree + filtre/decimation pour l'analyse
-    const b0 = this.lb0, b1 = this.lb1, b2 = this.lb2, a1 = this.la1, a2 = this.la2;
+    // 1. Ecriture de l'entree (et de l'accord en cours) + analyse
+    const ch = parameters.chord;
     for (let i = 0; i < blockSize; i++) {
       const x = channelData ? channelData[i] : 0;
-      this.inBuf[this.inCount & this.MASK] = x;
+      const k = this.inCount & this.MASK;
+      this.inBuf[k] = x;
+      this.chordBuf[k] = ch ? (ch.length > 1 ? ch[i] : ch[0]) : 0;
       this.inCount++;
-      let y = b0 * x + b1 * this.lx1 + b2 * this.lx2 - a1 * this.ly1 - a2 * this.ly2;
-      if (y < 1e-15 && y > -1e-15) y = 0; // pas de denormaux
-      this.lx2 = this.lx1; this.lx1 = x; this.ly2 = this.ly1; this.ly1 = y;
-      if (++this.decPhase >= this.D) {
-        this.decPhase = 0;
-        this.decBuf[this.decCount & this.DMASK] = y;
-        this.decCount++;
-      }
     }
+    if (channelData) this.det.push(channelData, blockSize);
+    else { if (!this.zeros || this.zeros.length < blockSize) this.zeros = new Float32Array(blockSize); this.det.push(this.zeros, blockSize); }
 
     // 2. Detection de hauteur toutes les HOP echantillons
     this.hopCounter += blockSize;
     if (this.hopCounter >= this.HOP) {
       this.hopCounter -= this.HOP;
-      const p = this.detectPeriod();
-      const center = (this.decCount - (this.W + this.tauMax) / 2) * this.D;
-      this.pushEstimate(center, p);
+      const p = this.det.estimate().period;
+      this.pushEstimate(this.det.center(), p);
     }
 
     // 3. Placement des grains puis lecture normalisee
     const blockEnd = this.outCount + blockSize;
-    this.placeGrains(blockEnd, speed, amount, humanize, rootKey, mask);
+    this.placeGrains(blockEnd, speed, amount, humanize, rootKey, mask, flex, vib, fmt, tr);
     const M = this.MASK;
     for (let i = 0; i < blockSize; i++) {
       const idx = (this.outCount + i) & M;
@@ -456,7 +511,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     if (this.llMix < 0) this.llMix = llWanted; // premier bloc : pas de fondu
     if (llWanted > 0 || this.llMix > 0) {
       if (this.llOut.length < blockSize) this.llOut = new Float32Array(blockSize);
-      this.llProcess(blockSize, speed, amount, humanize, rootKey, mask);
+      this.llProcess(blockSize, speed, amount, humanize, rootKey, mask, flex, vib, tr);
       const step = 1 / (0.02 * sampleRate);
       let m = this.llMix;
       for (let i = 0; i < blockSize; i++) {
@@ -528,7 +583,29 @@ export interface AutoTuneParams {
    * Bascule en fondu de 20 ms. Optionnel, desactive par defaut.
    */
   lowLatency?: boolean;
+  /** Flex (0-1) : 0 = tout est corrige ; plus haut, seules les notes proches de la cible le sont. */
+  flex?: number;
+  /** Vibrato naturel (0-2) : part du vibrato chante gardee (1 = tel quel, 2 = double) ; 0 = la vitesse decide. */
+  vibrato?: number;
+  /** Formant (demi-tons, -12..+12) : timbre plus fin (+) ou plus gros (-), meme hauteur. */
+  formant?: number;
+  /** Transposition (demi-tons, -12..+12). */
+  transpose?: number;
+  /** Type de voix : 'auto' (75-1000 Hz), 'grave' (75-400 Hz), 'aigue' (140-1000 Hz). */
+  voiceType?: 'auto' | 'grave' | 'aigue';
+  /** Notes cibles personnalisees (classes 0-11, Do = 0) ; vide ou absent = la gamme. */
+  targetNotes?: number[];
+  /** Vrai : les notes cibles suivent la piste d'accords du morceau (sinon la gamme). */
+  followChords?: boolean;
 }
+
+/** Masque 12 bits des notes cibles personnalisees (0 = aucune : la gamme s'applique). */
+export function targetNotesMask(notes: number[] | undefined | null): number {
+  let m = 0;
+  if (Array.isArray(notes)) for (const n of notes) { const pc = ((Math.round(+n) % 12) + 12) % 12; if (Number.isFinite(pc)) m |= 1 << pc; }
+  return m;
+}
+const VOICE_TYPES = ['auto', 'grave', 'aigue'];
 
 export class AutoTuneNode {
   private ctx: AudioContext;
@@ -657,7 +734,26 @@ export class AutoTuneNode {
     params.get('rootKey')?.setValueAtTime(safe(rootKey, 0), now);
     const scaleIdx = SCALES.indexOf(scale);
     params.get('scaleType')?.setValueAtTime(scaleIdx >= 0 ? scaleIdx : 0, now);
+    // Reglages avances (absents des anciens projets : valeurs neutres, son inchange).
+    const p = this.params;
+    params.get('flex')?.setValueAtTime(Math.max(0, Math.min(1, safe(+(p.flex ?? 0), 0))), now);
+    params.get('vibrato')?.setValueAtTime(Math.max(0, Math.min(2, safe(+(p.vibrato ?? 0), 0))), now);
+    params.get('formant')?.setValueAtTime(Math.max(-12, Math.min(12, safe(+(p.formant ?? 0), 0))), now);
+    params.get('transpose')?.setValueAtTime(Math.max(-12, Math.min(12, Math.round(safe(+(p.transpose ?? 0), 0)))), now);
+    params.get('voiceType')?.setValueAtTime(Math.max(0, VOICE_TYPES.indexOf(String(p.voiceType || 'auto'))), now);
+    params.get('targetMask')?.setValueAtTime(targetNotesMask(p.targetNotes), now);
   }
+
+  /**
+   * AudioParam « accord en cours » (notes cibles = accords du morceau), programme par le moteur
+   * sur la piste d'accords en lecture comme a l'export ; null tant que le worklet n'est pas pret.
+   */
+  public chordParam(): AudioParam | null {
+    return (this.worklet?.parameters.get('chord') as AudioParam | undefined) || null;
+  }
+
+  /** Vrai : les notes cibles suivent la piste d'accords (reglage « Accords du morceau »). */
+  public followsChords(): boolean { return this.params.followChords === true; }
 
   public setStatusCallback(cb: (data: any) => void) {
     this.onStatusCallback = cb;
@@ -707,7 +803,9 @@ const AT_SCALE_HINT: Record<string, string> = {
 };
 const NOTE_FR = ['Do', 'Do#', 'Ré', 'Ré#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si'];
 const noteOf = (freq: number) => (freq > 0 ? ((Math.round(69 + 12 * Math.log2(freq / 440)) % 12) + 12) % 12 : -1);
-const speedText = (v: number) => (v < 0.05 ? 'Robot' : `${Math.round(300 * v * v)} ms`);
+/** Temps affiché (convention du marché : demi-vie de l'écart, voir utils/tuneSpeed.ts). */
+const speedText = (v: number) => { const ms = retuneMsFromSpeed(v); return ms < 0.5 ? 'Robot' : ms < 10 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`; };
+const SPEED_SCALE = [0, 10, 25, 50, 100, 200].map(ms => ({ v: speedFromRetuneMs(ms), label: String(ms) }));
 
 /**
  * Écran de Nova Tune : note visée en grand, note chantée, et aiguille de la
@@ -775,17 +873,26 @@ const TuneScreen: React.FC<{ node: AutoTuneNode; enabled: boolean }> = ({ node, 
   );
 };
 
-/** Clavier d'une octave : clic = tonalité ; point vert = note de la gamme. */
-const KeyPiano: React.FC<{ root: number; scale: string; onPick: (n: number) => void }> = ({ root, scale, onPick }) => {
-  const inScale = new Set((AT_SCALE_NOTES[scale] || AT_SCALE_NOTES.CHROMATIC).map(i => (i + root) % 12));
+/**
+ * Clavier d'une octave. Mode « tonalité » : clic = tonique, point vert = note de la gamme.
+ * Mode « notes choisies » : clic = la note devient (ou n'est plus) une note cible.
+ */
+const KeyPiano: React.FC<{ root: number; scale: string; onPick: (n: number) => void; custom?: number[] | null; onToggle?: (n: number) => void }> = ({ root, scale, onPick, custom, onToggle }) => {
+  const choosing = !!custom && !!onToggle;
+  const inScale = choosing ? new Set(custom!.map(n => ((n % 12) + 12) % 12)) : new Set((AT_SCALE_NOTES[scale] || AT_SCALE_NOTES.CHROMATIC).map(i => (i + root) % 12));
   const whites = [0, 2, 4, 5, 7, 9, 11];
   const blacks: [number, number][] = [[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]; // note, position après la n-ième touche blanche
-  const help = useHwHelp('at-key', 'Tonalité', 'Touche la note de base du morceau. Les points verts montrent les notes de la gamme vers lesquelles la voix est ramenée.', `${NOTES[root]} (${NOTE_FR[root]})`);
+  const help = useHwHelp('at-key', choosing ? 'Notes cibles' : 'Tonalité', choosing
+    ? 'Touche les notes vers lesquelles la voix doit aller (point vert = note cible). Les autres sont évitées.'
+    : 'Touche la note de base du morceau. Les points verts montrent les notes de la gamme vers lesquelles la voix est ramenée.',
+  choosing ? `${inScale.size} note(s) cible(s)` : `${NOTES[root]} (${NOTE_FR[root]})`);
   const key = (n: number, style: React.CSSProperties, black: boolean) => (
-    <button key={n} type="button" role="radio" aria-checked={root === n} aria-label={`${NOTES[n]} (${NOTE_FR[n]})`} data-in={inScale.has(n) ? 'true' : 'false'}
-      className={`hw-piano-key ${black ? 'hw-piano-black' : 'hw-piano-white'}`} style={style} onClick={() => onPick(n)} title={`Tonalité : ${NOTES[n]} (${NOTE_FR[n]})`}
-      tabIndex={root === n ? 0 : -1}
+    <button key={n} type="button" role={choosing ? 'checkbox' : 'radio'} aria-checked={choosing ? inScale.has(n) : root === n} aria-label={`${NOTES[n]} (${NOTE_FR[n]})`} data-in={inScale.has(n) ? 'true' : 'false'}
+      className={`hw-piano-key ${black ? 'hw-piano-black' : 'hw-piano-white'}`} style={style} onClick={() => (choosing ? onToggle!(n) : onPick(n))}
+      title={choosing ? `${inScale.has(n) ? 'Retirer' : 'Ajouter'} ${NOTES[n]} (${NOTE_FR[n]})` : `Tonalité : ${NOTES[n]} (${NOTE_FR[n]})`}
+      tabIndex={choosing || root === n ? 0 : -1}
       onKeyDown={e => {
+        if (choosing) return;
         const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
         if (!d) return;
         e.preventDefault(); e.stopPropagation();
@@ -796,60 +903,147 @@ const KeyPiano: React.FC<{ root: number; scale: string; onPick: (n: number) => v
   );
   const ww = 100 / 7;
   return (
-    <div className="hw-piano" role="radiogroup" aria-label="Tonalité" onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave} onFocus={help.onFocus} onBlur={help.onBlur} data-nova-param="rootKey">
+    <div className="hw-piano" role={choosing ? 'group' : 'radiogroup'} aria-label={choosing ? 'Notes cibles' : 'Tonalité'} onPointerEnter={help.onPointerEnter} onPointerLeave={help.onPointerLeave} onFocus={help.onFocus} onBlur={help.onBlur}
+      data-nova-param={choosing ? 'targetNotes' : 'rootKey'}>
       {whites.map((n, i) => key(n, { left: `calc(${i * ww}% + 1px)`, width: `calc(${ww}% - 2px)` }, false))}
       {blacks.map(([n, pos]) => key(n, { left: `calc(${pos * ww}% - ${ww * 0.3}%)`, width: `${ww * 0.6}%` }, true))}
     </div>
   );
 };
 
+type TargetMode = 'scale' | 'custom' | 'chords';
+const targetModeOf = (p: AutoTuneParams): TargetMode => (p.followChords ? 'chords' : Array.isArray(p.targetNotes) && p.targetNotes.length ? 'custom' : 'scale');
+const signed = (v: number, unit: string) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(Math.round(v * 10) / 10)} ${unit}`;
+
 export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<AutoTuneParams>(initialParams);
   const paramsRef = useRef<AutoTuneParams>(initialParams);
+  const [advanced, setAdvanced] = useState(() => {
+    const p = initialParams || ({} as AutoTuneParams);
+    return !!(p.flex || p.vibrato || p.formant || p.transpose || (p.voiceType && p.voiceType !== 'auto') || p.followChords || (p.targetNotes && p.targetNotes.length));
+  });
+  // Mode « notes choisies » en cours de saisie (aucune note encore cochée).
+  const [choosing, setChoosing] = useState(false);
 
-  const updateParam = useCallback((key: keyof AutoTuneParams, value: any) => {
-    const next = { ...paramsRef.current, [key]: value };
+  const updateMany = useCallback((patch: Partial<AutoTuneParams>) => {
+    const next = { ...paramsRef.current, ...patch };
     paramsRef.current = next;
     setParams(next);
     node.updateParams(next);
     onParamsChange?.(next);
   }, [node, onParamsChange]);
+  const updateParam = useCallback((key: keyof AutoTuneParams, value: any) => updateMany({ [key]: value } as Partial<AutoTuneParams>), [updateMany]);
 
   const num = (v: any, def: number) => (Number.isFinite(+v) ? +v : def);
   const scale = SCALES.includes(params.scale) ? params.scale : 'CHROMATIC';
   const root = Math.max(0, Math.min(11, Math.round(num(params.rootKey, 0))));
+  const mode: TargetMode = choosing ? 'custom' : targetModeOf(params);
+  const custom = Array.isArray(params.targetNotes) ? params.targetNotes : [];
+  const presetNow = NOVA_TUNE_PRESETS.find(pr => {
+    const q = novaTunePresetParams(pr);
+    return Math.abs(num(params.speed, 0.1) - q.speed) < 0.006 && Math.abs(num(params.humanize, 0.2) - q.humanize) < 0.006
+      && Math.abs(num(params.flex, 0) - q.flex) < 0.006 && Math.abs(num(params.vibrato, 0) - q.vibrato) < 0.006 && Math.abs(num(params.mix, 1) - q.mix) < 0.006;
+  });
+
+  const setMode = (m: TargetMode) => {
+    setChoosing(m === 'custom' && !custom.length);
+    if (m === 'scale') updateMany({ followChords: false, targetNotes: [] });
+    else if (m === 'chords') updateMany({ followChords: true, targetNotes: [] });
+    else updateMany({ followChords: false });
+  };
+  const toggleNote = (n: number) => {
+    const set = new Set(custom);
+    if (set.has(n)) set.delete(n); else set.add(n);
+    const list = [...set].sort((a, b) => a - b);
+    setChoosing(list.length === 0);
+    updateMany({ targetNotes: list, followChords: false });
+  };
+
+  const sectionTitle = mode === 'chords' ? 'Notes cibles · accords du morceau' : mode === 'custom' ? `Notes cibles · ${custom.length ? custom.map(n => NOTES[n]).join(' ') : 'touche les notes'}`
+    : `Tonalité · ${NOTES[root]} ${AT_SCALE_SHORT[scale].toLowerCase()}`;
 
   return (
     <HwWindow type="AUTOTUNE" width={620} accent={AT_ACCENT} accentInk="#152003"
-      idleHelp={<>Ramène la voix sur les notes justes. Choisis la tonalité et la gamme du morceau, puis la vitesse : rapide = effet robot, lente = correction naturelle. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
+      toolbar={
+        <div className="hw-toolbar-row" data-nova-presets>
+          <HwLcdSelect label="Préréglage" ariaLabel="Préréglage (recettes publiées)" paramId="preset" width={210}
+            value={presetNow?.id || ''} options={[{ v: '', label: presetNow ? presetNow.name : 'Réglage libre' }, ...NOVA_TUNE_PRESETS.map(p => ({ v: p.id, label: p.name }))]}
+            hint={presetNow ? `${presetNow.hint} Source : ${presetNow.sources.map(s => s.titre).join(' ; ')}.` : 'Recettes publiées par des ingénieurs du son et des éditeurs (tonalité et gamme gardées).'}
+            onChange={id => { const pr = NOVA_TUNE_PRESETS.find(p => p.id === id); if (pr) updateMany(novaTunePresetParams(pr)); }} />
+        </div>
+      }
+      idleHelp={<>Ramène la voix sur les notes justes. Choisis la tonalité et la gamme du morceau, puis la vitesse : 0 = effet robot, plus long = correction naturelle. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s’affiche ici.</span></>}>
       <Faceplate finish="black" className="hw-finish-carbon" model="Nova Tune" kicker="Correction de justesse en temps réel" modelStyle="wide" style={{ ['--hw-accent' as any]: AT_ACCENT }}>
         <div className="hw-screen">
           <div className="hw-screen-glass" style={{ height: 222 }}><TuneScreen node={node} enabled={params.isEnabled !== false} /></div>
         </div>
 
-        <HwSection title={`Tonalité · ${NOTES[root]} ${AT_SCALE_SHORT[scale].toLowerCase()}`} className="mt-3">
-          <KeyPiano root={root} scale={scale} onPick={n => updateParam('rootKey', n)} />
-          <div className="mt-3 grid grid-cols-3 sm:grid-cols-5 gap-1.5" role="radiogroup" aria-label="Gamme">
-            {SCALES.map(s => (
-              <PushButton key={s} role="radio" active={scale === s} onClick={() => updateParam('scale', s)} text={AT_SCALE_SHORT[s]} led={AT_ACCENT} dark
-                hint={AT_SCALE_HINT[s]} ariaLabel={SCALE_LABELS[s] || s} valueText={scale === s ? 'choisie' : undefined} dataAttrs={{ 'data-nova-scale': s }} />
-            ))}
-          </div>
+        <HwSection title={sectionTitle} className="mt-3">
+          {mode === 'chords' ? (
+            <p className="text-[11px] font-bold" style={{ color: '#cbd5e1' }} data-nova-chords-hint>
+              La voix va vers les notes de l’accord joué à chaque instant (piste d’accords du projet). Sans accord : la gamme {NOTES[root]} {AT_SCALE_SHORT[scale].toLowerCase()}.
+            </p>
+          ) : (
+            <KeyPiano root={root} scale={scale} onPick={n => updateParam('rootKey', n)} custom={mode === 'custom' ? custom : null} onToggle={toggleNote} />
+          )}
+          {mode === 'scale' && (
+            <div className="mt-3 grid grid-cols-3 sm:grid-cols-5 gap-1.5" role="radiogroup" aria-label="Gamme">
+              {SCALES.map(s => (
+                <PushButton key={s} role="radio" active={scale === s} onClick={() => updateParam('scale', s)} text={AT_SCALE_SHORT[s]} led={AT_ACCENT} dark
+                  hint={AT_SCALE_HINT[s]} ariaLabel={SCALE_LABELS[s] || s} valueText={scale === s ? 'choisie' : undefined} dataAttrs={{ 'data-nova-scale': s }} />
+              ))}
+            </div>
+          )}
         </HwSection>
 
         <div className="hw-rule" style={{ margin: '12px 0 8px' }} />
         <div className="flex flex-wrap items-center justify-around gap-x-2 gap-y-2">
           <Knob paramId="humanize" label="Naturel" ariaLabel="Naturel (humanisation)" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.01}
             value={num(params.humanize, 0.2)} defaultValue={0.2} onChange={v => updateParam('humanize', v)} format={v => `${Math.round(v * 100)} %`} ticks={11}
-            hint="Laisse vivre les notes tenues (vibrato) en corrigeant plus doucement quand la note dure." />
+            hint="Laisse vivre les notes tenues en corrigeant plus doucement quand la note dure ; les attaques restent corrigées à la vitesse choisie." />
           <Knob paramId="speed" label="Vitesse" ariaLabel="Vitesse de correction" size="XL" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.005}
             value={num(params.speed, 0.1)} defaultValue={0.1} onChange={v => updateParam('speed', v)} format={speedText} sub="Temps de correction (ms)"
-            scale={[{ v: 0, label: '0' }, { v: Math.sqrt(25 / 300), label: '25' }, { v: 0.5, label: '75' }, { v: Math.sqrt(150 / 300), label: '150' }, { v: 1, label: '300' }]}
-            hint="À gauche (0 ms) : effet robot, la note saute d’un coup. À droite : correction lente et naturelle." />
+            scale={SPEED_SCALE}
+            hint="Temps pour corriger la moitié de l’écart (même définition que les correcteurs du marché, mesurée). 0 = effet robot ; 10–25 ms = effet chanté ; 30–80 ms = naturel." />
           <Knob paramId="mix" label="Dosage" ariaLabel="Dosage de la correction" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.01}
             value={num(params.mix, 1)} defaultValue={1} onChange={v => updateParam('mix', v)} format={v => `${Math.round(v * 100)} %`} ticks={11}
             hint="Force de la correction : 100 % = note juste, 50 % = à mi-chemin, 0 % = voix d’origine." />
         </div>
+
+        <div className="mt-3 flex justify-center">
+          <PushButton active={advanced} onClick={() => setAdvanced(a => !a)} text={advanced ? 'Moins de réglages' : 'Réglages avancés'} led={AT_ACCENT} dark role="checkbox"
+            hint="Flex, vibrato, formant, transposition, type de voix et notes cibles." dataAttrs={{ 'data-nova-tune-advanced': advanced ? 'on' : 'off' }} />
+        </div>
+
+        {advanced && (
+          <HwSection title="Réglages avancés" className="mt-3">
+            <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
+              <Knob paramId="flex" label="Flex" ariaLabel="Flex (ne corrige que près de la note)" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={1} step={0.01}
+                value={num(params.flex, 0)} defaultValue={0} onChange={v => updateParam('flex', v)} format={v => (v < 0.005 ? 'Coupé' : `${Math.round(v * 100)} %`)} ticks={11}
+                hint="0 = tout est corrigé. Plus haut : seules les notes déjà proches de la cible sont corrigées ; les glissés et l’expression passent (à 50 %, au-delà de 25 cents la voix est laissée de plus en plus libre)." />
+              <Knob paramId="vibrato" label="Vibrato" ariaLabel="Vibrato naturel gardé" size="M" cap="graphite" arc={AT_ACCENT} min={0} max={2} step={0.01}
+                value={num(params.vibrato, 0)} defaultValue={0} onChange={v => updateParam('vibrato', v)} format={v => (v < 0.005 ? 'Selon la vitesse' : `${Math.round(v * 100)} %`)} ticks={9}
+                hint="Garde le vibrato chanté même avec une correction rapide : la note est corrigée en son centre. 100 % = vibrato tel quel, 200 % = deux fois plus ample." />
+              <Knob paramId="formant" label="Formant" ariaLabel="Formant (timbre)" size="M" cap="graphite" arc={AT_ACCENT} bipolar min={-12} max={12} step={0.1}
+                value={num(params.formant, 0)} defaultValue={0} onChange={v => updateParam('formant', v)} format={v => (Math.abs(v) < 0.05 ? 'Naturel' : signed(v, 'dt'))} ticks={9}
+                hint="Timbre sans changer la note : vers + la voix s’affine, vers − elle grossit. 0 = timbre d’origine (pas d’effet « voix de canard »)." />
+              <Knob paramId="transpose" label="Transposer" ariaLabel="Transposition" size="M" cap="graphite" arc={AT_ACCENT} bipolar min={-12} max={12} step={1}
+                value={num(params.transpose, 0)} defaultValue={0} onChange={v => updateParam('transpose', Math.round(v))} format={v => (v === 0 ? '0' : signed(v, 'dt'))} ticks={9}
+                hint="Décale la voix corrigée en demi-tons (±12 = une octave), timbre gardé." />
+            </div>
+            <div className="mt-3 flex flex-wrap items-end justify-around gap-2">
+              <HwLcdSelect label="Type de voix" ariaLabel="Type de voix (plage de détection)" paramId="voiceType" width={150}
+                value={String(params.voiceType || 'auto')} options={[{ v: 'auto', label: 'Automatique' }, { v: 'grave', label: 'Grave' }, { v: 'aigue', label: 'Aiguë' }]}
+                hint="Restreint la détection : « Grave » évite les sauts vers l’octave du dessus (voix de rap grave), « Aiguë » ceux vers l’octave du dessous."
+                onChange={v => updateParam('voiceType', v as AutoTuneParams['voiceType'])} />
+              <HwLcdSelect label="Notes cibles" ariaLabel="Notes cibles" paramId="targetMode" width={190}
+                value={mode} options={[{ v: 'scale', label: 'Gamme du morceau' }, { v: 'custom', label: 'Notes choisies' }, { v: 'chords', label: 'Accords du morceau' }]}
+                hint="Gamme : les notes de la tonalité. Notes choisies : touche les notes sur le clavier. Accords : suit la piste d’accords du projet, en lecture comme à l’export."
+                onChange={v => setMode(v as TargetMode)} />
+            </div>
+            <p className="mt-2 text-[10px]" style={{ color: '#94a3b8' }}>Pendant la prise (piste armée), Nova Tune passe seul en mode direct (≈ 4 ms) pour le retour casque ; la lecture et l’export utilisent le mode qualité.</p>
+          </HwSection>
+        )}
       </Faceplate>
     </HwWindow>
   );

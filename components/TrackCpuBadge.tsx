@@ -59,7 +59,7 @@ const TrackCpuBadge: React.FC<{ track: Track }> = ({ track }) => {
         e.stopPropagation();
         if (actionable) { try { window.dispatchEvent(new CustomEvent('nova:freeze-track', { detail: { trackId: track.id } })); } catch { /* */ } }
       }}
-      className={`h-3 px-1 rounded border text-[7px] leading-[10px] font-bold tabular-nums whitespace-nowrap ${view.asleep ? 'text-slate-400 border-white/10 bg-white/5' : COLORS[view.level]} ${actionable ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
+      className={`h-3 px-1 [@media(pointer:coarse)]:h-6 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:leading-[22px] [@media(pointer:coarse)]:text-[10px] rounded border text-[7px] leading-[10px] font-bold tabular-nums whitespace-nowrap ${view.asleep ? 'text-slate-400 border-white/10 bg-white/5' : COLORS[view.level]} ${actionable ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
       {view.asleep && <i className="fas fa-moon mr-0.5 text-[6px]" aria-hidden="true" />}{label}
     </button>
   );

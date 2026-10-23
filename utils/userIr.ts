@@ -48,8 +48,8 @@ export interface IrShape {
 
 /**
  * Niveau calibré, calculé sur la réponse ENTIÈRE (avant rognage) : même règle
- * que la normalisation d'un ConvolverNode de Chrome (1 / puissance RMS,
- * −58 dB, ramené à 44,1 kHz). Calculée une fois sur la réponse complète, elle
+ * que la normalisation d’un ConvolverNode (spec Web Audio : 1 / puissance RMS,
+ * × 0,00125, ramené à 44,1 kHz). Calculée une fois sur la réponse complète, elle
  * ne change pas quand on raccourcit la queue (sinon raccourcir faisait monter
  * le niveau). Le convolveur est alors réglé sans normalisation : la lecture et
  * l'export appliquent le MÊME facteur, quel que soit le navigateur.
@@ -59,7 +59,9 @@ export function irCalibration(channels: Float32Array[], sampleRate: number): num
   for (const c of channels) { for (let i = 0; i < c.length; i++) power += c[i] * c[i]; n += c.length; }
   let rms = n ? Math.sqrt(power / n) : 0;
   if (!Number.isFinite(rms) || rms < 0.000125) rms = 0.000125;
-  return (1 / rms) * Math.pow(10, -58 / 20) * (44100 / sampleRate);
+  // 0,00125 exactement (≈ −58,06 dB), la constante de la spec Web Audio (GainCalibration) :
+  // avant (22/10/2026), 10^(−58/20) donnait +0,06 dB de plus qu’un convolveur normalisé.
+  return (1 / rms) * 0.00125 * (44100 / sampleRate);
 }
 
 /**

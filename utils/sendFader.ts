@@ -1,4 +1,5 @@
 import type { ContextMenuItem, Track, TrackSend } from '../types';
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos } from './faderLaw';
 import { acceptsSend, transferSend } from './insertCopy';
 
 /**
@@ -8,21 +9,18 @@ import { acceptsSend, transferSend } from './insertCopy';
  * Au doigt, le potard de 26 px de la console se tournait mal (le doigt cache
  * la valeur, la course verticale de 150 px se mélange au défilement). Sur un
  * écran tactile, chaque envoi devient une barre horizontale qu'on glisse comme
- * un fader : même courbe que les faders de NOVA (position = √(niveau / 1,5)),
+ * un fader : même échelle que les faders de NOVA (utils/faderLaw, −∞…+12 dB),
  * aimant sur 0 dB, double toucher = 0 dB, appui long = menu (copier /
  * déplacer vers une autre tranche, pré / post).
  */
 
-export const SEND_MAX = 1.5;
+export const SEND_MAX = FADER_MAX_GAIN;
 
-/** Niveau → position 0…1 (même courbe que les faders de la console). */
-export const sendPos = (level: number): number => Math.sqrt(Math.max(0, Math.min(SEND_MAX, Number.isFinite(level) ? level : 0)) / SEND_MAX);
+/** Niveau → position 0…1 (même échelle que les faders de la console). */
+export const sendPos = (level: number): number => gainToFaderPos(Math.max(0, Math.min(SEND_MAX, Number.isFinite(level) ? level : 0)));
 
 /** Position 0…1 → niveau. */
-export const sendLevelAt = (pos: number): number => {
-  const p = Math.max(0, Math.min(1, pos));
-  return p * p * SEND_MAX;
-};
+export const sendLevelAt = (pos: number): number => faderPosToGain(Math.max(0, Math.min(1, pos)));
 
 /** Largeur de l'aimant autour de 0 dB (en position) : le doigt retombe pile sur 0 dB. */
 export const UNITY_SNAP = 0.012;

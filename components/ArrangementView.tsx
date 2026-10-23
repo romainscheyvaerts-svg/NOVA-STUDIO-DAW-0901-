@@ -31,6 +31,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
+import { haptic } from '../utils/haptics';
 import { visibleEnvelope, visibleSamples } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
@@ -410,10 +411,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, []);
 
   // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
-  // Écran tactile en vue PC (iPad paysage) : boutons espacés au pas de 40 px,
-  // 40 px de plus pour que le nom reste lisible.
+  // Écran tactile (iPad portrait comme paysage) : boutons au pas de 44 px, 40 px de plus pour que le nom
+  // reste lisible (en portrait, le nom de la piste REC disparaissait derrière FX, M, S, R).
   const [headerWidth, setHeaderWidth] = useState(() =>
-    typeof window !== 'undefined' && window.innerWidth >= 1024 && window.matchMedia?.('(pointer: coarse)').matches ? 336 : 296);
+    typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 336 : 296);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
 
@@ -1125,7 +1126,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current || clipGainActiveRef.current) ev.preventDefault(); };
+    // Deux doigts : pincement / défilement gérés par NOVA (sinon le navigateur annule les pointeurs en défilant).
+    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current || clipGainActiveRef.current || (ev.touches.length >= 2 && pinchRef.current)) ev.preventDefault(); };
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => el.removeEventListener('touchmove', onTouchMove);
   }, []);
@@ -1164,10 +1166,42 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
    *  = défilement / zoom à deux doigts : jamais un appui long, jamais un nouveau geste. */
   const touchPointersRef = useRef<Set<number>>(new Set());
   const gestureFingerRef = useRef<number | null>(null);
+  /** Position de chaque doigt posé, et pincement en cours (deux doigts) : zoom horizontal ancré sous
+   *  le milieu des doigts + défilement à deux doigts. Avant : deux doigts ne faisaient rien (la page
+   *  ne zoome pas, user-scalable=no), seul le curseur de zoom de la barre servait. */
+  const fingerPosRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ d0: number; z0: number; time: number; my0: number; st0: number; atBound: boolean } | null>(null);
+  const pinchGeo = () => {
+    const pts = [...fingerPosRef.current.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return { d: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  };
+  const startPinch = () => {
+    const el = scrollContainerRef.current, g = pinchGeo();
+    if (!el || !g) return;
+    const rect = el.getBoundingClientRect();
+    pinchRef.current = { d0: g.d, z0: zoomHRef.current, time: Math.max(0, (el.scrollLeft + g.mx - rect.left - headerWidthRef.current) / zoomHRef.current), my0: g.my, st0: el.scrollTop, atBound: false };
+  };
+  const movePinch = () => {
+    const el = scrollContainerRef.current, p = pinchRef.current, g = pinchGeo();
+    if (!el || !p || !g) return;
+    const rect = el.getBoundingClientRect();
+    const raw = p.z0 * (g.d / p.d0);
+    const z = clampZoom(raw, durationRef.current);
+    if (z !== raw && !p.atBound) haptic('select');
+    p.atBound = z !== raw;
+    el.scrollTop = Math.max(0, p.st0 - (g.my - p.my0));
+    const pointerX = g.mx - rect.left;
+    if (Math.abs(z - zoomHRef.current) > 1e-6) { pendingZoomAnchorRef.current = { time: p.time, pointerX }; setZoomH(z); }
+    else { el.scrollLeft = Math.max(0, p.time * z + headerWidthRef.current - pointerX); setScrollLeft(el.scrollLeft); }
+  };
   /** Geste interrompu par un 2e doigt : sa fin n'est pas un « clic » (Spot n'ouvre rien). */
   const gestureAbortedRef = useRef(false);
   const endTouch = (pointerId: number) => {
     touchPointersRef.current.delete(pointerId);
+    fingerPosRef.current.delete(pointerId);
+    if (fingerPosRef.current.size < 2) pinchRef.current = null;
     cancelLongPress();
     // Le lever d'un 2e doigt ne termine pas le geste du premier.
     if (gestureFingerRef.current !== pointerId) return;
@@ -2842,7 +2876,7 @@ useEffect(() => {
     const gain = clipGainMenuItems(cm.trackId, cm.clip, close);
     const gainLine = gain.filter(it => /ligne de gain|Rendre le gain|gain d’avant/.test(it.label));
     const editTools = gain.filter(it => !gainLine.includes(it));
-    const justesse: ContextMenuItem = { label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Corrige la justesse de ta voix note par note',
+    const justesse: ContextMenuItem = { label: 'Éditer les notes de la voix…', icon: 'fa-wave-square', title: 'Corrige ta voix note par note, au 50e de demi-ton : hauteur, durée, vibrato, formant, gain (double-clic sur le clip)',
       onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } };
     const respirations: ContextMenuItem = { label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX',
       onClick: () => { requestBreaths({ mode: 'dialog', clipIds: selTargets().map(x => x.clipId), reason: 'menu' }); close(); } };
@@ -3094,13 +3128,13 @@ useEffect(() => {
         <div className="flex items-center space-x-4 shrink-0">
           {/* Au doigt : outils de 40 px (36 px à la souris) */}
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SMART')} aria-pressed={activeTool === 'SMART'} className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'SMART' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Smart Tool (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
-            {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+            {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Sélecteur (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
-            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
             {/* Mode avancé : scrub, zoom, crayon, ligne de gain, mode boucle et Trim TCE sont dans « Outils ▾ » (EditToolbarMenus). */}
           </div>
           {/* Allégé (22/10/2026) : les outils rares dans « Outils ▾ » (l'outil actif s'affiche sur le bouton),
@@ -3155,9 +3189,11 @@ useEffect(() => {
             // rien ne permettait de le rouvrir depuis l'arrangement.
             const sel = selectedClip;
             if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
-            // Double-clic sur un clip audio : le renommer (Pro Tools : double-clic avec le Grabber).
+            // Double-clic sur un clip de voix : l'éditeur de notes de la voix (Nova Pitch), en bas.
+            // Sur un autre clip audio (beat, sample) : le renommer (Ctrl+Maj+R partout).
             // (pas sur la poignée de gain, dont le double-clic remet 0 dB).
             else if (sel && editModeStore.get().mode === 'SPOT') setSpotTarget({ trackId: sel.trackId, clipId: sel.clip.id });
+            else if (sel && !dragActionRef.current && !gainTip && isVoiceTrack(tracks.find(t => t.id === sel.trackId))) openNovaWindow('pitch-editor', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }] });
             else if (sel && !dragActionRef.current && !gainTip) openNovaWindow('clip-props', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }], focus: 'name' });
           }} 
           onMouseMove={handleMouseMove} 
@@ -3170,12 +3206,14 @@ useEffect(() => {
             const fingers = touchPointersRef.current;
             // Premier doigt posé (isPrimary) : aucun autre doigt n'est sur l'écran
             // (un lever perdu ne laisse pas un doigt fantôme).
-            if (e.isPrimary) fingers.clear();
+            if (e.isPrimary) { fingers.clear(); fingerPosRef.current.clear(); pinchRef.current = null; }
             fingers.add(e.pointerId);
+            fingerPosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
             // Deuxième doigt : défilement ou zoom à deux doigts, pas un nouveau geste
             // (ni un appui long sous ce doigt, ni la fin de celui du premier doigt).
             if (fingers.size > 1) {
               cancelLongPress();
+              if (fingers.size === 2) startPinch();
               // Le geste du premier doigt s'arrête là (sans valoir un clic) : le clip ne suit
               // plus ce doigt et le navigateur peut faire défiler / zoomer à deux doigts.
               if (gestureFingerRef.current !== null) {
@@ -3224,6 +3262,8 @@ useEffect(() => {
           }}
           onPointerMove={(e) => {
             if (e.pointerType === 'mouse') return;
+            if (fingerPosRef.current.has(e.pointerId)) fingerPosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (pinchRef.current) { movePinch(); return; }
             if (e.pointerId !== gestureFingerRef.current) return;
             const lp = longPressRef.current;
             if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();

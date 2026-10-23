@@ -14,6 +14,7 @@ import { salvageJson, repairProject } from '../utils/projectRepair';
 import { projectRateOf } from '../utils/projectRate';
 import { packPlaylists, unpackPlaylists } from '../utils/trackPlaylists';
 import { isUserIrKey } from '../utils/userIr';
+import { analysisCache, analysisKey, decodeAnalysis, encodeAnalysis } from '../engine/pitch/analysis';
 
 /**
  * WAV d'un son pour le .zip, encodé dans sa propre tâche : avant, les 60 sons d'une grosse
@@ -132,6 +133,12 @@ export class ProjectIO {
                     }
                     sClip.pitchEdit.sourceRef = `audio/${filename}`;
                 }
+                // Nova Pitch : l'analyse de la voix (hauteur, notes) voyage avec le projet,
+                // la réouverture n'a pas à la refaire. Ignorée par une ancienne version.
+                const pe = clip.pitchEdit!;
+                const key = typeof pe.regionEnd === 'number' ? analysisKey(srcId, pe.regionStart, pe.regionEnd) : '';
+                const an = key ? analysisCache.get(key) : undefined;
+                if (an && zip) zip.file(`pitch/${clip.id}.bin`, encodeAnalysis(an, { regionStart: pe.regionStart, regionEnd: pe.regionEnd }));
                 delete sClip.pitchEdit.sourceBufferId;
             }
             // Melodyne / VocAlign (ARA) : la prise d'origine voyage aussi (l'archive ARA est dans le JSON).
@@ -536,6 +543,16 @@ export class ProjectIO {
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
                     }
+                }
+            }
+            // Nova Pitch : analyse rangée avec le projet → en cache (pas de nouvelle analyse).
+            if (pe?.sourceBufferId && typeof pe.regionEnd === 'number') {
+                const f = zip.file(`pitch/${clip.id}.bin`);
+                if (f) {
+                    try {
+                        const r = decodeAnalysis(new Uint8Array(await f.async('arraybuffer')));
+                        if (r) analysisCache.set(analysisKey(pe.sourceBufferId, pe.regionStart, pe.regionEnd), r.analysis);
+                    } catch (e) { console.warn('[ProjectIO] Analyse de voix illisible', e); }
                 }
             }
         }

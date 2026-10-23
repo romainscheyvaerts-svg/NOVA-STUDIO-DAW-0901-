@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './faderLaw';
 import type { Track } from '../types';
 import { vcaMembers } from './trackStructure';
 
@@ -21,7 +22,7 @@ export interface CoalesceResult {
   gain: number;
 }
 
-const VOLUME_MAX = 1.5;
+const VOLUME_MAX = FADER_MAX_GAIN;
 
 export function coalesceVca(tracks: Track[], vcaId: string): CoalesceResult {
   const vca = tracks.find(t => t.id === vcaId && t.isVca);
@@ -45,6 +46,6 @@ export function coalesceVca(tracks: Track[], vcaId: string): CoalesceResult {
   return { tracks: out, members: members.map(m => m.id), gain: g };
 }
 
-/** Un réglage au-dessus de la course du fader (+3,5 dB) après fusion : à signaler. */
+/** Un réglage au-dessus de la course du fader (+12 dB) après fusion : à signaler. */
 export const coalesceOverflow = (r: CoalesceResult): string[] =>
   r.tracks.filter(t => r.members.includes(t.id) && (t.volume > VOLUME_MAX + 1e-9 || (t.automationLanes || []).some(l => l.parameterName === 'volume' && l.points.some(p => p.value > VOLUME_MAX + 1e-9)))).map(t => t.name);

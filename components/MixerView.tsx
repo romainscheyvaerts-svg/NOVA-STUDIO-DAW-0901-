@@ -4,7 +4,8 @@ import type { MixScene } from '../utils/mixSnapshots';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
 import { dbTextToGain } from '../plugins/hw/valueEntry';
-import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
+import { faderPosToGain, gainToFaderPos, FADER_UNITY_POS, FADER_TICKS } from '../utils/faderLaw';
+import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup, ContextMenuItem } from '../types';
 import { SmartKnob } from './SmartKnob';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginName } from './PluginName';
@@ -41,6 +42,8 @@ import { OneKnobStrip } from './voice/OneKnob';
 import { isVoiceTrack } from '../utils/vocalRoles';
 import { projectKey } from '../utils/voiceProjectKey';
 import { sendTransferMenuItems } from '../utils/sendFader';
+import { DualPan, PanMenu } from './DualPan';
+import { isStereoTrack } from '../utils/panLaw';
 
 /**
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
@@ -52,7 +55,7 @@ import { sendTransferMenuItems } from '../utils/sendFader';
  * Avant, toute la tranche (inserts, envois, mètres) se redessinait à chaque image.
  */
 const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElement | null> }> = ({ track, host }) => {
-  const pos = useLiveView(track.id, 'volume', track.volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 1024) / 1024);
+  const pos = useLiveView(track.id, 'volume', track.volume, v => Math.round(gainToFaderPos(v) * 1024) / 1024);
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
   React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
   return (
@@ -61,6 +64,14 @@ const LiveFaderCap: React.FC<{ track: Track; host: React.RefObject<HTMLDivElemen
     </div>
   );
 };
+/** Graduations du fader (+12, +6, 0, −5 … −60, −∞) : repères discrets à gauche de la course. */
+const FaderScale: React.FC = React.memo(() => (
+  <div aria-hidden className="pointer-events-none absolute inset-y-0 right-full mr-0.5 w-4 select-none" data-testid="fader-scale">
+    {FADER_TICKS.map(t => (
+      <span key={t.label} className={`absolute right-0 translate-y-1/2 text-[7px] leading-none font-mono tabular-nums ${t.db === 0 ? 'text-slate-300 font-bold' : 'text-slate-600'}`} style={{ bottom: `${t.pos * 100}%` }}>{t.label}</span>
+    ))}
+  </div>
+));
 const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = ({ track, onSet }) => {
   const text = useLiveView(track.id, 'volume', track.volume, gainToDbText);
   // Saisie au clavier (comme la case de volume d'une console de DAW) : clic, « -3,5 », Entrée.
@@ -79,12 +90,25 @@ const LiveDbText: React.FC<{ track: Track; onSet?: (gain: number) => void }> = (
   // Boîte isolée (taille fixe, contain) : le texte qui change ne refait pas la mise en page de la tranche.
   return <button type="button" disabled={!onSet} onClick={() => { done.current = false; setEditing(true); }} data-testid={`fader-db-${track.id}`}
     title="Clic pour taper le volume en dB (ex. -3,5 puis Entrée)" aria-label={`Volume de ${track.name} : ${text}. Clic pour le taper`}
-    className="mt-2 block h-4 w-full leading-4 text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
+    className="mt-2 block h-4 w-full leading-4 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:leading-7 [@media(pointer:coarse)]:text-[12px] text-center text-[10px] font-mono tabular-nums text-slate-300 hover:text-white hover:bg-white/5 rounded cursor-text" style={{ contain: 'strict' }}>{text}</button>;
 };
 const LivePanKnob: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const pan = useLiveView(track.id, 'pan', track.pan, v => Math.round(v * 280) / 280);
   return <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({ ...track, pan: val })} />;
 };
+/**
+ * Pan de la tranche (22/10/2026) : piste mono = un pan (loi du projet) ; piste stéréo = double
+ * pan G / D. Même hauteur dans les deux cas (les faders restent alignés) ; menu ▾ : lien,
+ * format mono / stéréo, loi de pan du projet.
+ */
+const StripPan: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => (
+  <div className="relative h-[78px] w-full flex flex-col items-center justify-start" data-testid={`strip-pan-${track.id}`}>
+    {isStereoTrack(track) ? <DualPan track={track} onUpdate={onUpdate} variant="strip" /> : (<>
+      <LivePanKnob track={track} onUpdate={onUpdate} />
+      <div className="absolute top-0 right-3"><PanMenu track={track} onUpdate={onUpdate} compact /></div>
+    </>)}
+  </div>
+);
 
 const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
   const [editing, setEditing] = useState(false);
@@ -206,14 +230,15 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
           targetId={track.id}
           paramId={`send::${send.id}`} 
           label={sendLabel(send.id, allTracks, true)}
-          value={shownLevel}
+          value={gainToFaderPos(shownLevel)}
           min={0}
-          max={1.5}
+          max={1}
           size={26} // Slightly bigger
           color={getSendColor(send.id)}
-          defaultValue={1}
-          format={gainToDbText}
-          onChange={(val) => {
+          defaultValue={FADER_UNITY_POS}
+          format={p => gainToDbText(faderPosToGain(p))}
+          onChange={(p) => {
+              const val = faderPosToGain(p);
               const newSends = track.sends.map(s => sameSend(s, send) ? { ...s, level: val } : s);
               onUpdate({ ...track, sends: newSends });
           }}
@@ -344,14 +369,14 @@ const ChannelStrip: React.FC<{
     if (onRequestAddPlugin) onRequestAddPlugin(track.id, clientX, clientY);
   };
 
-  // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
+  // Fader de volume : échelle de console (utils/faderLaw, −∞…+12 dB, 0 dB aux 3/4), glissement RELATIF
   // (le fader ne saute plus sous le clic), Ctrl ou Maj = fin, molette, double-clic ou Alt+clic = 0 dB.
   // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
   // Valeur entendue lue au moment du geste ; l'affichage suit seul (LiveFaderCap, LivePanKnob).
-  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
-  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
-      min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
-      valueNow: () => Math.sqrt(Math.max(0, getLive(liveKey(track.id, 'volume')) ?? track.volume) / 1.5),
+  const faderPos = gainToFaderPos(track.volume);
+  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: faderPosToGain(p) }), {
+      min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.005,
+      valueNow: () => gainToFaderPos(getLive(liveKey(track.id, 'volume')) ?? track.volume),
       sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
       // Automation Touch / Latch / Write / Trim : l'appui et le relâchement bornent l'écriture.
       onStart: () => automationRecorder.touch(track.id, 'volume'),
@@ -484,7 +509,7 @@ const ChannelStrip: React.FC<{
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
                {/* Move Up/Down Buttons (toujours visibles au doigt : pas de survol) */}
-               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:hidden transition-opacity">
                   <button 
                     onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
                     className={`w-4 h-2.5 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
@@ -504,7 +529,8 @@ const ChannelStrip: React.FC<{
                </div>
                <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-4 h-4 [@media(pointer:coarse)]:w-8 [@media(pointer:coarse)]:h-8 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
+            {/* Au doigt : « Retirer l'effet » dans le menu de l'insert (appui long), pas de croix de 18 px posée sur le bord. */}
+            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx [@media(pointer:coarse)]:hidden" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
         ))}
         {hiddenInserts.length > 0 && (
@@ -528,7 +554,19 @@ const ChannelStrip: React.FC<{
         )}
         {fxMenu && (
           <FloatingMenu x={fxMenu.x} y={fxMenu.y} title={fxMenu.p.name || fxMenu.p.type} onClose={() => setFxMenu(null)}
-            items={[...pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p)), 'separator', ...insertCopyMenuItems(track, fxMenu.p, allTracks, (fn, label) => applyTracks(fn, label))]} />
+            items={[...pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p)), 'separator', ...insertCopyMenuItems(track, fxMenu.p, allTracks, (fn, label) => applyTracks(fn, label)),
+              // Au doigt, les petites flèches ↑ ↓ et la croix de l'insert sont masquées (2 × 16 px empilés : on
+              // touchait l'une pour l'autre) : monter, descendre et retirer passent par ce menu (appui long).
+              ...(() => {
+                const i = track.plugins.findIndex(x => x.id === fxMenu.p.id);
+                const extra: (ContextMenuItem | 'separator')[] = ['separator'];
+                if (onReorderPlugins) extra.push(
+                  { label: 'Monter', icon: 'fa-chevron-up', disabled: i <= 0, onClick: () => onReorderPlugins(track.id, i, i - 1) },
+                  { label: 'Descendre', icon: 'fa-chevron-down', disabled: i < 0 || i >= track.plugins.length - 1, onClick: () => onReorderPlugins(track.id, i, i + 1) },
+                );
+                if (onRemovePlugin) extra.push({ label: 'Retirer l’effet', icon: 'fa-times', onClick: () => onRemovePlugin(track.id, fxMenu.p.id) });
+                return extra.length > 1 ? extra : [];
+              })()]} />
         )}
         {insertList && (
           <InsertListPopover anchor={insertList} title={`Effets de ${track.name}`} plugins={track.plugins}
@@ -558,7 +596,7 @@ const ChannelStrip: React.FC<{
         <div className="mb-2"><StripHeadOrMenu track={track} onUpdate={onUpdate} isMaster={isMaster} /></div>
 
         <div className="mb-2 flex flex-col items-center">
-           <LivePanKnob track={track} onUpdate={onUpdate} />
+           <StripPan track={track} onUpdate={onUpdate} />
         </div>
 
         {/* Le fader garde au moins 150 px : si l'écran est trop bas, la console défile (le nom reste lisible). */}
@@ -576,6 +614,7 @@ const ChannelStrip: React.FC<{
                 // Taille donnée par la tranche : le capuchon qui suit l'automation ne refait que cette boîte.
                 style={{ width: 'var(--fader-width)', contain: 'layout style' }}
               >
+                 <FaderScale />
                  <LiveFaderCap track={track} host={faderTrackRef} />
               </div>
            </div>

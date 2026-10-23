@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from '../utils/faderLaw';
 import { describe, expect, it } from 'vitest';
 import { dbTextToGain, panTextToValue, parseShown, solveTypedValue, startsValueEntry } from '../plugins/hw/valueEntry';
 import { gainToDbText, panToText } from '../utils/db';
@@ -51,7 +52,8 @@ describe('saisie d\'une valeur au clavier', () => {
 
   it('dB → gain, pan au clavier, touches qui ouvrent la saisie', () => {
     expect(dbTextToGain('-6')).toBeCloseTo(0.501, 3);
-    expect(dbTextToGain('+10')).toBe(1.5);
+    expect(20 * Math.log10(dbTextToGain('+10')!)).toBeCloseTo(10, 9);
+    expect(dbTextToGain('+15')).toBe(FADER_MAX_GAIN);
     expect(dbTextToGain('-inf')).toBe(0);
     expect(dbTextToGain('2 kHz')).toBeNull();
     expect(panTextToValue('G 30')).toBeCloseTo(-0.3, 6);

@@ -2,7 +2,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AutomationLane as IAutomationLane, AutomationPoint, AutomationCurveType } from '../types';
 import { automationParamLabel, automationRangeText, automationValueText, CURVE_LABELS_FR } from '../utils/automationLabels';
-import { parsePluginParam } from '../utils/automationWrite';
+import { parsePluginParam, paramSpec, usesFaderScale } from '../utils/automationWrite';
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
 import { onVstCatalogChange } from '../utils/vstParamCatalog';
 import { liveVstNodes } from '../engine/VSTPluginNode';
 
@@ -79,9 +80,11 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
   const timeToX = (time: number) => time * zoomH;
   const xToTime = (x: number) => Math.max(0, x / zoomH);
   
+  // Volume / envois : même échelle que les faders (0 dB aux 3/4, butée +12 dB), pas le gain linéaire.
+  const faderScale = usesFaderScale({ kind: paramSpec(lane.parameterName).kind, max: lane.max });
   const valToY = (val: number) => {
     const range = lane.max - lane.min;
-    const normalized = (val - lane.min) / range;
+    const normalized = faderScale ? gainToFaderPos(val) : (val - lane.min) / range;
     return (LANE_HEIGHT - 10) - (normalized * (LANE_HEIGHT - 20));
   };
 
@@ -89,6 +92,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     const range = lane.max - lane.min;
     const normalized = 1 - ((y - 10) / (LANE_HEIGHT - 20));
     const clampedNorm = Math.max(0, Math.min(1, normalized));
+    if (faderScale) return Math.min(FADER_MAX_GAIN, faderPosToGain(clampedNorm));
     return lane.min + (clampedNorm * range);
   };
 

@@ -43,6 +43,9 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
 import { setModulatorSourceResolver } from '../utils/modulators';
+// Loi de pan pro et double pan des pistes stéréo (22/10/2026).
+import { NovaPanner, type PanMode } from './panNode';
+import { DEFAULT_PAN_LAW, PAN_L, PAN_R, legacyPanToStereo, sanitizePanLaw, stereoPanOf, isStereoTrack, type PanLaw } from '../utils/panLaw';
 import { DrumRackNode, type DrumNoteEx } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -97,6 +100,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { renderElasticAsync } from '../utils/clipTranspose';
 import { computePdc, PdcNode, PDC_MAX_SECONDS, latencyPreroll, loopPrerollLatency } from '../utils/pdc';
 import { applyGainEvents, clipGainAt, clipGainEvents, frameTime } from '../utils/fades';
+import { noteFrameTime, noteRenderTimes } from '../utils/noteTiming';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
 import { Scrubber, type ScrubStats } from './Scrubber';
@@ -115,11 +119,18 @@ import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../ut
 import { installHQDecode } from '../utils/hqAudio';
 import { createOutputDeviceWatch } from './outputDeviceWatch';
 import { IdleSuspender, type IdleStats } from './idleSuspend';
+import { takeWriter, type TakeTarget } from './takeWriter';
+import { measureRoundTrip as probeRoundTrip, type RoundTrip } from './latencyProbe';
+import { AudioClockWatch, type ClockIssue } from './audioClockWatch';
+
+/** Volume / pan connus d'une piste (retour direct, mixes casque). */
+interface TrackMixInfo { id: string; volume: number; pan: number; stereoPan?: Track['stereoPan']; stereo?: boolean }
 
 interface TrackDSP {
   input: GainNode;          
   output: GainNode;         
-  panner: StereoPannerNode; 
+  /** Pan à la loi du projet (piste mono : un pan ; piste stéréo : G / D). engine/panNode. */
+  panner: NovaPanner;
   gain: GainNode;           
   /**
    * Analyseur de la piste (après fader et pan) : créé à la première demande (affichages de prise :
@@ -135,7 +146,7 @@ interface TrackDSP {
   /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
   pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
-  sendPanners?: Map<string, StereoPannerNode>;
+  sendPanners?: Map<string, NovaPanner>;
   /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
   chainIds?: string[];
   postChainIds?: string[];
@@ -240,6 +251,10 @@ export interface TakeJournalLike {
   annotate?(patch: { lead?: number; bridge?: BridgeTakeRef }): void;
   finish(): Promise<void>;
   discard(): Promise<void>;
+  /** Identifiant de la prise dans la base de récupération (morceaux écrits par l'écrivain de prises). */
+  readonly takeId?: string;
+  /** Les morceaux sont écrits par l'écrivain de prises (Worker) : le journal ne garde que la description. */
+  external?(): void;
 }
 
 interface ScheduledSource {
@@ -292,7 +307,12 @@ export class AudioEngine {
    * rien qui écoute le micro ; réveillé par le premier geste, la première source démarrée ou toute
    * commande qui produit du son (wake() en tête de ces méthodes).
    */
-  private idle = new IdleSuspender({ busy: () => this.idleBusy() });
+  private idle = new IdleSuspender({
+    busy: () => this.idleBusy(),
+    // Reprise après la veille : la garde de l'horloge repart de maintenant (sinon, l'horloge immobile pendant
+    // la veille pouvait passer pour une horloge figée et faire recréer le contexte).
+    onWake: () => { this.clockWatchInst?.poke(); },
+  });
   /** Notes jouées en direct et pas encore relâchées (clavier MIDI, mini-clavier) : pas de veille pendant une note tenue. */
   private heldNotes = new Set<string>();
   private lastSourceEnd = new Map<string, number>();
@@ -425,7 +445,9 @@ export class AudioEngine {
   /** Canaux max que le navigateur donne pour le micro (capabilities), 0 = inconnu. */
   private browserMaxChannels = 0;
   /** Volume / pan connus des pistes (retour direct du pont, mixes casque). */
-  private trackMix = new Map<string, { id: string; volume: number; pan: number }>();
+  private trackMix = new Map<string, TrackMixInfo>();
+  /** Loi de pan du projet (utils/panLaw) : lecture, export, envois, casque, retour direct. */
+  private panLaw: PanLaw = DEFAULT_PAN_LAW;
   // --- R15 · Mixes casque et sorties de la carte ---
   private cueEngine: CueMixEngine | null = null;
   private cueMixes: CueMix[] = [];
@@ -510,6 +532,59 @@ export class AudioEngine {
   private currentInputDeviceId: string = 'default';
   private currentOutputDeviceId: string = 'default';
   private outputWatch: ReturnType<typeof createOutputDeviceWatch> | null = null;
+  /** Garde de l'horloge audio : sortie qui ne démarre pas, se fige ou signale une erreur (engine/audioClockWatch). */
+  private clockWatchInst: AudioClockWatch | null = null;
+  private clockWatch(): AudioClockWatch {
+    if (!this.clockWatchInst) {
+      this.clockWatchInst = new AudioClockWatch({
+        ctx: () => this.ctx,
+        // Veille volontaire en cours (engine/idleSuspend : endormi, s'endort ou repart) : rien à surveiller,
+        // la veille relance elle-même le contexte ; ni « suspendu », ni « horloge figée » à signaler.
+        active: () => !this.idle.isResting() && (this.isPlaying || !!this.recordingTrackId || !!this.recSession || (this.inputRouter?.size || 0) > 0),
+        recording: () => !!this.recordingTrackId || !!this.recSession,
+        visible: () => typeof document === 'undefined' || !document.hidden,
+        restart: (reason) => this.restartAudio(reason),
+        resume: () => this.resume(),
+        notify: (msg) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ } },
+        report: (e) => { console.warn('[AudioEngine] horloge audio :', e.issue, e.action, e.ms ?? ''); try { window.dispatchEvent(new CustomEvent('nova:audio-clock', { detail: e })); } catch { /* */ } },
+      });
+    }
+    return this.clockWatchInst;
+  }
+  /** État de la garde de l'horloge (Réglages audio, QA). */
+  public getClockWatchStatus() { return this.clockWatchInst?.status() ?? null; }
+  /** Lecture en cours (moteur). */
+  public isPlayingNow() { return this.isPlaying; }
+
+  /**
+   * Relance du moteur audio quand la sortie ne répond plus (horloge figée, erreur du
+   * périphérique, démarrage interminable) : contexte recréé à la même fréquence, la séance
+   * reste (App recâble les pistes sur « nova:audio-restarted » et relance la lecture à la même
+   * position). Jamais pendant une prise.
+   */
+  public async restartAudio(reason: ClockIssue | 'manuel' = 'manuel'): Promise<boolean> {
+    if (!this.ctx || this.recordingTrackId || this.recSession) return false;
+    const wasPlaying = this.isPlaying;
+    const position = wasPlaying ? this.getCurrentTime() : this.pausedAt;
+    const armed = this.armedIds();
+    const tracks = this.practiceRawTracks;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      await this.rebuildContext();
+    } catch (e) {
+      console.error('[AudioEngine] relance du moteur audio impossible', e);
+      return false;
+    }
+    // Le moteur repart seul : pistes recâblées et lecture reprise à la même position (App complète
+    // ensuite : mixes casque, pistes armées, métronome, diffusion du mix).
+    if (tracks && this.ctx) {
+      try { await this.resume(); } catch { /* */ }
+      try { tracks.forEach(t => this.updateTrack(t, tracks)); } catch (e) { console.warn('[AudioEngine] pistes non recâblées', e); }
+      if (wasPlaying) { try { this.startPlayback(position, tracks); } catch (e) { console.warn('[AudioEngine] lecture non reprise', e); } }
+    }
+    try { window.dispatchEvent(new CustomEvent('nova:audio-restarted', { detail: { reason, wasPlaying, position, armed, ms: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) } })); } catch { /* hors navigateur */ }
+    return true;
+  }
   /**
    * Fréquence du contexte audio = celle du PROJET (utils/projectRate) : 48 kHz pour
    * un nouveau projet, celle du fichier pour un projet ouvert (44,1 kHz s'il n'en a
@@ -624,6 +699,7 @@ export class AudioEngine {
     setCurrentRate(this.ctx.sampleRate);
     this.latency = this.ctx.baseLatency;
     this.hookAutoResume();
+    this.clockWatch().attach(this.ctx);
     this.setupEffectSleep();
     this.idle.attach(this.ctx);
 
@@ -713,6 +789,18 @@ export class AudioEngine {
     this.tryAutoConnectASIO();
   }
 
+  /**
+   * Préparation à l'ouverture du studio : module de l'enregistreur chargé dans le fil audio,
+   * écrivain de prises lancé (Worker inactif tant qu'il n'y a pas de prise). Le 1er REC et le 1er ▶
+   * n'attendent plus rien.
+   */
+  public prewarm() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (ctx.audioWorklet) void ensureRecorderModule(ctx).catch(() => { /* chargé à la prise */ });
+    try { takeWriter(); } catch { /* */ }
+  }
+
   /** Fréquence voulue pour le contexte (celle du projet ouvert). */
   public getProjectSampleRate(): number { return this.ctx?.sampleRate || this.desiredSampleRate; }
 
@@ -738,7 +826,19 @@ export class AudioEngine {
       this.desiredSampleRate = from;
       throw new Error(`Une prise est en cours : change la fréquence (${rateLabel(to)}) après l'arrêt.`);
     }
-    const old = this.ctx;
+    await this.rebuildContext();
+    try { window.dispatchEvent(new CustomEvent('nova:samplerate', { detail: { from, to } })); } catch { /* hors navigateur */ }
+    return { changed: true, from, to };
+  }
+
+  /**
+   * Contexte audio recréé à la fréquence voulue (desiredSampleRate) : tout ce qui vit dans l'ancien
+   * est libéré, le master est reconstruit, ses réglages rétablis. L'appelant recâble les pistes
+   * (App.ensureAudioEngine voit un nouveau contexte). Sert au changement de fréquence et à la
+   * relance après une sortie audio qui ne répond plus (engine/audioClockWatch).
+   */
+  private async rebuildContext(): Promise<void> {
+    const old = this.ctx!;
     // Réglages du master à garder (le nouveau graphe naît avec les valeurs par défaut).
     const keep = { limiter: this.safetyLimiterOn, monitor: this.masterOutput?.gain.value ?? 1, collabMuted: this.collabOutputMuted, asio: this.asioStreamActive };
     // 1. Tout ce qui joue s'arrête.
@@ -800,8 +900,6 @@ export class AudioEngine {
         this.browserOutput?.gain.setValueAtTime(0, this.ctx.currentTime);
       }
     }
-    try { window.dispatchEvent(new CustomEvent('nova:samplerate', { detail: { from, to } })); } catch { /* hors navigateur */ }
-    return { changed: true, from, to };
   }
 
   /**
@@ -1108,7 +1206,7 @@ export class AudioEngine {
    * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
    * C'est de cette durée qu'une prise arrive en retard sur la grille.
    */
-  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' } {
+  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' | 'mesuree' } {
     if (!this.ctx) return { total: 0, mode: 'navigateur' };
     const sr = this.ctx.sampleRate;
     if (!stream && this.isUsingASIOInput() && this.asioStreamActive) {
@@ -1118,6 +1216,13 @@ export class AudioEngine {
       const total = (this.latency || 0) + this.asioQueueSec + 512 / sr + fill + 0.002;
       return { total: Math.min(0.5, total), mode: 'asio' };
     }
+    // Latence MESURÉE par la boucle (measureRoundTrip) pour ce micro, cette sortie, cette fréquence :
+    // c'est le retard réel d'une prise, il remplace l'estimation ci-dessous.
+    // La boucle part de la sortie du navigateur : on y ajoute le retard du chemin du master, que le
+    // son de la timeline traverse avant (anticipation de 6 ms du limiteur de sécurité de Chrome,
+    // DynamicsCompressorNode : mesuré 288 images à 48 kHz dans qa/moteur_web.py).
+    const cal = this.calibratedLatency();
+    if (cal !== null) return { total: cal + this.masterPathLatency(), mode: 'mesuree' };
     const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
     let inp = 0.01;
     try {
@@ -1125,6 +1230,68 @@ export class AudioEngine {
       if (s && typeof s.latency === 'number' && s.latency > 0) inp = s.latency;
     } catch { /* défaut 10 ms */ }
     return { total: Math.min(0.5, out + inp), mode: 'navigateur' };
+  }
+
+  // ─── Latence aller-retour MESURÉE (boucle sortie → entrée, engine/latencyProbe) ──────────────
+  private static readonly RT_KEY = 'nova_rt_latency';
+  private rtKey(): string {
+    const sr = this.ctx?.sampleRate || this.desiredSampleRate;
+    return `${this.currentInputDeviceId || 'default'}|${this.currentOutputDeviceId || 'default'}|${sr}`;
+  }
+  private rtTable(): Record<string, { s: number; at: number }> {
+    try { return JSON.parse(localStorage.getItem(AudioEngine.RT_KEY) || '{}') || {}; } catch { return {}; }
+  }
+  /** Latence mesurée pour le micro, la sortie et la fréquence actuels (s), ou null. */
+  public calibratedLatency(): number | null {
+    if (this.asioStreamActive && this.isUsingASIOInput()) return null;
+    const v = this.rtTable()[this.rtKey()];
+    return v && Number.isFinite(v.s) && v.s > 0 && v.s < 0.5 ? v.s : null;
+  }
+  /** Retard du chemin du master avant la sortie (s) : anticipation du limiteur de sécurité. */
+  public masterPathLatency(): number {
+    return this.safetyLimiterOn && this.ctx ? Math.round(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate : 0;
+  }
+  /** Oublie la mesure (retour à l'estimation). */
+  public clearCalibratedLatency() {
+    const t = this.rtTable(); delete t[this.rtKey()];
+    try { localStorage.setItem(AudioEngine.RT_KEY, JSON.stringify(t)); } catch { /* */ }
+  }
+  /**
+   * Mesure la latence aller-retour réelle : trois courts « tic » partent dans la sortie du
+   * navigateur, le micro les capte (micro près de l'enceinte, ou câble sortie → entrée). Le
+   * résultat (même horloge que les prises) est gardé pour ce micro + cette sortie + cette
+   * fréquence et retiré aux prises suivantes ; le réglage fin repart de 0.
+   */
+  public async measureRoundTrip(): Promise<RoundTrip> {
+    if (!this.ctx) await this.init();
+    const ctx = this.ctx!;
+    if (ctx.state !== 'running') { try { await ctx.resume(); } catch { /* */ } }
+    if (this.asioStreamActive && this.isUsingASIOInput()) return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: 'En ASIO, la carte son mesure elle-même sa latence.' };
+    if (this.recordingTrackId || this.recSession) return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: 'Pendant une prise, la mesure attend la fin.' };
+    let src: AudioNode | null = this.monitorSource;
+    let own: MediaStream | null = null;
+    if (!src) {
+      // Même micro et mêmes réglages que les prises (sans traitement de la voix).
+      const base: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') base.deviceId = { exact: this.currentInputDeviceId };
+      try { own = await navigator.mediaDevices.getUserMedia({ audio: base }); } catch (e: any) {
+        return { ok: false, frames: 0, ms: 0, seconds: 0, tries: [], clarity: 0, error: e?.name === 'NotAllowedError' ? 'Micro bloqué par le navigateur.' : 'Micro inaccessible.' };
+      }
+      src = ctx.createMediaStreamSource(own);
+    }
+    try {
+      const r = await probeRoundTrip(ctx, src, this.browserOutput || ctx.destination);
+      if (r.ok) {
+        const t = this.rtTable(); t[this.rtKey()] = { s: r.seconds, at: Date.now() };
+        try { localStorage.setItem(AudioEngine.RT_KEY, JSON.stringify(t)); } catch { /* */ }
+        this.setRecordOffsetMs(0);
+        this.lastLatency = r.seconds;
+        try { window.dispatchEvent(new CustomEvent('nova:latency', { detail: { ms: Math.round(r.ms), mode: 'mesuree', offsetMs: 0 } })); } catch { /* */ }
+      }
+      return r;
+    } finally {
+      if (own) { try { src!.disconnect(); } catch { /* */ } this.stopInputStream(own); }
+    }
   }
 
   /** Mesure régulière (chaque seconde) tant qu'une piste est armée. */
@@ -1180,7 +1347,7 @@ export class AudioEngine {
     const direct = this.directMonitorActive();
     if (this.asioBridge.protocol >= 2) {
       const armed = (this.inputRouter?.all() || []).map(t => ({ track: this.trackMix.get(t.trackId) || { id: t.trackId, volume: 1, pan: 0 }, channels: t.channels }));
-      const routes = direct ? directMonitorRoutes({ armed, mixes: this.cueMixes, monitoring: this.inputMonitoring, monitorLevel: this.monitorLevel, outputChannels: this.asioOutputChannels, listenId: this.cueListen }) : [];
+      const routes = direct ? directMonitorRoutes({ panLaw: this.panLaw, armed, mixes: this.cueMixes, monitoring: this.inputMonitoring, monitorLevel: this.monitorLevel, outputChannels: this.asioOutputChannels, listenId: this.cueListen }) : [];
       this.asioBridge.setMonitorRoutes(routes.length > 0, routes);
       try { window.dispatchEvent(new CustomEvent('nova:direct-monitor', { detail: { routes } })); } catch { /* */ }
     } else {
@@ -1671,7 +1838,7 @@ export class AudioEngine {
       down?: number;
       input: GainNode;
       gain: GainNode;
-      panner: StereoPannerNode;
+      panner: NovaPanner;
       output: GainNode;
       sends: Map<string, GainNode>;
       /** Sortie de la chaîne d'effets, avant le fader (clé de side-chain) ; piste muette / coupée par un solo. */
@@ -1738,7 +1905,8 @@ export class AudioEngine {
       if (!offlineKeepAlive) offlineKeepAlive = createKeepAlive(offlineCtx);
       offlineKeepAlive.connect(input);
       const gain = offlineCtx.createGain();
-      const panner = offlineCtx.createStereoPanner();
+      // Pan à la loi du projet (comme en lecture) ; rendu pré-fader : neutre (son d'origine).
+      const panner = new NovaPanner(offlineCtx, options.preFader ? 'neutral' : this.panModeOf(track), this.panLaw, 0);
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
@@ -1805,13 +1973,13 @@ export class AudioEngine {
       head.connect(muteGain);
       muteGain.connect(gain);
       const preNode = head;
-      gain.connect(panner);
+      gain.connect(panner.input);
       panner.connect(output);
 
       // Le solo ne concerne que les pistes sources : un bus ne doit pas etre coupe.
       const silenced = track.isMuted || soloSilenced.has(track.id);
       gain.gain.value = silenced ? 0 : (options.preFader ? 1 : track.volume);
-      panner.pan.value = options.preFader ? 0 : track.pan;
+      if (!options.preFader) this.setPannerStatic(panner, track);
 
       const rt: RenderTrack = {
         input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced, strip,
@@ -1889,12 +2057,13 @@ export class AudioEngine {
         // Envoi muet (Pro Tools) : câblé mais à zéro.
         sendGain.gain.value = (send.preFader && rt.silenced) || send.isMuted ? 0 : send.level;
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
+        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner.output)).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         if (ownPan) {
-          const sp = offlineCtx.createStereoPanner();
-          sp.pan.value = Math.max(-1, Math.min(1, send.pan!));
-          sendGain.connect(sp);
+          // Pan propre de l'envoi : même loi que la piste (piste stéréo : G / D équivalents).
+          const sp = new NovaPanner(offlineCtx, this.panModeOf(track), this.panLaw, 0);
+          this.setSendPanStatic(sp, send.pan!);
+          sendGain.connect(sp.input);
           sp.connect(sendDelay);
         } else sendGain.connect(sendDelay);
         sendDelay.connect(target.input);
@@ -1985,7 +2154,7 @@ export class AudioEngine {
           if (rt.muteGain && lane.points.length) this.programmerVoieHorsLigne(rt.muteGain.gain, muteGainPoints(lane.points), startOffset + toSamples(rt.down || 0), totalDuration);
           return;
         }
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -2076,12 +2245,11 @@ export class AudioEngine {
         // Glissés par note (piano roll pro) : décidés d'après les notes, comme en lecture.
         const slides = rt.synth instanceof NovaSynthNode ? absorbedSlides(heard) : null;
         for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(heard) : heard)) {
-          const noteStart = clip.start + note.start - startOffset - lat;
-          const noteEnd = noteStart + note.duration;
+          // Attaque et relâchement posés sur l'échantillon (utils/noteTiming), comme en lecture :
+          // une note écrite directement et la même note déplacée par un changement de tempo
+          // (positions à un ulp ou une demi-nanoseconde près) donnent le même son, au bit près.
+          const { noteStart, noteEnd, attackAt, releaseAt } = noteRenderTimes(clip.start, note, startOffset, lat, totalDuration, offlineCtx.sampleRate);
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
-
-          const attackAt = Math.max(0, noteStart);
-          const releaseAt = Math.min(totalDuration, noteEnd);
 
           if (slides && slides.has(note)) {
             if (noteStart >= 0) (rt.synth as NovaSynthNode).slideTo(note.pitch, attackAt, note.duration);
@@ -2118,7 +2286,7 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       if (!rt.bass808 || !track.bass808) continue;
       const clips = clipsWithMidiFx(track, isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []));
-      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)));
+      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), t => noteFrameTime(t, offlineCtx.sampleRate));
     }
 
     // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
@@ -2192,6 +2360,7 @@ export class AudioEngine {
       this.setTrackLowLatency(trackId, true);
       this.syncDirectMonitor();
       if (!this.latencyTimer) this.startLatencyWatch();
+      this.clockWatchInst?.poke();
       this.reportMissingInput(tap);
       console.log("[AudioEngine] Track armed OK:", trackId, tap.channels);
     } catch (e: any) {
@@ -2268,6 +2437,20 @@ export class AudioEngine {
       stream = await navigator.mediaDevices.getUserMedia({ audio: base });
     }
     const track = stream.getAudioTracks()[0];
+    // Micro débranché (casque USB, carte son) : NOVA rouvre l'entrée choisie, sinon celle de Windows,
+    // comme la sortie (outputDeviceWatch). Pendant une prise : la prise continue (silence à la place,
+    // horloge gardée) et l'entrée est rouverte juste après.
+    track?.addEventListener('ended', () => {
+      if (this.activeMonitorStream !== stream) return;
+      const say = (m: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: m })); } catch { /* */ } };
+      if (this.recordingTrackId || this.recSession) {
+        this.inputLostDuringTake = true;
+        say('🎙️ Micro débranché pendant la prise : elle continue (en silence) ; NOVA rouvre le micro dès l’arrêt.');
+        return;
+      }
+      say('🎙️ Micro débranché : NOVA passe sur le micro disponible (celui de Windows si le tien n’est plus là).');
+      void this.refreshInputSource();
+    });
     let channels = 0;
     try { channels = Number((track?.getSettings() as any)?.channelCount) || 0; } catch { /* */ }
     try { const max = Number((track as any)?.getCapabilities?.()?.channelCount?.max); if (max > 0) this.browserMaxChannels = max; } catch { /* */ }
@@ -2281,6 +2464,9 @@ export class AudioEngine {
     try { oldSrc?.disconnect(); } catch { /* */ }
     if (oldStream && oldStream !== stream) this.stopInputStream(oldStream);
   }
+
+  /** Le micro a disparu pendant une prise : rouvert à l'arrêt. */
+  private inputLostDuringTake = false;
 
   /** Plus aucune piste armée : le micro est fermé (le flux de la carte, partagé, reste). */
   private closeInputSource() {
@@ -2700,7 +2886,6 @@ export class AudioEngine {
         await ensureRecorderModule(this.ctx);
         const input = this.inputRouter!.recorderInput(ids);
         if (input) {
-          const session = new NovaRecorderSession(this.ctx, input.node, { channels: input.channels });
           const group = input.layout.length > 1 ? newTakeGroupId() : undefined;
           const common = this.measureRecordLatency().total + this.recOffsetMs / 1000;
           const offs = channelOffsets();
@@ -2716,6 +2901,14 @@ export class AudioEngine {
               if (j) this.recJournals.set(l.trackId, j);
             } catch { /* le journal ne doit jamais empêcher la prise */ }
           }
+          // Prises écrites par le moteur (comme le moteur natif) : les échantillons vont du fil audio
+          // à l'écrivain de prises (Worker), qui les écrit dans la base de récupération au fil de
+          // l'eau, sans passer par le fil de l'interface (engine/takeWriter).
+          const writer = takeWriter();
+          const targets: TakeTarget[] = [];
+          if (writer) for (const l of input.layout) { const j = this.recJournals.get(l.trackId); if (j?.takeId && j.external) targets.push({ takeId: j.takeId, first: l.first, width: l.width }); }
+          const session = new NovaRecorderSession(this.ctx, input.node, { channels: input.channels, writer, targets });
+          if (session.transport !== 'post') for (const l of input.layout) { const j = this.recJournals.get(l.trackId); if (j?.takeId && targets.some(t => t.takeId === j.takeId)) { try { j.external!(); } catch { /* */ } } }
           this.recLeadDone = false;
           if (this.recJournals.size || this.canBridgeTake()) {
             session.onChunks = cs => {
@@ -2936,6 +3129,10 @@ export class AudioEngine {
     return { channels: wav.channels.map(c => c.subarray(pl.from)), sampleRate: sr, start: pl.start, path: got.path };
   }
 
+  /** Dernière prise : chemin des échantillons (anneau partagé, port direct, page), images écrites, perdues. */
+  private lastTakeHealth: { at: number; transport: 'ring' | 'port' | 'post'; frames: number; durable: number | null; lost: number; allocs: number; rescued: number; error: string | null; sampleRate: number } | null = null;
+  public getLastTakeHealth() { return this.lastTakeHealth; }
+
   /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
   public async stopRecording(): Promise<{ clip: Clip, trackId: string } | null> {
     const all = await this.stopRecordingAll();
@@ -3038,6 +3235,10 @@ export class AudioEngine {
 
     const { channels, firstFrame } = await session.stop(src);
     try { input?.dispose(); } catch { /* */ }
+    if (this.inputLostDuringTake) { this.inputLostDuringTake = false; void this.refreshInputSource(); }
+    // Santé de la prise (Réglages audio, QA) : chemin des échantillons, images écrites durablement, perdues.
+    const wr = session.writerReport;
+    this.lastTakeHealth = { at: Date.now(), transport: session.transport, frames: channels?.[0]?.length || 0, durable: wr?.durable ?? null, lost: wr?.lost ?? 0, allocs: wr?.allocs ?? 0, rescued: session.rescuedFrames, error: wr?.error || session.writerWarning || null, sampleRate: ctx.sampleRate };
     const journals = this.recJournals;
     this.recJournals = new Map();
     const len = channels?.[0]?.length || 0;
@@ -3113,6 +3314,11 @@ export class AudioEngine {
       });
     });
     if (bridged.note && out.length) out[0].note = bridged.note;
+    // Anneau plein (écrivain de prises figé plus de 8 s) : des images manquent, l'ingé est prévenu.
+    if (wr && wr.lost > 0 && out.length) {
+      const msg = `${(wr.lost / sr).toFixed(2).replace('.', ',')} s de son perdues pendant la prise (ordinateur surchargé) : réécoute-la.`;
+      out[0].note = out[0].note ? `${out[0].note} — ${msg}` : msg;
+    }
     this.lastTakeDebug = debug ? { at: Date.now(), bridgeTake: bt?.id ?? null, anchorFrame: bt?.anchorFrame ?? null, firstFrame, lead, sr, tracks: dbg, note: bridged.note ?? null } : null;
     return out;
   }
@@ -3267,6 +3473,8 @@ export class AudioEngine {
     // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
+    // Format de pan (mono / stéréo) : un son chargé après le câblage de la piste peut l'avoir changé.
+    this.refreshPanFormats(tracks);
     if (this.isPlaying) this.stopAll();
     // L'extrait du catalogue jouait en même temps que le projet : on le coupe
     // (lecteur interne ici, lecteur <audio> du catalogue via l'événement).
@@ -3277,6 +3485,7 @@ export class AudioEngine {
     if (this.practiceRate < 0.999 && !this.recSession && !this.recordingTrackId) { this.startPractice(startOffset, tracks); return; }
 
     this.isPlaying = true;
+    this.clockWatchInst?.poke();
     this.pendingLoopWrap = null;
     this.discardLoopLead();
     this.loopLeadTracks = new Set();
@@ -3364,15 +3573,17 @@ export class AudioEngine {
         try {
           const t = live.get(id);
           const vLane = t ? playedLanes(t).find(l => l.parameterName === 'volume' && l.points.length > 0) : undefined;
-          const pLane = t ? playedLanes(t).find(l => l.parameterName === 'pan' && l.points.length > 0) : undefined;
           const vol = !t ? dsp.gain.gain.value
             : (t.isMuted || this.soloSilencedIds.has(id)) ? 0
             : vLane ? this.valeurAutomationA(this.sortedOf(vLane.points), this.pausedAt) : t.volume;
-          const pan = !t ? dsp.panner.pan.value : pLane ? this.valeurAutomationA(this.sortedOf(pLane.points), this.pausedAt) : t.pan;
           dsp.gain.gain.cancelScheduledValues(now);
           dsp.gain.gain.setValueAtTime(vol, now);
+          // Pan (ou G / D) : valeur de la courbe à l'arrêt, sinon le réglage de la piste.
+          const [pa, pb] = t ? this.panValuesAt(t, this.pausedAt) : [dsp.panner.pan.value, dsp.panner.panR.value];
           dsp.panner.pan.cancelScheduledValues(now);
-          dsp.panner.pan.setValueAtTime(pan, now);
+          dsp.panner.pan.setValueAtTime(pa, now);
+          dsp.panner.panR.cancelScheduledValues(now);
+          dsp.panner.panR.setValueAtTime(pb, now);
         } catch (e) {}
       });
       // Réglages d'effets programmés d'avance : plus rien ne doit bouger après l'arrêt.
@@ -3701,6 +3912,7 @@ export class AudioEngine {
       try {
         dsp.gain.gain.cancelScheduledValues(boundaryContextTime);
         dsp.panner.pan.cancelScheduledValues(boundaryContextTime);
+        dsp.panner.panR.cancelScheduledValues(boundaryContextTime);
         dsp.input.gain.cancelScheduledValues(boundaryContextTime);
         dsp.frozenInput?.gain.cancelScheduledValues(boundaryContextTime);
       } catch (e) {}
@@ -3781,6 +3993,7 @@ export class AudioEngine {
    *        [ws, we[ seulement (aucun rattrapage), contrôleurs repris à leur valeur au début du tour.
    */
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, lead = false) {
+      const sr = this.ctx?.sampleRate || 0;
       tracks.map(t => this.eff(t)).forEach(track => {
         if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
@@ -3806,12 +4019,14 @@ export class AudioEngine {
         const b808 = this.tracksDSP.get(track.id)?.bass808;
         if (track.bass808 && b808) {
           const evs = events808(planOfClips(midiClips, track.bass808), ws, Math.min(we, loopEnd));
-          b808.play(evs, t => contextScheduleTime + (t - ws));
+          b808.play(evs, t => noteFrameTime(contextScheduleTime + (t - ws), sr));
           return;
         }
 
         const synth = this.tracksDSP.get(track.id)?.synth;
         const novaSynth = synth instanceof NovaSynthNode;
+        // Instant de chaque note posé sur l'échantillon (utils/noteTiming), même règle qu'à l'export.
+        const at = (abs: number) => noteFrameTime(contextScheduleTime + (abs - ws), sr);
         // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
         if (synth || this.tracksDSP.get(track.id)?.melodicSampler) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow || lead);
         midiClips.forEach(clip => {
@@ -3833,18 +4048,18 @@ export class AudioEngine {
 
                if (noteAbsStart >= loopEnd) return;
                if (slides && slides.has(note)) {
-                   if (noteAbsStart >= ws && noteAbsStart < we) (synth as NovaSynthNode).slideTo(note.pitch, contextScheduleTime + (noteAbsStart - ws), note.duration);
+                   if (noteAbsStart >= ws && noteAbsStart < we) (synth as NovaSynthNode).slideTo(note.pitch, at(noteAbsStart), note.duration);
                    return;
                }
                if (noteAbsStart >= ws && noteAbsStart < we) {
-                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws), note);
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, at(noteAbsStart), note);
                } else if (firstWindow && lat > 0 && noteAbsStart >= projectWindowStart && noteAbsStart < ws) {
                    // Trop tard pour être calée : jouée tout de suite plutôt que perdue.
                    this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime, note);
                }
 
                if (noteAbsEnd >= ws && noteAbsEnd < we) {
-                   this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime + (noteAbsEnd - ws));
+                   this.triggerTrackRelease(track.id, note.pitch, at(noteAbsEnd));
                } else if (firstWindow && lat > 0 && noteAbsEnd >= projectWindowStart && noteAbsEnd < ws) {
                    this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime);
                }
@@ -4040,7 +4255,7 @@ export class AudioEngine {
   private cibleAutomation(
     nomParametre: string,
     gain: AudioParam,
-    pan: AudioParam,
+    panner: NovaPanner,
     sends: Map<string, GainNode>,
     pre?: AudioParam,
     strip?: StripNodes | null
@@ -4051,7 +4266,10 @@ export class AudioEngine {
     // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
     // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
     if (nomParametre === PRE_VOLUME) return pre || null;
-    if (nomParametre === 'pan') return pan;
+    // Pan : piste mono = « pan » ; piste stéréo = « Pan G » / « Pan D » (playedLanes convertit l'ancienne voie).
+    if (nomParametre === 'pan') return panner.mode === 'stereo' ? null : panner.pan;
+    if (nomParametre === PAN_L) return panner.mode === 'stereo' ? panner.pan : null;
+    if (nomParametre === PAN_R) return panner.mode === 'stereo' ? panner.panR : null;
     if (nomParametre.startsWith('send::')) {
       const idDepart = nomParametre.slice('send::'.length);
       return sends.get(idDepart)?.gain || null;
@@ -4157,7 +4375,7 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
@@ -4191,7 +4409,7 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     const t0 = now + 0.01;
@@ -4508,7 +4726,7 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -4516,7 +4734,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -4733,7 +4951,7 @@ export class AudioEngine {
       input: this.ctx.createGain(),
       output: this.ctx.createGain(),
       gain: this.ctx.createGain(),
-      panner: this.ctx.createStereoPanner(),
+      panner: new NovaPanner(this.ctx, this.panModeOf(track), this.panLaw, this.ctx.currentTime),
       pluginChain: new Map(),
       sends: new Map(),
     };
@@ -4845,8 +5063,10 @@ export class AudioEngine {
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
-    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
+    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+    dsp.panner.dispose();
+    dsp.sendPanners?.forEach(n => n.dispose());
     meterBank.detachTrack(trackId);
     disposeStrip(dsp.strip);
     const lt = this.listenTapNodes.get(trackId);
@@ -4973,7 +5193,7 @@ export class AudioEngine {
       // gain.value relu plus tard (arrêt, retour au début) renvoyait l'ANCIENNE valeur.
       if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
       else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
-      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      this.applyPannerTargets(dsp, track, t);
       if (dsp.strip) setStrip(dsp.strip, track, t, !this.isPlaying, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
@@ -5000,7 +5220,8 @@ export class AudioEngine {
         const sendGain = dsp.sends.get(send.id);
         const forcedOff = !send.isEnabled || !!send.isMuted || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
-        if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
+        const sp = typeof send.pan === 'number' ? dsp.sendPanners?.get(send.id) : undefined;
+        if (sp) { sp.setFormat(this.panModeOf(track), this.panLaw); this.setSendPanStatic(sp, send.pan!, t); }
       });
       this.syncSidechains(allTracks);
       this.syncVstWatch(track, dsp);
@@ -5173,7 +5394,7 @@ export class AudioEngine {
     link(head, dsp.chainOut);
     dsp.preFaderTap.connect(dsp.gain);
     this.resetMuteGain(track, dsp);
-    dsp.gain.connect(dsp.panner);
+    dsp.gain.connect(dsp.panner.input);
     dsp.panner.connect(dsp.output);
     // Analyseur en dérivation, seulement s'il a été demandé (getTrackAnalyzer) : même signal.
     if (dsp.analyzer) dsp.panner.connect(dsp.analyzer);
@@ -5182,7 +5403,7 @@ export class AudioEngine {
     const targetVolume = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
     dsp.gain.gain.setValueAtTime(0, now + fadeTime);
     dsp.gain.gain.linearRampToValueAtTime(targetVolume, now + fadeTime * 2);
-    dsp.panner.pan.setTargetAtTime(track.pan, now + fadeTime, 0.015);
+    this.applyPannerTargets(dsp, track, now + fadeTime, true);
     
     dsp.output.disconnect();
     let destNode: AudioNode = this.masterOutput!;
@@ -5234,18 +5455,20 @@ export class AudioEngine {
         sendGain.gain.setTargetAtTime(sendLevel, now + fadeTime, 0.015);
         
         // Post-fader : après le fader et le pan ; pré-fader : après les effets, avant le fader.
-        try { dsp!.panner.disconnect(sendGain); } catch (e) {}
+        try { dsp!.panner.output.disconnect(sendGain); } catch (e) {}
         try { dsp!.preFaderTap?.disconnect(sendGain); } catch (e) {}
         // Pan propre de l'envoi (Pro Tools « FMP » éteint) : post-fader pris AVANT le pan de la piste.
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : (ownPan ? dsp!.gain : dsp!.panner)).connect(sendGain);
+        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : (ownPan ? dsp!.gain : dsp!.panner.output)).connect(sendGain);
         let sendTail: AudioNode = sendGain;
         if (ownPan) {
+          // Pan propre de l'envoi : même loi que la piste (piste stéréo : G / D équivalents).
           let sp = dsp!.sendPanners!.get(send.id);
-          if (!sp) { sp = this.ctx!.createStereoPanner(); dsp!.sendPanners!.set(send.id, sp); }
-          sp.pan.setValueAtTime(Math.max(-1, Math.min(1, send.pan!)), now);
-          sendGain.connect(sp);
-          sendTail = sp;
+          if (!sp) { sp = new NovaPanner(this.ctx!, this.panModeOf(track), this.panLaw, this.ctx!.currentTime); dsp!.sendPanners!.set(send.id, sp); }
+          sp.setFormat(this.panModeOf(track), this.panLaw);
+          this.setSendPanStatic(sp, send.pan!, now);
+          sendGain.connect(sp.input);
+          sendTail = sp.output;
         }
         
         // Find the destination send/bus track and connect
@@ -5277,7 +5500,7 @@ export class AudioEngine {
     });
     dsp.sendLinks.forEach((_, sendId) => { if (!currentSendIds.has(sendId)) dsp!.sendLinks!.delete(sendId); });
     dsp.sendPanners.forEach((node, sendId) => {
-      if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
+      if (!currentSendIds.has(sendId)) { node.dispose(); dsp!.sendPanners!.delete(sendId); }
     });
     dsp.outputs = outputs;
     this.syncSidechains(allTracks);
@@ -5285,9 +5508,9 @@ export class AudioEngine {
     this.recomputePdc();
     // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
     // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
-    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.panner);
+    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.panner.output);
     // R15 : les mixes casque reprennent la prise pré-fader (le recâblage l'a débranchée).
-    this.trackMix.set(track.id, { id: track.id, volume: track.volume, pan: track.pan });
+    this.trackMix.set(track.id, this.mixOf(track));
     if (this.cueMixes.length) this.cueEngine?.reconnectTrack(track.id, dsp.preFaderTap || null);
   }
 
@@ -5337,7 +5560,7 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner, dsp.sends, this.preParam(dsp), dsp.strip);
         if (cible) cible.setValueAtTime(value, now);
     });
 }
@@ -6019,7 +6242,7 @@ export class AudioEngine {
   /** Mixes casque du projet (et pistes, pour les niveaux par défaut et les prises pré-fader). */
   public setCueMixes(mixes: CueMix[], tracks: Track[]) {
     this.cueMixes = mixes || [];
-    tracks.forEach(t => this.trackMix.set(t.id, { id: t.id, volume: t.volume, pan: t.pan }));
+    tracks.forEach(t => this.trackMix.set(t.id, this.mixOf(t)));
     if (!this.ctx || !this.cueEngine) return;
     if (this.cueMixes.length) metronomeService.addTap(this.cueEngine.clickIn);
     const sources = tracks.filter(t => this.isSourceTrackType(t) && t.id !== 'master');
@@ -6175,15 +6398,115 @@ export class AudioEngine {
     }
   }
 
-  public setTrackPan(trackId: string, pan: number) {
+  /**
+   * Pan d'une piste (chemin rapide, sans recâbler). Piste stéréo : `track` donne G / D
+   * (track.stereoPan) ; sans lui, le pan unique est converti (ancienne balance).
+   */
+  public setTrackPan(trackId: string, pan: number, track?: Pick<Track, 'stereoPan'>) {
     const tm = this.trackMix.get(trackId);
-    if (tm && tm.pan !== pan) { tm.pan = pan; if (this.inputRouter?.has(trackId)) this.syncDirectMonitor(); }
+    const stereoPan = track ? track.stereoPan : tm?.stereoPan;
+    if (tm && (tm.pan !== pan || tm.stereoPan !== stereoPan)) { tm.pan = pan; tm.stereoPan = stereoPan; if (this.inputRouter?.has(trackId)) this.syncDirectMonitor(); }
     const live = this.liveTracks?.find(t => t.id === trackId);
-    if (live && this.automationOwns(live, 'pan')) return;
     const dsp = this.tracksDSP.get(trackId);
-    if (dsp && this.ctx) {
-        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
+    if (!dsp || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (dsp.panner.mode === 'stereo') {
+      const sp = stereoPanOf({ pan, stereoPan });
+      if (!(live && this.automationOwns(live, PAN_L))) dsp.panner.pan.setTargetAtTime(sp.l, now, 0.015);
+      if (!(live && this.automationOwns(live, PAN_R))) dsp.panner.panR.setTargetAtTime(sp.r, now, 0.015);
+    } else if (!(live && this.automationOwns(live, 'pan'))) dsp.panner.pan.setTargetAtTime(pan, now, 0.015);
+  }
+
+  // ─── Loi de pan et double pan (22/10/2026) ─────────────────────────────────────────
+
+  /** Loi de pan du projet : appliquée tout de suite à toutes les pistes, aux mixes casque et au retour direct. */
+  public setPanLaw(law: unknown) {
+    const next = sanitizePanLaw(law);
+    if (next === this.panLaw) return;
+    this.panLaw = next;
+    const live = new Map((this.liveTracks || []).map(t => [t.id, t] as const));
+    this.tracksDSP.forEach((dsp, id) => {
+      const t = live.get(id);
+      dsp.panner.setFormat(t ? this.panModeOf(t) : dsp.panner.mode, next);
+      dsp.sendPanners?.forEach(sp => sp.setFormat(sp.mode, next));
+    });
+    this.cueEngine?.setPanLaw(next);
+    this.syncDirectMonitor();
+  }
+
+  public getPanLaw(): PanLaw { return this.panLaw; }
+
+  /** Pistes dont le format de pan a changé (son stéréo chargé après coup, format choisi) : pan reposé. */
+  private refreshPanFormats(tracks: Track[]) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const t of tracks) {
+      const dsp = this.tracksDSP.get(t.id);
+      if (dsp && dsp.panner.mode !== this.panModeOf(t)) this.applyPannerTargets(dsp, t, now, true);
     }
+  }
+
+  /** Format de pan d'une piste : stéréo (G / D) ou mono (utils/panLaw · isStereoTrack). */
+  private panModeOf(track: Track): PanMode { return isStereoTrack(track) ? 'stereo' : 'mono'; }
+
+  /** Réglage fixe du pan (piste mono) ou de G / D (piste stéréo). */
+  private staticPanOf(track: Track, mode: PanMode): [number, number] {
+    if (mode === 'stereo') { const sp = stereoPanOf(track); return [sp.l, sp.r]; }
+    return [Number.isFinite(track.pan) ? track.pan : 0, 1];
+  }
+
+  /** Pan (ou G / D) entendu à l'instant `time` : courbe jouée s'il y en a une, sinon le réglage. */
+  private panValuesAt(track: Track, time: number): [number, number] {
+    const mode = this.panModeOf(track);
+    const [a, b] = this.staticPanOf(track, mode);
+    const lanes = playedLanes(track);
+    const at = (name: string, stat: number) => {
+      const l = lanes.find(x => x.parameterName === name && x.points.length > 0);
+      return l ? this.valeurAutomationA(this.sortedOf(l.points), time) : stat;
+    };
+    return mode === 'stereo' ? [at(PAN_L, a), at(PAN_R, b)] : [at('pan', a), b];
+  }
+
+  /** Pose le pan d'une piste (format, loi, valeurs automatisées ou fixes). */
+  private applyPannerTargets(dsp: TrackDSP, track: Track, t: number, fixed = false) {
+    const mode = this.panModeOf(track);
+    dsp.panner.setFormat(mode, this.panLaw);
+    const [a, b] = this.staticPanOf(track, mode);
+    if (fixed) {
+      dsp.panner.pan.setTargetAtTime(a, t, 0.015);
+      dsp.panner.panR.setTargetAtTime(b, t, 0.015);
+      return;
+    }
+    if (mode === 'stereo') {
+      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, PAN_L, a), t, 0.015);
+      dsp.panner.panR.setTargetAtTime(this.automatedValue(track, PAN_R, b), t, 0.015);
+    } else {
+      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', a), t, 0.015);
+      dsp.panner.panR.setTargetAtTime(1, t, 0.015);
+    }
+  }
+
+  /** Valeurs fixes d'un pan de rendu (export). */
+  private setPannerStatic(panner: NovaPanner, track: Track) {
+    const [a, b] = this.staticPanOf(track, panner.mode === 'stereo' ? 'stereo' : 'mono');
+    panner.pan.value = a;
+    panner.panR.value = b;
+  }
+
+  /** Pan propre d'un envoi : piste mono = position ; piste stéréo = ancien pan converti en G / D. */
+  private setSendPanStatic(sp: NovaPanner, pan: number, t?: number) {
+    const p = Math.max(-1, Math.min(1, pan));
+    const lr = legacyPanToStereo(p);
+    const a = sp.mode === 'stereo' ? lr.l : p;
+    const b = sp.mode === 'stereo' ? lr.r : 1;
+    if (t === undefined) { sp.pan.value = a; sp.panR.value = b; return; }
+    sp.pan.setValueAtTime(a, t);
+    sp.panR.setValueAtTime(b, t);
+  }
+
+  /** Volume / pan connus d'une piste (retour direct du pont, mixes casque). */
+  private mixOf(t: Track): TrackMixInfo {
+    return { id: t.id, volume: t.volume, pan: t.pan, stereoPan: t.stereoPan, stereo: isStereoTrack(t) };
   }
 }
 

@@ -36,6 +36,11 @@ export const CHECK_MS = 2_000;
 export interface IdleHost {
   /** Raison de rester éveillé côté moteur (lecture, prise, piste armée…), ou null. */
   busy(): string | null;
+  /**
+   * Le contexte vient de repartir après une veille VOLONTAIRE. Le moteur le dit à la garde de l'horloge
+   * (engine/audioClockWatch) : l'horloge immobile pendant la veille n'est pas une horloge figée.
+   */
+  onWake?(): void;
 }
 
 export interface IdleOptions {
@@ -75,6 +80,8 @@ export class IdleSuspender {
   private asleep = false;
   /** Suspension demandée et pas encore aboutie. */
   private suspending: Promise<void> | null = null;
+  /** Reprise demandée après une veille et pas encore aboutie. */
+  private waking = false;
   private blockers = new Set<string>();
   private listening = false;
   private readonly o: Required<Omit<IdleOptions, 'listen'>> & { listen?: IdleOptions['listen'] };
@@ -116,6 +123,18 @@ export class IdleSuspender {
   }
 
   isAsleep() { return this.asleep; }
+  /** En veille, en train de s'endormir ou de repartir : l'horloge du contexte est immobile VOLONTAIREMENT. */
+  isResting() { return this.asleep || this.waking || !!this.suspending; }
+
+  private resumeFromSleep(c: Ctx) {
+    this.waking = true;
+    // Reprise qui ne répond pas (sortie audio en panne) : au bout de 2 s, la garde de l'horloge reprend la main.
+    this.o.setTimeout(() => { this.waking = false; }, 2000);
+    const done = () => { this.waking = false; try { this.host.onWake?.(); } catch { /* */ } };
+    const r = c.resume?.();
+    if (r && typeof r.then === 'function') r.then(done, () => { this.waking = false; /* attend un geste */ });
+    else done();
+  }
 
   getStats(): IdleStats {
     return { enabled: this.o.enabled(), asleep: this.asleep, sleeps: this.stats.sleeps, wakes: this.stats.wakes, liveSources: this.live.size,
@@ -141,7 +160,7 @@ export class IdleSuspender {
       // Suspension encore en cours (le contexte dit encore « running ») : la reprise se fait dès qu'elle
       // aboutit (voir check). Sinon tout de suite. Avant (batterie QA sous charge) : un réveil pendant la
       // suspension était perdu, la lecture partait sur un contexte suspendu (tête bloquée à 0, aucun son).
-      if (c.state === 'suspended' && !this.suspending) c.resume?.().catch(() => { /* attend un geste */ });
+      if (c.state === 'suspended' && !this.suspending) this.resumeFromSleep(c);
     }
     this.schedule();
   }
@@ -191,7 +210,7 @@ export class IdleSuspender {
       .then(() => {
         this.suspending = null;
         // Réveillé pendant la suspension : on repart tout de suite.
-        if (!this.asleep && this.ctx === c && c.state === 'suspended') c.resume?.().catch(() => { /* attend un geste */ });
+        if (!this.asleep && this.ctx === c && c.state === 'suspended') this.resumeFromSleep(c);
       })
       .catch(() => { this.suspending = null; this.asleep = false; this.schedule(); });
     this.suspending = p;

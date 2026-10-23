@@ -16,6 +16,7 @@
  *
  * Données pures (aucun React) : App.tsx branche, les tests vérifient.
  */
+import { FADER_MAX_DB, FADER_MAX_GAIN } from './faderLaw';
 import { checkBeatCall } from './beatChat';
 import type { AIAction, DAWState, PluginInstance, Track } from '../types';
 import { TrackType } from '../types';
@@ -580,11 +581,16 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
     }
     case 'SET_VOLUME': {
       if (p.volumeDb !== undefined || p.db !== undefined) {
-        const db = clampNum(p.volumeDb ?? p.db, [-60, 3.5], notes, 'Volume (dB)');
+        // Au-delà de la butée (+12 dB) : valeur aberrante, refusée (jamais un fader poussé tout en haut par erreur).
+        if (Number(p.volumeDb ?? p.db) > FADER_MAX_DB + 1e-6) return reject(`volume hors course (${fmtNum(Number(p.volumeDb ?? p.db), 3)} dB ; le fader va de −∞ à +12 dB)`);
+        const db = clampNum(p.volumeDb ?? p.db, [-60, FADER_MAX_DB], notes, 'Volume (dB)');
         if (db === undefined) return reject('volume illisible');
         p.volume = r2(dbToGain(db)); delete p.volumeDb; delete p.db;
       } else {
-        const v = clampNum(p.volume, [0, 1.5], notes, 'Volume');
+        // Gain linéaire au-delà de la butée (+12 dB) : sans doute un pourcentage ou une erreur → refusé
+        // plutôt que ramené tout en haut (l'assistant ne pousse jamais un fader à +12 dB par erreur).
+        if (Number(p.volume) > FADER_MAX_GAIN + 1e-6) return reject('volume hors course (gain linéaire de 0 à 3,98 ; donne plutôt volumeDb, jusqu’à +12 dB)');
+        const v = clampNum(p.volume, [0, FADER_MAX_GAIN], notes, 'Volume');
         if (v === undefined) return reject('volume illisible');
         p.volume = v;
       }
@@ -657,7 +663,7 @@ function checkOne(raw: any, ctx: ChatCheckContext): CheckedCall | RejectedCall {
       const isPan = param === 'pan';
       p.points = p.points.slice(0, 256).map((pt: any) => {
         const time = clampNum(pt?.time, [0, 3600], notes, 'Temps') ?? 0;
-        const value = !isPan && pt?.valueDb !== undefined ? r2(dbToGain(clampNum(pt.valueDb, [-60, 3.5], notes, 'Volume (dB)') ?? 0)) : clampNum(pt?.value, isPan ? [-1, 1] : [0, 1.5], notes, 'Valeur') ?? (isPan ? 0 : 1);
+        const value = !isPan && pt?.valueDb !== undefined ? r2(dbToGain(clampNum(pt.valueDb, [-60, FADER_MAX_DB], notes, 'Volume (dB)') ?? 0)) : clampNum(!isPan && Number(pt?.value) > FADER_MAX_GAIN + 1e-6 ? (notes.push('Valeur hors course (gain au-delà de +12 dB) remplacée par 0 dB'), 1) : pt?.value, isPan ? [-1, 1] : [0, FADER_MAX_GAIN], notes, 'Valeur') ?? (isPan ? 0 : 1);
         return { time, value };
       });
       p.parameter = param;

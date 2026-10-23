@@ -1204,6 +1204,10 @@ def run_window(url: str, url_mode: bool, updater: "app_update.Updater | None" = 
             headers = [f"Content-Type: {ui_bundle.mime_type(rel)}", "Cache-Control: no-cache",
                        "Access-Control-Allow-Origin: *", "Accept-Ranges: bytes",
                        f"X-Nova-Desktop-UI: {ui.active.id}"]
+            # Page du DAW isolée (comme en ligne, vercel.json) : le fil audio et l'écrivain de prises
+            # partagent la mémoire (engine/takeRing). Pas la page d'écoute ni celle d'un morceau.
+            if rel.endswith(".html") and not rel.startswith(("ecoute", "morceau")):
+                headers.append("Document-Isolation-Policy: isolate-and-credentialless")
             status, reason, start, count = 200, "OK", 0, total
             try:
                 rng = str(req.Headers.GetHeader("Range")) if req.Headers.Contains("Range") else ""

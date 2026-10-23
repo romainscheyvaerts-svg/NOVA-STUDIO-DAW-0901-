@@ -643,6 +643,11 @@ export interface StoredNoteEdit {
   formant?: number;
   /** Transition depuis la note précédente (ms). */
   transitionMs?: number;
+  /** Gain de la note (dB). Absent = niveau chanté. */
+  gain?: number;
+  /** Timing : décalage du début et de la fin de la note (s). Absents = à sa place. */
+  dt0?: number;
+  dt1?: number;
   /** Retouchée à la main (sinon : par « Corriger tout », recalculée si on change le dosage). */
   manual?: boolean;
 }
@@ -667,6 +672,20 @@ export interface PitchEditInfo {
   sourceName?: string;
   /** Heure de la correction (ms). */
   at?: number;
+  /** Fin de la région analysée dans le son d'origine (s) : même région à la réouverture. */
+  regionEnd?: number;
+  /** Notes coupées / fusionnées à la main (instants dans le son d'origine, s). */
+  cuts?: number[];
+  joins?: number[];
+  /** « Décaler la suite » : la fin du son rendu avance ou recule de tant (s). */
+  extend?: number;
+  /**
+   * Éditeur de notes (Nova Pitch) : signature des retouches dont le son joué
+   * est le rendu. '' = rendu en attente. Différente des retouches (annuler,
+   * collaboration) : le son est recalculé en arrière-plan. Absent : ancienne
+   * correction (rendue une fois pour toutes).
+   */
+  renderSig?: string;
 }
 
 /** Une respiration traitée : zone de l'audio source et gain appliqué. */
@@ -884,7 +903,22 @@ export interface Track {
   recordInput?: RecordInput | null;
   isFrozen: boolean;
   volume: number;
+  /**
+   * Pan d'une piste mono (−1 … 1, loi de pan du projet). Piste stéréo : pan unique « équivalent »
+   * tenu à jour avec `stereoPan` (anciennes versions, mode simple, surfaces) ; utils/panLaw.
+   */
   pan: number;
+  /**
+   * Double pan d'une piste stéréo (22/10/2026) : position du canal gauche (`l`) et du canal droit
+   * (`r`), −1 … 1, chacun placé par la loi de pan. `at` = valeur de `pan` écrite en même temps :
+   * si `pan` a changé depuis (ancienne version, mix auto), c'est `pan` qui compte (converti).
+   * Absent : G = −1, D = +1 (son d'origine), ou l'ancien pan converti (utils/panLaw).
+   */
+  stereoPan?: { l: number; r: number; at: number };
+  /** Lien des deux pans d'une piste stéréo : « same » = bougent ensemble, « mirror » = en miroir. Absent : indépendants. */
+  panLink?: 'same' | 'mirror';
+  /** Format de pan choisi à la main (menu du pan). Absent : déduit du son (utils/panLaw · isStereoTrack). */
+  panFormat?: 'mono' | 'stereo';
   /** Tête de tranche (R11), avant les inserts : trim d'entrée en dB (−24 à +24, 0 par défaut). */
   inputTrimDb?: number;
   /** Inversion de polarité Ø des deux canaux. */
@@ -1293,6 +1327,11 @@ export interface DAWState {
    * réglage) : 44,1 kHz, la fréquence fixe de l'ancien moteur.
    */
   sampleRate?: import('./utils/projectRate').ProjectRate;
+  /**
+   * Loi de pan du projet (dB au centre) : −3 (défaut, puissance constante), −4,5, −6 ou 0.
+   * Absente : −3 dB. Même loi en lecture, à l'export, dans les envois et au casque (utils/panLaw).
+   */
+  panLaw?: import('./utils/panLaw').PanLaw;
   bpm: number;
   timeSignature: TimeSignature;  // NEW
   /** Changements de tempo et de mesure (piste tempo, R2). utils/tempoMap. */

@@ -432,8 +432,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   };
 
   const containerClass = isMobile 
-    ? "fixed inset-0 z-[50] bg-nv-bg flex flex-col pb-20"
-    : "fixed bottom-6 right-6 z-[500] flex flex-col items-end";
+    // Téléphone : sous l'encoche rien, et la saisie au-dessus des onglets du bas ET de la barre d'accueil
+    // (pb-20 seul : 80 px pour 64 + 34 px d'onglets sur iPhone, la saisie passait sous les onglets).
+    // Sous la barre du transport (64 px) : Lecture / REC restent à portée pendant qu'on lit les conseils de Nova.
+    ? "fixed inset-x-0 bottom-0 top-[calc(4rem+env(safe-area-inset-top))] z-[50] bg-nv-bg flex flex-col pl-[max(env(safe-area-inset-left),var(--nv-rail-w,0px))] pr-[env(safe-area-inset-right)] pb-[calc(var(--nv-nav-h,4rem)+0.5rem)]"
+    // Ordinateur / tablette : dans le bandeau du bas (64 px, place réservée à droite), plus au-dessus des pistes
+    // ni de la console (avant : bouton de 80 px à 24 px du bas, il débordait de 40 px sur la timeline).
+    : "fixed bottom-2 right-3 z-[500] flex flex-col items-end";
 
   const windowClass = isMobile
     ? "w-full h-full flex flex-col"
@@ -453,11 +458,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           // Fenêtre de travail ouverte (batterie, piano roll, export…) : la bulle se lit mais laisse passer les
           // clics (audit de nuit 22/10/2026 : elle couvrait les derniers pas de la batterie et un clic sur un
           // pas ouvrait le chat au lieu d'allumer le pas). Le chat ne s'ouvre pas tout seul dans ce cas non plus.
-          className={`fixed left-1/2 -translate-x-1/2 bottom-[196px] md:left-auto md:right-6 md:translate-x-0 md:bottom-[176px] z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-nv-surface/95 px-4 py-3 text-left shadow-2xl backdrop-blur ${suppressAutoOpen ? 'pointer-events-none' : 'pointer-events-auto'}`}>
+          className={`${!isMobile && document.querySelector('[data-nova-band]') ? 'mx-3 mt-1.5 self-end w-[min(520px,calc(100%-24px))]' : 'fixed left-1/2 -translate-x-1/2 bottom-[196px] md:left-auto md:right-6 md:translate-x-0 md:bottom-[176px] z-[565] w-[min(520px,calc(100vw-24px))]'} rounded-2xl border border-cyan-500/30 bg-nv-surface/95 px-4 py-3 text-left shadow-2xl backdrop-blur ${suppressAutoOpen ? 'pointer-events-none' : 'pointer-events-auto'}`}>
           <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
           {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
         </button>,
-        document.body,
+        // Ordinateur / tablette : dans la bande réservée au-dessus du bandeau du bas (App, data-nova-band), en
+        // flux : il ne recouvre plus la timeline ni la console. Téléphone : flottant, comme avant.
+        (!isMobile && document.querySelector('[data-nova-band]')) || document.body,
       )}
       {isOpen && (
         <div className={windowClass} data-testid="nova-chat">
@@ -499,7 +506,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 6</span>
                   <button type="button" onClick={toggleStep} aria-expanded={!stepCollapsed} data-testid="nova-step-toggle"
-                    className="ml-auto text-[10px] font-bold text-slate-400 hover:text-white">
+                    className="nova-hit-tactile ml-auto text-[11px] font-bold text-slate-400 hover:text-white">
                     {stepCollapsed ? 'Afficher' : 'Réduire'} <i className={`fas ${stepCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-[8px]`}></i>
                   </button>
                 </div>
@@ -660,7 +667,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && !isOpen && unread.n > 0 && !projectState?.isRecording && (
         <button type="button" data-testid="nova-tip-pill" onClick={() => setIsOpen(true)}
           title={unread.last} aria-label={`Nova : ${tipPillLabel(unread.n)} (ouvrir)`}
-          className="nova-hit-tactile absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-nv-surface/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+          className="nova-hit-tactile absolute right-[3.75rem] bottom-1.5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-nv-surface/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
           <i className="fas fa-lightbulb text-[11px] text-amber-300" aria-hidden="true"></i>{tipPillLabel(unread.n)}
         </button>
       )}
@@ -671,14 +678,14 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           aria-label={isOpen ? "Fermer l'assistante Nova" : "Ouvrir l'assistante Nova"}
           title={isOpen ? 'Fermer Nova' : 'Nova, ton assistante de studio'}
           aria-expanded={isOpen}
-          className={`w-20 h-20 rounded-[32px] flex items-center justify-center shadow-[0_0_50px_rgba(0,242,255,0.2)] transition-all duration-500 hover:scale-110 active:scale-90 group relative ${
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-[0_0_24px_rgba(0,242,255,0.18)] transition-all duration-300 hover:scale-105 active:scale-90 group relative ${
             isOpen ? 'bg-white text-black rotate-90' : 'bg-nv-surface border border-cyan-500/30 text-cyan-400'
           }`}
         >
-          {isOpen ? <i className="fas fa-chevron-down text-xl"></i> : (
+          {isOpen ? <i className="fas fa-chevron-down text-lg"></i> : (
             <>
-              <i className="fas fa-wand-magic-sparkles text-2xl group-hover:animate-pulse"></i>
-              {isSyncing && <div className="absolute inset-0 rounded-[32px] border-4 border-cyan-500 animate-ping"></div>}
+              <i className="fas fa-wand-magic-sparkles text-lg group-hover:animate-pulse"></i>
+              {isSyncing && <div className="absolute inset-0 rounded-2xl border-2 border-cyan-500 animate-ping"></div>}
             </>
           )}
         </button>

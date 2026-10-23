@@ -16,9 +16,12 @@
  * d'un mix sur la sortie principale (prise AVANT la voix : pas de larsen dans la régie).
  */
 import type { CueMix, Track } from '../types';
-import { cueLevelOf } from '../utils/cueMix';
+import { cueLevelOf, cuePanPositions } from '../utils/cueMix';
+import { NovaPanner } from './panNode';
+import { DEFAULT_PAN_LAW, isStereoTrack, type PanLaw } from '../utils/panLaw';
 
-interface Send { tap: AudioNode | null; gain: GainNode; pan: StereoPannerNode }
+/** Pan de chaque piste dans un mix : même loi que le mix principal (22/10/2026), G / D pour une piste stéréo. */
+interface Send { tap: AudioNode | null; gain: GainNode; pan: NovaPanner }
 interface Bus { mix: CueMix; sum: GainNode; master: GainNode; dim: GainNode; out: GainNode; click: GainNode; sends: Map<string, Send> }
 
 export class CueMixEngine {
@@ -32,6 +35,8 @@ export class CueMixEngine {
   public readonly talkIn: GainNode;
   /** Gain de la musique des mixes (1, ou le dim pendant le talkback). */
   private dimGain = 1;
+  /** Loi de pan du projet (utils/panLaw). */
+  private panLaw: PanLaw = DEFAULT_PAN_LAW;
 
   constructor(private ctx: AudioContext) {
     this.listenOut = ctx.createGain();
@@ -51,6 +56,13 @@ export class CueMixEngine {
     this.buses.forEach(b => b.dim.gain.setTargetAtTime(this.dimGain, t, 0.015));
   }
   getDim() { return this.dimGain; }
+
+  /** Loi de pan du projet : les pans des mixes casque suivent celle du mix principal. */
+  setPanLaw(law: PanLaw) {
+    if (law === this.panLaw) return;
+    this.panLaw = law;
+    this.buses.forEach(b => b.sends.forEach(s => s.pan.setFormat(s.pan.mode, law)));
+  }
   getListen() { return this.listenId; }
 
   /**
@@ -74,8 +86,8 @@ export class CueMixEngine {
         keep.add(tr.id);
         let s = b.sends.get(tr.id);
         if (!s) {
-          s = { tap: null, gain: this.ctx.createGain(), pan: this.ctx.createStereoPanner() };
-          s.gain.connect(s.pan);
+          s = { tap: null, gain: this.ctx.createGain(), pan: new NovaPanner(this.ctx, 'mono', this.panLaw, this.ctx.currentTime) };
+          s.gain.connect(s.pan.input);
           s.pan.connect(b.sum);
           b.sends.set(tr.id, s);
         }
@@ -88,7 +100,11 @@ export class CueMixEngine {
         tap.connect(s.gain);
         const l = cueLevelOf(mix, tr);
         s.gain.gain.setTargetAtTime(l.muted ? 0 : l.level, t, 0.01);
-        s.pan.pan.setTargetAtTime(l.pan, t, 0.01);
+        const stereo = isStereoTrack(tr);
+        s.pan.setFormat(stereo ? 'stereo' : 'mono', this.panLaw);
+        const [pa, pb] = cuePanPositions(mix, tr, stereo);
+        s.pan.pan.setTargetAtTime(pa, t, 0.01);
+        s.pan.panR.setTargetAtTime(pb, t, 0.01);
       }
       for (const [id, s] of [...b.sends]) if (!keep.has(id)) { this.dropSend(s); b.sends.delete(id); }
     }
@@ -145,7 +161,8 @@ export class CueMixEngine {
 
   private dropSend(s: Send) {
     if (s.tap) { try { s.tap.disconnect(s.gain); } catch { /* */ } }
-    try { s.gain.disconnect(); s.pan.disconnect(); } catch { /* */ }
+    try { s.gain.disconnect(); } catch { /* */ }
+    s.pan.dispose();
   }
 
   private removeBus(id: string) {

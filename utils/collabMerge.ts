@@ -65,12 +65,35 @@ export function applyStructure(t: Track, st: StructureFields) {
   }
 }
 
+/** Double pan d'une piste (G / D écrits, lien, format choisi) tel qu'il voyage ; null = rien de réglé. */
+export function panStereoOf(t: Pick<Track, 'stereoPan' | 'panLink' | 'panFormat'>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (t.stereoPan) out.sp = { l: t.stereoPan.l, r: t.stereoPan.r, at: t.stereoPan.at };
+  if (t.panLink) out.link = t.panLink;
+  if (t.panFormat) out.format = t.panFormat;
+  return Object.keys(out).length ? out : null;
+}
+
+/** Applique un double pan reçu (valeurs vérifiées, bornées à −1 … 1). */
+export function applyPanStereo(t: Track, v: unknown) {
+  const rec = t as unknown as Record<string, unknown>;
+  const o = v && typeof v === 'object' ? v as Record<string, any> : {};
+  const c = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(-1, Math.min(1, x)) : null);
+  const sp = o.sp && typeof o.sp === 'object' ? { l: c(o.sp.l), r: c(o.sp.r), at: c(o.sp.at) } : null;
+  if (sp && sp.l !== null && sp.r !== null && sp.at !== null) rec.stereoPan = sp; else delete rec.stereoPan;
+  if (o.link === 'same' || o.link === 'mirror') rec.panLink = o.link; else delete rec.panLink;
+  if (o.format === 'mono' || o.format === 'stereo') rec.panFormat = o.format; else delete rec.panFormat;
+}
+
 /** Réglages de mix d'une piste, champ par champ (volume absent s'il est verrouillé par l'artiste). */
 export function mixFieldsOf(t: Track): MixFields {
   const out: MixFields = {
     pan: t.pan, isMuted: t.isMuted, outputTrackId: t.outputTrackId,
     sends: t.sends || [], pluginOrder: (t.plugins || []).map(p => p.id),
     structure: structureOf(t),
+    // Double pan d'une piste stéréo (G / D, lien, format choisi) : un seul champ, ignoré par les
+    // anciennes versions (elles gardent « pan », le pan unique équivalent, utils/panLaw).
+    panStereo: panStereoOf(t),
   };
   if (!t.volumeLock) out.volume = t.volume;
   for (const p of t.plugins || []) out[PLUGIN_FIELD + p.id] = p;
@@ -172,6 +195,7 @@ export function applyMixFields(t: Track, fields: MixFields, accept: (field: stri
   const take = (f: string) => { const ok = accept(f); if (ok) applied.push(f); return ok; };
   if (typeof fields.volume === 'number' && !t.volumeLock && take('volume')) t.volume = fields.volume;
   if (typeof fields.pan === 'number' && take('pan')) t.pan = fields.pan;
+  if ('panStereo' in fields && take('panStereo')) applyPanStereo(t, fields.panStereo);
   if (typeof fields.isMuted === 'boolean' && take('isMuted')) t.isMuted = fields.isMuted;
   if (typeof fields.outputTrackId === 'string' && take('outputTrackId')) t.outputTrackId = fields.outputTrackId;
   if (Array.isArray(fields.sends) && take('sends')) t.sends = (fields.sends as TrackSend[]).map(s => ({ ...s }));

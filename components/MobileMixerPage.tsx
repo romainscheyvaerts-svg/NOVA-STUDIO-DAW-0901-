@@ -1,4 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
+import { isStereoTrack, panShort, stereoPanOf, withStereoPan } from '../utils/panLaw';
 import MobileContainer from './MobileContainer';
 import { Track, TrackType } from '../types';
 import { structureBus } from '../utils/structureBus';
@@ -23,10 +25,10 @@ interface MobileMixerPageProps {
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
 }
 
-const MAX_VOLUME = 1.5;
-// Même courbe que le fader du mixer PC (MixerView) : volume = p² × 1,5.
-const volumeToPos = (v: number) => Math.sqrt(Math.max(0, v) / MAX_VOLUME);
-const posToVolume = (p: number) => p * p * MAX_VOLUME;
+const MAX_VOLUME = FADER_MAX_GAIN;
+// Même échelle que le fader du mixer PC (utils/faderLaw : −∞…+12 dB, 0 dB aux 3/4).
+const volumeToPos = gainToFaderPos;
+const posToVolume = faderPosToGain;
 const toDb = (v: number) => (v <= 0.0001 ? '-∞' : (20 * Math.log10(v)).toFixed(1));
 
 /** Fader vertical tactile (Pointer Events : doigt, souris, stylet). */
@@ -43,7 +45,7 @@ const VerticalFader: React.FC<{
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     const p = 1 - Math.min(1, Math.max(0, (clientY - r.top) / r.height));
-    onChange(Math.round(posToVolume(p) * 100) / 100);
+    onChange(Math.round(posToVolume(p) * 10000) / 10000);
   };
 
   return (
@@ -161,7 +163,33 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   </button>
 
                   {/* Pan (pas de pan sur le master) */}
-                  {!isMaster ? (
+                  {!isMaster && isStereoTrack(t) ? (
+                    // Piste stéréo : double pan G / D (deux curseurs de 40 px ; toucher la valeur la remet par défaut).
+                    <div className="w-full" data-testid={`mobile-dual-pan-${t.id}`}>
+                      {(['l', 'r'] as const).map(side => {
+                        const sp = stereoPanOf(t);
+                        const v = side === 'l' ? sp.l : sp.r;
+                        const set = (x: number) => onUpdateTrack(withStereoPan(t, side === 'l' ? x : sp.l, side === 'r' ? x : sp.r));
+                        return (
+                          <div key={side} className="flex items-center gap-1 h-10">
+                            <button type="button" onClick={(e) => { e.stopPropagation(); set(side === 'l' ? -1 : 1); }}
+                              aria-label={`Pan ${side === 'l' ? 'G' : 'D'} de ${t.name} : ${panShort(v)}. Toucher pour ${side === 'l' ? '100G' : '100D'}`}
+                              title={`Toucher pour ${side === 'l' ? '100G' : '100D'} (son d'origine)`}
+                              className="w-7 h-10 shrink-0 flex flex-col items-center justify-center leading-none">
+                              <b className="text-[10px] text-slate-400">{side === 'l' ? 'G' : 'D'}</b>
+                              <span className="mt-0.5 text-[8px] font-mono tabular-nums text-slate-500">{panShort(v)}</span>
+                            </button>
+                            <input type="range" min="-1" max="1" step="0.01" value={v}
+                              aria-label={`Pan ${side === 'l' ? 'G (canal gauche)' : 'D (canal droit)'} de ${t.name}`}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => set(parseFloat(e.target.value))}
+                              className="min-w-0 flex-1"
+                              style={{ height: 40, background: 'linear-gradient(transparent 18px, var(--border-highlight) 18px, var(--border-highlight) 22px, transparent 22px)' }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : !isMaster ? (
                     <div className="w-full">
                       <input
                         type="range"

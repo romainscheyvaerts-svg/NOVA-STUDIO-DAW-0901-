@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { meterBank, meterClock, MeterView, HOLD_MS } from '../../engine/meters/meterBank';
 import { meterPrefs } from '../../engine/meters/meterPrefs';
-import { MeterScale, scaleFrac, scaleReading, METER_SCALES } from '../../engine/meters/scales';
+import { MeterScale, scaleFrac, scaleReading, METER_SCALES, meterMainDb } from '../../engine/meters/scales';
 import { audioEngine } from '../../engine/AudioEngine';
 import { canvasTheme } from '../../utils/canvasTheme';
 import { playheadStore } from '../../utils/playheadStore';
@@ -53,7 +53,7 @@ export function drawStereoMeter(ctx: CanvasRenderingContext2D, W: number, H: num
   for (let ch = 0; ch < 2; ch++) {
     bar(ch, 0, len, bg);
     if (!v) continue;
-    const main = s.ballistics === 'peak' ? v.peak[ch] : v.rms[ch];
+    const main = meterMainDb(s, v.peak[ch], v.rms[ch]);
     const fm = scaleFrac(s, main) * len;
     // barre principale découpée par zones (vert / ambre / rouge)
     for (const [a, b, c] of zones) {
@@ -252,11 +252,11 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
     return (
       <div className={`relative flex flex-col items-stretch gap-0.5 h-full min-h-0 ${className}`} data-meter={pointId} onContextMenu={onMenu} title={help}>
         {showClip && <button ref={clipRef} type="button" onClick={reset} data-testid={`meter-clip-${pointId}`}
-          className={`h-2.5 shrink-0 rounded-sm bg-white/10 [[data-theme=light]_&]:bg-slate-300/60 ${clipHit ? 'nova-hit-tactile' : ''}`} aria-label="Pas de saturation" />}
+          className={`h-2.5 shrink-0 rounded-sm bg-white/10 [[data-theme=light]_&]:bg-slate-300/60 ${clipHit ? 'nova-hit-tactile' : ''}`} data-no-hit={clipHit ? undefined : ''} aria-label="Pas de saturation" />}
         <canvas ref={canvasRef} className="flex-1 min-h-0 w-full" />
         {grTrackId && grText && <span ref={grRef} className="h-3 shrink-0 text-center text-[8px] font-mono tabular-nums text-amber-400 leading-3" />}
         {showReadout && <button ref={readRef} type="button" onClick={reset} title="Crête vraie la plus haute (dBTP) : clic pour remettre à zéro"
-          className="h-3.5 shrink-0 text-center text-[8px] font-mono tabular-nums text-slate-300 leading-3 hover:text-white">−∞</button>}
+          className="h-3.5 [@media(pointer:coarse)]:h-5 [@media(pointer:coarse)]:leading-5 [@media(pointer:coarse)]:text-[10px] shrink-0 text-center text-[8px] font-mono tabular-nums text-slate-300 leading-3 hover:text-white">−∞</button>}
         {menu && <MeterMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
       </div>
     );

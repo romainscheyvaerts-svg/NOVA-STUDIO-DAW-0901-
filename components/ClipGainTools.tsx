@@ -9,7 +9,7 @@ import {
 } from '../utils/clipGain';
 import { gridStepSeconds, snapToGrid } from '../utils/grid';
 import { LANE_HEIGHT } from '../utils/automationDraw';
-import { paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
+import { denormalize, paramSpec, sortedPoints, valueAtPoints } from '../utils/automationWrite';
 import { canvasTheme } from '../utils/canvasTheme';
 import { getEditCommands, bufferDurationOf } from '../hooks/useEditCommands';
 import {
@@ -17,6 +17,7 @@ import {
   unloopCommand, useClipGainCommands,
 } from '../hooks/useClipGainCommands';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { PAN_L, PAN_R, stereoPanOf } from '../utils/panLaw';
 import { editSelectionStore } from '../utils/editSelection';
 
 /**
@@ -58,8 +59,7 @@ const laneSpec = (lane: AutomationLane) => ({ ...paramSpec(lane.parameterName), 
 const laneValueAt = (lane: AutomationLane, relY: number): number => {
   const spec = laneSpec(lane);
   const n = Math.max(0, Math.min(1, 1 - (relY - 8) / (LANE_HEIGHT - 16)));
-  if (spec.kind === 'gain') return n * n * (spec.max || 1);
-  return spec.min + n * (spec.max - spec.min);
+  return denormalize(spec, n);
 };
 
 export function useClipGainEdit(deps: ClipGainEditDeps) {
@@ -174,7 +174,8 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
 
   /** Applique le geste du crayon d'automation (relY absolu dans les voies de la piste). */
   const applyAuto = (d: Extract<Drag, { kind: 'auto' }>, final: boolean) => {
-    const stat = d.lane.parameterName === 'volume' ? d.track.volume : d.lane.parameterName === 'pan' ? d.track.pan : (d.lane.min + d.lane.max) / 2;
+    const stat = d.lane.parameterName === 'volume' ? d.track.volume : d.lane.parameterName === 'pan' ? d.track.pan
+      : d.lane.parameterName === PAN_L ? stereoPanOf(d.track).l : d.lane.parameterName === PAN_R ? stereoPanOf(d.track).r : (d.lane.min + d.lane.max) / 2;
     let n = 0;
     const tag = Date.now().toString(36);
     const pts = applyPencilToAutomation(d.points0, d.stroke, t => valueAtPoints(d.points0, t, stat), () => `pt-${tag}-${n++}`, d.stroke.ramp);

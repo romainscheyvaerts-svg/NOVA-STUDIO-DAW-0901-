@@ -28,6 +28,10 @@ export interface MobileNoticeInlineProps {
 
 const MobileNoticeInline: React.FC<MobileNoticeInlineProps> = ({ notice, blocked, ttl = 9000 }) => {
   const [shown, setShown] = useState<{ text: string; id: number } | null>(null);
+  // Deux lignes au plus (un toucher sur le texte le montre en entier) : le message ne pousse plus
+  // les pistes hors de l'écran du téléphone.
+  const [full, setFull] = useState(false);
+  useEffect(() => { setFull(false); }, [shown?.id]);
   useEffect(() => {
     if (!notice || blocked || !isImportantNotice(notice.text)) return;
     setShown(notice);
@@ -38,9 +42,10 @@ const MobileNoticeInline: React.FC<MobileNoticeInlineProps> = ({ notice, blocked
   return (
     <div role="alert" data-testid="mobile-notice"
       className="shrink-0 mx-2 my-1.5 flex items-start gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2">
-      <p className="flex-1 min-w-0 text-[13px] leading-snug font-semibold text-nv-ink">{shown.text}</p>
+      <p onClick={() => setFull(f => !f)} title={full ? undefined : shown.text}
+        className={`flex-1 min-w-0 text-[13px] leading-snug font-semibold text-nv-ink ${full ? '' : 'line-clamp-2'}`}>{shown.text}</p>
       <button type="button" onClick={() => setShown(null)} aria-label="Fermer le message" title="Fermer"
-        className="-mr-1 -my-1 shrink-0 w-10 h-10 rounded-lg text-nv-muted hover:text-nv-ink flex items-center justify-center">
+        className="-mr-1 -my-1 shrink-0 w-11 h-11 rounded-lg text-nv-muted hover:text-nv-ink flex items-center justify-center">
         <i className="fas fa-times" aria-hidden="true"></i>
       </button>
     </div>

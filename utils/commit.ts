@@ -16,6 +16,7 @@
  * l'automation de mix de l'originale : le rendu étant pris AVANT le fader, le
  * mix ne change pas.
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import { AutomationLane, Clip, PluginInstance, Track, TrackCommitInfo, TrackType } from '../types';
 import { parsePluginParam, pluginParamName } from './automationWrite';
 import { PRE_VOLUME } from './preFxEdits';
@@ -155,7 +156,7 @@ export const printBusTracks = (tracks: Track[], busId: string, r: BusPrintRender
   const t: Track = {
     ...base, volume: 1, pan: 0, isMuted: false,
     automationLanes: base.automationLanes.filter(l => l.parameterName !== 'volume' && l.parameterName !== 'pan').concat(
-      [{ id: newId('auto'), parameterName: 'volume', points: [], color: bus.color, isExpanded: false, min: 0, max: 1.5 }]),
+      [{ id: newId('auto'), parameterName: 'volume', points: [], color: bus.color, isExpanded: false, min: 0, max: FADER_MAX_GAIN }]),
   };
   delete t.parentFolderId;
   // Sortie : là où va le bus (un dossier de routage sort vers sa propre sortie).

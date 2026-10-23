@@ -195,4 +195,28 @@ describe('veille du moteur à l\'arrêt', () => {
     await advance(250_000);
     expect(ctx.state).toBe('suspended');
   });
+
+  it('garde de l’horloge : « au repos » pendant la veille et la reprise, puis prévenue à la reprise (onWake)', async () => {
+    let woke = 0;
+    let t = 0;
+    const timers: { at: number; fn: () => void }[] = [];
+    let onInput = () => {};
+    const idle = new IdleSuspender({ busy: () => null, onWake: () => { woke++; } }, {
+      idleMs: 20_000, visibleIdleMs: 20_000, hidden: () => true, checkMs: 2_000, now: () => t,
+      setTimeout: (fn, ms) => { timers.push({ at: t + ms, fn }); return timers.length; }, clearTimeout: () => {},
+      enabled: () => true, workWindowOpen: () => false, listen: fn => { onInput = fn; },
+    });
+    const ctx = new FakeCtx();
+    idle.attach(ctx as any);
+    expect(idle.isResting()).toBe(false);
+    while (timers.length && ctx.state === 'running') { timers.sort((a, b) => a.at - b.at); const n = timers.shift()!; t = n.at; n.fn(); await Promise.resolve(); }
+    expect(ctx.state).toBe('suspended');
+    expect(idle.isResting()).toBe(true);
+    onInput();
+    expect(idle.isResting()).toBe(true); // reprise en cours
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(ctx.state).toBe('running');
+    expect(idle.isResting()).toBe(false);
+    expect(woke).toBe(1);
+  });
 });

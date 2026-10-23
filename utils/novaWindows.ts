@@ -41,7 +41,7 @@ export interface NovaWindowDetail {
   revert?: boolean;
   /** Traitement de clip ouvert sur l'onglet « Réparer la voix » (L5 · écart 7). */
   repair?: boolean;
-  /** Transposition : version simple (téléphone, mode simple : la tonalité seulement). */
+  /** Version simple : transposition (la tonalité seulement), éditeur de notes épuré (« Corriger la justesse »). */
   simple?: boolean;
   /** Trim TCE (R13) : nouvelle place du clip étiré (début et durée, s). */
   tce?: { start: number; duration: number };

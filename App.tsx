@@ -1,3 +1,4 @@
+import { FADER_MAX_GAIN } from './utils/faderLaw';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, ViewMode, User, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix, TimeSignature } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
@@ -143,6 +144,9 @@ const ModulatorsPanel = lazyWithPreload(() => import('./components/ModulatorsPan
 const SessionPlayerPanel = lazyWithPreload(() => import('./components/SessionPlayerPanel'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { NEW_PROJECT_RATE, ProjectRate, projectRateOf, rateLabel, sanitizeRate } from './utils/projectRate';
+import { isStereoTrack, lanesForFormat, PAN_L, PAN_R, sanitizePanLaw } from './utils/panLaw';
+import { interpolateCurve } from './utils/automationWrite';
+import { showPanLaw } from './utils/panLawStore';
 import { convertRegistryTo, registryConversionPlan, resampleBuffer } from './utils/hqAudio';
 import { ProjectRateConfirm } from './components/ProjectRateControls';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
@@ -417,7 +421,7 @@ const AVAILABLE_FX_MENU = [
 
 const createDefaultAutomation = (param: string, color: string): AutomationLane => ({
   id: `auto-${Date.now()}-${Math.random()}`,
-  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: 1.5
+  parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: FADER_MAX_GAIN
 });
 
 /**
@@ -760,7 +764,9 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
         newState.projectScale !== curr.present.projectScale ||
         newState.beatTitle !== curr.present.beatTitle ||
         // Fréquence du projet (Session › Réglages) : Ctrl+Z revient à l'ancienne (sons reconvertis).
-        newState.sampleRate !== curr.present.sampleRate;
+        newState.sampleRate !== curr.present.sampleRate ||
+        // Loi de pan du projet (Options ▾ › Mixage) : une étape d'annulation.
+        newState.panLaw !== curr.present.panLaw;
 
       if (!modificationReelle) return { ...curr, present: newState };
       // Autre projet ouvert : historique vidé (Ctrl+Z ne ramène plus le projet d'avant, utils/undoHistory).
@@ -780,7 +786,7 @@ const useUndoRedo = (initialState: DAWState, moveRef?: React.MutableRefObject<Hi
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre', 'sampleRate'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre', 'sampleRate', 'panLaw'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -1603,10 +1609,13 @@ function Studio() {
   };
   // Un téléphone en paysage (≈ 844 px) passait en TABLET, dont les vues sont
   // utilisables seulement à la souris : écran tactile + petit côté < 600 px = MOBILE.
+  // Tablette au doigt (petit côté ≥ 600 px) : la vue tablette (arrangement, console, piano roll),
+  // même en portrait sous 768 px (iPad mini : 744 px), qui avait jusqu'ici la vue du téléphone.
   const autoViewMode = (): ViewMode => {
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const shortSide = Math.min(window.innerWidth, window.innerHeight);
-    if (window.innerWidth < 768 || (coarse && shortSide < 600)) return 'MOBILE';
+    if (coarse) return shortSide < 600 ? 'MOBILE' : window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
+    if (window.innerWidth < 768) return 'MOBILE';
     return window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
   };
   const [viewMode, setViewMode] = useState<ViewMode>(() => readSavedViewMode() ?? autoViewMode());
@@ -1685,6 +1694,50 @@ function Studio() {
       metronomeService.setOutputs({ main: audioEngine.getMonitorBus(), system: audioEngine.ctx.destination });
     }
   };
+
+  // ─── Loi de pan du projet (utils/panLaw, 22/10/2026) ─────────────────────────────
+  // Le moteur (lecture, export, envois, casques, retour direct) et les menus suivent l'état :
+  // ouverture d'un projet, Ctrl+Z, collaboration (champ « panLaw »). Absente : −3 dB.
+  useEffect(() => {
+    const law = sanitizePanLaw(state.panLaw);
+    audioEngine.setPanLaw(law);
+    showPanLaw(law);
+  }, [state.panLaw]);
+  useEffect(() => {
+    const onSet = (e: Event) => {
+      const law = sanitizePanLaw((e as CustomEvent).detail?.law);
+      setState(prev => (sanitizePanLaw(prev.panLaw) === law ? prev : { ...prev, panLaw: law }));
+    };
+    window.addEventListener('nova:set-pan-law', onSet);
+    return () => window.removeEventListener('nova:set-pan-law', onSet);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Ancien couloir « Panoramique » d'une piste stéréo (projet d'avant le double pan) : converti
+  // une fois en « Pan G » / « Pan D » (même son, utils/panLaw · convertPanLane), dès que le son de
+  // la piste est connu. Le moteur le convertit de toute façon à la lecture et à l'export.
+  useEffect(() => {
+    const old = (t: Track) => !!t.automationLanes?.some(l => l.parameterName === 'pan' && l.points.length)
+      && !t.automationLanes.some(l => l.parameterName === PAN_L || l.parameterName === PAN_R) && isStereoTrack(t);
+    if (!state.tracks.some(old)) return;
+    setSilently(prev => ({ ...prev, tracks: prev.tracks.map(t => (old(t) ? { ...t, automationLanes: lanesForFormat(t.automationLanes, true, interpolateCurve) } : t)) }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.tracks]);
+  // Studio ouvert : le moteur audio est préparé tout de suite (contexte, master, pistes recâblées,
+  // modules du fil audio, écrivain de prises), pas au premier ▶. Mesuré (qa/moteur_web.py, toucher) :
+  // au téléphone le 1er toucher sur Lecture mettait 240 à 340 ms à faire du son (création du moteur
+  // dans le geste) ; ensuite ~30 ms. L'ouverture du studio suit un geste (Nouveau projet, un beat…) :
+  // le contexte démarre ; sinon il attend le premier toucher (AudioEngine.hookAutoResume).
+  const ensureAudioEngineRef = useRef(ensureAudioEngine);
+  ensureAudioEngineRef.current = ensureAudioEngine;
+  useEffect(() => {
+    if (showLanding) return;
+    let live = true;
+    const t = window.setTimeout(() => {
+      if (!live) return;
+      void ensureAudioEngineRef.current().then(() => { if (live) audioEngine.prewarm(); }).catch(() => { /* au premier ▶ */ });
+    }, 0);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [showLanding]);
 
   // ─── Fréquence d'échantillonnage du projet (utils/projectRate, utils/hqAudio) ──────
   // Le moteur suit TOUJOURS la fréquence de l'état : réglage de session, opération de
@@ -2394,12 +2447,14 @@ function Studio() {
     // Detect atomic updates (volume/pan only) to avoid expensive graph rebuild
     if (previousTrack) {
         const isVolumeOnlyChange = previousTrack.volume !== updatedTrack.volume &&
-            previousTrack.pan === updatedTrack.pan &&
+            previousTrack.pan === updatedTrack.pan && previousTrack.stereoPan === updatedTrack.stereoPan &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
             previousTrack.plugins === updatedTrack.plugins && previousTrack.sends === updatedTrack.sends && previousTrack.clips === updatedTrack.clips;
 
-        const isPanOnlyChange = previousTrack.pan !== updatedTrack.pan &&
+        // Pan (ou double pan G / D d'une piste stéréo) seul : chemin rapide, sans recâbler.
+        const isPanOnlyChange = (previousTrack.pan !== updatedTrack.pan || previousTrack.stereoPan !== updatedTrack.stereoPan) &&
+            previousTrack.panFormat === updatedTrack.panFormat &&
             previousTrack.volume === updatedTrack.volume &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
@@ -2411,7 +2466,7 @@ function Studio() {
                 audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume, updatedTrack.isMuted);
             }
             if (isPanOnlyChange) {
-                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
+                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan, updatedTrack);
             }
             // Cette piste-là n'a pas besoin d'être reconstruite.
             atomicTracksRef.current.set(updatedTrack.id, updatedTrack);
@@ -5759,8 +5814,14 @@ function Studio() {
       try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
     }
     if (!seen) {
-      const t = setTimeout(() => setWelcomeOpen(true), 1200);
-      return () => clearTimeout(t);
+      // Déjà au travail (clic, toucher, touche) avant la fenêtre : on ne la pose pas par-dessus
+      // ce qu'on vient d'ouvrir (synthé, menu, piano roll…) ; elle reviendra à la prochaine visite.
+      const busy = () => { clearTimeout(t); off(); };
+      const off = () => { window.removeEventListener('pointerdown', busy, true); window.removeEventListener('keydown', busy, true); };
+      const t = setTimeout(() => { off(); setWelcomeOpen(true); }, 1200);
+      window.addEventListener('pointerdown', busy, true);
+      window.addEventListener('keydown', busy, true);
+      return () => { clearTimeout(t); off(); };
     }
   }, [showLanding, arrivedByLink]);
   const closeWelcome = () => {
@@ -6433,6 +6494,9 @@ function Studio() {
       annotate: (patch: Parameters<NonNullable<TakeJournalLike['annotate']>>[0]) => base?.annotate?.(patch),
       finish: async () => { try { cutter.flush(); } catch { /* */ } await base?.finish(); },
       discard: async () => { ltCancel(w); await base?.discard(); },
+      // Morceaux durables écrits par l'écrivain de prises (engine/takeWriter) ; le direct, lui, reçoit toujours push().
+      ...(base?.takeId ? { takeId: base.takeId } : {}),
+      ...(base?.external ? { external: () => base.external!() } : {}),
     };
   };
   /** STOP : la fin de chaque prise part après son dernier morceau (passage gardé, somme de contrôle). */
@@ -7766,7 +7830,7 @@ function Studio() {
       if (knownSongRef.current.get(f) !== sig) { changed[f] = fields[f]; knownSongRef.current.set(f, sig); }
     }
     if (Object.keys(changed).length) c.client.queue('song', 'song', { fields: changed });
-  }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, collab]);
+  }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, state.panLaw, collab]);
 
   // Page fermée, rechargée ou mise en arrière-plan : les réglages qui attendaient leur envoi
   // (regroupés 250 ms) partent tout de suite dans la file — gardée dans le navigateur, elle
@@ -8630,6 +8694,36 @@ function Studio() {
     };
     window.addEventListener('nova:samplerate', on);
     return () => window.removeEventListener('nova:samplerate', on);
+  }, []);
+  // Moteur audio relancé (sortie audio qui ne répondait plus, engine/audioClockWatch) : la séance
+  // reste. Pistes recâblées sur le nouveau contexte, mixes casque, pistes armées, diffusion du mix,
+  // et la lecture repart de la même position si elle tournait.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      void (async () => {
+        await ensureAudioEngine();
+        const s = stateRef.current;
+        s.tracks.forEach(t => audioEngine.updateTrack(t, s.tracks));
+        if (s.cueMixes?.length) audioEngine.setCueMixes(s.cueMixes, s.tracks);
+        try { await rearmArmedRef.current?.(); } catch { /* armement signalé ailleurs */ }
+        const rtc = rtcRef.current;
+        if (rtc && rtc.isSending('mix')) {
+          const stream = audioEngine.getCollabMixStream();
+          if (stream) rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+        }
+        if (d.wasPlaying && stateRef.current.isPlaying && !stateRef.current.isRecording) {
+          const pos = typeof d.position === 'number' ? d.position : stateRef.current.currentTime;
+          // Le moteur a déjà repris la lecture lui-même (sinon : reprise ici).
+          if (!audioEngine.isPlayingNow()) audioEngine.startPlayback(pos, stateRef.current.tracks);
+          const mt = stateRef.current.metronome;
+          if (mt.enabled && mt.mode !== 'record') metronomeService.start(audioEngine.getCurrentTime());
+        }
+      })();
+    };
+    window.addEventListener('nova:audio-restarted', on);
+    return () => window.removeEventListener('nova:audio-restarted', on);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   /**
    * Pendant l'écoute du mix de l'ingé : ce qui arrive vraiment (getStats, toutes les secondes).
@@ -11263,7 +11357,8 @@ function Studio() {
       a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
       a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
       a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
-      a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
+      a('Voix', 'pal.pitch', 'Éditer les notes de la voix du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { keywords: 'justesse note par note autotune pitch notes voix éditeur hauteur étirer élastique formant vibrato', disabledReason: needClip }),
+      a('Voix', 'pal.pitchSimple', '🎯 Corriger la justesse du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets, simple: true }), { keywords: 'corriger justesse fausse note juste gamme autotune', disabledReason: needClip }),
       a('Voix', 'pal.melodyne', 'Ouvrir le clip dans Melodyne (ARA)', () => openNovaWindow('ara-melodyne', { targets: clipTargets }), { pt: 'ARA Melodyne', keywords: 'melodyne ara justesse', disabledReason: needClip }),
       a('Édition', 'pal.stems', 'Séparer le clip en stems (voix, instru, batterie, basse)', () => { if (clipTargets[0]) onSeparateStemsStable(clipTargets[0].trackId, clipTargets[0].clipId); }, { pt: 'Séparation de stems', keywords: 'stems séparer separation voix instru acapella karaoké batterie basse demucs isoler extraire', disabledReason: needClip }),
       // Pistes et mix
@@ -11473,7 +11568,8 @@ function Studio() {
           onNewSynthTrack={handleNewSynthTrack}
           onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
-          onOpenLyrics={() => setLyricsOpen(o => !o)}
+          // Mode simple : « Paroles » est déjà un onglet de la barre du bas (pas deux fois le même bouton).
+          onOpenLyrics={simpleMode ? undefined : () => setLyricsOpen(o => !o)}
           lyricsOpen={lyricsOpen}
           currentStyleId={state.vocalMixStyle}
         />
@@ -11531,6 +11627,8 @@ function Studio() {
                 </PanelBoundary>
               )}
               {/* Panneau ARA (Melodyne / VocAlign en insert) : en bas de la fenêtre Édition, comme Pro Tools. */}
+              {/* Nova Pitch (notes de la voix) : l'éditeur s'ancre ici, en bas de la fenêtre d'édition. */}
+              {shownView === 'ARRANGEMENT' && <div id="nova-pitch-dock" className="shrink-0" />}
               {shownView === 'ARRANGEMENT' && (
                 <PanelBoundary name="l'éditeur ARA">
                   <AraEditorDock tracks={state.tracks} selectedTrackId={state.selectedTrackId} onCommit={handleAraCommit} onSetGuide={handleAraGuide} />
@@ -11551,8 +11649,34 @@ function Studio() {
           {/* Bandeau du bas (ordinateur / tablette) : Collaborer, session en ligne et
               les gestes voix (Piste voix, Paroles, Mix auto). Il prend sa propre place
               sous la grille : plus rien ne flotte sur les clips ni sur le catalogue. */}
+          {/* Bande réservée (ordinateur / tablette), dans le flux juste au-dessus du bandeau du bas : « Et
+              maintenant ? », l'avancement d'un import et les messages de Nova y prennent leur place le temps
+              qu'ils sont là, puis la bande disparaît. En flottant, ils recouvraient la timeline, les clips, les
+              faders de la console. */}
           {!isMobile && (
-            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
+            <div data-nova-band className="shrink-0 flex flex-col empty:hidden" style={{ backgroundColor: 'var(--bg-surface)' }}>
+              {externalImportNotice && (
+                <div role="status" aria-live="polite" data-testid="band-status"
+                  className="mx-3 mt-1.5 self-start px-3 py-1.5 rounded-xl bg-nv-raised border border-white/10 flex items-center gap-2.5 text-[12px] font-medium text-slate-200">
+                  {!/^[✅❌]/.test(externalImportNotice) && <i className="fas fa-circle-notch fa-spin text-cyan-400" aria-hidden="true"></i>}
+                  <span>{externalImportNotice}</span>
+                </div>
+              )}
+              <NextStepCard inline band
+                open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen}
+                trigger={nextStep || 'take'}
+                actions={nextStepActions}
+                beatTitle={getCatalogBeat(state.tracks)?.title}
+                isMobile={false}
+                besideSidebar={isSidebarOpen}
+                onAction={handleNextStep}
+                onClose={() => setNextStep(null)}
+                footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} row /> : null}
+              />
+            </div>
+          )}
+          {!isMobile && (
+            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-[11rem] border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
                 {/* Mode simple : Pistes, Groupes, Temps, Session, Collaborer et Retours sont rangés (menu ☰,
                     Ctrl+K, mode avancé) ; Collaborer et Retours reviennent dès qu'une séance ou un retour est en cours. */}
@@ -11821,7 +11945,7 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {/* Téléphone, page Morceau : posé dans la page (MobileStatusInline) ; en flottant, il couvrait la barre du clip. */}
-      {externalImportNotice && !(isMobile && activeMobileTab === 'ARRANGEMENT') && (
+      {externalImportNotice && isMobile && activeMobileTab !== 'ARRANGEMENT' && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
@@ -11842,17 +11966,6 @@ function Studio() {
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
-      <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && (activeMobileTab === 'NOVA' || activeMobileTab === 'ARRANGEMENT'))}
-        trigger={nextStep || 'take'}
-        actions={nextStepActions}
-        beatTitle={getCatalogBeat(state.tracks)?.title}
-        isMobile={isMobile}
-        besideSidebar={isSidebarOpen}
-        onAction={handleNextStep}
-        onClose={() => setNextStep(null)}
-        footer={nextStep ? <HowToNextRow moment={nextStep} onPicked={() => setNextStep(null)} /> : null}
-      />
       <HowToHost getState={howToGetState} getEnv={howToGetEnv} isMobile={isMobile} runPaletteAction={howToRunAction}
         onBeforeShowMe={howToBeforeShowMe} vocalMixStyle={state.vocalMixStyle} isRecording={!!state.isRecording}
         busy={!!nextStep || countInBeat !== null} simple={simpleMode} />
@@ -12169,7 +12282,7 @@ function Studio() {
         onSeek={handleSeek} onAddMarker={handleAddMarkerHere} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator}
-        lyrics={state.lyrics || ''} />
+        lyrics={state.lyrics || ''} setSilently={setSilently} />
       </PanelBoundary>
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
       <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}

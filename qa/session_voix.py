@@ -288,7 +288,7 @@ def run(page, log, ch):
     ch.mouse_click(x, y, "clip de la lead", button="right")
     page.wait_for_timeout(250)
     page.screenshot(path=str(OUT / "v10_menu_clip.png"))
-    it = page.locator("[role=menu] button", has_text=re.compile("Justesse")).locator("visible=true")
+    it = page.locator("[role=menu] button", has_text=re.compile("notes de la voix")).locator("visible=true")
     if it.count():
         ch.click(it.first, "Justesse…")
     elif not open_by_palette(ch, "justesse", "pal.pitch"):

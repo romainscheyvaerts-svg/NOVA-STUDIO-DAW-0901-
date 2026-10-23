@@ -1,4 +1,5 @@
 
+import { faderPosToGain, gainToFaderPos, FADER_UNITY_POS, FADER_MAX_GAIN } from '../utils/faderLaw';
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import { openSessionPanel } from '../utils/r21Bus';
 import { muteClickKind, soloClickKind } from '../utils/soloMute';
@@ -9,6 +10,8 @@ import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collab
 import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
+import { DualPan } from './DualPan';
+import { isStereoTrack } from '../utils/panLaw';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
@@ -90,10 +93,10 @@ const HorizontalSendFader: React.FC<{
   const handleInteraction = (clientX: number, rect: DOMRect) => {
     const x = clientX - rect.left;
     const progress = Math.max(0, Math.min(1, x / rect.width));
-    onChange(progress * 1.5);
+    onChange(faderPosToGain(progress));
   };
-  // Molette / double-clic (0 dB) partagés avec les autres potards
-  const knob = useKnobInteraction(shown / 1.5, (p) => onChange(p * 1.5), { min: 0, max: 1, defaultValue: 1 / 1.5, wheelStep: 0.01 });
+  // Molette / double-clic (0 dB) partagés avec les autres potards ; même échelle que les faders (utils/faderLaw).
+  const knob = useKnobInteraction(gainToFaderPos(shown), (p) => onChange(faderPosToGain(p)), { min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.01 });
 
   const param = `send::${send.id}`;
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -101,7 +104,7 @@ const HorizontalSendFader: React.FC<{
     if (e.detail >= 2) { knob.handleDoubleClick(); return; }
     // Automation (Touch / Latch…) : l'appui et le relâchement bornent l'écriture.
     automationRecorder.touch(trackId, param);
-    dragHorizontal(e, shown / 1.5, (p) => onChange(p * 1.5), () => automationRecorder.release(trackId, param));
+    dragHorizontal(e, gainToFaderPos(shown), (p) => onChange(faderPosToGain(p)), () => automationRecorder.release(trackId, param));
   };
   
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -116,7 +119,7 @@ const HorizontalSendFader: React.FC<{
     handleInteraction(e.touches[0].clientX, rect);
   };
 
-  const percent = (shown / 1.5) * 100;
+  const percent = gainToFaderPos(shown) * 100;
 
   return (
     <div
@@ -167,7 +170,7 @@ const LivePanNeedle: React.FC<{ trackId: string; pan: number; host: React.RefObj
 };
 const LiveVolumeFill: React.FC<{ trackId: string; volume: number; color: string; adjusting: boolean; host: React.RefObject<HTMLDivElement | null> }> = ({ trackId, volume, color, adjusting, host }) => {
   // Remplissage au 1/512 près (moins d'un demi-pixel), déplacé par le GPU (scaleX, pas de mise en page).
-  const fill = useLiveView(trackId, 'volume', volume, v => Math.round(Math.sqrt(Math.max(0, v) / 1.5) * 512) / 512);
+  const fill = useLiveView(trackId, 'volume', volume, v => Math.round(gainToFaderPos(v) * 512) / 512);
   const text = useLiveView(trackId, 'volume', volume, gainToDbText);
   React.useLayoutEffect(() => { const el = host.current; if (el && el.getAttribute('aria-valuetext') !== text) el.setAttribute('aria-valuetext', text); }, [text, host]);
   return (
@@ -375,14 +378,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     min: -1, max: 1, sensitivity: 200, defaultValue: 0, valueNow: shownPanNow,
     onStart: () => automationRecorder.touch(track.id, 'pan'), onEnd: () => automationRecorder.release(track.id, 'pan'),
   });
-  // Volume : molette et double-clic = 0 dB (course en racine du gain)
-  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }),
-    { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005, valueNow: () => Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5) });
+  // Volume : molette et double-clic = 0 dB (échelle de console −∞…+12 dB, utils/faderLaw)
+  const volKnob = useKnobInteraction(gainToFaderPos(track.volume), (p) => onUpdate({ ...track, volume: faderPosToGain(p) }),
+    { min: 0, max: 1, defaultValue: FADER_UNITY_POS, wheelStep: 0.005, valueNow: () => gainToFaderPos(shownVolumeNow()) });
 
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
       const progress = Math.max(0, Math.min(1, x / rect.width));
-      onUpdate({ ...track, volume: progress * progress * 1.5 });
+      onUpdate({ ...track, volume: faderPosToGain(progress) });
   };
 
   const handleVolumeMouseDown = (e: React.MouseEvent) => {
@@ -390,7 +393,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     if (e.detail >= 2) { volKnob.handleDoubleClick(); return; }
     setIsAdjustingVolume(true);
     automationRecorder.touch(track.id, 'volume');
-    dragHorizontal(e, Math.sqrt(Math.max(0, shownVolumeNow()) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
+    dragHorizontal(e, gainToFaderPos(shownVolumeNow()), (p) => onUpdate({ ...track, volume: faderPosToGain(p) }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
   };
 
   const handleVolumeTouchStart = (e: React.TouchEvent) => {
@@ -419,7 +422,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           color: track.color, 
           isExpanded: true, 
           min: 0, 
-          max: 1.5 
+          max: FADER_MAX_GAIN 
       });
     } else {
       lanes = lanes.map(l => ({ ...l, isExpanded: !l.isExpanded }));
@@ -683,7 +686,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-label={`Effets de ${track.name}`}
                 aria-expanded={fxMenu}
                 aria-haspopup="menu"
-                className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+                className={`nova-hit-tactile relative w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
               >
                 FX
                 {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
@@ -705,7 +708,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
                           aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
                           aria-pressed={p.isEnabled}
-                          className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
+                          className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
                           <i className="fas fa-power-off text-[9px]" />
                         </button>
                       </div>
@@ -729,7 +732,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onClick={handleMuteToggle}
             // Pas de onTouchStart : React l'écoute en passif, preventDefault échouait et le
             // clic qui suit rebasculait (M / S / R / envois sans effet au doigt).
-            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+            className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">M</span>
           </button>
@@ -739,7 +742,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             aria-pressed={!!track.isSolo}
             data-solo-safe={track.soloSafe ? '1' : undefined}
             onClick={handleSoloToggle}
-            className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-amber-400/70 text-amber-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+            className={`nova-hit-tactile relative w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-amber-400/70 text-amber-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">S</span>
             {track.soloSafe && <i className="fas fa-shield-alt absolute -top-1 -right-1 text-[8px] text-amber-300 drop-shadow" aria-hidden="true" />}
@@ -752,7 +755,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 title="Envois : écho et reverbs"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
+                // Au doigt : dans le menu « ⋯ » de la piste (Envois), pour laisser 44 px à chaque bouton de la rangée.
+                className={`nova-hit-tactile [@media(pointer:coarse)]:hidden w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
@@ -762,7 +766,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); noteArmClick(e); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
                 title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer (toutes les pistes armées enregistrent ensemble)" : "Armer : cette piste enregistre aussi (plusieurs pistes armées = plusieurs micros). Maj+clic : armer celle-ci seule"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -776,7 +780,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button
                 data-nova-arm-midi={track.id}
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
                 title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus"}
                 aria-label={`Armer l'enregistrement MIDI : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -788,8 +792,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               automation écrite), et toutes les actions du clic droit. Monté seulement à l'ouverture. */}
           {!simple && track.id !== 'master' && (
             <ToolbarMenu testId={`track-more-${track.id}`} menuLabel={`Piste ${track.name}`} width={260} alignRight
-              ariaLabel={`Plus d'options : ${track.name}`} title="Envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
-              triggerClassName="nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
+              ariaLabel={`Plus d'options : ${track.name}`} title="Plus d'options : envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
+              triggerClassName="nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
               label={<i className="fas fa-ellipsis-h text-[10px]" aria-hidden="true" />}>
               {(close) => (<>
                 {canHaveSends && (
@@ -801,7 +805,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {!autoModeShown && (
                   <div className="px-2 py-1.5 flex items-center gap-2">
                     <span className="text-[11px] font-semibold text-slate-400">Automation</span>
-                    <div className="flex-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
+                    <div className="flex-1"><AutomationModeSelector track={track} onUpdate={(t) => { close(); onUpdate(t); }} variant="mixer" /></div>
                   </div>
                 )}
                 <button type="button" onClick={(e) => { close(); onContextMenu(e, track.id); }} className={menuRowClass(false)}
@@ -835,6 +839,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
         {/* Mode d'automation : visible dès qu'il compte (autre que Lecture, ou automation écrite) ; sinon dans « ⋯ ». */}
         {!simple && track.id !== 'master' && autoModeShown && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
+        {/* Piste stéréo (hors mode simple) : double pan G / D, comme les consoles de studio. */}
+        {!simple && isStereoTrack(track) ? <DualPan track={track} onUpdate={onUpdate} variant="header" /> : (<>
         <div
           {...panKnob.bind}
           ref={(el) => { panHostRef.current = el; panKnob.bind.ref(el); }}
@@ -848,6 +854,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
         {/* Valeur du panoramique lisible (F2) : « C », « G 30 », « D 30 ». */}
         <span className="w-7 shrink-0 text-[9px] font-mono tabular-nums text-slate-400 pointer-events-none" aria-hidden="true">{panToText(track.pan)}</span>
+        </>)}
         
         <div className="flex-1 flex items-center gap-1 h-6 relative">
           {/* Verrou de volume (collaboration) : « c'est ce volume-là que veut l'artiste ». */}

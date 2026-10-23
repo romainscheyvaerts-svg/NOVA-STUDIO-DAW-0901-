@@ -123,6 +123,11 @@ def run(page, log, ch):
     ch.start("808", "Tout sélectionner + quantifier", protools="Ctrl+A puis Alt+0 (Quantize) : 2 raccourcis")
     ch.press("Control+a")
     q = visible_first(page, f"{PR} button[aria-label='Quantifier la sélection'], {PR} button[title^='Quantifier']")
+    if not q:
+        # Piano roll pratique (22/10/2026) : « Quantifier » est rangé dans « Notes ▾ ».
+        from qalib import roll_reveal
+        loc = roll_reveal(page, "[data-nova-roll=quantifier]")
+        q = loc if loc.count() and loc.is_visible() else None
     if q: ch.click(q, "Quantifier")
     else:
         # Piano roll pratique (22/10/2026) : barre épurée, « Quantifier » est rangé dans « Outils ▾ » (et sur Q).

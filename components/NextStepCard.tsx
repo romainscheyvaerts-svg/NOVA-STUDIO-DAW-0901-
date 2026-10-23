@@ -25,6 +25,9 @@ interface NextStepCardProps {
   onClose: () => void;
   /** Ligne « Comment faire la suite » (components/HowToHost, HowToNextRow). */
   footer?: React.ReactNode;
+  /** Ordinateur / tablette : bande réservée au-dessus du bandeau du bas (une rangée : texte, actions, fermer),
+   *  jamais posée sur la timeline ni la console. */
+  band?: boolean;
 }
 
 /**
@@ -34,7 +37,7 @@ interface NextStepCardProps {
  * sur ordinateur à droite, au-dessus du bouton Nova : Nova ne s'ouvre plus
  * seule, la carte ne couvre plus les en-têtes de pistes).
  */
-const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose, inline, footer }) => {
+const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose, inline, footer, band }) => {
   if (!open || (actions.length === 0 && !footer)) return null;
   const sub = trigger === 'export'
     ? 'Ton fichier est prêt. Pour aller plus loin :'
@@ -50,33 +53,35 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
         ? 'inset-x-3 bottom-[calc(8.75rem+env(safe-area-inset-bottom))]'
         : 'right-6 bottom-[17.5rem] w-[340px]'}`} animate-in fade-in slide-in-from-bottom-2 duration-300`}
     >
-      <div className="rounded-2xl border border-cyan-400/30 bg-nv-surface/95 backdrop-blur-xl shadow-2xl p-3">
-        <div className="flex items-start gap-2">
-          <div className="flex-1 min-w-0">
+      <div className={`rounded-2xl border border-cyan-400/30 bg-nv-surface/95 backdrop-blur-xl shadow-2xl ${band ? 'px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1' : 'p-3'}`}>
+        <div className={band ? 'contents' : 'flex items-start gap-2'}>
+          <div className={band ? 'order-1 min-w-0 max-w-[24rem] flex-1 basis-56' : 'flex-1 min-w-0'}>
             <p className="text-[14px] font-black text-white leading-tight">Ça sonne bien ! Et maintenant ?</p>
-            <p className="mt-0.5 text-[12px] text-slate-300 leading-snug">{sub}</p>
+            <p className={`mt-0.5 text-[12px] text-slate-300 leading-snug ${inline ? 'truncate' : ''}`}>{sub}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer" title="Fermer"
-            className="shrink-0 w-10 h-10 -mt-1 -mr-1 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center">
+            className={`shrink-0 w-11 h-11 ${band ? 'order-3 ml-auto' : '-mt-1.5 -mr-1.5'} rounded-xl text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center`}>
             <i className="fas fa-times"></i>
           </button>
         </div>
-        <div className={`mt-2 grid gap-2 ${actions.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {/* Dans la page (téléphone) : une seule rangée qui défile au doigt. En grille, la carte prenait
+            185 px au-dessus des pistes (la piste REC sortait de l'écran juste après la prise). */}
+        <div className={band ? 'order-2 flex gap-2 overflow-x-auto scrollbar-hide min-w-0' : inline ? 'mt-2 -mx-1 px-1 flex gap-2 overflow-x-auto scrollbar-hide' : `mt-2 grid gap-2 ${actions.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {actions.map((a, i) => (
             <button
               key={a}
               type="button"
               onClick={() => onAction(a)}
-              className={`min-h-10 px-3 py-2 rounded-xl text-[12px] font-black leading-tight text-left flex items-center gap-2 transition-all active:scale-[0.98] ${
+              className={`${inline ? 'shrink-0 min-h-11 whitespace-nowrap' : 'min-h-10'} px-3 py-2 rounded-xl text-[12px] font-black leading-tight text-left flex items-center gap-2 transition-all active:scale-[0.98] ${
                 i === 0 ? 'bg-cyan-500 text-black hover:bg-cyan-400' : 'bg-white/10 text-white hover:bg-white/15'
-              } ${actions.length === 3 && i === 0 ? 'col-span-2' : ''}`}
+              } ${actions.length === 3 && i === 0 && !inline ? 'col-span-2' : ''}`}
             >
               <span className="text-base leading-none">{LABELS[a].emoji}</span>
               <span>{LABELS[a].label}</span>
             </button>
           ))}
         </div>
-        {footer}
+        {footer && (band ? <div className="order-4 basis-full">{footer}</div> : footer)}
       </div>
     </div>
   );

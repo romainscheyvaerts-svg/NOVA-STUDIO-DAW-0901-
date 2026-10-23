@@ -50,9 +50,11 @@ export interface AnalyzeOptions {
   threshold?: number;
   /** Écart entre trames (s). */
   hopSec?: number;
+  /** Avancement (0 à 1), appelé environ tous les 2 % (barre de progression). */
+  onProgress?: (p: number) => void;
 }
 
-const DEFAULTS = { fmin: 65, fmax: 1100, threshold: 0.2, hopSec: 0.005 };
+const DEFAULTS: AnalyzeOptions & { fmin: number; fmax: number; threshold: number; hopSec: number } = { fmin: 65, fmax: 1100, threshold: 0.2, hopSec: 0.005 };
 
 export const midiOfHz = (f: number) => 69 + 12 * Math.log2(f / 440);
 export const hzOfMidi = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
@@ -200,7 +202,9 @@ export function analyzePitch(x: Float32Array, sr: number, opts: AnalyzeOptions =
   const W = Math.max(tauMax + 32, Math.round(0.03 * ysr));
   const d = new Float32Array(tauMax + 2);
 
+  const every = Math.max(1, Math.floor(frames / 50));
   for (let i = 0; i < frames; i++) {
+    if (o.onProgress && i % every === 0) o.onProgress(i / frames);
     if (rmsDb[i] < floor) continue;
     const c = i * hop;
     const r = yinCoarse(y, c / f, W, tauMin, tauMax, o.threshold, d);
@@ -212,11 +216,12 @@ export function analyzePitch(x: Float32Array, sr: number, opts: AnalyzeOptions =
   }
 
   cleanTrack(midi);
+  o.onProgress?.(1);
   return { sr, hop, length: x.length, midi, rmsDb };
 }
 
 /** Bouche les trous d'une ou deux trames, retire les éclats isolés, corrige les sauts d'octave. */
-function cleanTrack(m: Float32Array) {
+export function cleanTrack(m: Float32Array) {
   const n = m.length;
   // Éclats isolés (une ou deux trames voisées seules).
   for (let i = 0; i < n; i++) {

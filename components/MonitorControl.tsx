@@ -84,7 +84,7 @@ const MonitorControl: React.FC<{ compact?: boolean; mini?: boolean; trackId?: st
           aria-pressed={on}
           aria-label={on ? 'Couper le retour casque' : 'Activer le retour casque'}
           title={on ? 'Retour de ta voix dans le casque : actif (clic pour couper)' : 'Retour casque coupé (clic pour l\'activer, avec un casque seulement)'}
-          className={`shrink-0 h-5 w-6 rounded text-[11px] ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-500'}`}
+          className={`nova-hit-tactile shrink-0 h-5 w-6 rounded text-[11px] ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-500'}`}
         >
           🎧
         </button>
@@ -112,7 +112,7 @@ const MonitorControl: React.FC<{ compact?: boolean; mini?: boolean; trackId?: st
           onClick={toggle}
           title={on ? 'Couper le retour de ta voix dans le casque' : 'Entendre ta voix dans le casque (avec un casque seulement)'}
           aria-pressed={on}
-          className={`shrink-0 h-6 px-1.5 rounded-md text-[10px] font-black ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-400'}`}
+          className={`nova-hit-tactile shrink-0 h-6 px-1.5 rounded-md text-[10px] font-black ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-400'}`}
         >
           🎧 {on ? 'Retour' : 'Retour coupé'}
         </button>

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { meterBank, meterClock, MASTER_OUT } from '../../engine/meters/meterBank';
 import { meterPrefs } from '../../engine/meters/meterPrefs';
 import { METER_SCALES } from '../../engine/meters/scales';
-import { octaveSmooth, SpectrumHold, freqToX } from '../../engine/meters/spectrum';
+import { octaveSmooth, SpectrumHold, freqToX, SPECTRUM_SINE_DB } from '../../engine/meters/spectrum';
 import { audioEngine } from '../../engine/AudioEngine';
 import { PLATFORM_TARGETS } from '../../utils/masterAssistant';
 import { canvasTheme } from '../../utils/canvasTheme';
@@ -163,7 +163,8 @@ const LoudnessPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           octaveSmooth(bins, actx!.sampleRate, fraction, smooth);
           const held = hold.update(smooth, now, dt);
           const nyq = actx!.sampleRate / 2, n = bins.length;
-          const yOf = (d: number) => h - Math.max(0, Math.min(1, (d + 96) / 90)) * h;
+          // Échelle en dBFS (de −90 à 0) : un sinus se lit à son niveau de crête (bande lissée + SPECTRUM_SINE_DB).
+          const yOf = (d: number) => h - Math.max(0, Math.min(1, (d + 90) / 90)) * h;
           sctx.fillStyle = cv.light ? '#f8fafc' : '#05070a'; sctx.fillRect(0, 0, w, h);
           sctx.strokeStyle = cv.ink(0.1); sctx.fillStyle = cv.ink(0.45); sctx.font = '600 8px Inter, system-ui, sans-serif';
           for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
@@ -177,7 +178,7 @@ const LoudnessPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             for (let i = 1; i < n; i++) {
               const f = i * nyq / n;
               if (f < 20) continue;
-              const x = freqToX(f) * w, y = yOf(arr[i]);
+              const x = freqToX(f) * w, y = yOf(arr[i] + SPECTRUM_SINE_DB);
               if (!started) { sctx.moveTo(x, y); started = true; } else sctx.lineTo(x, y);
               if (f > 20000) break;
             }

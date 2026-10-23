@@ -181,6 +181,9 @@ BATTERIE = [
     # scènes de mix A/B/C/D (rappel exact en une annulation, A⇄B, rappel partiel), mastering d'un EP (6 titres ≤ 0,5 LU,
     # blancs exacts, .cue + ISRC, un WAV par titre) ; bureau sombre + clair, téléphone 390.
     ("mixpro", []),
+    # 22/10/2026 · loi de pan pro et double pan G / D : son dans le vrai Chrome (loi −3 / −4,5 / −6 / 0 dB, stéréo au bit près,
+    # anciens projets = ancien son), console PC sombre / clair, mode simple, tablette au doigt (≥ 44 px), téléphone.
+    ("pan_console", []),
     # 22/10/2026 · L3 temps musical : tempo 90 → 140 par la fenêtre Tempo (notes, clips, repère, boucle : même mesure | temps |
     # tick ; export = projet écrit directement à 140), Ctrl+Z en une étape, « garder les clips audio à leur place », rampe
     # 120 → 100 (clics à ±1 ms, bande de la piste tempo), sauvegarde + rechargement ; bureau sombre / clair, téléphone 390.
@@ -248,6 +251,31 @@ BATTERIE = [
     # souder, sourdine, épaissir, miroir, replier, zoom sur la sélection, suivre la lecture, prise calée sur la grille,
     # plusieurs clips ouverts ; bureau sombre / clair, tablette au doigt.
     ("pianoroll_pratique", []),
+    # 22/10/2026 · tour tactile : iPhone 390 × 844 (sombre, clair), iPhone couché 844 × 390, petit Android 360 × 800,
+    # iPad 820 × 1180 / 1180 × 820, iPad mini 744 × 1133, au doigt (encoche et barre d'accueil simulées) : parcours
+    # instru → 2 prises → écoute → export compté, cibles < 32 px, recouverts, sous l'encoche, défilement parasite,
+    # pincer pour zoomer (ancré sous les doigts), glisser à un doigt, double-toucher sans zoom de la page.
+    ("tactile_audit", ["--strict"]),
+    # 23/10/2026 · éléments flottants (« Et maintenant ? », conseils de Nova, « Filmer la prise », bouton Nova, messages) :
+    # jamais sur la timeline ni la console ; bureau 1366 / 1600 / 1920, tablette 1024, iPad portrait et paysage.
+    ("flottants", []),
+    # 23/10/2026 · boîte à rythmes et piano roll au doigt (téléphone 390, iPad 820) : pas de 44 px, toucher, glisser
+    # pour peindre, appui long = menu, barre du piano roll sans défilement, pincer pour zoomer, cibles ≥ 32 px.
+    ("beat_doigt", []),
+    # 22/10/2026 : Nova Tune (fenêtre sobre, réglages avancés repliés, préréglages sourcés, notes cibles), bureau et téléphone.
+    ("nova_tune", []),
+    # 22/10/2026 · moteur web solide (banc qa/moteur_web.py, version courte) : page isolée, prise écrite au fil de l'eau
+    # par le Worker (images captées = écrites), calage de la prise par la boucle mesurée (0 échantillon), navigateur tué
+    # pendant une prise (perte < 0,5 s), 4 navigateurs en parallèle + panne de la sortie (lecture qui repart seule),
+    # toucher → son au téléphone. Les mesures longues (10 / 30 min) : --tests derive,charge.
+    ("moteur_web", ["--label", "batterie", "--tests", "isolation,prise,latence,latence_fige,crash,demarrage,toucher", "--n", "4"]),
+    # 23/10/2026 · Nova Pitch « Notes de la voix » : double-clic sur un clip de voix → éditeur en bas (analyse avec
+    # avancement), note glissée (aimant gamme), Maj+↑ = 2 cents, ↑ = demi-ton, saisie « La2 +4 », Corriger la sélection,
+    # réglages (gain, formant), élastique (×1,3, voisine qui s'adapte, double-clic = durée d'origine), couper / fusionner,
+    # un geste = une étape (Ctrl+Z / Ctrl+Y), hauteur mesurée ±1 cent (YIN Python), export = son rendu au bit près,
+    # .zip (analyse pitch/<clip>.bin) et réouverture sans nouvelle analyse ; tablette claire au doigt (cibles ≥ 44 px),
+    # téléphone 390 (« Corriger la justesse »), PC clair (palette, version épurée) ; aucun nom de concurrent.
+    ("nova_pitch", []),
     # 22/10/2026 · audit de nuit (tour croisé) : beat → sampler → 808 → accords → 3 prises → console → exports WAV / MP3 / stems →
     # .zip rouvert (état identique, prises au bit près, rendu ≤ −120 dBFS) → Ctrl+Z / Ctrl+Y jusqu'au bout ; raccourcis du piano roll
     # et de la batterie sans effet sur l'arrangement caché ; bulle de Nova ; veille du moteur (CPU à l'arrêt) ; fuites des fenêtres ;

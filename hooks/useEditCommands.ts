@@ -314,7 +314,7 @@ function rangeCommands(
       const names = targets.map(t => t.name);
       const clamped = targets.some(t => trimVolumeRange(t, s.start, s.end, dbv).clamped);
       d().setState(prev => ({ ...prev, tracks: prev.tracks.map(t => (ids.has(t.id) && t.type !== TrackType.SEND ? trimVolumeRange(t, s.start, s.end, dbv).track : t)) }));
-      d().notify(`🔊 Volume ${fmtDb(dbv)} sur ${what(s)} (${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}) : courbe de volume écrite, rampes de 10 ms aux bords.${clamped ? ' Plafonnée à +3,5 dB (maximum de la courbe).' : ''} Ctrl+Z pour annuler.`);
+      d().notify(`🔊 Volume ${fmtDb(dbv)} sur ${what(s)} (${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}) : courbe de volume écrite, rampes de 10 ms aux bords.${clamped ? ' Plafonnée à +12 dB (butée des faders).' : ''} Ctrl+Z pour annuler.`);
       return true;
     },
     markClipClipboard: () => { lastClipboard = 'clip'; },

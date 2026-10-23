@@ -153,7 +153,7 @@ export function useProToolsEcarts2(d: ProToolsEcarts2Deps) {
           over.push(...coalesceOverflow(r));
         }
         if (tracks !== s.tracks) dd().setState(prev => ({ ...prev, tracks: prev.tracks.map(t => tracks.find(x => x.id === t.id) || t) }));
-        dd().notify(`🎚️ ${parts.join(' ; ')}. Le son ne change pas ; le VCA est revenu à 0 dB.${over.length ? ` Attention : ${over.join(', ')} dépasse +3,5 dB.` : ''} Ctrl+Z pour annuler.`);
+        dd().notify(`🎚️ ${parts.join(' ; ')}. Le son ne change pas ; le VCA est revenu à 0 dB.${over.length ? ` Attention : ${over.join(', ')} dépasse +12 dB.` : ''} Ctrl+Z pour annuler.`);
         return true;
       },
     });

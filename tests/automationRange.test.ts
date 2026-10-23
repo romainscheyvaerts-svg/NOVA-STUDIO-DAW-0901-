@@ -41,10 +41,14 @@ describe('Volume de la plage (+N dB sur le refrain, comme le Trim de Pro Tools)'
     expect(new Set(times).size).toBe(times.length);
   });
 
-  it('plafonné au maximum de la voie (+3,5 dB) et signalé', () => {
-    const r = trimVolumeRange(track(), 1, 2, 12);
+  it('plafonné au maximum de la voie (butée des faders, +12 dB) et signalé', () => {
+    const r = trimVolumeRange(track(), 1, 2, 15);
     expect(r.clamped).toBe(true);
-    expect(at(r.track, 1.5)).toBeCloseTo(1.5, 9);
+    expect(db(at(r.track, 1.5))).toBeCloseTo(12, 9);
+    // +6 dB passe sans plafond (au-delà de l'ancienne butée +3,5 dB).
+    const r6 = trimVolumeRange(track(), 1, 2, 6);
+    expect(r6.clamped).toBe(false);
+    expect(db(at(r6.track, 1.5))).toBeCloseTo(6, 9);
   });
 
   it('plage à 0 s : pas de point avant le début', () => {

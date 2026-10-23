@@ -1,4 +1,6 @@
-import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { faderPosToGain, gainToFaderPos } from '../utils/faderLaw';
+import { gainToDbText } from '../utils/db';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
 import { CLEAN_TOOLTIP } from '../utils/voiceCleanLabels';
@@ -7,7 +9,8 @@ import { requestBreaths } from '../utils/breathBus';
 import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
-import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
+import { playheadStore } from '../utils/playheadStore';
+import { haptic } from '../utils/haptics';
 import { scrubControl } from '../utils/scrubControl';
 import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
@@ -21,21 +24,6 @@ import { KeptTakesCard, KeptZoneApi } from './KeptTakesZone';
 import { keptLanes, keptZoneTargets, lastTakeNumber } from '../utils/keptTakes';
 import { listLanes } from '../utils/playlists';
 import { duplicateClip } from '../utils/mobileDuplicate';
-
-/** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
-const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
-  const t = usePlayheadTime(0.05);
-  return (
-    <>
-      <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
-        {format(t + 1e-6)}
-      </span>
-      <span className="text-white/50 font-mono text-xs ml-2">
-        {(t + 1e-6).toFixed(1)}s
-      </span>
-    </>
-  );
-};
 
 // Cache des tracés de forme d'onde. Pendant la lecture, la page se ré-affiche à
 // chaque image (position de lecture) : recalculer les crêtes parcourait tout le
@@ -90,7 +78,7 @@ interface MobileArrangementPageProps {
 }
 
 type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE' | 'FADE' | 'DUPLICATE';
-type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
+type DragMode = 'move' | 'resize-start' | 'resize-end' | 'fade-in' | 'fade-out' | null;
 
 interface DragState {
   mode: DragMode;
@@ -100,6 +88,8 @@ interface DragState {
   startTime: number;
   startDuration: number;
   startOffset: number;
+  /** Fondu au départ du geste (poignées de fondu). */
+  startFade?: number;
 }
 
 // Constants - Logic Pro iPad inspired
@@ -169,7 +159,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const lastTouchRef = useRef(0);
   const [activeTool, setActiveTool] = useState<EditTool>('SELECT');
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const [pinchStart, setPinchStart] = useState<{ dist: number; zoom: number } | null>(null);
+  // Colonne des en-têtes : défile en hauteur avec les pistes (avant, deux défilements séparés :
+  // au-delà de 4 pistes, les noms ne correspondaient plus aux clips en face).
+  const headersScrollRef = useRef<HTMLDivElement>(null);
   // Libre / Grille : même réglage que les modes Slip / Grid du PC (utils/editModes).
   const editMode = useEditMode();
   const snapToGrid = editMode.mode === 'GRID';
@@ -331,9 +323,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     setSelectedClip({ trackId, clip });
     onSelectTrack(trackId);
     if (onSelectClip) onSelectClip(trackId, clip);
+    if (isTouch && !wasSelected) haptic('select');
 
     // Tool-specific behavior
     if (activeTool === 'ERASE' && onDeleteClip) {
+      haptic('press');
       onDeleteClip(trackId, clip.id);
       setSelectedClip(null);
       return;
@@ -347,6 +341,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
     if (activeTool === 'SPLIT') {
       const splitTime = xToTime(relativeX) + clip.start;
+      haptic('press');
       onSplitClip?.(trackId, clip.id, splitTime);
       setSelectedClip(null);
       return;
@@ -359,9 +354,11 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     // Determine drag mode based on tool and click position
     let mode: DragMode = 'move';
     const isTrimTool = activeTool === 'TRIM';
-    if (isTrimTool || relativeX < 16) {
+    // Bords du clip : 24 px au doigt (les poignées dessinées en font 20), 16 px à la souris.
+    const edge = isTouch ? 24 : 16;
+    if (isTrimTool || relativeX < edge) {
       mode = 'resize-start';
-    } else if (relativeX > clipWidth - 16) {
+    } else if (relativeX > clipWidth - edge) {
       mode = 'resize-end';
     }
 
@@ -378,21 +375,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
   // Handle drag
   const handleTouchMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    // Pinch zoom
-    if ('touches' in e && e.touches.length === 2) {
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
-      
-      if (pinchStart) {
-        const scale = dist / pinchStart.dist;
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStart.zoom * scale));
-        setZoom(newZoom);
-      } else {
-        setPinchStart({ dist, zoom });
-      }
-      return;
-    }
+    // Deux doigts : pincement / défilement gérés plus bas (écouteurs natifs), jamais un glisser de clip.
+    if ('touches' in e && e.touches.length > 1) return;
 
     if (!dragState || !onUpdateClip) return;
 
@@ -417,13 +401,79 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     } else if (dragState.mode === 'resize-end') {
       const newDuration = snapTime(Math.max(0.1, dragState.startDuration + deltaTime));
       onUpdateClip(dragState.trackId, dragState.clip.id, { duration: newDuration });
+    } else if (dragState.mode === 'fade-in' || dragState.mode === 'fade-out') {
+      // Poignée de fondu (coin haut du clip) : vers l'intérieur = fondu plus long. Jamais plus que le clip
+      // moins l'autre fondu.
+      const c = dragState.clip;
+      const other = dragState.mode === 'fade-in' ? (c.fadeOut || 0) : (c.fadeIn || 0);
+      const v = Math.max(0, Math.min(c.duration - other, (dragState.startFade || 0) + (dragState.mode === 'fade-in' ? deltaTime : -deltaTime)));
+      onUpdateClip(dragState.trackId, c.id, dragState.mode === 'fade-in' ? { fadeIn: v } : { fadeOut: v });
     }
-  }, [dragState, pinchStart, zoom, pixelsPerSecond, snapTime, onUpdateClip]);
+  }, [dragState, pixelsPerSecond, snapTime, onUpdateClip]);
 
   const handleTouchEnd = useCallback(() => {
     setDragState(null);
-    setPinchStart(null);
   }, []);
+
+  // === Pincer pour zoomer, glisser à deux doigts pour défiler ===
+  // Écouteurs natifs (non passifs) : le navigateur ne fait pas défiler la zone en même temps, et
+  // l'instant qui est sous les doigts reste sous les doigts pendant tout le pincement (avant : le
+  // zoom partait du bord gauche, la partie qu'on voulait agrandir sortait de l'écran).
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const bpmRef = useRef(bpm);
+  bpmRef.current = bpm;
+  const pendingAnchorRef = useRef<{ time: number; px: number } | null>(null);
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    let pinch: { d0: number; z0: number; time: number; midY0: number; st0: number; atBound: boolean } | null = null;
+    const geo = (e: TouchEvent) => {
+      const a = e.touches[0], b = e.touches[1];
+      return { d: Math.max(1, Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)), mx: (a.clientX + b.clientX) / 2, my: (a.clientY + b.clientY) / 2 };
+    };
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      const g = geo(e), rect = el.getBoundingClientRect();
+      const pps = zoomRef.current * (bpmRef.current / 60);
+      pinch = { d0: g.d, z0: zoomRef.current, time: Math.max(0, (el.scrollLeft + g.mx - rect.left) / pps), midY0: g.my, st0: el.scrollTop, atBound: false };
+      setDragState(null);
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const g = geo(e), rect = el.getBoundingClientRect();
+      const raw = pinch.z0 * (g.d / pinch.d0);
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, raw));
+      const bound = next !== raw;
+      if (bound && !pinch.atBound) haptic('select');
+      pinch.atBound = bound;
+      // Défilement vertical à deux doigts.
+      el.scrollTop = Math.max(0, pinch.st0 - (g.my - pinch.midY0));
+      // L'instant du départ reste sous le milieu des doigts (qui peut aussi se déplacer : défilement horizontal).
+      pendingAnchorRef.current = { time: pinch.time, px: g.mx - rect.left };
+      if (Math.abs(next - zoomRef.current) > 0.01) setZoom(next);
+      else { el.scrollLeft = Math.max(0, pinch.time * next * (bpmRef.current / 60) - (g.mx - rect.left)); pendingAnchorRef.current = null; }
+    };
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) pinch = null; };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
+  // Le défilement se recale une fois la nouvelle largeur appliquée (même instant sous les doigts).
+  useLayoutEffect(() => {
+    const a = pendingAnchorRef.current, el = scrollContainerRef.current;
+    if (!a || !el) return;
+    pendingAnchorRef.current = null;
+    el.scrollLeft = Math.max(0, a.time * pixelsPerSecond - a.px);
+  }, [pixelsPerSecond]);
 
   // (Le defilement n'est plus copie dans un etat : la valeur n'etait lue nulle
   // part et le suivi de la tete de lecture defile a chaque image, ce qui
@@ -633,108 +683,112 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   return (
     // pb : la barre de navigation du bas (fixed, h-16) recouvrait la barre
     // d'édition du clip sélectionné.
-    <div className="flex flex-col h-full bg-nv-bg select-none pb-[calc(4rem+env(safe-area-inset-bottom))]">
-      {/* === TOP BAR - Mini Transport === */}
-      <div className="flex items-center h-12 px-3 bg-gradient-to-b from-nv-raised to-nv-surface border-b border-white/10 gap-2">
-        {/* Lecture / stop : déjà dans la barre du haut (il y avait deux transports). */}
-        {/* Time Display */}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded-lg px-3 py-1 border border-white/10">
-            <MobileClock format={formatBarsBeat} />
-          </div>
-        </div>
-
-        {/* BPM & Zoom */}
-        <div className="flex items-center gap-2">
-          <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
-            {bpm} BPM
-          </div>
-          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). Mode avancé. */}
-          {!simple && <PracticeSpeed compact />}
-          <button
-            onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
-            aria-label="Dézoomer"
-            title="Dézoomer"
-            className="nova-hit w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
-          >
-            <i className="fas fa-minus text-white/50 text-[10px]"></i>
-          </button>
-          <button
-            onClick={() => setZoom(z => Math.min(MAX_ZOOM, z + 20))}
-            aria-label="Zoomer"
-            title="Zoomer"
-            className="nova-hit w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
-          >
-            <i className="fas fa-plus text-white/50 text-[10px]"></i>
-          </button>
-        </div>
-      </div>
-
-      {/* === TOOL BAR === */}
-      <div className="flex items-center h-10 px-2 bg-nv-bg border-b border-white/5 gap-2 overflow-x-auto scrollbar-hide">
+    <div className="nv-phone-text flex flex-col h-full bg-nv-bg select-none pb-[var(--nv-nav-h,4rem)]">
+      {/* === BARRE D'OUTILS : une seule rangée ===
+          Avant : deux rangées (horloge + BPM + zoom, puis outils) = 88 px de haut sur un écran de 844,
+          et l'horloge doublait celle du transport (un toucher sur celle-ci montre mesures et temps).
+          Outils, Libre / Grille, zoom (le pincement à deux doigts zoome aussi) puis, en mode avancé,
+          la division de la grille, la vitesse de lecture et les boutons de séance ; la rangée défile
+          au doigt si elle est plus large que l'écran. */}
+      <div className="shrink-0 flex items-center h-12 px-2 bg-nv-bg border-b border-white/5 gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-hide" data-testid="mobile-toolbar">
         {/* Mode simple : sélection, couper, effacer (le reste en mode avancé). */}
         {tools.filter(tool => !simple || tool.id === 'SELECT' || tool.id === 'SPLIT' || tool.id === 'ERASE').map(tool => (
           <button
             key={tool.id}
-            onClick={() => setActiveTool(tool.id)}
+            onClick={() => { setActiveTool(tool.id); haptic('select'); }}
             aria-label={TOOL_LABELS[tool.id] || tool.label}
             title={TOOL_LABELS[tool.id] || tool.label}
             aria-pressed={activeTool === tool.id}
-            className={`nova-hit shrink-0 flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
+            className={`nova-hit shrink-0 flex items-center justify-center gap-1.5 w-10 sm:w-auto sm:px-3 h-10 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all ${
               activeTool === tool.id
                 ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
+                : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'
             }`}
           >
-            <i className={`fas ${tool.icon}`}></i>
+            <i className={`fas ${tool.icon} text-[13px]`}></i>
             <span className="hidden sm:inline">{tool.label}</span>
           </button>
         ))}
 
-        <div className="flex-1" />
-        {/* Groupes, Temps, pistes masquées (posés par App) : dans la barre, jamais par-dessus. */}
-        {toolbarExtras && <div className="shrink-0 flex items-center gap-1.5 [&>button]:h-8">{toolbarExtras}</div>}
-
         {/* Libre / Grille (modes Slip / Grid de Pro Tools, version téléphone) */}
-        <div role="radiogroup" aria-label="Placement des clips" className="shrink-0 flex rounded-md bg-white/5 border border-white/10 p-0.5">
+        <div role="radiogroup" aria-label="Placement des clips" className="shrink-0 ml-1 flex rounded-lg bg-white/5 border border-white/10 p-0.5">
           {([false, true] as const).map(on => (
             <button key={String(on)} type="button" role="radio" aria-checked={snapToGrid === on}
-              onClick={() => setSnapToGrid(on)}
+              onClick={() => { setSnapToGrid(on); haptic('select'); }}
               title={on ? 'Grille : les clips se calent sur les temps (mode Grid)' : 'Libre : les clips vont exactement où tu les poses (mode Slip)'}
-              className={`nova-hit h-10 px-2.5 rounded text-[11px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/45'}`}>
+              className={`nova-hit h-10 px-2.5 rounded-md text-[12px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/55'}`}>
               {on ? 'Grille' : 'Libre'}
             </button>
           ))}
         </div>
-        {!simple && <>
 
+        {/* Zoom : boutons (le pincement à deux doigts sur les pistes fait pareil) */}
+        <div className="shrink-0 ml-1 flex items-center rounded-lg bg-white/5 border border-white/10">
+          <button
+            onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
+            aria-label="Dézoomer"
+            title="Dézoomer (ou rapproche deux doigts sur les pistes)"
+            className="nova-hit w-10 h-10 rounded-l-lg hover:bg-white/10 flex items-center justify-center"
+          >
+            <i className="fas fa-minus text-white/60 text-[12px]"></i>
+          </button>
+          <button
+            onClick={() => setZoom(z => Math.min(MAX_ZOOM, z + 20))}
+            aria-label="Zoomer"
+            title="Zoomer (ou écarte deux doigts sur les pistes)"
+            className="nova-hit w-10 h-10 rounded-r-lg hover:bg-white/10 flex items-center justify-center"
+          >
+            <i className="fas fa-plus text-white/60 text-[12px]"></i>
+          </button>
+        </div>
+
+        {!simple && <>
         {/* Grid division */}
         <select
           value={gridDivision}
           onChange={e => setGridDivision(Number(e.target.value))}
           aria-label="Division de la grille"
-          className="shrink-0 h-10 px-2 rounded-md bg-white/5 border border-white/10 text-[10px] font-bold text-white/70"
+          className="shrink-0 h-10 px-2 rounded-lg bg-white/5 border border-white/10 text-[12px] font-bold text-white/75"
         >
           <option value={1}>1/4</option>
           <option value={0.5}>1/8</option>
           <option value={0.25}>1/16</option>
           <option value={2}>1/2</option>
           <option value={4}>1 mesure</option>
-        </select></>}
+        </select>
+        {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). Mode avancé. */}
+        <PracticeSpeed compact />
+        </>}
+
+        <span className="shrink-0 ml-1 text-[11px] font-bold text-white/55 bg-white/5 px-2 py-1 rounded-md tabular-nums" title="Tempo du morceau">
+          {bpm} BPM
+        </span>
+
+        <div className="flex-1" />
+        {/* Groupes, Temps, pistes masquées (posés par App) : dans la barre, jamais par-dessus. */}
+        {toolbarExtras && <div className="shrink-0 flex items-center gap-1.5 [&>button]:h-10">{toolbarExtras}</div>}
       </div>
 
+      {/* Messages et « Et maintenant ? » : au plus 32 % de la hauteur, le reste défile au doigt (empilés sans
+          limite, ils poussaient la piste REC hors de l'écran juste après une prise). 📌 Prises gardées garde sa
+          taille (ses étoiles et « Vider la zone » restent visibles). Téléphone couché : le tout au plus 30 %, et
+          rien pendant que la barre du clip est ouverte (sinon plus aucune piste visible sur 390 px). */}
+      <div className={`shrink-0 [@media(orientation:landscape)_and_(max-height:520px)]:max-h-[25%] [@media(orientation:landscape)_and_(max-height:520px)]:overflow-y-auto overscroll-contain scrollbar-hide ${selectedClip ? '[@media(orientation:landscape)_and_(max-height:520px)]:hidden' : ''}`} data-testid="mobile-cards">
+      <div className="max-h-[32vh] overflow-y-auto overscroll-contain scrollbar-hide [@media(orientation:landscape)_and_(max-height:520px)]:max-h-none [@media(orientation:landscape)_and_(max-height:520px)]:overflow-visible">
       {/* Cartes « Et après ? » / « Être prévenu… » : cachées seulement quand la carte des prises gardées a du
           contenu (prise à garder ou lignes). Depuis que la playlist vide est visible d'office sur la piste REC,
           elles ne s'affichaient plus jamais au téléphone (audit de nuit 22/10/2026, qa/notifications.py). */}
       {!(keptZone && kept && !keptZone.closed[kept.t.id] && (kept.lanes.length > 0 || !!kept.candidate)) && tipCard}
       {topCard}
+      </div>
       {keptZone && kept && (
         <KeptTakesCard track={kept.t} lanes={kept.lanes} open={!keptZone.closed[kept.t.id]} api={keptZone} candidate={kept.candidate}
           isRecording={!!isRecording} audition={takeAudition} onAudition={(id, n) => onAuditionTake?.(id, n)} onRename={(id, n, name) => onRenameTake?.(id, n, name)} />
       )}
+      </div>
 
       {/* === MAIN AREA === */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-[5rem] flex overflow-hidden">
         {/* === TRACK HEADERS (Fixed) === */}
         <div className="flex-shrink-0 bg-nv-bg border-r border-white/10 z-10" style={{ width: TRACK_HEADER_WIDTH }}>
           {/* Timeline header spacer */}
@@ -742,11 +796,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             className="flex items-center justify-center border-b border-white/10 bg-nv-bg"
             style={{ height: TIMELINE_HEIGHT }}
           >
-            <span className="text-[9px] font-bold text-white/50 uppercase">Pistes</span>
+            <span className="text-[11px] font-bold text-white/55 uppercase">Pistes</span>
           </div>
 
           {/* Track headers */}
-          <div className="overflow-y-auto" style={{ height: `calc(100% - ${TIMELINE_HEIGHT}px)` }}>
+          <div ref={headersScrollRef} className="overflow-y-auto scrollbar-hide overscroll-contain [@media(orientation:landscape)_and_(max-height:520px)]:pb-14" style={{ height: `calc(100% - ${TIMELINE_HEIGHT}px)` }}
+            onScroll={(e) => { const tl = scrollContainerRef.current; const t = e.currentTarget.scrollTop; if (tl && Math.abs(tl.scrollTop - t) > 0.5) tl.scrollTop = t; }}>
             {visibleTracks.map(track => (
               <div
                 key={track.id}
@@ -765,15 +820,15 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span title={track.name} className="text-[10px] min-[400px]:text-[11px] leading-4 font-semibold tracking-tight text-white/90 truncate flex-1">
+                  <span title={track.name} className="text-[12px] leading-4 font-semibold tracking-tight text-white/90 truncate flex-1">
                     {track.name}
                   </span>
                   {/* G26 : en mode simple aussi, on voit que la voix a des effets. */}
                   {track.plugins.length > 0 && (
-                    <span className="shrink-0 text-[9px] leading-4 text-cyan-300" role="img"
+                    <span className="shrink-0 text-[11px] leading-4 text-cyan-300" role="img"
                       aria-label={`${track.plugins.length} effets sur ${track.name}`}
                       title={`${track.plugins.length} effets : ${track.plugins.map(p => p.name || p.type).join(', ')}`}>
-                      <i className="fas fa-wand-magic-sparkles text-[8px] mr-0.5" aria-hidden="true"></i>{track.plugins.length}
+                      <i className="fas fa-wand-magic-sparkles text-[9px] mr-0.5" aria-hidden="true"></i>{track.plugins.length}
                     </span>
                   )}
                 </div>
@@ -783,14 +838,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   <input
                     type="range"
                     min="0"
-                    max="100"
+                    max="1000"
                     aria-label={`Volume ${track.name}`}
+                    aria-valuetext={gainToDbText(track.volume ?? 0.8)}
                     data-nova-target={simple ? `vol-${track.id}` : undefined}
-                    value={Math.min(1, track.volume ?? 0.8) * 100}
+                    // Même échelle que les faders (−∞…+12 dB, 0 dB aux 3/4) : une piste au-dessus de 0 dB n'est plus ramenée à 0 dB au toucher.
+                    value={Math.round(gainToFaderPos(track.volume ?? 0.8) * 1000)}
                     onChange={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) {
-                        onUpdateTrack({ ...track, volume: Number(e.target.value) / 100 });
+                        onUpdateTrack({ ...track, volume: faderPosToGain(Number(e.target.value) / 1000) });
                       }
                     }}
                     onClick={(e) => e.stopPropagation()}
@@ -798,7 +855,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     // Trait de 4 px centré, zone de saisie de toute la rangée (+ curseur 24 px)
                     style={{
                       height: 40,
-                      backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${Math.min(1, track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${Math.min(1, track.volume ?? 0.8) * 100}%)`,
+                      backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${gainToFaderPos(track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${gainToFaderPos(track.volume ?? 0.8) * 100}%)`,
                       backgroundColor: 'transparent', backgroundSize: '100% 4px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center'
                     }}
                   />
@@ -916,16 +973,20 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         {/* === SCROLLABLE TIMELINE AREA === */}
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-auto"
+          data-testid="mobile-timeline"
+          data-zoom={Math.round(zoom)}
+          className="flex-1 overflow-auto overscroll-contain"
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           onTouchCancel={handleTouchEnd}
+          onScroll={(e) => { const h = headersScrollRef.current; const t = e.currentTarget.scrollTop; if (h && Math.abs(h.scrollTop - t) > 0.5) h.scrollTop = t; }}
           onMouseMove={handleTouchMove}
           onMouseUp={handleTouchEnd}
           onMouseLeave={handleTouchEnd}
           style={{ touchAction: 'pan-x pan-y' }}
         >
-          <div style={{ width: totalWidth, minHeight: '100%' }}>
+          {/* Téléphone couché : marge sous la dernière piste, que les boutons flottants ne la cachent pas. */}
+          <div className="[@media(orientation:landscape)_and_(max-height:520px)]:pb-14" style={{ width: totalWidth, minHeight: '100%' }}>
             {/* === TIMELINE RULER === */}
             <div
               ref={timelineRef}
@@ -1046,19 +1107,51 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
                         {/* Clip header */}
                         <div 
-                          className="absolute top-0 left-0 right-0 h-4 px-1.5 flex items-center"
+                          className="absolute top-0 left-0 right-0 h-5 px-1.5 flex items-center"
                           style={{ backgroundColor: (clip.color || track.color) + '60' }}
                         >
-                          <span className="text-[11px] font-semibold text-white truncate drop-shadow">
+                          <span className="text-[12px] font-semibold text-white truncate drop-shadow">
                             {clip.name}
                           </span>
                         </div>
 
-                        {/* Resize handles */}
+                        {/* Poignées du clip sélectionné : bords = rogner (glisser), coins du haut = fondus (glisser vers
+                            l'intérieur). Dessinées assez grandes pour le doigt (20 px de large, 28 px pour les fondus). */}
                         {isSelected && (
                           <>
-                            <div className="absolute left-0 top-0 bottom-0 w-3 bg-cyan-400/50 cursor-ew-resize" />
-                            <div className="absolute right-0 top-0 bottom-0 w-3 bg-cyan-400/50 cursor-ew-resize" />
+                            <div className="absolute left-0 top-0 bottom-0 w-5 bg-cyan-400/35 border-r border-cyan-300/60 cursor-ew-resize flex items-center justify-center pointer-events-none">
+                              <span className="w-0.5 h-6 rounded bg-white/80" />
+                            </div>
+                            <div className="absolute right-0 top-0 bottom-0 w-5 bg-cyan-400/35 border-l border-cyan-300/60 cursor-ew-resize flex items-center justify-center pointer-events-none">
+                              <span className="w-0.5 h-6 rounded bg-white/80" />
+                            </div>
+                            {(['fade-in', 'fade-out'] as const).map(m => {
+                              const f = m === 'fade-in' ? (clip.fadeIn || 0) : (clip.fadeOut || 0);
+                              const fx = Math.min(clipWidth - 30, Math.max(22, f * pixelsPerSecond));
+                              return (
+                                <div key={m} role="slider" aria-label={m === 'fade-in' ? "Fondu d'entrée (glisser)" : 'Fondu de sortie (glisser)'}
+                                  aria-valuemin={0} aria-valuemax={Math.round(clip.duration * 1000)} aria-valuenow={Math.round(f * 1000)} aria-valuetext={`${Math.round(f * 1000)} ms`}
+                                  data-testid={`mobile-${m}`}
+                                  className="absolute top-0 w-11 h-11 -mt-1.5 z-10 flex items-center justify-center touch-none"
+                                  style={m === 'fade-in' ? { left: fx - 22 } : { right: fx - 22 }}
+                                  onTouchStart={(e) => {
+                                    e.stopPropagation();
+                                    lastTouchRef.current = Date.now();
+                                    haptic('select');
+                                    setDragState({ mode: m, trackId: track.id, clip, startX: e.touches[0].clientX, startTime: clip.start, startDuration: clip.duration, startOffset: clip.offset || 0, startFade: f });
+                                  }}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    if (Date.now() - lastTouchRef.current < 700) return;
+                                    setDragState({ mode: m, trackId: track.id, clip, startX: e.clientX, startTime: clip.start, startDuration: clip.duration, startOffset: clip.offset || 0, startFade: f });
+                                  }}>
+                                  <span className="w-3.5 h-3.5 rounded-full bg-white border-2 border-cyan-500 shadow" />
+                                </div>
+                              );
+                            })}
+                            {/* Courbes des fondus */}
+                            {(clip.fadeIn || 0) > 0 && <div className="absolute left-0 top-0 bottom-0 pointer-events-none bg-gradient-to-r from-black/45 to-transparent" style={{ width: (clip.fadeIn || 0) * pixelsPerSecond }} />}
+                            {(clip.fadeOut || 0) > 0 && <div className="absolute right-0 top-0 bottom-0 pointer-events-none bg-gradient-to-l from-black/45 to-transparent" style={{ width: (clip.fadeOut || 0) * pixelsPerSecond }} />}
                           </>
                         )}
 
@@ -1075,7 +1168,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   {/* Empty track hint */}
                   {track.clips.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="text-[10px] text-white/40 font-medium">Vide</span>
+                      <span className="text-[12px] text-white/40 font-medium">Vide</span>
                     </div>
                   )}
                 </div>
@@ -1104,10 +1197,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 className="w-2.5 h-2.5 rounded"
                 style={{ backgroundColor: selectedClip.clip.color || '#22d3ee' }}
               />
-              <span className="text-[11px] font-bold text-white truncate max-w-[100px]">
+              <span className="text-[12px] font-bold text-white truncate max-w-[110px]">
                 {selectedClip.clip.name}
               </span>
-              <span className="text-[10px] text-white/50 font-mono">
+              <span className="text-[11px] text-white/55 font-mono">
                 {formatBarsBeat(selectedClip.clip.start)} · {selectedClip.clip.duration.toFixed(1)}s
               </span>
             </div>
@@ -1127,10 +1220,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <button
               onClick={handleCopyClip}
               aria-label="Copier le clip"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
             >
               <i className="fas fa-copy text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">COPIER</span>
+              <span className="text-[11px] font-semibold text-white/75">COPIER</span>
             </button>
 
             {/* Paste */}
@@ -1138,14 +1231,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={handlePasteClip}
               aria-label="Coller le clip copié"
               disabled={!clipboard}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 clipboard 
                   ? 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20' 
                   : 'bg-white/5 opacity-40'
               }`}
             >
               <i className="fas fa-paste text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">COLLER</span>
+              <span className="text-[11px] font-semibold text-white/75">COLLER</span>
             </button>
 
             {/* Duplicate (seulement si l'appli sait vraiment dupliquer) */}
@@ -1153,34 +1246,34 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={handleDuplicateClip}
               data-testid="mobile-dup"
               aria-label="Dupliquer le clip (copie juste après)"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
             >
               <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">DOUBLER</span>
+              <span className="text-[11px] font-semibold text-white/75">DOUBLER</span>
             </button>}
 
             {/* Split */}
             <button
               onClick={handleSplitClip}
               aria-label="Couper le clip en deux à la tête de lecture"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
             >
               <i className="fas fa-cut text-yellow-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">COUPER</span>
+              <span className="text-[11px] font-semibold text-white/75">COUPER</span>
             </button>
 
             {/* Reverse */}
             <button
               onClick={handleReverseClip}
               aria-label="Inverser le clip (lecture à l'envers)"
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isReversed 
                   ? 'bg-purple-500/30 border border-purple-500/50' 
                   : 'bg-white/5 hover:bg-white/10 active:bg-purple-500/20'
               }`}
             >
               <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
-              <span className="text-[10px] font-semibold text-white/70">INVERSER</span>
+              <span className="text-[11px] font-semibold text-white/75">INVERSER</span>
             </button>
 
             {/* Lot 1 : nettoyer la voix (bruit, niveau ; réverbe dans l'appli Windows), en premier des outils voix */}
@@ -1190,26 +1283,26 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Nettoyer la voix : bruit de fond et niveau"
                 title={CLEAN_TOOLTIP}
                 data-testid="mobile-clip-clean"
-                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 active:bg-cyan-500/30 transition-all"
+                className="flex-shrink-0 flex flex-col items-center justify-center w-[4.5rem] h-12 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 active:bg-cyan-500/30 transition-all"
               >
                 <i className="fas fa-wand-magic-sparkles text-cyan-300 text-sm mb-0.5" aria-hidden></i>
-                <span className="text-[9px] font-bold text-cyan-100">NETTOYER</span>
+                <span className="text-[10px] font-bold text-cyan-100">NETTOYER</span>
               </button>
             )}
 
             {/* Justesse (V19) : tout corriger dans la gamme, avec le dosage */}
             {selectedClip.clip.type !== TrackType.MIDI && (
               <button
-                onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }], simple: true })}
                 aria-label="Justesse : corriger la voix dans la gamme"
-                title="Ramène ta voix dans la gamme"
+                title="Corrige ta voix : ramène-la dans la gamme, ou note par note"
                 data-testid="mobile-clip-pitch"
-                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.pitchEdit ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
                 }`}
               >
                 <i className="fas fa-bullseye text-cyan-300 text-sm mb-0.5"></i>
-                <span className="text-[10px] font-semibold text-white/70">JUSTE</span>
+                <span className="text-[11px] font-semibold text-white/75">JUSTE</span>
               </button>
             )}
 
@@ -1220,9 +1313,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Respirations : les baisser ou les retirer"
                 onClick={() => requestBreaths({ mode: 'dialog', trackIds: [selectedClip.trackId], reason: 'menu' })}
                 title="Respirations : baissées sur la lead, supprimées sur les backs (comme Breath Control de Waves)"
-                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
+                className="flex-shrink-0 flex flex-col items-center justify-center w-[5.5rem] h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
                 <i className="fas fa-wind text-violet-300 text-sm" aria-hidden />
-                <span className="text-[8px] font-bold text-violet-200 mt-0.5">RESPIRATIONS</span>
+                <span className="text-[10px] font-bold text-violet-200 mt-0.5">RESPIRATIONS</span>
               </button>
             )}
 
@@ -1233,12 +1326,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 aria-label="Changer la tonalité du clip"
                 title="Plus aigu ou plus grave, sans changer le tempo"
                 data-testid="mobile-clip-transpose"
-                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
                 }`}
               >
                 <i className="fas fa-arrows-up-down text-cyan-300 text-sm mb-0.5"></i>
-                <span className="text-[10px] font-semibold text-white/70">TON</span>
+                <span className="text-[11px] font-semibold text-white/75">TON</span>
               </button>
             )}
 
@@ -1249,14 +1342,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
                 isMuted: !selectedClip.clip.isMuted 
               })}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isMuted 
                   ? 'bg-red-500/30 border border-red-500/50' 
                   : 'bg-white/5 hover:bg-white/10'
               }`}
             >
               <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm mb-0.5 ${selectedClip.clip.isMuted ? 'text-red-400' : 'text-white/60'}`}></i>
-              <span className="text-[10px] font-semibold text-white/70">MUET</span>
+              <span className="text-[11px] font-semibold text-white/75">MUET</span>
             </button>
 
             {/* Divider */}
@@ -1264,20 +1357,20 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
             {/* Fade In */}
             <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
-              <span className="text-[8px] font-bold text-white/40 mb-0.5">FONDU ENTRÉE</span>
+              <span className="text-[10px] font-bold text-white/50 mb-0.5">FONDU ENTRÉE</span>
               <div className="flex items-center gap-1">
                 <button onClick={() => handleFadeIn(-0.1)} aria-label="Raccourcir le fondu d'entrée" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono tabular-nums text-cyan-400 w-9 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)} ms</span>
+                <span className="text-[11px] font-mono tabular-nums text-cyan-400 w-12 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)} ms</span>
                 <button onClick={() => handleFadeIn(0.1)} aria-label="Allonger le fondu d'entrée" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
             {/* Fade Out */}
             <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
-              <span className="text-[8px] font-bold text-white/40 mb-0.5">FONDU SORTIE</span>
+              <span className="text-[10px] font-bold text-white/50 mb-0.5">FONDU SORTIE</span>
               <div className="flex items-center gap-1">
                 <button onClick={() => handleFadeOut(-0.1)} aria-label="Raccourcir le fondu de sortie" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono tabular-nums text-cyan-400 w-9 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)} ms</span>
+                <span className="text-[11px] font-mono tabular-nums text-cyan-400 w-12 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)} ms</span>
                 <button onClick={() => handleFadeOut(0.1)} aria-label="Allonger le fondu de sortie" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
@@ -1296,10 +1389,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 setSelectedClip(null);
               }}
               aria-label="Supprimer le clip (Annuler dans le menu ☰ pour le retrouver)"
-              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-[4.5rem] h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
             >
               <i className="fas fa-trash text-red-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-red-400/80">SUPPRIMER</span>
+              <span className="text-[10px] font-bold text-red-400/80">SUPPRIMER</span>
             </button>
           </div>
         </div>
@@ -1436,8 +1529,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </div>
       )}
 
-      {/* === BOTTOM PADDING FOR NAV === */}
-      <div className="h-16 bg-nv-bg" />
+      {/* Place des boutons flottants « Piste voix / Mix auto » : ils ne recouvrent jamais la barre du clip. */}
+      <div className="shrink-0 h-16 [@media(orientation:landscape)_and_(max-height:520px)]:h-0 bg-nv-bg" />
     </div>
   );
 };

@@ -5,6 +5,12 @@
   "framework": "vite",
   "headers": [
     {
+      "source": "/((?!api/|morceau|ecoute).*)",
+      "headers": [
+        { "key": "Document-Isolation-Policy", "value": "isolate-and-credentialless" }
+      ]
+    },
+    {
       "source": "/drums/(kits|lib)/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },

@@ -293,7 +293,7 @@ def inge(b, theme):
         rec = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
         pg.mouse.click(rec["x"] + rec["width"] + 40, rec["y"] + 60, button="right"); pg.wait_for_timeout(500)
         P.ecran("menu_clip")
-        t = time.time(); pg.get_by_text("Justesse note par note…").first.click(); pg.wait_for_timeout(2500); P.chrono("justesse", t)
+        t = time.time(); pg.get_by_text("Éditer les notes de la voix…").first.click(); pg.wait_for_timeout(2500); P.chrono("justesse", t)
         P.ecran("justesse")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
     P.etape("justesse note par note", justesse)

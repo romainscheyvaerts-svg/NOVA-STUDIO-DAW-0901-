@@ -327,7 +327,8 @@ export const sendFreezeSig = (s: Track, bus: Track): string => {
   return [
     freezeSignature(s.clips || [], s.plugins || [], (s.plugins || []).length - 1),
     pluginsSignature(bus.plugins || [], upTo),
-    s.pan, JSON.stringify((s.automationLanes || []).filter(l => l.parameterName !== PRE_VOLUME && l.points.length > 0).map(l => [l.parameterName, l.points.map(p => [p.time, p.value, p.curveType || ''])])),
+    // Double pan G / D (piste stéréo) : seulement s'il est réglé (empreintes d'avant inchangées).
+    s.stereoPan ? `${s.pan}|${s.stereoPan.l},${s.stereoPan.r}` : s.pan, JSON.stringify((s.automationLanes || []).filter(l => l.parameterName !== PRE_VOLUME && l.points.length > 0).map(l => [l.parameterName, l.points.map(p => [p.time, p.value, p.curveType || ''])])),
     s.frozenClip?.id || '', anchored,
   ].join('#');
 };

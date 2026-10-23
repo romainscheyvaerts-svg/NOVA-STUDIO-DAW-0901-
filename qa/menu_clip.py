@@ -78,7 +78,7 @@ def run_pc(b):
     check("PC : menu du clip sous 500 px de haut (avant 892 px)", (root.get("h") or 9999) < 500, f"{root.get('h')} px")
     check("PC : sous-menus dans l'ordre Édition, Gain et fondus, Hauteur et temps, Voix, Traitement, MIDI", subs == GROUPS, subs)
     check("PC : gestes de tous les jours en haut (Couper … Muter)", labels[:6] == ["Couper", "Copier", "Coller", "Dupliquer", "Diviser", "Muter"], labels[:6])
-    check("PC : Justesse et Respirations au 1er niveau (clip audio)", "Justesse note par note…" in labels and "Respirations…" in labels)
+    check("PC : Notes de la voix et Respirations au 1er niveau (clip audio)", "Éditer les notes de la voix…" in labels and "Respirations…" in labels)
     # Survol : chaque sous-menu s'ouvre à côté, dans l'écran.
     res["cas"]["pc"]["sous_menus_detail"] = {}
     for i, g in enumerate(GROUPS):
@@ -112,7 +112,7 @@ def run_pc(b):
         page.keyboard.press("ArrowDown")
     page.keyboard.press("ArrowRight"); page.wait_for_timeout(300)
     first = page.evaluate("() => (document.activeElement && document.activeElement.innerText || '').trim()")
-    check("Clavier : ↓ atteint « Voix », → ouvre le sous-menu et place le focus sur sa 1re entrée", target_ok and first.startswith("Justesse"), first)
+    check("Clavier : ↓ atteint « Voix », → ouvre le sous-menu et place le focus sur sa 1re entrée", target_ok and first.startswith("Éditer les notes de la voix"), first)
     page.keyboard.press("ArrowLeft"); page.wait_for_timeout(200)
     back = page.evaluate("() => (document.activeElement && document.activeElement.innerText || '').trim()")
     still = len(menus(page)) == 1

@@ -166,9 +166,14 @@ def run():
             first = voix(page)["clips"][0]
             x, y = clip_point(page, first["start"] + first["dur"] / 2)
             page.mouse.click(x, y); page.wait_for_timeout(200)
-            page.mouse.dblclick(x, y); page.wait_for_timeout(500)
+            # 23/10/2026 : double-clic sur un clip de voix = éditeur de notes ; Renommer = Ctrl+Maj+R.
+            page.mouse.dblclick(x, y); page.wait_for_timeout(700)
+            check("Double-clic sur un clip de voix : éditeur de notes", page.locator('[data-testid="pitch-editor"]').count() == 1)
+            if page.locator('[data-testid="pitch-close"]').count(): page.locator('[data-testid="pitch-close"]').first.click(); page.wait_for_timeout(300)
+            page.mouse.click(x, y); page.wait_for_timeout(200)
+            page.keyboard.press("Control+Shift+r"); page.wait_for_timeout(500)
             dlg = page.locator('[data-testid="clip-props"]')
-            check("Double-clic sur un clip : fenêtre Renommer", dlg.count() == 1)
+            check("Ctrl+Maj+R sur un clip : fenêtre Renommer", dlg.count() == 1)
             page.get_by_role("textbox", name="Nom").fill("Couplet 1 · phrase A")
             page.get_by_role("radio", name="#ef4444").click()
             shot(page, "v7_08_renommer_clip")

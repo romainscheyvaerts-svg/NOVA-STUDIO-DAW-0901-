@@ -20,6 +20,7 @@
  * Aucune dépendance au moteur audio ni à React : utilisable dans les tests et
  * dans les scripts Node (scripts/template_from_spec.ts).
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import {
   AutomationLane, Clip, DAWState, Marker, PluginInstance, PluginType, ProjectPhase, TimeSignature, Track, TrackGroup, TrackType,
 } from '../types';
@@ -402,7 +403,7 @@ export interface TemplateLoadReport {
 }
 
 const defaultVolumeLane = (color: string): AutomationLane => ({
-  id: `auto-${Date.now().toString(36)}-${(seq++).toString(36)}`, parameterName: 'volume', points: [], color, isExpanded: false, min: 0, max: 1.5,
+  id: `auto-${Date.now().toString(36)}-${(seq++).toString(36)}`, parameterName: 'volume', points: [], color, isExpanded: false, min: 0, max: FADER_MAX_GAIN,
 });
 
 const masterTrack = (): TemplateTrack => ({

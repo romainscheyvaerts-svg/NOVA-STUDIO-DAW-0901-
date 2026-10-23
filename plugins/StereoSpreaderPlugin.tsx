@@ -47,6 +47,13 @@ export interface SpreaderParams {
   isEnabled: boolean;
 }
 
+/**
+ * Q des passe-bas / passe-haut en dB (spec Web Audio) : −3,01 dB = Butterworth, −3 dB pile à la
+ * fréquence réglée. Avant (22/10/2026), 0,707 était lu comme 0,707 dB (Q ≈ 1,08) : +0,7 dB À la
+ * coupure des « graves en mono » au lieu de −3 dB, et des bandes qui bossaient.
+ */
+const BW_Q_DB = -3.0103;
+
 export class StereoSpreaderNode {
   private ctx: AudioContext;
   public input: GainNode;
@@ -70,6 +77,13 @@ export class StereoSpreaderNode {
   private gMid!: GainNode;
   private gHigh!: GainNode;
   private gDirect!: GainNode;
+  /** Passe-tout de compensation (Linkwitz-Riley) : bande grave (à f2), et Milieu (f1 puis f2). */
+  private lowAP!: BiquadFilterNode;
+  private midAP1!: BiquadFilterNode;
+  private midAP2!: BiquadFilterNode;
+  /** Milieu direct (pleine bande) ou passé dans les mêmes passe-tout que les Côtés (3 bandes). */
+  private gMidDirect!: GainNode;
+  private gMidAP!: GainNode;
   
   // Haas delay
   private haasDelayL: DelayNode;
@@ -125,32 +139,32 @@ export class StereoSpreaderNode {
     // Crossover filters (Linkwitz-Riley style - cascaded for 24dB/oct)
     this.lowBandLP = ctx.createBiquadFilter();
     this.lowBandLP.type = 'lowpass';
-    this.lowBandLP.Q.value = 0.707;
+    this.lowBandLP.Q.value = BW_Q_DB;
     this.lowBandLP2 = ctx.createBiquadFilter();
     this.lowBandLP2.type = 'lowpass';
-    this.lowBandLP2.Q.value = 0.707;
+    this.lowBandLP2.Q.value = BW_Q_DB;
     
     // Bande medium : passe-haut a lowMidFreq puis passe-bas a midHighFreq.
     // Un simple passe-bande (ce qu'il y avait) ne se recombine pas a plat.
     this.midBandHP = ctx.createBiquadFilter();
     this.midBandHP.type = 'highpass';
-    this.midBandHP.Q.value = 0.707;
+    this.midBandHP.Q.value = BW_Q_DB;
     this.midBandHP2 = ctx.createBiquadFilter();
     this.midBandHP2.type = 'highpass';
-    this.midBandHP2.Q.value = 0.707;
+    this.midBandHP2.Q.value = BW_Q_DB;
     this.midBandLP = ctx.createBiquadFilter();
     this.midBandLP.type = 'lowpass';
-    this.midBandLP.Q.value = 0.707;
+    this.midBandLP.Q.value = BW_Q_DB;
     this.midBandLP2 = ctx.createBiquadFilter();
     this.midBandLP2.type = 'lowpass';
-    this.midBandLP2.Q.value = 0.707;
+    this.midBandLP2.Q.value = BW_Q_DB;
     
     this.highBandHP = ctx.createBiquadFilter();
     this.highBandHP.type = 'highpass';
-    this.highBandHP.Q.value = 0.707;
+    this.highBandHP.Q.value = BW_Q_DB;
     this.highBandHP2 = ctx.createBiquadFilter();
     this.highBandHP2.type = 'highpass';
-    this.highBandHP2.Q.value = 0.707;
+    this.highBandHP2.Q.value = BW_Q_DB;
     
     // Haas effect
     this.haasDelayL = ctx.createDelay(0.1);
@@ -201,8 +215,11 @@ export class StereoSpreaderNode {
     // Grave mono : on retire le Side sous monoFreq avant le reglage de largeur.
     this.sideHighpass = this.ctx.createBiquadFilter();
     this.sideHighpass.type = 'highpass';
-    this.sideHighpass.Q.value = 0.707;
-    this.sideHighpass.frequency.value = 10; // transparent par defaut
+    this.sideHighpass.Q.value = BW_Q_DB;
+    // 0 Hz = passe-plat exact (spec : passe-haut à fréquence nulle). Avant (22/10/2026) : 10 Hz,
+    // « transparent » en niveau mais pas en phase : les Côtés tournaient par rapport au Milieu et un
+    // son placé à gauche fuyait à droite (−31 dB à 250 Hz, −20 dB à 80 Hz) même réglé à 100 %.
+    this.sideHighpass.frequency.value = 0;
     sideDiff.connect(this.sideHighpass);
 
     // Separateur 3 bandes sur le signal Side. Le Mid reste pleine bande : c'est
@@ -218,58 +235,43 @@ export class StereoSpreaderNode {
     this.sideHighpass.connect(this.gDirect);
     this.gDirect.connect(sideGain);
 
-    // Separateur 3 bandes du signal Side, en arbre SOUSTRACTIF.
+    // Séparateur 3 bandes du signal Côtés : Linkwitz-Riley du 4e ordre (deux Butterworth en
+    // cascade), compensé par des passe-tout, et le MILIEU passé dans les mêmes passe-tout :
     //
-    // Trois montages essayes, mesures a l'appui (largeurs toutes a 1, l'ecart
-    // par rapport au mode pleine bande doit etre nul) :
+    //   graves  = PB4(f1) · PT(f2)
+    //   médiums = PH4(f1) · PB4(f2)
+    //   aigus   = PH4(f1) · PH4(f2)
+    //   Milieu  = PT(f1) · PT(f2)          (PT = passe-tout du 2e ordre, Q = 0,7071)
     //
-    //   trois passe-bande cascades .......... +7,55 dB aux coupures
-    //   arbre Linkwitz-Riley (LP/HP) ........ +7,55 dB aux coupures
-    //   arbre LR + passe-tout compensateur .. +7,55 dB aux coupures
-    //   arbre soustractif ...................  0,00 dB partout
-    //
-    // Les montages a filtres complementaires isolent mieux chaque bande, mais
-    // leurs rotations de phase bossent la reponse aux points de coupure : regler
-    // les trois largeurs au meme niveau colorait le son de plus de 7 dB. Pour un
-    // outil de mixage c'est redhibitoire, la neutralite prime sur l'isolement.
-    //
-    // La soustraction est une identite algebrique : chaque etage produit une
-    // bande et son complement exact, la somme redonne donc rigoureusement le
-    // signal d'origine, quelle que soit la phase des filtres.
-    //
-    //   etage 1 : aigu  = HP(f2)          reste = Side  - aigu
-    //   etage 2 : grave = LP(f1)(reste)   medium = reste - grave
-    //
-    // Contrepartie assumee : le grave n'est attenue que d'environ moitie a
-    // largeur nulle, le residu de phase du filtre restant dans le medium. Pour
-    // un grave reellement mono, c'est « Safe Mono Bass » qui fait le travail.
+    // PB4 + PH4 = PT exactement (transformée bilinéaire comprise) : avec les trois largeurs à
+    // 100 %, gauche et droite ressortent en passe-tout pur (amplitude plate, image intacte).
+    // À chaque coupure, les deux bandes voisines sont à −6 dB : la coupure affichée est bien
+    // celle où elles pèsent autant. Avant (22/10/2026) : arbre soustractif (bande − filtre),
+    // plat mais dont les coupures tombaient à 5,3 dB d'écart entre les deux bandes (le
+    // « Linkwitz-Riley qui bossait de 7,55 dB » essayé avant lui l'était à cause du Q lu en dB).
+    const ap = (f: number) => { const b = this.ctx.createBiquadFilter(); b.type = 'allpass'; b.frequency.value = f; b.Q.value = Math.SQRT1_2; return b; };
+    this.lowAP = ap(4000);
+    this.midAP1 = ap(250);
+    this.midAP2 = ap(4000);
 
-    // Etage 1 : aigu, puis le reste par soustraction
-    this.sideHighpass.connect(this.highBandHP);
+    // Graves
+    this.sideHighpass.connect(this.lowBandLP);
+    this.lowBandLP.connect(this.lowBandLP2);
+    this.lowBandLP2.connect(this.lowAP);
+    this.lowAP.connect(this.gLow);
+    this.gLow.connect(sideGain);
+    // Médiums
+    this.sideHighpass.connect(this.midBandHP);
+    this.midBandHP.connect(this.midBandHP2);
+    this.midBandHP2.connect(this.midBandLP);
+    this.midBandLP.connect(this.midBandLP2);
+    this.midBandLP2.connect(this.gMid);
+    this.gMid.connect(sideGain);
+    // Aigus (après le même passe-haut f1)
+    this.midBandHP2.connect(this.highBandHP);
     this.highBandHP.connect(this.highBandHP2);
     this.highBandHP2.connect(this.gHigh);
     this.gHigh.connect(sideGain);
-
-    const invAigu = this.ctx.createGain(); invAigu.gain.value = -1;
-    const reste = this.ctx.createGain();
-    this.sideHighpass.connect(reste);
-    this.highBandHP2.connect(invAigu);
-    invAigu.connect(reste);
-
-    // Etage 2 : grave, puis le medium par soustraction
-    reste.connect(this.lowBandLP);
-    this.lowBandLP.connect(this.lowBandLP2);
-    this.lowBandLP2.connect(this.gLow);
-    this.gLow.connect(sideGain);
-
-    const invGrave = this.ctx.createGain(); invGrave.gain.value = -1;
-    const sommeMedium = this.ctx.createGain();
-    reste.connect(sommeMedium);
-    this.lowBandLP2.connect(invGrave);
-    invGrave.connect(sommeMedium);
-
-    sommeMedium.connect(this.gMid);
-    this.gMid.connect(sideGain);
 
     // Haas delay on one channel
     
@@ -283,10 +285,21 @@ export class StereoSpreaderNode {
     const leftMix = this.ctx.createGain();
     const rightMix = this.ctx.createGain();
     
-    midSum.connect(leftMix);
+    this.gMidDirect = this.ctx.createGain();
+    this.gMidAP = this.ctx.createGain();
+    this.gMidAP.gain.value = 0;
+    midSum.connect(this.gMidDirect);
+    midSum.connect(this.midAP1);
+    this.midAP1.connect(this.midAP2);
+    this.midAP2.connect(this.gMidAP);
+    const midOut = this.ctx.createGain();
+    this.gMidDirect.connect(midOut);
+    this.gMidAP.connect(midOut);
+
+    midOut.connect(leftMix);
     sideGain.connect(leftMix);
-    
-    midSum.connect(rightMix);
+
+    midOut.connect(rightMix);
     invertSide.connect(rightMix);
     
     // Add Haas effect
@@ -343,19 +356,19 @@ export class StereoSpreaderNode {
       // Grave mono. Le bouton et sa frequence existaient dans l'interface mais
       // n'etaient jamais lus : le grave restait stereo quel que soit le reglage.
       smoothSet(this.sideHighpass.frequency, 
-        this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 10, this.ctx, 0.02);
+        this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 0, this.ctx, 0.02);
 
       // Separateur 3 bandes. Hors mode multibande, seule la voie directe passe :
       // on evite ainsi la rotation de phase des filtres quand ils ne servent pas.
       const f1 = safe(this.params.lowMidFreq, 250);
       const f2 = safe(this.params.midHighFreq, 4000);
-      smoothSet(this.lowBandLP.frequency, f1, this.ctx, 0.02);
-      smoothSet(this.lowBandLP2.frequency, f1, this.ctx, 0.02);
-      smoothSet(this.highBandHP.frequency, f2, this.ctx, 0.02);
-      smoothSet(this.highBandHP2.frequency, f2, this.ctx, 0.02);
+      for (const f of [this.lowBandLP, this.lowBandLP2, this.midBandHP, this.midBandHP2, this.midAP1]) smoothSet(f.frequency, f1, this.ctx, 0.02);
+      for (const f of [this.midBandLP, this.midBandLP2, this.highBandHP, this.highBandHP2, this.lowAP, this.midAP2]) smoothSet(f.frequency, f2, this.ctx, 0.02);
 
       const multi = !!this.params.multiBand;
       smoothSet(this.gDirect.gain, multi ? 0 : 1, this.ctx, 0.02);
+      smoothSet(this.gMidDirect.gain, multi ? 0 : 1, this.ctx, 0.02);
+      smoothSet(this.gMidAP.gain, multi ? 1 : 0, this.ctx, 0.02);
       smoothSet(this.gLow.gain, multi ? safe(this.params.lowWidth, 0.8) : 0, this.ctx, 0.02);
       smoothSet(this.gMid.gain, multi ? safe(this.params.midWidth, 1.2) : 0, this.ctx, 0.02);
       smoothSet(this.gHigh.gain, multi ? safe(this.params.highWidth, 1.5) : 0, this.ctx, 0.02);
@@ -377,8 +390,10 @@ export class StereoSpreaderNode {
       }
       smoothSet(this.haasDelayL.delayTime, 0, this.ctx, 0.02);
       smoothSet(this.haasDelayR.delayTime, 0, this.ctx, 0.02);
-      smoothSet(this.sideHighpass.frequency, 10, this.ctx, 0.02);
+      smoothSet(this.sideHighpass.frequency, 0, this.ctx, 0.02);
       smoothSet(this.gDirect.gain, 1, this.ctx, 0.02);
+      smoothSet(this.gMidDirect.gain, 1, this.ctx, 0.02);
+      smoothSet(this.gMidAP.gain, 0, this.ctx, 0.02);
       smoothSet(this.gLow.gain, 0, this.ctx, 0.02);
       smoothSet(this.gMid.gain, 0, this.ctx, 0.02);
       smoothSet(this.gHigh.gain, 0, this.ctx, 0.02);

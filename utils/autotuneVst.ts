@@ -22,10 +22,13 @@
  *   (réglage défaut)  0,10   →  10 ms       20         100 %    correction nette
  *   Drill             0,25   →  25 ms       30         50 %     discret
  *   Chant / R&B       0,35   →  35 ms       45 (+Flex) 100 %    naturel
- * Règle : retune (ms) = speed × 100, humanize = humanize × 100, mélange = mix × 100,
+ * Règle (22/10/2026) : retune (ms) = retuneMsFromSpeed(speed) (même allure que Nova Tune,
+ * voir utils/tuneSpeed.ts ; avant : speed × 100), humanize = humanize × 100, mélange = mix × 100,
  * bornés à la plage du plugin. Flex-Tune (Antares) : 0 en dessous de 25 ms, 25 au-delà
  * (garde les glissés naturels des styles chantés).
  */
+
+import { retuneMsFromSpeed } from './tuneSpeed';
 
 // ─── Plugins vus par le pont ─────────────────────────────────────────────────
 
@@ -344,6 +347,10 @@ export interface AutotuneTarget {
   mix: number;
   /** Mode faible latence du plugin (par défaut : oui, réglage de Romain). */
   lowLatency: boolean;
+  /** Flex de Nova Tune (0–1), recopié s'il est réglé. */
+  flex?: number;
+  /** Transposition de Nova Tune (demi-tons), recopiée si le plugin en a une. */
+  transpose?: number;
 }
 
 export interface ResolvedAutotune {
@@ -545,15 +552,21 @@ export const resolveAutotuneSettings = (pluginName: string, params: VstParam[], 
     || usable.find(p => /retune/i.test(p.name))
     || usable.find(p => /(correction ?speed|^speed$|tune ?speed)/i.test(n(p.displayName || p.name).replace(/_/g, ' ')));
   if (retune) {
-    const ms = Math.max(0, target.speed) * 100;
+    // Même allure que Nova Tune (prise ↔ lecture) : temps du marché = demi-vie (utils/tuneSpeed.ts).
+    const ms = retuneMsFromSpeed(target.speed);
     settings.push({ name: retune.name, real: clampReal(retune, ms), why: `vitesse de correction ${Math.round(ms)} ms` });
   }
   const hum = (profile?.humanize && usable.find(p => p.name === profile.humanize)) || usable.find(p => /humani[sz]e/i.test(p.name));
   if (hum) settings.push({ name: hum.name, real: clampReal(hum, target.humanize * 100), why: 'naturel des notes tenues' });
   const flex = (profile?.flex && usable.find(p => p.name === profile.flex)) || null;
   if (flex) {
-    const v = target.speed >= 0.25 ? 25 : 0;
+    // Flex de Nova Tune (même loi, mesurée sur la référence) ; sans Flex réglé : règle des styles.
+    const v = typeof target.flex === 'number' && target.flex > 0 ? Math.round(target.flex * 100) : target.speed >= 0.25 ? 25 : 0;
     settings.push({ name: flex.name, real: clampReal(flex, v), why: v ? 'Flex-Tune : garde les glissés' : 'Flex-Tune coupé (effet net)' });
+  }
+  if (typeof target.transpose === 'number') {
+    const tp = usable.find(p => /^transpose$/i.test(p.name));
+    if (tp) settings.push({ name: tp.name, real: clampReal(tp, Math.round(target.transpose)), why: 'transposition' });
   }
   const mixP = (profile?.mix && usable.find(p => p.name === profile.mix!.param))
     || usable.find(p => /^(wet ?dry ?mix|mix|dry ?wet|amount|correction ?amount)$/i.test(n(p.name).replace(/_/g, ' ')));

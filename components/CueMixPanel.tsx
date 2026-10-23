@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CueMix, Track, TrackType } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { copyMainMix, cueLevelOf, cueProblems, defaultCueMixes, newCueMix, outputPairs, pairLabel, setCueLevel } from '../utils/cueMix';
+import { FADER_MAX_DB } from '../utils/faderLaw';
 
 /**
  * R15 · « Mixes casque » (cue mixes, Pro Tools : envois pré-fader vers une paire de
@@ -10,7 +11,8 @@ import { copyMainMix, cueLevelOf, cueProblems, defaultCueMixes, newCueMix, outpu
  * (carte à une seule paire, navigateur, ou pour le préparer).
  */
 
-const dbOf = (g: number) => (g <= 0.001 ? -60 : Math.max(-60, Math.min(6, 20 * Math.log10(g))));
+// Course −∞ … +12 dB, comme les faders de la console (utils/faderLaw).
+const dbOf = (g: number) => (g <= 0.001 ? -60 : Math.max(-60, Math.min(FADER_MAX_DB, 20 * Math.log10(g))));
 const gainOf = (db: number) => (db <= -59.9 ? 0 : Math.pow(10, db / 20));
 const dbText = (g: number) => (g <= 0.001 ? '−∞' : `${dbOf(g) > 0 ? '+' : ''}${dbOf(g).toFixed(1)} dB`);
 const panText = (p: number) => (Math.abs(p) < 0.02 ? 'C' : p < 0 ? `G ${Math.round(-p * 100)}` : `D ${Math.round(p * 100)}`);
@@ -118,11 +120,11 @@ const CueMixPanel: React.FC<Props> = ({ tracks, mixes, onChange, onClose, isMobi
                       className="h-8 px-3 rounded-lg bg-white/5 text-[11px] font-bold text-slate-400 hover:text-red-300">Supprimer</button>
                   </div>
                   <Row label="Volume du mix" value={dbText(m.master ?? 1)}>
-                    <input type="range" min={-60} max={6} step={0.5} value={dbOf(m.master ?? 1)} aria-label={`Volume général de ${m.name}`}
+                    <input type="range" min={-60} max={FADER_MAX_DB} step={0.5} value={dbOf(m.master ?? 1)} aria-label={`Volume général de ${m.name}`}
                       onChange={e => upd(m.id, x => ({ ...x, master: gainOf(parseFloat(e.target.value)) }))} className="w-full accent-cyan-400" />
                   </Row>
                   <Row label="Clic" value={dbText(m.click)}>
-                    <input type="range" min={-60} max={6} step={0.5} value={dbOf(m.click)} data-testid={`cue-click-${m.id}`} aria-label={`Clic dans ${m.name}`}
+                    <input type="range" min={-60} max={FADER_MAX_DB} step={0.5} value={dbOf(m.click)} data-testid={`cue-click-${m.id}`} aria-label={`Clic dans ${m.name}`}
                       onChange={e => upd(m.id, x => ({ ...x, click: gainOf(parseFloat(e.target.value)) }))} className="w-full accent-amber-400" />
                   </Row>
                   <div className="rounded-xl border border-white/5 divide-y divide-white/5">
@@ -135,7 +137,7 @@ const CueMixPanel: React.FC<Props> = ({ tracks, mixes, onChange, onClose, isMobi
                           <span className={`min-w-0 flex-1 basis-24 truncate text-[12px] font-bold ${own ? 'text-white' : 'text-slate-400'}`} title={own ? t.name : `${t.name} : suit le mix principal`}>
                             {t.name}{t.isTrackArmed ? ' · 🎤' : ''}
                           </span>
-                          <input type="range" min={-60} max={6} step={0.5} value={dbOf(l.muted ? 0 : l.level)} data-testid={`cue-level-${m.id}-${t.id}`}
+                          <input type="range" min={-60} max={FADER_MAX_DB} step={0.5} value={dbOf(l.muted ? 0 : l.level)} data-testid={`cue-level-${m.id}-${t.id}`}
                             aria-label={`Niveau de ${t.name} dans ${m.name}`} aria-valuetext={dbText(l.level)}
                             onChange={e => upd(m.id, x => setCueLevel(x, t.id, { level: gainOf(parseFloat(e.target.value)), muted: false }, t))}
                             className="w-28 sm:w-36 accent-cyan-400" />

@@ -309,7 +309,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   return (
-    <div className="nova-grille fixed inset-0 bg-nv-bg flex flex-col overflow-hidden">
+    // Zones de sécurité de l'iPhone (encoche, barre d'état, côtés en paysage) : l'accueil est en plein écran.
+    <div className="nova-grille fixed inset-0 bg-nv-bg flex flex-col overflow-hidden pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Appli Windows : nouvelle version prête / disponible (dans la page, pousse le contenu). */}
       <DesktopUpdateCard />
       {/* Echec d'ecoute : le bouton revenait a son etat initial sans rien dire */}
@@ -386,7 +387,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       {/* Contenu principal */}
       {/* Téléphone : la page défile d'un bloc. Avant, la colonne « Démarrer » prenait 577 px
           sur 692 et le catalogue (ou ses actions de secours) n'avait plus que 32 px visibles. */}
-      <main className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
+      <main className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden pb-[env(safe-area-inset-bottom)]">
         {/* Sidebar gauche - Actions principales */}
         <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-nv-bg flex flex-col">
           <div className="p-4 space-y-3">

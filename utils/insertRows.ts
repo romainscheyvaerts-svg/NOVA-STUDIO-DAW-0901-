@@ -30,6 +30,7 @@ export function consoleSections(maxPlugins: number, anySends: boolean, coarse: b
   return { insertRows, showSends: sendView || anySends };
 }
 
-/** Hauteur (px) de la zone d'effets pour `rows` lignes à la souris : marges, en-tête, lignes de 20 px et espaces de 2 px (au doigt : 200). */
+/** Hauteur (px) de la zone d'effets pour `rows` lignes à la souris : marges, en-tête, lignes de 20 px et espaces de 2 px
+ *  (au doigt : 212, l'en-tête porte la charge processeur sur 24 px au lieu de 12 pour se toucher). */
 export const insertAreaHeight = (rows: number, coarse: boolean): number =>
-  coarse ? 200 : 29 + 22 * Math.max(1, Math.floor(rows));
+  coarse ? 212 : 29 + 22 * Math.max(1, Math.floor(rows));

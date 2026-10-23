@@ -220,8 +220,9 @@ export const sameOrder = (a: string[], b: string[]): boolean => a.length === b.l
  * sampleRate (12/10/2026) : la fréquence du projet est UNE pour tout le monde ;
  * reçue, le moteur de chacun s'y règle et convertit ses sons (App, utils/hqAudio).
  * null = projet d'avant le réglage (44,1 kHz). Ignorée par les anciennes versions.
+ * panLaw (22/10/2026) : loi de pan du projet (null = −3 dB), même son chez tout le monde.
  */
-export const SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'lyrics', 'lyricsRegions', 'sampleRate'] as const;
+export const SONG_FIELDS = ['projectKey', 'projectScale', 'arrangements', 'lyrics', 'lyricsRegions', 'sampleRate', 'panLaw'] as const;
 export type SongField = typeof SONG_FIELDS[number];
 
 export function songFieldsOf(s: Record<string, any>): Record<SongField, unknown> {
@@ -239,6 +240,8 @@ export function sanitizeSongField(f: SongField, v: unknown): unknown {
     case 'lyrics': return typeof v === 'string' ? v.slice(0, 20000) : undefined;
     case 'lyricsRegions': return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined;
     case 'sampleRate': return v === 44100 || v === 48000 || v === 88200 || v === 96000 ? v : undefined;
+    // Loi de pan du projet (22/10/2026) : une pour toute la séance, comme la fréquence.
+    case 'panLaw': return v === -3 || v === -4.5 || v === -6 || v === 0 ? v : undefined;
     case 'arrangements': return Array.isArray(v)
       ? v.filter((a: any) => a && typeof a.id === 'string' && Array.isArray(a.sections)).slice(0, 50)
         .map((a: any) => ({ ...a, name: String(a.name || 'Arrangement').slice(0, 80), sections: a.sections.filter((x: unknown) => typeof x === 'string'), mutedClipIds: Array.isArray(a.mutedClipIds) ? a.mutedClipIds.filter((x: unknown) => typeof x === 'string') : [] }))

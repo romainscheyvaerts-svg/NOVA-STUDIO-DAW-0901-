@@ -1,5 +1,7 @@
+import { FADER_MAX_GAIN, faderPosToGain, gainToFaderPos, LEGACY_FADER_MAX_GAIN } from './faderLaw';
 import type { AutomationCurveType, AutomationLane, AutomationPoint, Track } from '../types';
 import { parseRackChildKey, rackNestedValue, withRackNestedValue } from '../engine/fxRack';
+import { isStereoTrack, lanesForFormat, PAN_L, PAN_R, stereoPanOf, withStereoPan } from './panLaw';
 
 /**
  * Modes d'automation façon Pro Tools (Off, Read, Touch, Latch, Write, Trim) :
@@ -81,7 +83,12 @@ export const setLaneModulator = (fn: LaneModulator | null) => { laneModulator = 
 /** Voies réellement rejouées (lecture ET export) : aucune en mode Off (les modulateurs, eux, jouent toujours). */
 export const playedLanes = (track: Pick<Track, 'automationLanes'> & { automationMode?: string; modulators?: unknown[] }): AutomationLane[] => {
   const lanes = isAutomationPlayed(automationModeOf(track)) ? (track.automationLanes || []) : [];
-  return laneModulator && track.modulators?.length ? laneModulator(track, lanes) : lanes;
+  const played = laneModulator && track.modulators?.length ? laneModulator(track, lanes) : lanes;
+  // Pan selon le format de la piste (22/10/2026) : stéréo = « Pan G » / « Pan D » (ancienne voie
+  // « pan » convertie), mono = « pan ». Même résultat en lecture et à l'export.
+  const t = track as Partial<Track>;
+  if (!t.type || !played.some(l => l.parameterName === 'pan' || l.parameterName === PAN_L || l.parameterName === PAN_R)) return played;
+  return lanesForFormat(played, isStereoTrack(t as Track), interpolateCurve);
 };
 
 // --- Courbes ------------------------------------------------------------------------
@@ -156,12 +163,12 @@ const PLUGIN_RANGES: [RegExp, number, number][] = [
  * de la valeur entendue (elle s'élargit ensuite si l'écriture la dépasse).
  */
 export const paramSpec = (name: string, sample?: number): ParamSpec => {
-  if (name === 'volume' || name === PRE_VOLUME) return { min: 0, max: 1.5, kind: 'gain' };
-  if (name === 'pan') return { min: -1, max: 1, kind: 'pan' };
+  if (name === 'volume' || name === PRE_VOLUME) return { min: 0, max: FADER_MAX_GAIN, kind: 'gain' };
+  if (name === 'pan' || name === PAN_L || name === PAN_R) return { min: -1, max: 1, kind: 'pan' };
   // Tête de tranche (R11)
   if (name === 'trim') return { min: 0, max: 4, kind: 'gain' };
   if (name === 'width') return { min: 0, max: 2, kind: 'linear' };
-  if (name.startsWith(SEND_PREFIX)) return { min: 0, max: 1.5, kind: 'gain' };
+  if (name.startsWith(SEND_PREFIX)) return { min: 0, max: FADER_MAX_GAIN, kind: 'gain' };
   const p = parsePluginParam(name);
   const v = typeof sample === 'number' && Number.isFinite(sample) ? sample : 0;
   if (p) {
@@ -185,20 +192,37 @@ export const widenSpec = (spec: ParamSpec, values: number[]): ParamSpec => {
 
 export const clampToSpec = (spec: ParamSpec, v: number) => Math.max(spec.min, Math.min(spec.max, v));
 
-/** Valeur → position 0…1 (fader en racine du gain, comme la console de NOVA). */
+/** Valeur → position 0…1 (gain : échelle des faders de la console, utils/faderLaw). */
 export const normalize = (spec: ParamSpec, v: number): number => {
-  if (spec.kind === 'gain') return Math.sqrt(Math.max(0, v) / (spec.max || 1));
+  if (spec.kind === 'gain') return usesFaderScale(spec) ? gainToFaderPos(v) : Math.sqrt(Math.max(0, v) / (spec.max || 1));
   return (v - spec.min) / ((spec.max - spec.min) || 1);
+};
+
+/**
+ * Voie de volume / d'envoi (butée +12 dB, ou ancienne butée 1,5 pas encore relevée) : affichée avec
+ * l'échelle des faders (0 dB aux 3/4). Les autres gains (trim) gardent la racine du gain.
+ */
+export const usesFaderScale = (spec: Pick<ParamSpec, 'kind' | 'max'>): boolean =>
+  spec.kind === 'gain' && spec.max >= LEGACY_FADER_MAX_GAIN - 1e-9 && spec.max <= FADER_MAX_GAIN + 1e-6;
+
+/** Position 0…1 → valeur (inverse de normalize). */
+export const denormalize = (spec: ParamSpec, n: number): number => {
+  const x = Math.max(0, Math.min(1, n));
+  if (spec.kind === 'gain') return usesFaderScale(spec) ? faderPosToGain(x) : x * x * (spec.max || 1);
+  return spec.min + x * (spec.max - spec.min);
 };
 
 /** Paramètre piloté par un fader, un potard ou un effet (pas le volume avant effets). */
 export const isFaderParam = (name: string): boolean =>
-  name === 'volume' || name === 'pan' || name.startsWith(SEND_PREFIX) || !!parsePluginParam(name);
+  name === 'volume' || name === 'pan' || name === PAN_L || name === PAN_R || name.startsWith(SEND_PREFIX) || !!parsePluginParam(name);
 
 /** Valeur « statique » (réglage de la piste, hors automation). */
 export const staticParamValue = (track: Track, name: string): number | null => {
   if (name === 'volume') return track.volume;
   if (name === 'pan') return track.pan;
+  // Double pan d'une piste stéréo (G / D) : réglage écrit, ou ancien pan converti.
+  if (name === PAN_L) return stereoPanOf(track).l;
+  if (name === PAN_R) return stereoPanOf(track).r;
   if (name.startsWith(SEND_PREFIX)) {
     const id = name.slice(SEND_PREFIX.length);
     return (track.sends || []).find(s => s.id === id)?.level ?? null;
@@ -218,6 +242,10 @@ export const staticParamValue = (track: Track, name: string): number | null => {
 export const withStaticParamValue = (track: Track, name: string, value: number): Track => {
   if (name === 'volume') return { ...track, volume: value };
   if (name === 'pan') return { ...track, pan: value };
+  if (name === PAN_L || name === PAN_R) {
+    const sp = stereoPanOf(track);
+    return withStereoPan(track, name === PAN_L ? value : sp.l, name === PAN_R ? value : sp.r);
+  }
   if (name.startsWith(SEND_PREFIX)) {
     const id = name.slice(SEND_PREFIX.length);
     return { ...track, sends: (track.sends || []).map(s => s.id === id ? { ...s, level: value } : s) };
@@ -237,6 +265,8 @@ export const withStaticParamValue = (track: Track, name: string, value: number):
 export const laneDisplayName = (name: string, track?: Pick<Track, 'plugins'>): string => {
   if (name === 'volume') return 'Volume';
   if (name === 'pan') return 'Panoramique';
+  if (name === PAN_L) return 'Pan G';
+  if (name === PAN_R) return 'Pan D';
   if (name === PRE_VOLUME) return 'Volume avant effets';
   if (name === 'trim') return "Trim d'entrée";
   if (name === 'width') return 'Largeur stéréo';

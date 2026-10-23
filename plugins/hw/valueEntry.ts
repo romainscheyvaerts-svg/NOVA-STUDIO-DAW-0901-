@@ -10,6 +10,7 @@
  * monotone sur la course (c'est le cas de tous les réglages continus).
  */
 import { fromNorm, quantize, type KnobRange } from './knobMath';
+import { FADER_MAX_GAIN } from '../../utils/faderLaw';
 
 const UNIT_MUL: Record<string, number> = { hz: 1, khz: 1000, k: 1000, ms: 0.001, s: 1, sec: 1, db: 1, '%': 1, x: 1 };
 const FAMILY: Record<string, string> = { hz: 'f', khz: 'f', k: 'f', ms: 't', s: 't', sec: 't' };
@@ -90,8 +91,8 @@ export function solveTypedValue(range: KnobRange, format: (v: number) => string,
   return quantize(range, (v0 + v1) / 2);
 }
 
-/** Gain linéaire (0…max) pour un texte en dB (« -3,5 », « +2 dB », « -inf ») ; null si illisible. */
-export function dbTextToGain(typed: string, maxGain = 1.5): number | null {
+/** Gain linéaire (0…max, +12 dB par défaut comme les faders) pour un texte en dB (« -3,5 », « +2 dB », « -inf ») ; null si illisible. */
+export function dbTextToGain(typed: string, maxGain = FADER_MAX_GAIN): number | null {
   const p = parseShown(typed);
   if (!p || (p.unit && p.unit !== 'db')) return null;
   if (p.num === -Infinity || p.num <= -120) return 0;

@@ -316,7 +316,7 @@ def seance_voix(ch, res):
 
     ch.start("Éditer", "Justesse note par note (appui long, ouvrir, fermer)")
     if pt: long_press(ch, pt[0], pt[1], "clip de la lead")
-    tap(ch, r"^Justesse note par note…", "Justesse…", scope="[role=menu]")
+    tap(ch, r"^Éditer les notes de la voix…", "Notes de la voix…", scope="[role=menu]")
     ch.wait_js("() => !!document.querySelector('[data-testid=pitch-editor]')", 10000, "éditeur de justesse")
     page.screenshot(path=str(OUT / "tab_voix_03_justesse.png"))
     tap(ch, r"^Fermer", "Fermer la justesse", scope="[data-testid=pitch-editor]")

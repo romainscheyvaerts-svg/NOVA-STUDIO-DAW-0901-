@@ -9,6 +9,7 @@
  *
  * Données pures (aucun React) : tests/soundPlace.test.ts.
  */
+import { FADER_MAX_GAIN } from './faderLaw';
 import type { Clip, DAWState, MidiNote, Track } from '../types';
 import { TrackType } from '../types';
 import { newChordId, replaceRange } from './chordTrack';
@@ -97,7 +98,7 @@ export function withDrumMachine(st: DAWState, dmIn: DrumMachine): DAWState {
     const t: Track = {
       id: DRUM_TRACK_ID, name: 'PERCUSSIONS', type: TrackType.DRUM_RACK, color: '#f97316', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
       volume: 0.85, pan: 0, outputTrackId: 'master', sends: [], clips, plugins: [],
-      automationLanes: [{ id: `auto-${Date.now().toString(36)}-drums`, parameterName: 'volume', points: [], color: '#f97316', isExpanded: false, min: 0, max: 1.5 }],
+      automationLanes: [{ id: `auto-${Date.now().toString(36)}-drums`, parameterName: 'volume', points: [], color: '#f97316', isExpanded: false, min: 0, max: FADER_MAX_GAIN }],
       totalLatency: 0, drumMachine: dm, drumPads: drumPadsFor(dm) as any,
     } as Track;
     tracks.splice(tracks.findIndex(x => x.id === 'instrumental') + 1, 0, t);
