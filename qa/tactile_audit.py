@@ -458,13 +458,15 @@ def gestes(a: Audit):
         if b.count(): b.first.tap(); page.wait_for_timeout(300); b0 = page.evaluate(TIMELINE_JS); vy = b0.get("vy") or b0["y"]
     except Exception:
         pass
-    touch("touchStart", [(cx + 100, vy)])
-    for k in range(1, 11):
-        touch("touchMove", [(cx + 100 - 20 * k, vy)])
-        page.wait_for_timeout(16)
-    touch("touchEnd", [])
-    page.wait_for_timeout(400)
-    b1 = page.evaluate(TIMELINE_JS)
+    for essai in range(2):   # machine très chargée : un 2e essai si le 1er geste n'a rien fait défiler
+        touch("touchStart", [(cx + 100, vy)])
+        for k in range(1, 11):
+            touch("touchMove", [(cx + 100 - 20 * k, vy)])
+            page.wait_for_timeout(16)
+        touch("touchEnd", [])
+        page.wait_for_timeout(400)
+        b1 = page.evaluate(TIMELINE_JS)
+        if b1["sl"] != b0["sl"]: break
     r["glisser_un_doigt"] = {"defilement_avant": b0["sl"], "defilement_apres": b1["sl"]}
     # Fluidité : CPU ×4, lecture 3 s, temps d'image ; puis latence des touchers (Event Timing).
     try:

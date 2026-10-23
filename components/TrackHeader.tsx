@@ -686,7 +686,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-label={`Effets de ${track.name}`}
                 aria-expanded={fxMenu}
                 aria-haspopup="menu"
-                className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+                className={`nova-hit-tactile relative w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
               >
                 FX
                 {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
@@ -708,7 +708,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
                           aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
                           aria-pressed={p.isEnabled}
-                          className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
+                          className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
                           <i className="fas fa-power-off text-[9px]" />
                         </button>
                       </div>
@@ -732,7 +732,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onClick={handleMuteToggle}
             // Pas de onTouchStart : React l'écoute en passif, preventDefault échouait et le
             // clic qui suit rebasculait (M / S / R / envois sans effet au doigt).
-            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+            className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">M</span>
           </button>
@@ -742,7 +742,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             aria-pressed={!!track.isSolo}
             data-solo-safe={track.soloSafe ? '1' : undefined}
             onClick={handleSoloToggle}
-            className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-amber-400/70 text-amber-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+            className={`nova-hit-tactile relative w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-amber-400/70 text-amber-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">S</span>
             {track.soloSafe && <i className="fas fa-shield-alt absolute -top-1 -right-1 text-[8px] text-amber-300 drop-shadow" aria-hidden="true" />}
@@ -756,7 +756,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
                 // Au doigt : dans le menu « ⋯ » de la piste (Envois), pour laisser 44 px à chaque bouton de la rangée.
-                className={`nova-hit-tactile [@media(pointer:coarse)]:hidden w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
+                className={`nova-hit-tactile [@media(pointer:coarse)]:hidden w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
@@ -766,7 +766,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); noteArmClick(e); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
                 title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer (toutes les pistes armées enregistrent ensemble)" : "Armer : cette piste enregistre aussi (plusieurs pistes armées = plusieurs micros). Maj+clic : armer celle-ci seule"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -780,7 +780,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button
                 data-nova-arm-midi={track.id}
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                className={`nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
                 title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus"}
                 aria-label={`Armer l'enregistrement MIDI : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -793,7 +793,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {!simple && track.id !== 'master' && (
             <ToolbarMenu testId={`track-more-${track.id}`} menuLabel={`Piste ${track.name}`} width={260} alignRight
               ariaLabel={`Plus d'options : ${track.name}`} title="Plus d'options : envois, mode d'automation, dupliquer, couleur, geler… (aussi : clic droit sur la piste)"
-              triggerClassName="nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
+              triggerClassName="nova-hit-tactile w-7 h-7 [@media(pointer:coarse)]:w-[30px] rounded-md flex items-center justify-center bg-white/[0.06] text-slate-400 hover:text-white transition-all"
               label={<i className="fas fa-ellipsis-h text-[10px]" aria-hidden="true" />}>
               {(close) => (<>
                 {canHaveSends && (

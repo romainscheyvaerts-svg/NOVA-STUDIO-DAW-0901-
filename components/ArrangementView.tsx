@@ -411,10 +411,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, []);
 
   // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
-  // Écran tactile en vue PC (iPad paysage) : boutons espacés au pas de 40 px,
-  // 40 px de plus pour que le nom reste lisible.
+  // Écran tactile (iPad portrait comme paysage) : boutons au pas de 44 px, 40 px de plus pour que le nom
+  // reste lisible (en portrait, le nom de la piste REC disparaissait derrière FX, M, S, R).
   const [headerWidth, setHeaderWidth] = useState(() =>
-    typeof window !== 'undefined' && window.innerWidth >= 1024 && window.matchMedia?.('(pointer: coarse)').matches ? 336 : 296);
+    typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 336 : 296);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
 
@@ -3123,13 +3123,13 @@ useEffect(() => {
         <div className="flex items-center space-x-4 shrink-0">
           {/* Au doigt : outils de 40 px (36 px à la souris) */}
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SMART')} aria-pressed={activeTool === 'SMART'} className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'SMART' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Smart Tool (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
-            {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+            {!simple && <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Sélecteur (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>}
-            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
             {/* Mode avancé : scrub, zoom, crayon, ligne de gain, mode boucle et Trim TCE sont dans « Outils ▾ » (EditToolbarMenus). */}
           </div>
           {/* Allégé (22/10/2026) : les outils rares dans « Outils ▾ » (l'outil actif s'affiche sur le bouton),
