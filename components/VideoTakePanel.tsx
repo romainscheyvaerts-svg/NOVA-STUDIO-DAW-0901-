@@ -119,7 +119,7 @@ const VideoTakeDock: React.FC<Props> = props => {
         <button type="button" onClick={onOpen} className="h-10 rounded-full px-3 text-[13px] font-bold hover:bg-nv-accent/10 whitespace-nowrap" aria-label="Filmer la prise avec la caméra"
           title="Filme-toi pendant la prise : la vidéo se cale sur ton son"><span data-dock-icon>🎥</span><span data-dock-label> Filmer la prise</span></button>
         <button type="button" onClick={() => { setPillHidden(true); try { sessionStorage.setItem(HIDE_PILL, '1'); } catch { /* */ } }}
-          className="h-8 w-8 rounded-full text-nv-muted hover:bg-nv-accent/10" aria-label="Masquer « Filmer la prise » (palette Ctrl+K : « caméra »)" title="Masquer (Ctrl+K « caméra » pour la retrouver)">×</button>
+          className="h-10 w-10 rounded-full text-nv-muted hover:bg-nv-accent/10" aria-label="Masquer « Filmer la prise » (palette Ctrl+K : « caméra »)" title="Masquer (Ctrl+K « caméra » pour la retrouver)">×</button>
       </div>
     );
     return dock ? createPortal(pill, dock) : pill;

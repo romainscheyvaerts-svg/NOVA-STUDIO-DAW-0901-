@@ -102,7 +102,8 @@ const PanSideKnob: React.FC<KnobProps> = ({ track, side, value, size, onChange, 
         <button type="button" onClick={() => { done.current = false; setEditing(true); }}
           title={`Clic pour taper le pan ${letter} (ex. 100G, 30D, C), puis Entrée`}
           data-testid={`pan-${side === 'l' ? 'g' : 'd'}-value-${track.id}`}
-          className="min-w-[34px] rounded bg-black/50 px-1 text-[9px] font-mono font-bold tabular-nums text-slate-200 hover:text-white cursor-text">{text}</button>
+          // Au doigt (tablette) : 28 px de haut au lieu de 19 (audit tactile : cible trop petite).
+          className={`min-w-[34px] rounded bg-black/50 px-1 font-mono font-bold tabular-nums text-slate-200 hover:text-white cursor-text ${coarsePointer() ? 'min-h-[28px] text-[11px]' : 'text-[9px]'}`}>{text}</button>
       ))}
     </div>
   );
