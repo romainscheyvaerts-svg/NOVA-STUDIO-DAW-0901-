@@ -183,7 +183,7 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                 )}
                 {onSaveNewVersion && (
                   <div className="col-span-2 p-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5 space-y-2" data-testid="save-new-version-box">
-                    <span className="block text-[12px] font-black text-white" title="File › Save As New Version ; Logic : Project Alternatives">🔖 Enregistrer comme nouvelle version</span>
+                    <span className="block text-[12px] font-black text-white" title="Garde l’état actuel sous un nouveau numéro (v2, v3…), sans toucher aux versions d’avant">🔖 Enregistrer comme nouvelle version</span>
                     <span className="block text-[11px] text-slate-400">Le projet devient « {nextVersionLabel || 'v2'} ». La version est marquée dans l'historique (jamais effacée) : restaure-la ou compare-la plus tard.</span>
                     <input value={versionComment} onChange={e => setVersionComment(e.target.value)} maxLength={400} aria-label="Commentaire de la version"
                       placeholder="Commentaire (ex. : mix validé par l'artiste)" data-testid="save-new-version-comment"

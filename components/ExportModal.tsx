@@ -447,7 +447,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     <label className="space-y-1 block" data-testid="export-arrangement">
       <span className={lab}>Arrangement</span>
       <select value={arrangementId} disabled={isRendering} className={sel} aria-label="Arrangement exporté"
-        title="Exporter un arrangement précis (clean, explicite, radio edit…) : sections dans son ordre, passages coupés. Logic : Arrangement Alternatives ; ailleurs : une session par version."
+        title="Exporter un arrangement précis (clean, explicite, radio edit…) : sections dans son ordre, passages coupés. Pas besoin d’un projet par version."
         onChange={e => {
           const id = e.target.value;
           setArrangementId(id);
@@ -657,7 +657,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <span className={lab}>Quoi</span>
                             {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
                             <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-nv-line/15 bg-nv-well/40 p-1">
-                              {([['MASTER', 'Mix', 'Le morceau mixé (Bounce Mix ; Logic : Bounce ; Ableton : Export Audio ; FL : Export)'], ['STEMS', 'Stems', 'Les pistes séparées, alignées au début, même longueur (Track Bounce ; Ableton : Export individual tracks ; FL : Split mixer tracks)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
+                              {([['MASTER', 'Mix', 'Le morceau mixé, en un seul fichier'], ['STEMS', 'Stems', 'Les pistes séparées, alignées au début, même longueur, un fichier par piste'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
                                 <button key={v} type="button" role="radio" aria-checked={source === v} title={h} disabled={isRendering}
                                   data-testid={`export-source-${v}`}
                                   onClick={() => { sourceTouched.current = true; setSource(v); }}
@@ -680,7 +680,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                               <span className={lab}>Découpage</span>
                               <select value={grouping} onChange={e => setGrouping(e.target.value as StemGrouping)} disabled={isRendering} className={sel}
-                                title="Par piste (Track Bounce), par bus (Logic : Bounce des Track Stacks ; FL : Split mixer tracks), par dossier (Routing Folders) ou instru / voix (ce que demande l'ingé)">
+                                title="Par piste, par bus, par dossier ou instru / voix (ce que demande l'ingé)">
                                 <option value="tracks">Une piste = un fichier</option>
                                 <option value="buses">Par bus (bus voix, bus batterie…)</option>
                                 <option value="folders">Par dossier</option>
@@ -711,7 +711,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                           <label className="space-y-1 block">
                             <span className={lab}>Durée</span>
                             <select value={rangeMode} onChange={e => setRangeMode(e.target.value as RangeMode)} disabled={isRendering} className={sel}
-                              title="Tout, la boucle, ta sélection ou d'un repère à l'autre (Bounce de la sélection ; Logic : entre les localisateurs)">
+                              title="Tout, la boucle, ta sélection ou d'un repère à l'autre">
                               <option value="FULL">Tout le morceau</option>
                               <option value="LOOP">Zone de boucle ({fmtS(projectState.loopStart)} → {fmtS(projectState.loopEnd)})</option>
                               {selRange && <option value="SELECTION">Ta sélection ({fmtS(selRange.start)} → {fmtS(selRange.end)})</option>}
@@ -722,7 +722,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <span className={lab}>Queue (réverbe après la fin)</span>
                             <div className="flex gap-2">
                               <select value={tailMode} onChange={e => setTailMode(e.target.value as TailMode)} disabled={isRendering} className={sel}
-                                title="Auto : NOVA attend que la réverbe retombe (−80 dBFS, 10 s au plus). Réglée : durée fixe. Coupée : rien après la fin (FL : Cut remainder). Bouclée : la queue revient au début, pour une boucle sans trou (FL : Wrap remainder).">
+                                title="Auto : NOVA attend que la réverbe retombe (−80 dBFS, 10 s au plus). Réglée : durée fixe. Coupée : rien après la fin. Bouclée : la queue revient au début, pour une boucle sans trou.">
                                 <option value="auto">Auto (fin de la réverbe)</option>
                                 <option value="manual">Réglée</option>
                                 <option value="cut">Coupée net</option>
@@ -761,9 +761,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                                 <span className={lab}>Type de fichier</span>
                                 <select value={format} onChange={e => setFormat(e.target.value as ExportFormat)} disabled={isRendering} className={sel}
-                                  title="WAV : le standard des studios (lu partout : logiciels de studio, Ableton, FL). AIFF : le standard Mac (Logic). FLAC : sans perte et 40 % plus léger. MP3 : pour partager.">
+                                  title="WAV : le standard des studios (lu par tous les logiciels de studio). AIFF : le standard Mac. FLAC : sans perte et 40 % plus léger. MP3 : pour partager.">
                                     <option value="WAV">WAV (qualité studio)</option>
-                                    <option value="AIFF">AIFF (Mac, Logic)</option>
+                                    <option value="AIFF">AIFF (Mac)</option>
                                     <option value="FLAC">FLAC (sans perte, plus léger)</option>
                                     <option value="MP3">MP3 (pour partager)</option>
                                 </select>
@@ -811,7 +811,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             </label>
                         </div>
                         {format !== 'MP3' && effBits < 32 && (
-                          <label className="flex items-center gap-2 text-[12px] text-nv-ink" title="Dither TPDF : un bruit infime qui évite la distorsion de quantification en passant à 16 bits (POW-r ; Logic : Dither ; Ableton : Triangular)">
+                          <label className="flex items-center gap-2 text-[12px] text-nv-ink" title="Dither TPDF : un bruit infime qui évite la distorsion de quantification en passant à 16 bits">
                             <input type="checkbox" checked={dither} onChange={e => setDither(e.target.checked)} disabled={isRendering} />
                             Dither (adoucit le passage en {effBits} bits{effBits === 16 ? ', conseillé' : ''})
                           </label>
@@ -867,7 +867,7 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
                           <p className="sm:col-span-2 text-[11px] text-nv-muted">
                             {format === 'MP3' ? 'Dans le MP3 : titre, artiste, BPM, tonalité, ISRC et pochette (ID3).'
                               : format === 'FLAC' ? 'Dans le FLAC : titre, artiste, BPM, tonalité, ISRC et pochette.'
-                              : `Dans le ${format} : titre, artiste, BPM et mesure, tonalité, ISRC, repères et loudness (BWF), lus par les logiciels de studio, Logic, Ableton et FL.`}
+                              : `Dans le ${format} : titre, artiste, BPM et mesure, tonalité, ISRC, repères et loudness (BWF), lus par les logiciels de studio.`}
                           </p>
                         </div>
                     </div>
@@ -947,7 +947,7 @@ ${JARGON.lra}`}>À la fin, NOVA mesure le fichier : LUFS intégrés (volume ress
                         </button>
                         {!bloque && !needsVoicesPayment && (
                           <button type="button" onClick={() => void handleExport(true)} disabled={isRendering || payWait} data-testid="export-queue"
-                            title="Lance cet export en arrière-plan et garde la fenêtre libre : ajoute ensuite un MP3, les stems… (Bounce en arrière-plan ; Logic : file de bounce). Une notification te prévient à la fin."
+                            title="Lance cet export en arrière-plan et garde la fenêtre libre : ajoute ensuite un MP3, les stems… Une notification te prévient à la fin."
                             className="w-full min-h-10 rounded-xl border border-nv-line/15 text-[12px] font-bold text-nv-ink hover:bg-nv-raised disabled:opacity-50">
                             <i className="fas fa-layer-group mr-1.5" aria-hidden="true"></i>Ajouter à la file d'exports
                           </button>

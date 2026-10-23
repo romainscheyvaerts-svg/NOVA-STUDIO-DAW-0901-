@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { DAWState } from '../types';
-import { wavOf } from './AudioUtils';
+import { wavOf, wav16Of } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
@@ -20,7 +20,7 @@ import { analysisCache, analysisKey, decodeAnalysis, encodeAnalysis } from '../e
  * WAV d'un son pour le .zip, encodé dans sa propre tâche : avant, les 60 sons d'une grosse
  * séance étaient encodés d'un bloc (interface figée 1,3 s). JSZip attend la promesse.
  */
-const wavLater = (b: AudioBuffer): Promise<Blob> => new Promise(r => setTimeout(() => r(wavOf(b)), 0));
+const wavLater = (b: AudioBuffer, depth: 'lossless' | 16 = 'lossless'): Promise<Blob> => new Promise(r => setTimeout(() => r(depth === 16 ? wav16Of(b) : wavOf(b)), 0));
 
 /** Au plus `n` tâches à la fois (décodage des sons à l'ouverture). */
 function limitConcurrency(n: number) {
@@ -44,7 +44,12 @@ export class ProjectIO {
    * Sauvegarde l'état actuel et les fichiers audio dans un ZIP.
    * EXCLUSION INTELLIGENTE : Les fichiers audio des instruments du store non achetés ne sont PAS inclus.
    */
-  public static async saveProject(state: DAWState, ownedInstrumentIds: (string | number)[] = []): Promise<Blob> {
+  /**
+   * `opts.audio` : 'lossless' (défaut : fichier .zip, envoi au studio ; sons relus au bit près) ou 16
+   * (séance en ligne : taille et trafic ; voir services/AudioUtils).
+   */
+  public static async saveProject(state: DAWState, ownedInstrumentIds: (string | number)[] = [], opts: { audio?: 'lossless' | 16 } = {}): Promise<Blob> {
+    const depth = opts.audio ?? 'lossless';
     const zip = new JSZip();
     // Playlists rangées : leurs clips passent par le même chemin que les autres (son écrit une fois), puis reviennent à leur place.
     state = packPlaylists(state);
@@ -103,7 +108,7 @@ export class ProjectIO {
                     if (!written.has(filename)) {
                         written.add(filename);
                         // Conversion AudioBuffer -> WAV Blob
-                        const wavBlob = wavLater(buffer);
+                        const wavBlob = wavLater(buffer, depth);
                         if (audioFolder) {
                             audioFolder.file(filename, wavBlob);
                         }
@@ -124,7 +129,7 @@ export class ProjectIO {
                     const filename = `${srcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf, depth));
                     }
                     sClip.pitchEdit.sourceRef = `audio/${filename}`;
                 }
@@ -144,7 +149,7 @@ export class ProjectIO {
                     const filename = `${araSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf, depth));
                     }
                     sClip.araEdit.sourceRef = `audio/${filename}`;
                 }
@@ -158,7 +163,7 @@ export class ProjectIO {
                     const filename = `${grSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf, depth));
                     }
                     sClip.gainRender.sourceRef = `audio/${filename}`;
                 }
@@ -172,7 +177,7 @@ export class ProjectIO {
                     const filename = `${asSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf, depth));
                     }
                     sClip.audioSuite.sourceRef = `audio/${filename}`;
                 }
@@ -186,7 +191,7 @@ export class ProjectIO {
                     const filename = `${elSrcId}.wav`;
                     if (!written.has(filename)) {
                         written.add(filename);
-                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf));
+                        if (audioFolder) audioFolder.file(filename, wavLater(srcBuf, depth));
                     }
                     sClip.elastic.sourceRef = `audio/${filename}`;
                 }
@@ -196,7 +201,7 @@ export class ProjectIO {
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
         for (const f of padSampleFiles(track, k => audioBufferRegistry.get(k))) {
-            if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavLater(f.buffer)); }
+            if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavLater(f.buffer, depth)); }
             sTrack.drumMachine.samples[f.id].audioRef = `audio/${f.filename}`;
         }
 
@@ -206,7 +211,7 @@ export class ProjectIO {
         // Son des kits NOVA : seulement la référence (rechargé depuis la bibliothèque à la réouverture).
         if (msId && msBuf && sTrack.melodicSampler && !track.melodicSampler?.kitRef) {
             const filename = `${samplerBufferKey(msId)}.wav`;
-            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(msBuf)); }
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(msBuf, depth)); }
             sTrack.melodicSampler.audioRef = `audio/${filename}`;
         }
 
@@ -218,7 +223,7 @@ export class ProjectIO {
             const buf = audioBufferRegistry.get(key);
             if (!buf) return;
             const filename = `${key.replace(/[^a-zA-Z0-9_-]/g, '-')}.wav`;
-            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf, depth)); }
             const sp = sTrack.plugins?.[pIndex];
             if (sp && sp.params) sp.params.irAudioRef = `audio/${filename}`;
         });
@@ -228,7 +233,7 @@ export class ProjectIO {
         const frozenBuffer = track.frozenClip?.bufferId ? audioBufferRegistry.get(track.frozenClip.bufferId) : undefined;
         if (track.frozenClip && frozenBuffer && shouldPersistFrozen(track)) {
             const filename = `frozen-${track.id}.wav`;
-            if (audioFolder) audioFolder.file(filename, wavLater(frozenBuffer));
+            if (audioFolder) audioFolder.file(filename, wavLater(frozenBuffer, depth));
             sTrack.frozenClip.audioRef = `audio/${filename}`;
             delete sTrack.frozenClip.buffer;
             delete sTrack.frozenClip.bufferId;
@@ -254,7 +259,7 @@ export class ProjectIO {
             const buf = sf.clip.bufferId ? audioBufferRegistry.get(sf.clip.bufferId) : undefined;
             if (!bus || !buf || !bus.frozenClip || bus.frozenClip.id !== sf.busRenderId || !shouldPersistFrozen(bus)) return;
             const filename = `send-${track.id}-${sf.busId}.wav`;
-            if (audioFolder) audioFolder.file(filename, wavLater(buf));
+            if (audioFolder) audioFolder.file(filename, wavLater(buf, depth));
             const sSf = sTrack.sendFreezes[i];
             sSf.clip.audioRef = `audio/${filename}`;
             delete sSf.clip.buffer;
@@ -272,7 +277,7 @@ export class ProjectIO {
                 const buf = bc.bufferId ? audioBufferRegistry.get(bc.bufferId) : undefined;
                 if (buf && !isUnlicensedStoreBeat) {
                     const filename = `${bc.bufferId}.wav`;
-                    if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
+                    if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf, depth)); }
                     bc.audioRef = `audio/${filename}`;
                 }
                 delete bc.bufferId;
@@ -294,7 +299,7 @@ export class ProjectIO {
             if (c.bufferId && !buf) return; // son déjà libéré : rien à garder
             if (buf) {
                 const filename = `${c.bufferId}.wav`;
-                if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf)); }
+                if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavLater(buf, depth)); }
                 sc.audioRef = `audio/${filename}`;
                 delete sc.bufferId;
             }

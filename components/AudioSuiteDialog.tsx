@@ -269,7 +269,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, initialSource
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-black">Traitement de clip</h2>
-            <p className="text-[11px] text-nv-muted" title="Logic : Traitement de fichier · Ableton : effet puis Consolidate · FL : Edison">
+            <p className="text-[11px] text-nv-muted" title="Le son traité remplace celui du clip ; l'original reste disponible">
               Traite {resolved.length} clip{resolved.length > 1 ? 's' : ''}{range ? ' de la plage' : ''} avec un effet, comme le traitement hors ligne des studios. L'original est gardé.
             </p>
           </div>

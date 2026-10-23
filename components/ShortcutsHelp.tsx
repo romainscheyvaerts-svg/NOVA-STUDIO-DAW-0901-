@@ -31,7 +31,7 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
               className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-[12px] font-bold text-slate-200 hover:bg-white/10">🪟 Dispositions</button>
           )}
           {onCustomize && (
-            <button type="button" onClick={onCustomize} data-testid="shortcuts-customize" title="Changer les touches, choisir un jeu Studio pro, FL Studio ou Ableton Live"
+            <button type="button" onClick={onCustomize} data-testid="shortcuts-customize" title="Changer les touches, choisir un jeu de raccourcis : Studio pro, Beatmaking ou Clips et boucles"
               className="h-9 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 text-[12px] font-bold text-cyan-200 hover:bg-cyan-500/20">Personnaliser</button>
           )}
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>

@@ -222,7 +222,7 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   // R4 : Track Presets (Pro Tools 2020+).
   if (!target.isVca && !target.folder) items.push({
     label: 'Track Preset…', icon: 'fa-bookmark',
-    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
+    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Track Presets)',
     onClick: () => openNovaWindow('track-preset', { trackId: id }),
   });
   // VCA : reporter son gain dans ses pistes (Pro Tools « Coalesce VCA Automation », utils/vcaCoalesce).
@@ -251,12 +251,12 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   // R6 : Commit, impression de bus, restauration.
   if (canCommit(target) && (target.clips || []).length) items.push({
     label: 'Commit (rendre avec les effets)…', icon: 'fa-check-double',
-    title: 'La piste rendue avec ses effets remplace l’originale, gardée inactive et masquée (Commit · Logic : Bounce in Place · Ableton : Freeze and Flatten · FL : Consolidate)',
+    title: 'La piste rendue avec ses effets remplace l’originale, gardée inactive et masquée (Commit)',
     onClick: () => openNovaWindow('bounce', { trackId: id, bounce: { mode: 'commit' } }),
   });
   if (canPrintBus(target)) items.push({
     label: 'Imprimer le bus sur une nouvelle piste…', icon: 'fa-print',
-    title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (enregistrer un bus · Logic : Bounce in Place d’un aux · Ableton : Resample)',
+    title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (enregistrer un bus)',
     onClick: () => openNovaWindow('print-bus', { trackId: id }),
   });
   items.push({ label: 'Commit / geler plusieurs pistes…', icon: 'fa-layer-group', shortcut: 'Alt+Maj+C',

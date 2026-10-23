@@ -45,7 +45,7 @@ export const NovaLimiterUI: React.FC<Props> = ({ node, initialParams, onParamsCh
   );
   return (
     <HwWindow type="LIMITER" width={600} accent={ACCENT} accentInk="#1a1102" latencyMs={latencyMs} fallback={!!node?.isFallback?.()}
-      idleHelp={<>Maximiseur à plafond en crête vraie, pour le master ou la 808 (comme Maximus dans FL Studio ou le Limiter de Live). <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
+      idleHelp={<>Maximiseur à plafond en crête vraie, pour le master ou la 808. <span style={{ color: '#7d8696' }}>Survole ou touche un réglage : son rôle s'affiche ici.</span></>}>
       <Faceplate finish="steel" model="Nova Limiter" kicker="Maximiseur · crête vraie" modelStyle="wide" style={{ ['--hw-accent' as any]: ACCENT }}>
         <div className="flex flex-wrap sm:flex-nowrap items-stretch justify-center gap-4">
           <div className="w-full sm:w-auto sm:flex-1 min-w-0">

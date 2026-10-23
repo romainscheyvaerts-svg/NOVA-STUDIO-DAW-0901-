@@ -16,8 +16,9 @@ describe('séparation de stems : logique', () => {
   it('nomme les pistes en français', () => {
     expect(STEM_SETS[4].map(stemTrackName)).toEqual(['Voix (stem)', 'Batterie (stem)', 'Basse (stem)', 'Autres (stem)']);
     expect(STEM_SETS[2].map(stemTrackName)).toEqual(['Voix (stem)', 'Instru (stem)']);
-    expect(STEMS_TOOLTIP).toMatch(/Stem Splitter dans Logic/);
-    expect(STEMS_TOOLTIP).toMatch(/FL Studio/);
+    expect(STEMS_TOOLTIP).toMatch(/la voix lead des chœurs/);
+    expect(STEMS_TOOLTIP).toMatch(/Calcul gratuit sur ton appareil/);
+    expect(STEMS_TOOLTIP).not.toMatch(/Logic|FL Studio|BandLab|Ableton|Pro Tools/);
     expect(STEMS_INSTALL_LABEL).toBe('Installer la séparation de stems (~2 Go, une fois)');
   });
 
@@ -87,7 +88,7 @@ describe('lot 6 : 6 stems, voix lead / chœurs, MIDI, licence', () => {
     expect(STEM_SET_ORDER).toEqual([2, 4, 6, 'leadback']);
     for (const k of STEM_SET_ORDER) expect(STEM_SET_CHOICES[String(k)].title).toBeTruthy();
     expect(STEM_SET_CHOICES[6].note).toMatch(/piano/i);
-    expect(STEMS_TOOLTIP).toMatch(/BandLab/);
+    expect(STEMS_TOOLTIP).toMatch(/6 stems et voix lead \/ chœurs/);
     expect(LEADBACK_CREDIT).toMatch(/Ultimate Vocal Remover.*MIT/);
   });
 

@@ -298,7 +298,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                 hint="Le temps de te placer devant le micro. Longueur, son et volume : ▾ à côté du métronome (comme Click/Countoff)."
               />
               {p.onCaptureMinutes && (
-                <div className="py-2 flex items-center justify-between gap-3" title="Pendant la lecture avec une piste armée, NOVA garde les dernières minutes du micro : « Capturer la dernière prise » (Maj+R) récupère un freestyle chanté sans avoir appuyé sur REC (Logic : Capture as Recording).">
+                <div className="py-2 flex items-center justify-between gap-3" title="Pendant la lecture avec une piste armée, NOVA garde les dernières minutes du micro : « Capturer la dernière prise » (Maj+R) récupère un freestyle chanté sans avoir appuyé sur REC.">
                   <span className="text-[12px] text-slate-200">Capture après coup : garder</span>
                   <select value={p.captureMinutes} onChange={e => p.onCaptureMinutes!(Number(e.target.value))} aria-label="Durée gardée par la capture après coup"
                     className="min-h-9 rounded-lg bg-white/5 border border-white/10 px-2 text-[12px] text-white">

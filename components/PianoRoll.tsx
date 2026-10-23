@@ -30,6 +30,7 @@ import {
   NoteClipboard, humanize, toggleSlide, slideOrigins, velocityColor, inkOn, resizeNotesBy, copyForDrag,
 } from '../utils/pianoRollPro';
 import './pianoroll/pianoroll.css';
+import { useFocusOnOpen } from '../hooks/useFocusOnOpen';
 
 /**
  * Piano roll (éditeur de notes MIDI).
@@ -265,6 +266,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   const light = useTheme().theme === 'light';
   const G = light ? GRID_THEME.light : GRID_THEME.dark;
   const { simple } = useSimpleMode();
+  // Le focus clavier entre dans le piano roll (plein écran) : Entrée n'active plus le bouton caché derrière.
+  const rollRootRef = useRef<HTMLDivElement>(null);
+  useFocusOnOpen(rollRootRef);
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   // Piste tempo (R2) : la grille et la quantification du clip suivent le tempo à l'endroit du clip.
@@ -1730,7 +1734,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   } as React.CSSProperties;
 
   return (
-    <div data-nova-pianoroll="" data-zoom-x={Math.round(zoomX)} className="w-full h-full flex flex-col bg-nv-surface select-none text-white font-inter">
+    <div data-nova-pianoroll="" ref={rollRootRef} tabIndex={-1} data-zoom-x={Math.round(zoomX)} className="w-full h-full flex flex-col bg-nv-surface select-none text-white font-inter outline-none">
        {/* BARRE (piano roll pratique, 22/10/2026) : pas de mur de boutons. Visibles : l'outil actif, la grille, la gamme ;
            le reste dans « Outils ▾ », « Notes ▾ », « Vue ▾ » et au clic droit dans la grille. Fermer reste à droite. */}
        <div data-nova-roll="barre" className="pr-bar min-h-14 flex items-center gap-2 px-3 shrink-0">

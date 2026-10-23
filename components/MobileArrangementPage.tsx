@@ -775,7 +775,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           rien pendant que la barre du clip est ouverte (sinon plus aucune piste visible sur 390 px). */}
       <div className={`shrink-0 [@media(orientation:landscape)_and_(max-height:520px)]:max-h-[25%] [@media(orientation:landscape)_and_(max-height:520px)]:overflow-y-auto overscroll-contain scrollbar-hide ${selectedClip ? '[@media(orientation:landscape)_and_(max-height:520px)]:hidden' : ''}`} data-testid="mobile-cards">
       <div className="max-h-[32vh] overflow-y-auto overscroll-contain scrollbar-hide [@media(orientation:landscape)_and_(max-height:520px)]:max-h-none [@media(orientation:landscape)_and_(max-height:520px)]:overflow-visible">
-      {!(keptZone && kept && !keptZone.closed[kept.t.id]) && tipCard}
+      {/* Cartes « Et après ? » / « Être prévenu… » : cachées seulement quand la carte des prises gardées a du
+          contenu (prise à garder ou lignes). Depuis que la playlist vide est visible d'office sur la piste REC,
+          elles ne s'affichaient plus jamais au téléphone (audit de nuit 22/10/2026, qa/notifications.py). */}
+      {!(keptZone && kept && !keptZone.closed[kept.t.id] && (kept.lanes.length > 0 || !!kept.candidate)) && tipCard}
       {topCard}
       </div>
       {keptZone && kept && (
@@ -928,7 +931,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     <button type="button" data-testid={`beat-key-${track.id}`}
                       onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
                       aria-label={`Changer la tonalité de ${track.name}`}
-                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Live : Transpose · FL : Pitch)"
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas"
                       className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-arrows-up-down"></i>
                     </button>
@@ -1321,7 +1324,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <button
                 onClick={() => openNovaWindow('transpose', { simple: true, targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
                 aria-label="Changer la tonalité du clip"
-                title="Plus aigu ou plus grave, sans changer le tempo (Live : Transpose · FL : Pitch)"
+                title="Plus aigu ou plus grave, sans changer le tempo"
                 data-testid="mobile-clip-transpose"
                 className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'

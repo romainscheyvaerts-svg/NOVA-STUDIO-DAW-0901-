@@ -71,7 +71,7 @@ def make_project(path: Path):
 
 
 def read_stereo(raw):
-    with wave.open(io.BytesIO(raw)) as w:
+    with wav_compat(raw) as w:
         sr, n, ch, sw = w.getframerate(), w.getnframes(), w.getnchannels(), w.getsampwidth()
         frames = w.readframes(n)
     if sw == 4:

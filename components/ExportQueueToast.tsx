@@ -58,7 +58,7 @@ const ExportQueueToast: React.FC = () => {
                   <div className="mt-2 flex flex-wrap gap-2">
                     {reveal && j.saved ? (
                       <button type="button" onClick={() => revealDownload(j.result!.download.name)}
-                        title="Montre le fichier dans l'Explorateur Windows (comme « Show in Finder » après un Bounce de Logic)"
+                        title="Montre le fichier dans l'Explorateur Windows"
                         className="nova-hit min-h-9 px-3 rounded-lg bg-cyan-500 text-black text-[12px] font-bold">
                         <i className="fas fa-folder-open mr-1.5" aria-hidden="true"></i>Ouvrir le dossier
                       </button>

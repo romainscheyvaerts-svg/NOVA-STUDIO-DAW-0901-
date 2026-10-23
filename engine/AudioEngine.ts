@@ -118,6 +118,7 @@ import { GrPart, readGainReduction } from './meters/gainReduction';
 import { NEW_PROJECT_RATE, sanitizeRate, rateLabel, setCurrentRate } from '../utils/projectRate';
 import { installHQDecode } from '../utils/hqAudio';
 import { createOutputDeviceWatch } from './outputDeviceWatch';
+import { IdleSuspender, type IdleStats } from './idleSuspend';
 import { takeWriter, type TakeTarget } from './takeWriter';
 import { measureRoundTrip as probeRoundTrip, type RoundTrip } from './latencyProbe';
 import { AudioClockWatch, type ClockIssue } from './audioClockWatch';
@@ -301,6 +302,19 @@ export class AudioEngine {
   private activeSources: Map<string, ScheduledSource> = new Map();
   /** Veille des effets silencieux (chantier 13, engine/effectSleep) et fin de la dernière source de chaque piste. */
   private effectSleep: EffectSleepManager | null = null;
+  /**
+   * Veille du moteur à l'arrêt (engine/idleSuspend) : contexte suspendu après 20 s sans geste ni son ni
+   * rien qui écoute le micro ; réveillé par le premier geste, la première source démarrée ou toute
+   * commande qui produit du son (wake() en tête de ces méthodes).
+   */
+  private idle = new IdleSuspender({
+    busy: () => this.idleBusy(),
+    // Reprise après la veille : la garde de l'horloge repart de maintenant (sinon, l'horloge immobile pendant
+    // la veille pouvait passer pour une horloge figée et faire recréer le contexte).
+    onWake: () => { this.clockWatchInst?.poke(); },
+  });
+  /** Notes jouées en direct et pas encore relâchées (clavier MIDI, mini-clavier) : pas de veille pendant une note tenue. */
+  private heldNotes = new Set<string>();
   private lastSourceEnd = new Map<string, number>();
   /** Source muette (0) partagée par toutes les pistes, voir ensureTrackDSP. */
   private sharedKeepAlive: ConstantSourceNode | null = null;
@@ -524,7 +538,9 @@ export class AudioEngine {
     if (!this.clockWatchInst) {
       this.clockWatchInst = new AudioClockWatch({
         ctx: () => this.ctx,
-        active: () => this.isPlaying || !!this.recordingTrackId || !!this.recSession || (this.inputRouter?.size || 0) > 0,
+        // Veille volontaire en cours (engine/idleSuspend : endormi, s'endort ou repart) : rien à surveiller,
+        // la veille relance elle-même le contexte ; ni « suspendu », ni « horloge figée » à signaler.
+        active: () => !this.idle.isResting() && (this.isPlaying || !!this.recordingTrackId || !!this.recSession || (this.inputRouter?.size || 0) > 0),
         recording: () => !!this.recordingTrackId || !!this.recSession,
         visible: () => typeof document === 'undefined' || !document.hidden,
         restart: (reason) => this.restartAudio(reason),
@@ -685,6 +701,7 @@ export class AudioEngine {
     this.hookAutoResume();
     this.clockWatch().attach(this.ctx);
     this.setupEffectSleep();
+    this.idle.attach(this.ctx);
 
     this.masterOutput = this.ctx.createGain();
     this.masterLimiter = this.ctx.createDynamicsCompressor();
@@ -1697,6 +1714,7 @@ export class AudioEngine {
    */
   public auditionBuffers(hits: { buffer: AudioBuffer; at: number; gain?: number }[]): void {
     if (!this.ctx || !this.previewGain) return;
+    this.idle.wake();
     this.stopAudition();
     const t0 = this.ctx.currentTime + 0.02;
     this.previewGain.gain.cancelScheduledValues(t0);
@@ -1721,7 +1739,29 @@ export class AudioEngine {
   public getPreviewAnalyzer() { return this.previewAnalyzer; }
   // iOS : l'état peut aussi être « interrupted » (appel, Siri, changement d'app) —
   // ne reprendre que sur « suspended » laissait l'audio muet jusqu'au rechargement.
-  public async resume() { if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') { await this.ctx.resume(); } }
+  public async resume() { this.idle.wake(); if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') { await this.ctx.resume(); } }
+
+  /** Veille du moteur : quelque chose va produire du son (ou l'utilisateur agit), on reste / on repart éveillé. */
+  public wake() { this.idle.wake(); }
+  /** Raison externe de rester éveillé (collaboration en direct…). */
+  public setIdleBlocker(key: string, on: boolean) { this.idle.setBlocker(key, on); }
+  public getIdleStats(): IdleStats { return this.idle.getStats(); }
+  /** Ce qui, dans le moteur, a besoin du son en continu (sinon la veille peut suspendre le contexte). */
+  private idleBusy(): string | null {
+    if (this.isPlaying) return 'lecture';
+    if (this.recordingTrackIds.length) return 'prise';
+    // Piste armée : micro ouvert, mètres d'entrée et écoute (le réglage « écouter l'entrée » seul ne compte
+    // pas : sans piste armée, rien n'entre).
+    if (this.armingPromise || (this.inputRouter?.ids().length ?? 0) > 0) return 'piste armée';
+    if (this.talkPlan.talkGain > 0) return 'talkback';
+    if (this.asioConnected) return 'carte ASIO';
+    if (this.listenActive) return 'écoute à distance';
+    if (this.activeSources.size || this.scrubbingSources.size) return 'sons du morceau';
+    if (this.activeMidiNotes.size || this.heldNotes.size) return 'notes tenues';
+    if (this.isPreviewPlaying || this.auditionVoices.length) return 'pré-écoute';
+    if (this.humTake) return 'fredonnement';
+    return null;
+  }
 
   private autoResumeHooked = false;
   /** Reprend le contexte au retour sur la page et au prochain geste de l'utilisateur. */
@@ -2276,6 +2316,7 @@ export class AudioEngine {
    */
   public async armTrack(trackId: string, opts: { spec?: RecordInput | null; alone?: boolean } = {}): Promise<string | null> {
     if (!this.ctx) await this.init();
+    this.idle.wake();
     if (this.ctx!.state !== 'running' && this.ctx!.state !== 'closed') await this.ctx!.resume();
     if (opts.spec !== undefined) this.armedSpecs.set(trackId, opts.spec);
     else if (!this.armedSpecs.has(trackId)) this.armedSpecs.set(trackId, null);
@@ -2293,11 +2334,13 @@ export class AudioEngine {
     // Maj+clic (ou armement exclusif) : la piste seule.
     if (alone) for (const id of this.armedIds()) if (id !== trackId) this.disarmTrack(id);
     let dsp = this.tracksDSP.get(trackId);
-    let attempts = 0;
-    while (!dsp && attempts < 10) {
+    // Piste créée à l'instant (« Piste voix » puis R) : sa chaîne arrive au rendu suivant. Avant : 150 ms au
+    // plus, puis « Piste indisponible » ; sur un PC chargé (mesuré dans la batterie QA, 2 scénarios en
+    // parallèle), l'armement échouait. On attend jusqu'à 3 s ; dès que la chaîne est là, on arme.
+    const armDeadline = Date.now() + 3000;
+    while (!dsp && Date.now() < armDeadline) {
       await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
       dsp = this.tracksDSP.get(trackId);
-      attempts++;
     }
     if (!dsp) {
       console.error("[AudioEngine] ARM FAILED - No DSP for track:", trackId);
@@ -2462,6 +2505,7 @@ export class AudioEngine {
   /** Active / coupe le retour du micro dans le casque. */
   public setInputMonitoring(on: boolean) {
     this.inputMonitoring = on;
+    this.idle.wake();
     this.syncDirectMonitor();
     try { window.dispatchEvent(new CustomEvent('nova:monitoring', { detail: on })); } catch { /* */ }
   }
@@ -2819,6 +2863,7 @@ export class AudioEngine {
    * toutes les pistes, donc des prises alignées à l'échantillon près.
    */
   public async startRecording(currentTime: number, trackIds: string | string[]): Promise<boolean> {
+    this.idle.wake();
     // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
     // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
     // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
@@ -3422,6 +3467,7 @@ export class AudioEngine {
    */
   public startPlayback(startOffset: number, tracks: Track[], opts: { at?: number } = {}) {
     if (!this.ctx) return;
+    this.idle.wake();
     // Source muette reliée AVANT la remise à zéro des effets et les sources (même graphe qu'à l'export).
     this.linkKeepAlive();
     // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
@@ -3627,6 +3673,7 @@ export class AudioEngine {
    */
   public scrub(tracks: Track[], time: number, _velocity?: number) {
     if (this.isPlaying) return;
+    this.idle.wake();
     this.linkKeepAlive();
     this.scrubberOf()?.scrubTo(engineView(tracks).tracks, time);
   }
@@ -3634,6 +3681,7 @@ export class AudioEngine {
   /** Shuttle : défilement à vitesse constante (× temps réel, négatif = en arrière). */
   public shuttle(tracks: Track[], speed: number, from?: number) {
     if (this.isPlaying) return;
+    this.idle.wake();
     this.linkKeepAlive();
     this.scrubberOf()?.shuttle(engineView(tracks).tracks, speed, from ?? this.pausedAt);
   }
@@ -3889,6 +3937,7 @@ export class AudioEngine {
   private takeAudition: { trackId: string; n: number } | null = null;
   private auditionCache: { src: Clip[]; n: number; out: Clip[] } | null = null;
   public setTakeAudition(a: { trackId: string; n: number } | null) {
+    this.idle.wake();
     this.takeAudition = a;
     this.auditionCache = null;
     if (this.liveTracks) this.setLiveTracks(this.liveTracks);
@@ -4086,6 +4135,7 @@ export class AudioEngine {
    */
   public sendTrackController(trackId: string, key: string, value: number, time: number = 0) {
     if (!this.ctx) return;
+    this.idle.wake();
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp || dsp.bass808) return;
     try { dsp.synth?.setController(key, value, Math.max(time, this.ctx.currentTime)); } catch { /* instrument sans contrôleurs */ }
@@ -4095,8 +4145,11 @@ export class AudioEngine {
   /** `ex` : panoramique et hauteur propres à la note (R18, pas de la boîte à rythmes). */
   public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0, ex?: { pan?: number; tune?: number }) {
       if (!this.ctx) return;
+      this.idle.wake();
       const dsp = this.tracksDSP.get(trackId);
       if (!dsp) return;
+      // Note tenue (instrument qui attend son relâchement) : la veille attend qu'elle soit relâchée.
+      if (!dsp.drumRack && !dsp.drumSampler) this.heldNotes.add(`${trackId}:${pitch}`);
       
       const now = Math.max(time, this.ctx.currentTime);
       
@@ -4110,6 +4163,8 @@ export class AudioEngine {
 
   public triggerTrackRelease(trackId: string, pitch: number, time: number = 0) {
       if (!this.ctx) return;
+      this.heldNotes.delete(`${trackId}:${pitch}`);
+      this.idle.wake();
       const dsp = this.tracksDSP.get(trackId);
       if (!dsp) return;
       
@@ -4124,6 +4179,7 @@ export class AudioEngine {
   /** L3 · Relâche tout ce que joue l'instrument d'une piste (effets MIDI changés pendant la lecture). */
   public releaseTrackNotes(trackId: string) {
       if (!this.ctx) return;
+      for (const k of [...this.heldNotes]) if (k.startsWith(`${trackId}:`)) this.heldNotes.delete(k);
       const dsp = this.tracksDSP.get(trackId);
       if (!dsp) return;
       const now = this.ctx.currentTime;
@@ -6217,6 +6273,7 @@ export class AudioEngine {
    * diffusé en collaboration (pris sur le master).
    */
   public setTalkback(plan: { talkGain: number; musicGain: number }) {
+    this.idle.wake();
     this.talkPlan = { talkGain: Math.max(0, plan.talkGain), musicGain: Math.max(0, Math.min(1, plan.musicGain)) };
     this.applyTalkback();
   }
@@ -6238,6 +6295,7 @@ export class AudioEngine {
 
   /** Écouter un mix casque sur la sortie principale (null = le master). */
   public setCueListen(mixId: string | null) {
+    this.idle.wake();
     this.cueListen = mixId && this.cueMixes.some(m => m.id === mixId) ? mixId : null;
     this.cueEngine?.setListen(this.cueListen);
     if (this.mainSel && this.ctx) this.mainSel.gain.setTargetAtTime(this.cueListen ? 0 : 1, this.ctx.currentTime, 0.01);

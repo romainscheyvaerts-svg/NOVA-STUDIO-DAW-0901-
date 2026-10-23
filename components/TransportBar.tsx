@@ -921,7 +921,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           )}
           {onCapture && captureReady && !isRecording && !simple && (
             <button {...barItem('capturer', 32)} type="button" onClick={onCapture} data-testid="capture-take"
-              title="Capturer la dernière prise (Maj+R) : ce que tu viens de chanter pendant la lecture, sans avoir appuyé sur REC, posé au bon endroit (Logic : Capture as Recording / Flashback Capture)."
+              title="Capturer la dernière prise (Maj+R) : ce que tu viens de chanter pendant la lecture, sans avoir appuyé sur REC, posé au bon endroit."
               aria-label="Capturer la dernière prise"
               className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-amber-500/40 text-amber-300 hover:bg-amber-500/15">
               <i className="fas fa-history" aria-hidden="true"></i><span {...barItem('libelle-capturer', 9)} className="ml-1">CAPTURER</span>

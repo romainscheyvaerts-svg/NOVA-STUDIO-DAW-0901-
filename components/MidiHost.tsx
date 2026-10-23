@@ -300,12 +300,12 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
             <button type="button" data-testid="midi-import-project" onClick={() => { const p = pending; setPending(null); applyImport(p, 'project', drumsToRack); }}
               className="w-full text-left rounded-xl border border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15 p-3">
               <span className="block text-[13px] font-black">Garder le tempo du projet ({Math.round(state.bpm * 10) / 10} BPM)</span>
-              <span className="block text-[11px] text-slate-300">Les notes restent sur leurs temps et leurs mesures, et suivent ton tempo (comme Live, FL et Logic par défaut).</span>
+              <span className="block text-[11px] text-slate-300">Les notes restent sur leurs temps et leurs mesures, et suivent ton tempo (le réglage le plus courant).</span>
             </button>
             <button type="button" data-testid="midi-import-file" onClick={() => { const p = pending; setPending(null); applyImport(p, 'file', drumsToRack); }}
               className="w-full text-left rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 p-3">
               <span className="block text-[13px] font-black">Prendre le tempo du fichier ({Math.round(fileBpm * 10) / 10} BPM)</span>
-              <span className="block text-[11px] text-slate-300">Le projet passe à {Math.round(fileBpm * 10) / 10} BPM{changes ? ' ; les changements de tempo du fichier sont respectés note par note' : ''} (comme « Importer le tempo » dans Logic).</span>
+              <span className="block text-[11px] text-slate-300">Le projet passe à {Math.round(fileBpm * 10) / 10} BPM{changes ? ' ; les changements de tempo du fichier sont respectés note par note' : ''}.</span>
             </button>
             {pendingDrums && (
               <label className="flex items-start gap-2 text-[12px] text-slate-300 min-h-10">

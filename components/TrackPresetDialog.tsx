@@ -140,7 +140,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
         <div className="flex items-start justify-between gap-3 border-b border-nv-line p-4">
           <div className="min-w-0">
             <h2 className="text-[15px] font-black">Track Presets{track ? <span className="font-semibold text-nv-muted"> · {track.name}</span> : null}</h2>
-            <p className="text-[11px] text-nv-muted" title="Track Presets · Logic : Patches · Ableton : Rack enregistré · FL : état de piste du mixeur (.fst)">
+            <p className="text-[11px] text-nv-muted" title="Un seul preset pour toute la chaîne de la piste, à rappeler en un clic">
               Toute la chaîne d’une piste : effets dans l’ordre, envois, volume, pan, sortie. Comme les Track Presets.
             </p>
           </div>

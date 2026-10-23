@@ -154,7 +154,7 @@ const ImportSessionDialog: React.FC<{
         className="flex max-h-[92vh] w-full max-w-[720px] flex-col gap-3 rounded-2xl border border-nv-line bg-nv-panel p-4 shadow-2xl">
         <div className="flex items-center gap-2">
           <i className="fas fa-file-import text-nv-accent" />
-          <h2 id="import-session-title" className="min-w-0 flex-1 truncate text-[15px] font-bold text-nv-ink" title="File › Import › Session Data (Alt+Maj+I) ; Logic : Import › Logic Projects">
+          <h2 id="import-session-title" className="min-w-0 flex-1 truncate text-[15px] font-bold text-nv-ink" title="Pistes, effets, envois et automation d’un autre projet (Alt+Maj+I)">
             Importer depuis une session{loaded ? ` · ${loaded.name}` : ''}
           </h2>
           <button type="button" onClick={onClose} disabled={!!busy} aria-label="Fermer" className="nova-hit-tactile h-9 w-9 rounded-lg text-nv-muted hover:text-nv-ink"><i className="fas fa-times" /></button>

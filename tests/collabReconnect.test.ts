@@ -41,7 +41,7 @@ vi.mock('../services/supabase', () => ({
   },
 }));
 vi.mock('../services/SessionCloud', () => ({ call: h.call, sha1: async () => 'h', CHUNK: 4 }));
-vi.mock('../services/AudioUtils', () => ({ wavOf: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) }));
+vi.mock('../services/AudioUtils', () => { const w = () => ({ arrayBuffer: async () => new ArrayBuffer(0) }); return { wavOf: w, wav16Of: w }; });
 vi.mock('../utils/audioBufferRegistry', () => ({ audioBufferRegistry: { get: () => undefined, has: () => false } }));
 vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, ctx: null } }));
 

@@ -119,10 +119,15 @@ const PadSamplerEditor: React.FC<Props> = ({ dm, rowIndex, onChange, onAudition,
     return () => { alive = false; };
   }, [row.sound, root]);
 
-  // Échap ferme l'éditeur (pas toute la batterie) quand le focus est dedans.
+  // Échap ferme l'éditeur (pas toute la batterie) : la fenêtre du dessus d'abord. Focus dans l'éditeur, sur le
+  // pad double-cliqué (dans la batterie) ou nulle part. Avant (audit de nuit 22/10/2026) : double-clic sur un
+  // pad puis Échap fermait TOUTE la batterie, le focus étant resté sur le pad.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !rootRef.current?.contains(document.activeElement) || document.querySelector('[data-testid=drum-menu]')) return;
+      if (e.key !== 'Escape' || document.querySelector('[data-testid=drum-menu]')) return;
+      const a = document.activeElement as HTMLElement | null;
+      const inside = !!rootRef.current?.contains(a) || !a || a === document.body || !!a.closest?.("[aria-labelledby='drums-title']");
+      if (!inside) return;
       e.preventDefault(); e.stopImmediatePropagation(); onClose();
     };
     window.addEventListener('keydown', on, true);

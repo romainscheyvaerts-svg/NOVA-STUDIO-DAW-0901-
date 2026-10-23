@@ -78,7 +78,7 @@ vi.mock('../services/SessionCloud', () => ({
   sha1: async (b: Uint8Array) => `h${Array.from(b.subarray(0, 4)).join('-')}-${b.length}`,
   CHUNK: 4,
 }));
-vi.mock('../services/AudioUtils', () => ({ wavOf: (buf: { bytes: Uint8Array }) => ({ arrayBuffer: async () => buf.bytes.buffer.slice(0) }) }));
+vi.mock('../services/AudioUtils', () => { const w = (buf: { bytes: Uint8Array }) => ({ arrayBuffer: async () => buf.bytes.buffer.slice(0) }); return { wavOf: w, wav16Of: w }; });
 vi.mock('../utils/audioBufferRegistry', () => ({ audioBufferRegistry: { get: (id: string) => h.registry.get(id), has: (id: string) => h.registry.has(id) } }));
 vi.mock('../engine/AudioEngine', () => ({ audioEngine: { init: async () => {}, ctx: null } }));
 

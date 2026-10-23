@@ -151,7 +151,7 @@ export const TakeLanesOverlay: React.FC<OverlayProps> = ({ track, lanes, api, to
     <>
       {lanes.map((l, i) => (
         <div key={l.n} {...(kept ? { 'data-kept-row': l.n } : { 'data-take-lane-row': l.n })}
-          title={`${l.title}\nBalaie un passage pour le garder dans ta voix finale (Quick Swipe Comping de Logic, comping) · Tap : remplace le passage à cet endroit`}
+          title={`${l.title}\nBalaie un passage pour le garder dans ta voix finale (comping) · Tap : remplace le passage à cet endroit`}
           className="absolute left-0 right-0 border-t border-white/5 cursor-crosshair select-none"
           style={{ top: top + i * TAKE_LANE_H, height: TAKE_LANE_H, pointerEvents: inert ? 'none' : 'auto', touchAction: 'pan-y' }}
           onWheel={onWheel}

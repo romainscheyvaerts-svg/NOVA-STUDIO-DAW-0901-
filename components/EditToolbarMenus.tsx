@@ -92,7 +92,7 @@ export const ToolsMoreMenu: React.FC<{ activeTool: EditorTool; setActiveTool: (t
             <i className="fas fa-repeat w-5 text-center text-[12px]" aria-hidden="true" /><span>Mode boucle</span><MenuSwitch on={v.loopTrim} />
           </button>
           <button type="button" role="menuitemcheckbox" aria-checked={!!prefs.trimTce} aria-pressed={!!prefs.trimTce} data-testid="trim-tce" aria-label="Étirer en tirant le bord (Trim TCE)"
-            title="Étirer en tirant le bord (outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
+            title="Étirer en tirant le bord (outil Trim en mode TCE) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
             onClick={() => editPrefsStore.set({ trimTce: !prefs.trimTce })} className={menuRowClass(!!prefs.trimTce)}>
             <i className="fas fa-left-right w-5 text-center text-[12px]" aria-hidden="true" /><span>Étirer en tirant le bord</span><MenuSwitch on={!!prefs.trimTce} />
           </button>

@@ -5,7 +5,7 @@ import { ProjectIO } from '../services/ProjectIO';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { anchorClipsToRender, freezeDrift, pluginsSignature } from '../utils/freeze';
 import { DAWState, PluginInstance, PluginType, Track } from '../types';
-import { makeBuffer, parseWavHeader } from './helpers/audio';
+import { decodeWav, makeBuffer, parseWavHeader } from './helpers/audio';
 import { makeClip, makeState, makeTrack } from './helpers/fixtures';
 
 // Moteur audio : seul le décodage sert au chargement (WAV PCM 16 bits relu pour de vrai).
@@ -50,8 +50,17 @@ describe('ProjectIO.saveProject', () => {
     const zip = await zipOf(await ProjectIO.saveProject(project(), []));
     const files = Object.keys(zip.files).filter(f => !zip.files[f].dir).sort();
     expect(files).toEqual(['audio/rec-1.wav', 'audio/rec-2.wav', 'project.json']);
+    const ab = await zip.file('audio/rec-1.wav')!.async('arraybuffer');
+    const h = parseWavHeader(ab);
+    // Sans perte (audit de nuit 22/10/2026) : un son quelconque part en flottant 32 bits et revient au bit près.
+    expect(h).toMatchObject({ format: 3, bitsPerSample: 32, numChannels: 1, sampleRate: 44100, dataSize: 8820 * 4 });
+    expect(Array.from(decodeWav(ab).getChannelData(0))).toEqual(Array.from(audioBufferRegistry.get('rec-1')!.getChannelData(0)));
+  });
+
+  it('séance en ligne (audio: 16) : sons en 16 bits', async () => {
+    const zip = await zipOf(await ProjectIO.saveProject(project(), [], { audio: 16 }));
     const h = parseWavHeader(await zip.file('audio/rec-1.wav')!.async('arraybuffer'));
-    expect(h).toMatchObject({ numChannels: 1, sampleRate: 44100, dataSize: 8820 * 2 });
+    expect(h).toMatchObject({ format: 1, bitsPerSample: 16, numChannels: 1, sampleRate: 44100, dataSize: 8820 * 2 });
   });
 
   it('JSON : audioRef à la place de bufferId, beat sans licence marqué et SANS audio', async () => {

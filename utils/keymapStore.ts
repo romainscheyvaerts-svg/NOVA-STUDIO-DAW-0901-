@@ -110,9 +110,10 @@ const PROTOOLS: KeymapPreset = {
 
 const FL: KeymapPreset = {
   id: 'fl',
-  name: 'FL Studio',
-  description: 'Les raccourcis de la documentation d’Image-Line : P crayon, C découpe, D gomme, E sélection, Z zoom, Y lecture (scrub), Ctrl+B dupliquer, Ctrl+R exporter, F5 Playlist, F9 Mixer…',
-  source: 'Image-Line, FL Studio Online Manual « Keyboard shortcuts » (basics_shortcuts.htm)',
+  name: 'Beatmaking (pas à pas)',
+  description: 'Les raccourcis des logiciels de beatmaking : P crayon, C découpe, D gomme, E sélection, Z zoom, Y lecture (scrub), Ctrl+B dupliquer, Ctrl+R exporter, F5 arrangement, F9 console…',
+  // Source d’origine : Image-Line, FL Studio Online Manual « Keyboard shortcuts » (basics_shortcuts.htm).
+  source: 'Documentation officielle des raccourcis d’un logiciel de beatmaking (2026)',
   keys: {
     'nova.play': ['space'],
     'nova.record': ['r'],
@@ -160,9 +161,10 @@ const FL: KeymapPreset = {
 
 const ABLETON: KeymapPreset = {
   id: 'ableton',
-  name: 'Ableton Live',
-  description: 'Les raccourcis du manuel d’Ableton Live 12 : F9 enregistrer, Ctrl+L boucle, Ctrl+E séparer, Ctrl+J consolider, B crayon, M clavier MIDI, O métronome, Ctrl+Alt+M console…',
-  source: 'Ableton Live 12 Reference Manual, chapitre « Live Keyboard Shortcuts »',
+  name: 'Clips et boucles',
+  description: 'Les raccourcis des logiciels à clips et boucles : F9 enregistrer, Ctrl+L boucle, Ctrl+E séparer, Ctrl+J consolider, B crayon, M clavier MIDI, O métronome, Ctrl+Alt+M console…',
+  // Source d’origine : Ableton Live 12 Reference Manual, chapitre « Live Keyboard Shortcuts ».
+  source: 'Manuel de référence officiel d’un logiciel à clips et boucles (version 12, chapitre des raccourcis clavier)',
   keys: {
     'nova.play': ['space'],
     'nova.home': ['home'],

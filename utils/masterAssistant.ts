@@ -24,9 +24,9 @@ export const PLATFORM_TARGETS: PlatformTarget[] = [
 
 export type MasterCharacter = 'propre' | 'punch' | 'chaud';
 export const CHARACTERS: { id: MasterCharacter; label: string; hint: string }[] = [
-  { id: 'propre', label: 'Propre', hint: 'Transparent : le mix tel quel, plus fort (comme « Clean » / « Transparent » dans Logic).' },
-  { id: 'punch', label: 'Punch', hint: 'Kick et 808 qui claquent, compression plus franche (comme « Punch » dans Logic).' },
-  { id: 'chaud', label: 'Chaud', hint: 'Bas-médiums ronds, aigus adoucis, compression douce façon opto (comme « Valve » dans Logic).' },
+  { id: 'propre', label: 'Propre', hint: 'Transparent : le mix tel quel, plus fort.' },
+  { id: 'punch', label: 'Punch', hint: 'Kick et 808 qui claquent, compression plus franche.' },
+  { id: 'chaud', label: 'Chaud', hint: 'Bas-médiums ronds, aigus adoucis, compression douce façon opto.' },
 ];
 
 // ---------------------------------------------------------------------------

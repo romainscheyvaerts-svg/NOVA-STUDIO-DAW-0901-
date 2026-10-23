@@ -51,9 +51,15 @@ const NotificationsHost: React.FC<NotificationsHostProps> = (p) => {
   // ── Le bon moment pour proposer ───────────────────────────────────────────
   // Minuterie gardée hors des effets : un nouvel état (accusé de la collaboration…) ne l'annule pas.
   const askTimer = useRef<number | null>(null);
-  const askLater = (trigger: 'collab' | 'comment', ms: number) => {
+  // Occupé à ce moment-là (prise, décompte, carte d'étape) : on repropose dès que c'est fini (toutes les 4 s,
+  // 3 min au plus) au lieu d'abandonner pour de bon.
+  const askLater = (trigger: 'collab' | 'comment', ms: number, tries = 45) => {
     if (askTimer.current !== null) window.clearTimeout(askTimer.current);
-    askTimer.current = window.setTimeout(() => { askTimer.current = null; void requestAsk(trigger, null, live.current.busy); }, ms);
+    askTimer.current = window.setTimeout(() => {
+      askTimer.current = null;
+      if (live.current.busy && tries > 0) { askLater(trigger, 4000, tries - 1); return; }
+      void requestAsk(trigger, null, live.current.busy);
+    }, ms);
   };
   useEffect(() => () => { if (askTimer.current !== null) window.clearTimeout(askTimer.current); }, []);
 

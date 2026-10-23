@@ -114,6 +114,12 @@ s.save_version("p1", "Séance", rec)
             while not flag.exists() and time.time() - t0 < 30:
                 time.sleep(0.05)
             self.assertTrue(flag.exists(), "le processus n'a pas commencé à écrire")
+            # Windows + venv : sys.executable est un lanceur qui démarre le vrai Python en processus enfant ;
+            # p.kill() ne tuait que le lanceur, l'enfant gardait le temporaire ouvert (ménage impossible).
+            # On tue tout l'arbre, comme TerminateProcess sur le vrai pont.
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             p.kill()
             p.wait(10)
         finally:
