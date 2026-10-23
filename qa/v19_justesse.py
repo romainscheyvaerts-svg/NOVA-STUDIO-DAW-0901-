@@ -292,7 +292,7 @@ def open_clip_menu(page, t=2.0):
 def open_editor_desktop(page, label):
     open_clip_menu(page)
     shot(page, f"{label}_menu_clip")
-    page.get_by_text("Justesse note par note…", exact=True).first.click()
+    page.get_by_text("Éditer les notes de la voix…", exact=True).first.click()
     page.wait_for_selector("[data-testid=pitch-editor]", timeout=8000)
     page.wait_for_function("() => !document.querySelector('[data-testid=pitch-status]')", timeout=30000)
     page.wait_for_timeout(400)
@@ -547,7 +547,7 @@ def scenario_tablet(p):
     box = canvas_box(page)
     long_press(page, box["x"] + 2.0 * 40 - box["sl"], box["y"] + box.get("tt", 40) + 60 - box["st"])
     shot(page, "B1_appui_long_menu_clip")
-    tap(page, page.get_by_text("Justesse note par note…", exact=True).first)
+    tap(page, page.get_by_text("Éditer les notes de la voix…", exact=True).first)
     wait_editor(page)
     shot(page, "B2_editeur_tablette")
     res = {"mode": page.get_attribute("[data-testid=pitch-editor]", "data-mode")}

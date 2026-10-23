@@ -1290,9 +1290,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Justesse (V19) : tout corriger dans la gamme, avec le dosage */}
             {selectedClip.clip.type !== TrackType.MIDI && (
               <button
-                onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }], simple: true })}
                 aria-label="Justesse : corriger la voix dans la gamme"
-                title="Comme Flex Pitch dans Logic : ramène ta voix dans la gamme"
+                title="Corrige ta voix : ramène-la dans la gamme, ou note par note"
                 data-testid="mobile-clip-pitch"
                 className={`flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all ${
                   selectedClip.clip.pitchEdit ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'

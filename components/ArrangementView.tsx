@@ -2871,7 +2871,7 @@ useEffect(() => {
     const gain = clipGainMenuItems(cm.trackId, cm.clip, close);
     const gainLine = gain.filter(it => /ligne de gain|Rendre le gain|gain d’avant/.test(it.label));
     const editTools = gain.filter(it => !gainLine.includes(it));
-    const justesse: ContextMenuItem = { label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
+    const justesse: ContextMenuItem = { label: 'Éditer les notes de la voix…', icon: 'fa-wave-square', title: 'Corrige ta voix note par note, au 50e de demi-ton : hauteur, durée, vibrato, formant, gain (double-clic sur le clip)',
       onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } };
     const respirations: ContextMenuItem = { label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX',
       onClick: () => { requestBreaths({ mode: 'dialog', clipIds: selTargets().map(x => x.clipId), reason: 'menu' }); close(); } };
@@ -3184,9 +3184,11 @@ useEffect(() => {
             // rien ne permettait de le rouvrir depuis l'arrangement.
             const sel = selectedClip;
             if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
-            // Double-clic sur un clip audio : le renommer (Pro Tools : double-clic avec le Grabber).
+            // Double-clic sur un clip de voix : l'éditeur de notes de la voix (Nova Pitch), en bas.
+            // Sur un autre clip audio (beat, sample) : le renommer (Ctrl+Maj+R partout).
             // (pas sur la poignée de gain, dont le double-clic remet 0 dB).
             else if (sel && editModeStore.get().mode === 'SPOT') setSpotTarget({ trackId: sel.trackId, clipId: sel.clip.id });
+            else if (sel && !dragActionRef.current && !gainTip && isVoiceTrack(tracks.find(t => t.id === sel.trackId))) openNovaWindow('pitch-editor', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }] });
             else if (sel && !dragActionRef.current && !gainTip) openNovaWindow('clip-props', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }], focus: 'name' });
           }} 
           onMouseMove={handleMouseMove} 

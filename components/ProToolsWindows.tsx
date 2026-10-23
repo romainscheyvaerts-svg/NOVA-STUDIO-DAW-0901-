@@ -37,6 +37,7 @@ import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTem
 import { applyClipPatches, doneMessage, renderElasticClip } from '../services/elasticRender';
 import { audioSuiteRevertPatch, patchClip } from '../utils/clipProcess';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { syncPitchRenders } from '../utils/novaPitchHost';
 
 interface Props {
   tracks: Track[];
@@ -57,6 +58,11 @@ interface Props {
   beatsPerBar?: number;
   /** Paroles du projet (R24 : transcription → prompteur). */
   lyrics?: string;
+  /**
+   * Changement du projet SANS étape d'annulation (Nova Pitch : le son rendu
+   * remplace le son joué une fois calculé). Absent : étape normale.
+   */
+  setSilently?: (fn: (prev: DAWState) => DAWState) => void;
 }
 
 /**
@@ -65,7 +71,7 @@ interface Props {
  * couleur de piste ; plus le témoin Commands Keyboard Focus.
  * App.tsx ne fait que monter ce composant.
  */
-const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar, lyrics }) => {
+const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar, lyrics, setSilently }) => {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [batch, setBatch] = useState<NovaWindowDetail | null>(null);
   const [ioNames, setIoNames] = useState(false);
@@ -86,6 +92,17 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [textEdit, setTextEdit] = useState<{ trackId: string; clipId: string } | null>(null);
   const tracksRef = React.useRef(tracks);
   tracksRef.current = tracks;
+  // Nova Pitch : les clips dont les retouches de notes n'ont pas encore de son rendu
+  // (geste de l'éditeur, annuler / rétablir, collaboration) sont calculés en arrière-plan.
+  const silentRef = React.useRef(setSilently || setState);
+  silentRef.current = setSilently || setState;
+  useEffect(() => {
+    syncPitchRenders(tracks, {
+      getTracks: () => tracksRef.current,
+      setSilently: fn => silentRef.current(fn),
+      notify: detail => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } },
+    });
+  }, [tracks]);
   const say = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
   // Transposition / warp : « Revenir à l'original » depuis le menu du clip (une étape d'annulation).
   const revertElastic = useCallback((targets: { trackId: string; clipId: string }[]) => {
@@ -220,7 +237,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
       }
     }));
-    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
+    if (message) { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ } }
   }, [setState]);
 
   // Justesse sur plusieurs clips : tous les changements en UN setState (une seule annulation).
@@ -292,7 +309,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       <MountWhenOpened when={!!strip}><StripSilenceDialog open={!!strip} tracks={tracks} targets={strip?.targets || []} onApply={applyStrip} onClose={() => setStrip(null)} /></MountWhenOpened>
       {propsView}
       <MountWhenOpened when={!!pitch}><PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
-        projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} /></MountWhenOpened>
+        projectKey={projectKey} projectScale={projectScale} bpm={bpm} simple={!!pitch?.simple} onCommit={applyPitch} onClose={() => setPitch(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!pitchBatch}><PitchBatchDialog open={!!pitchBatch} targets={pitchBatch?.targets || []} tracks={tracks}
         projectKey={projectKey} projectScale={projectScale} onApply={applyPitchMany} onClose={() => setPitchBatch(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!convert}><AudioToMidiDialog request={convert} tracks={tracks} bpm={bpm} beatsPerBar={beatsPerBar} projectKey={projectKey} projectScale={projectScale}

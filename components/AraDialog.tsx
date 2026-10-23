@@ -323,7 +323,7 @@ const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm
           <div className="mb-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-slate-300" data-testid="ara-unavailable">
             {avail.tooltip}
             <div className="mt-2"><button type="button" className="rounded-lg bg-cyan-500/20 px-3 py-1.5 font-bold text-cyan-200 hover:bg-cyan-500/30"
-              onClick={() => { onClose(); openNovaWindow('pitch-editor', { targets: [{ trackId: trackId!, clipId: clip.id }] }); }}>Ouvrir la justesse NOVA</button></div>
+              onClick={() => { onClose(); openNovaWindow('pitch-editor', { targets: [{ trackId: trackId!, clipId: clip.id }] }); }}>Ouvrir les notes de la voix (NOVA)</button></div>
           </div>
         )}
 

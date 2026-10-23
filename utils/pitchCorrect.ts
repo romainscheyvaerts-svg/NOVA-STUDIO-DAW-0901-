@@ -30,7 +30,21 @@ export interface NoteEdit {
    * épaisse — sans changer la hauteur (Melodyne : outil Formant).
    */
   formant?: number;
+  /** Gain de la note (dB, −24 à +12). Absent / 0 = niveau chanté. */
+  gainDb?: number;
+  /**
+   * Timing (s) : déplacement du début (`dt0`) et de la fin (`dt1`) de la note
+   * dans le temps. Absents = à sa place. La partie tenue (voyelle) s'étire,
+   * l'attaque et les consonnes gardent leur vitesse (engine/pitch/timeMap).
+   */
+  dt0?: number;
+  dt1?: number;
 }
+
+/** Course du gain par note (dB). */
+export const GAIN_MIN_DB = -24;
+export const GAIN_MAX_DB = 12;
+export const clampGain = (v: number) => Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, Number.isFinite(v) ? Math.round(v * 10) / 10 : 0));
 
 /** Course du formant par note (demi-tons). */
 export const FORMANT_RANGE = 12;
@@ -44,7 +58,11 @@ export const NATURAL_TRANSITION_MS = 70;
 export type CorrectStyle = 'naturel' | 'robot';
 
 export const isNeutral = (e?: NoteEdit): boolean =>
-  !e || (Math.abs(e.shift) < 1e-4 && e.drift < 1e-4 && Math.abs(e.vibrato - 1) < 1e-4 && e.transitionMs === undefined && !(Math.abs(e.formant || 0) >= 0.05));
+  !e || (Math.abs(e.shift) < 1e-4 && e.drift < 1e-4 && Math.abs(e.vibrato - 1) < 1e-4 && e.transitionMs === undefined && !(Math.abs(e.formant || 0) >= 0.05)
+    && !(Math.abs(e.gainDb || 0) >= 0.05) && !hasTiming(e));
+
+/** La note est déplacée ou étirée dans le temps (au moins 0,1 ms). */
+export const hasTiming = (e?: NoteEdit): boolean => !!e && (Math.abs(e.dt0 || 0) >= 1e-4 || Math.abs(e.dt1 || 0) >= 1e-4);
 
 /** Au moins une note a un formant déplacé. */
 export const hasFormant = (edits: (NoteEdit | undefined)[]): boolean => edits.some(e => Math.abs(e?.formant || 0) >= 0.05);
@@ -133,8 +151,20 @@ const ease = (u: number) => (u <= 0 ? 0 : u >= 1 ? 1 : 0.5 - 0.5 * Math.cos(Math
  * consonnes, silences : rendu à l'identique).
  */
 export function correctionCurve(track: PitchTrack, notes: PitchNote[], edits: (NoteEdit | undefined)[]): Float32Array {
+  return correctionParts(track, notes, edits).corr;
+}
+
+/**
+ * Correction trame par trame et sa part « vibrato » : la hauteur visée vaut
+ * `midi + corr` ; `vib` est la part oscillante de cette hauteur visée (vibrato
+ * chanté × réglage de vibrato), 0 hors des notes. Le rendu avec étirement
+ * (engine/pitch/render) rejoue `vib` à sa vitesse naturelle quand une note est
+ * allongée ou raccourcie, au lieu de le ralentir ou de l'accélérer.
+ */
+export function correctionParts(track: PitchTrack, notes: PitchNote[], edits: (NoteEdit | undefined)[]): { corr: Float32Array; vib: Float32Array } {
   const n = track.midi.length;
   const out = new Float32Array(n);
+  const vibOut = new Float32Array(n);
   const hopMs = (track.hop / track.sr) * 1000;
   // Décomposition dérive lente / vibrato : moyenne double de ±70 ms (≈ coupe
   // au-dessus de 3 Hz, le vibrato chanté est entre 4 et 8 Hz).
@@ -161,6 +191,7 @@ export function correctionCurve(track: PitchTrack, notes: PitchNote[], edits: (N
       const vib = dev[i] - slow[i];
       const w = Math.min(tIn > 0 ? ease((i + 0.5) / tIn) : 1, tOut > 0 ? ease((len - i - 0.5) / tOut) : 1);
       res[i] = e.shift + w * (-e.drift * slow[i] + (e.vibrato - 1) * vib);
+      vibOut[note.i0 + i] = vib * (1 + w * (e.vibrato - 1));
     }
     return res;
   });
@@ -189,8 +220,8 @@ export function correctionCurve(track: PitchTrack, notes: PitchNote[], edits: (N
   }
 
   // Aucune correction là où rien n'est chanté.
-  for (let i = 0; i < n; i++) if (Number.isNaN(track.midi[i])) out[i] = 0;
-  return out;
+  for (let i = 0; i < n; i++) if (Number.isNaN(track.midi[i])) { out[i] = 0; vibOut[i] = 0; }
+  return { corr: out, vib: vibOut };
 }
 
 /**

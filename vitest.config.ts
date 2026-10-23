@@ -26,5 +26,9 @@ export default defineConfig({
     // chargée (Pro Tools ouvert) — les 1ers imports à froid du moteur dépassaient
     // 5 s sans aucun défaut. Un vrai blocage reste détecté.
     testTimeout: 30_000,
+    // Même raison pour les préparations (beforeAll) qui importent le moteur à froid :
+    // 10 s par défaut, dépassées sous la charge de la suite complète (mesuré : 12 à 50 s
+    // pour tests/metrologieConsole seul sur une machine occupée), sans aucun défaut.
+    hookTimeout: 60_000,
   },
 });
