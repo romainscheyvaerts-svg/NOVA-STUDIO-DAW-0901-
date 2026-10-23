@@ -52,7 +52,7 @@ def wav(freq, dur, ch=1):
     return b.getvalue()
 
 
-def make(path, pid, name, n=3, dur=5.0, ch=1, skip=()):
+def make(path, pid, name, n=3, dur=5.0, ch=1, skip=(), gain=1):
     tr = lambda tid, tname, clips, **kw: {"id": tid, "name": tname, "type": "AUDIO", "color": "#3b82f6", "isMuted": False, "isSolo": False,
         "isTrackArmed": False, "isFrozen": False, "volume": 0.8, "pan": 0, "outputTrackId": "master", "sends": [], "clips": clips,
         "plugins": [], "automationLanes": [], "totalLatency": 0, **kw}
@@ -63,7 +63,7 @@ def make(path, pid, name, n=3, dur=5.0, ch=1, skip=()):
             if ref not in skip:
                 z.writestr(ref, wav(110 + 13 * i, dur, ch))
             tracks.append(tr(f"t{i + 1}", f"Prise {i + 1}", [{"id": f"c{i + 1}", "name": f"Prise {i + 1}", "start": (i % 8) * 2, "duration": dur,
-                "offset": 0, "fadeIn": 0, "fadeOut": 0, "color": "#22d3ee", "type": "AUDIO", "audioRef": ref, "gain": 1}]))
+                "offset": 0, "fadeIn": 0, "fadeOut": 0, "color": "#22d3ee", "type": "AUDIO", "audioRef": ref, "gain": gain}]))
         st = {"id": pid, "name": name, "bpm": 120, "timeSignature": {"numerator": 4, "denominator": 4}, "isPlaying": False, "isRecording": False,
               "currentTime": 0, "isLoopActive": False, "loopStart": 0, "loopEnd": 8, "tracks": tracks, "trackGroups": [], "markers": [],
               "selectedTrackId": "t1", "currentView": "ARRANGEMENT", "projectPhase": "RECORDING", "isLowLatencyMode": False, "isRecModeActive": False,
@@ -299,7 +299,9 @@ def cas_zip(p):
 
 
 def cas_export(p):
-    f = make(WORK / "export4min.novaproj.zip", "proj-exportqa0001", "Titre: test / mix", n=8, dur=240.0, ch=2)
+    # Gain de clip ×2 (+6 dB) : le mix doit dépasser 0 dBTP. Depuis la loi de pan pro (22/10/2026), ces prises
+    # à deux canaux identiques sont mono, au centre à −3 dB : sans ce gain, la crête restait sous −2 dBTP.
+    f = make(WORK / "export4min.novaproj.zip", "proj-exportqa0001", "Titre: test / mix", n=8, dur=240.0, ch=2, gain=2)
     br, ctx, page = studio(p)
     try:
         open_from_landing(page, f, "proj-exportqa0001", 8)
