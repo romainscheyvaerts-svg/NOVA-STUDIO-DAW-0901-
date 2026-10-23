@@ -7,6 +7,14 @@ affiché aux utilisateurs dans la carte « Nova Studio X.Y.Z est prête » puis 
 Règles : 3 à 6 lignes commençant par « - », en français simple, sans jargon, du point de vue
 de l'utilisateur (ce qui change pour lui). Les 6 premières lignes seulement sont gardées.
 
+## 1.5.16
+- Studio allégé : les commandes rares sont rangées dans des menus (Options, Vue, Outils, Édition, Session, ⋯), rien n'a disparu.
+- Nouveau séquenceur de batterie pro (probabilité, rolls, fills, polymétrie) avec un sampler complet par pad, et un piano roll plus pratique.
+- Notes de la voix : corrige la justesse note par note au 2 cents près, et allonge ou raccourcis une note en mode élastique.
+- Nova Tune calé sur les meilleurs autotunes (vitesse, flex, vibrato naturel, formant, notes cibles) ; pan pro, double pan stéréo et faders jusqu'à +12 dB.
+- Effets mesurés : chaque réglage affiché est le vrai (coupe-bas, ratio, temps, LUFS…), lecture = export au bit près.
+- Plus fiable : prises écrites au fil de l'eau, son qui repart seul après une panne, tablette et téléphone revus au doigt.
+
 ## 1.5.15
 - Fenêtres de plugins comme dans un vrai DAW : plus d'icône par plugin dans la barre des tâches, elles restent devant Nova et se réduisent avec lui.
 - Plugins plus rapides à ouvrir : Waves 4 fois plus vite, Auto-Tune 2 fois plus vite ; un projet de 12 plugins se charge en 3,5 s au lieu de 12.
