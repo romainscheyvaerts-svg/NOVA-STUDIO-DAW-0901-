@@ -24,6 +24,7 @@ import { fmtDuration, fmtPitch, parseDuration, parsePitch } from '../utils/pitch
 import { keyLabelFr, NOTE_NAMES_FR, SCALE_CHOICES } from '../utils/scales';
 import { useTheme } from '../utils/themeStore';
 import { usePlayheadTime } from '../utils/playheadStore';
+import { windowAbove } from '../utils/windowAbove';
 import RollMenu, { RollMenuEntry } from './pianoroll/RollMenu';
 import {
   drawAll, drawKeys, makePeaks, mOfY, PITCH_DARK, PITCH_LIGHT, tOfX, xOf, yOf, type DrawNote, type Peaks, type PitchView,
@@ -826,6 +827,9 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   }, [open]);
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandler.current = (e: KeyboardEvent) => {
+    // Une fenêtre ouverte par-dessus (palette, Track Presets, export…) : ses touches sont à elle.
+    // Avant, Échap fermait le panneau du dessous et la fenêtre restait ouverte (qa/protools_ecarts).
+    if (windowAbove(rootRef.current)) return;
     // Un menu ou un réglage ouvert : Échap le ferme (et seulement lui).
     if (e.key === 'Escape' && (menu || pop)) { e.preventDefault(); e.stopPropagation(); if (menu) setMenu(null); else setPop(null); return; }
     if (menu) return;
@@ -883,7 +887,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
         onPointerUp={() => commit(draftRef.current, '')}
         onKeyUp={ev => { if (ev.key.startsWith('Arrow') || ev.key === 'Home' || ev.key === 'End' || ev.key.startsWith('Page')) commit(draftRef.current, ''); }}
         onDoubleClick={() => s.onReset?.()} />
-      <span className="np-val">{s.fmt(s.value)}</span>
+      <span className="np-val" data-testid={`${s.testId}-value`}>{s.fmt(s.value)}</span>
     </label>
   );
   const settingsPanel = firstSel && firstNote && (() => {

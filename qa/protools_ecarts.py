@@ -727,43 +727,50 @@ def scen_sends_touch(page, vp, theme):
 
 
 def scen_formant(page, vp, theme):
-    """Formant par note dans l'éditeur de justesse : réglé, appliqué, rangé dans le clip."""
+    """Formant par note dans l'éditeur de notes de la voix (Nova Pitch) : réglé, appliqué (rangé dans le clip), son rendu."""
     touch = vp == "tab"
     mod(page, "/utils/novaWindows.ts", "m => m.openNovaWindow('pitch-editor', { targets: [{ trackId: 'lead', clipId: 'lead-1' }] })")
     ed = page.locator("[data-testid=pitch-editor]")
     ed.wait_for(timeout=15000)
-    page.locator("[data-testid=pitch-selection]").wait_for(timeout=30000)
-    # Analyse finie : des notes à sélectionner (Ctrl+A : toutes).
-    t0 = time.time()
-    while time.time() - t0 < 40 and "Touche une note" not in (page.locator("[data-testid=pitch-selection]").inner_text() or ""):
-        page.wait_for_timeout(300)
+    # Analyse finie : plus de message d'état (« Analyse de la voix… »), des notes dessinées.
+    page.wait_for_function("() => !document.querySelector('[data-testid=pitch-status]')", timeout=60000)
+    buf0 = st(page, "s => s.tracks.find(t => t.id === 'lead').clips.find(c => c.id === 'lead-1').bufferId")
+    # Toutes les notes (Ctrl+A), puis « Réglages… » de la barre du bas (R au clavier).
     page.keyboard.press("Control+a"); page.wait_for_timeout(400)
+    reg = page.locator("[data-testid=pitch-open-settings]").locator("visible=true")
+    if reg.count(): tap_or_click(reg.first, touch)
+    else: page.keyboard.press("r")
+    page.wait_for_timeout(400)
     slider = page.locator("[data-testid=pitch-formant]")
     ok("formant_reglage_visible", slider.count() > 0 and slider.first.is_visible())
     if not slider.count():
-        page.keyboard.press("Escape"); return
+        escape(page, 3); return
+    # Curseur : valeur en direct (input), une étape d'annulation au relâcher (pointerup).
     page.evaluate("""() => { const el = document.querySelector('[data-testid=pitch-formant]');
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, '5');
-      el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }""")
+      el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); }""")
     page.wait_for_timeout(400)
     shown = page.locator("[data-testid=pitch-formant-value]").first.inner_text()
     ok("formant_affiche", "+5,0 dt" in shown, shown)
     page.screenshot(path=str(OUT / f"{vp}_{theme}_formant.png"))
-    buf0 = st(page, "s => s.tracks.find(t => t.id === 'lead').clips.find(c => c.id === 'lead-1').bufferId")
-    tap_or_click(page.locator("[data-testid=pitch-apply]").first, touch)
-    pe = wait_for(page, "s => { const c = s.tracks.find(t => t.id === 'lead').clips.find(c => c.id === 'lead-1'); return c.pitchEdit && c.pitchEdit.edits.length ? { formant: c.pitchEdit.edits.map(e => e.formant), buf: c.bufferId } : null; }", 40000)
+    # Appliqué : rangé dans le clip (retouches de notes), puis le son rendu remplace le son joué (en arrière-plan).
+    pe = wait_for(page, """s => { const c = s.tracks.find(t => t.id === 'lead').clips.find(c => c.id === 'lead-1'); const p = c.pitchEdit;
+      return p && p.edits.length && p.edits.every(e => e.formant === 5) && c.bufferId !== p.sourceBufferId ? { formant: p.edits.map(e => e.formant), buf: c.bufferId } : null; }""", 40000)
     ok("formant_applique", pe and all(f == 5 for f in pe["formant"]) and pe["buf"] != buf0, pe)
     son = page.evaluate("""async (ids) => { const { audioBufferRegistry } = await window.__novaAppModule('/utils/audioBufferRegistry.ts');
       const a = audioBufferRegistry.get(ids[0]), b = audioBufferRegistry.get(ids[1]); if (!a || !b) return null;
       const x = a.getChannelData(0), y = b.getChannelData(0); let d = 0; const n = Math.min(x.length, y.length);
       for (let i = 0; i < n; i += 7) d = Math.max(d, Math.abs(x[i] - y[i])); return { diff: Math.round(d * 1000) / 1000, sr: b.sampleRate }; }""", [buf0, pe["buf"] if pe else ""])
     ok("formant_son_rendu", son and son["diff"] > 0.01, son)
+    # Fermer : Échap ferme les réglages, puis le bouton ✕ du panneau.
     page.keyboard.press("Escape"); page.wait_for_timeout(300)
     if ed.count() and ed.first.is_visible():
-        b = page.get_by_role("button", name="Fermer", exact=True).locator("visible=true")
+        b = page.locator("[data-testid=pitch-close]").locator("visible=true")
         if b.count(): tap_or_click(b.first, touch)
     page.wait_for_timeout(300)
+    ok("formant_editeur_ferme", ed.count() == 0 or not ed.first.is_visible())
     undo(page, touch, 1)
 
 
