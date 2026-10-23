@@ -61,6 +61,8 @@ export class IdleSuspender {
   private lastActivity: number;
   private timer: any = null;
   private asleep = false;
+  /** Suspension demandée et pas encore aboutie. */
+  private suspending: Promise<void> | null = null;
   private blockers = new Set<string>();
   private listening = false;
   private readonly o: Required<Omit<IdleOptions, 'listen'>> & { listen?: IdleOptions['listen'] };
@@ -119,18 +121,24 @@ export class IdleSuspender {
   private activity() {
     this.lastActivity = this.o.now();
     const c = this.ctx;
-    if (c && this.asleep && c.state === 'suspended') {
+    if (c && this.asleep) {
       this.asleep = false;
       this.stats.wakes++;
-      c.resume?.().catch(() => { /* attend un geste : le prochain le relancera */ });
-    } else if (c && this.asleep && c.state === 'running') {
-      this.asleep = false;
+      // Suspension encore en cours (le contexte dit encore « running ») : la reprise se fait dès qu'elle
+      // aboutit (voir check). Sinon tout de suite. Avant (batterie QA sous charge) : un réveil pendant la
+      // suspension était perdu, la lecture partait sur un contexte suspendu (tête bloquée à 0, aucun son).
+      if (c.state === 'suspended' && !this.suspending) c.resume?.().catch(() => { /* attend un geste */ });
     }
     this.schedule();
   }
 
   private onState(ctx: Ctx) {
     if (ctx !== this.ctx) return;
+    if (ctx.state === 'suspended' && !this.asleep && !this.suspending && this.host.busy()) {
+      // Suspendu alors que le moteur travaille (lecture, prise…) et que la veille ne dort pas : on repart.
+      ctx.resume?.().catch(() => { /* attend un geste */ });
+      return;
+    }
     if (ctx.state === 'running') {
       // Repris par quelqu'un d'autre (ctx.resume() direct d'une fenêtre, retour sur la page) : réveil normal.
       if (this.asleep) { this.asleep = false; this.lastActivity = this.o.now(); }
@@ -164,7 +172,14 @@ export class IdleSuspender {
     if (typeof c.suspend !== 'function') return;
     this.asleep = true;
     this.stats.sleeps++;
-    c.suspend().catch(() => { this.asleep = false; this.schedule(); });
+    const p = c.suspend()
+      .then(() => {
+        this.suspending = null;
+        // Réveillé pendant la suspension : on repart tout de suite.
+        if (!this.asleep && this.ctx === c && c.state === 'suspended') c.resume?.().catch(() => { /* attend un geste */ });
+      })
+      .catch(() => { this.suspending = null; this.asleep = false; this.schedule(); });
+    this.suspending = p;
   }
 
   /** Toute source démarrée sur le contexte compte comme du son jusqu'à sa fin (évènement « ended »). */

@@ -24,13 +24,21 @@ class FakeCtx {
   createMediaStreamSource(_s: any) { return {}; }
   createMediaElementSource(_e: any) { return {}; }
   addEventListener(t: string, fn: () => void) { if (t === 'statechange') this.stateListeners.push(fn); }
-  async suspend() { this.suspends++; this.state = 'suspended'; this.stateListeners.forEach(f => f()); }
+  /** Suspension lente (vrai périphérique sous charge) : l'état ne change qu'à `finishSuspend()`. */
+  slow = false;
+  private pending: (() => void) | null = null;
+  async suspend() {
+    this.suspends++;
+    if (this.slow) { await new Promise<void>(r => { this.pending = r; }); }
+    this.state = 'suspended'; this.stateListeners.forEach(f => f());
+  }
+  finishSuspend() { const r = this.pending; this.pending = null; r?.(); }
   async resume() { this.resumes++; this.state = 'running'; this.stateListeners.forEach(f => f()); }
   /** Reprise faite par quelqu'un d'autre (ctx.resume() direct d'une fenêtre). */
   externalResume() { this.state = 'running'; this.stateListeners.forEach(f => f()); }
 }
 
-function setup(o: { busy?: () => string | null; enabled?: boolean; work?: boolean } = {}) {
+function setup(o: { busy?: () => string | null; enabled?: boolean; work?: boolean; slow?: boolean } = {}) {
   let t = 0;
   const timers: { at: number; fn: () => void; id: number }[] = [];
   let seq = 0;
@@ -44,6 +52,7 @@ function setup(o: { busy?: () => string | null; enabled?: boolean; work?: boolea
     listen: (fn) => { onInput = fn; },
   });
   const ctx = new FakeCtx();
+  ctx.slow = !!o.slow;
   idle.attach(ctx as any);
   const advance = async (ms: number) => {
     const end = t + ms;
@@ -157,5 +166,25 @@ describe('veille du moteur à l\'arrêt', () => {
     await advance(15_000);
     expect(ctx.state).toBe('suspended');
     expect(ctx.suspends).toBe(2);
+  });
+
+  it('réveil PENDANT la suspension (contexte encore « running ») : le contexte repart dès que la suspension aboutit', async () => {
+    let busy: string | null = null;
+    const { ctx, advance, input } = setup({ slow: true, busy: () => busy });
+    await advance(25_000);
+    expect(ctx.suspends).toBe(1);
+    expect(ctx.state).toBe('running'); // suspension pas encore aboutie
+    input(); busy = 'lecture';           // Espace : la lecture part
+    ctx.finishSuspend();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(ctx.resumes).toBe(1);
+    expect(ctx.state).toBe('running');
+  });
+
+  it('suspendu par erreur pendant la lecture (hors veille) : il repart tout seul', async () => {
+    const { ctx } = setup({ busy: () => 'lecture' });
+    await ctx.suspend();
+    expect(ctx.resumes).toBe(1);
+    expect(ctx.state).toBe('running');
   });
 });
